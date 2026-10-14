@@ -1,0 +1,14 @@
+# Normalize text files to LF in the repository
+* text=auto
+
+# Lua / TOC: always LF in repo
+*.lua  text eol=lf
+*.toc  text eol=lf
+*.md   text eol=lf
+
+# Binary assets: never touch
+*.ttf  binary
+*.otf  binary
+*.png  binary
+*.jpg  binary
+*.blp  binary

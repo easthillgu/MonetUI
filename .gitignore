@@ -1,0 +1,25 @@
+# ---- Editors / IDEs ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---- OS junk ----
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---- Lua tooling ----
+luacheckrc
+.luacheckcache
+
+# ---- Packaging / build output ----
+*.zip
+*.tar.gz
+_build/
+release/
+
+# ---- Local-only config ----
+*.local
+*.local.lua
