@@ -1,32 +1,68 @@
 -- Utils/Color.lua
--- Color access layer: MonetColor integration with fallback
+-- Colour access layer: LibMonetColor-1.0 integration with a graceful fallback.
+--
+-- "5 + 3" model (see MonetUI.md):
+--   functional 5 : primary / health / resource / danger / neutral
+--   signature  3 : edge glow / ambient tint / highlight wash
+--
+-- Only the signature colours (plus the Monet neutral) come from the engine.
+-- Health / resource / danger stay UI-managed on purpose (they must never be
+-- "Monetised").
 
+local ADDON_NAME, ns = ...
+
+local LibStub = _G.LibStub
 local LMC = LibStub and LibStub("LibMonetColor-1.0", true)
 
 local Color = {}
+ns.Color = Color
 
--- Private: cached theme colors
-local theme = nil
-
--- Fallback palette (Andromeda-inspired)
+-- Palette used when LibMonetColor is missing or the user turns the engine off.
 local FALLBACK = {
-    edge = {r = 0.8, g = 0.6, b = 0.2, a = 0.9},
-    ambient = {r = 0.2, g = 0.2, b = 0.3, a = 0.2},
-    highlight = {r = 0.9, g = 0.9, b = 0.9, a = 0.5},
-    neutral = {r = 0.5, g = 0.5, b = 0.5, a = 0.8},
-    health = {r = 0.2, g = 0.8, b = 0.2, a = 1.0},
-    resource = {r = 0.2, g = 0.5, b = 0.9, a = 1.0},
-    danger = {r = 0.9, g = 0.2, b = 0.2, a = 1.0},
+    edge      = { r = 0.85, g = 0.66, b = 0.36, a = 0.95 },  -- warm ochre
+    ambient   = { r = 0.24, g = 0.26, b = 0.36, a = 0.22 },  -- cool blue-grey
+    highlight = { r = 0.95, g = 0.93, b = 0.84, a = 0.50 },  -- soft cream
+    neutral   = { r = 0.62, g = 0.60, b = 0.57, a = 0.85 },  -- Monet grey
+
+    health    = { r = 0.20, g = 0.80, b = 0.20, a = 1.00 },
+    resource  = { r = 0.20, g = 0.50, b = 0.90, a = 1.00 },
+    danger    = { r = 0.90, g = 0.20, b = 0.20, a = 1.00 },
+    primary   = { r = 0.85, g = 0.66, b = 0.36, a = 1.00 },
 }
 
--- ============================================================================
--- Public API
--- ============================================================================
+local theme
+local useMonetColor = true
 
+-- -- Source control -----------------------------------------------------------
+
+function Color:HasMonetColor()
+    return LMC ~= nil
+end
+
+function Color:SetSource(useMonet)
+    useMonetColor = useMonet ~= false
+    self:Refresh()
+end
+
+function Color:GetSource()
+    if LMC and useMonetColor then
+        return "monet", LMC:GetActiveProfile()
+    end
+    return "fallback"
+end
+
+-- -- Refresh ------------------------------------------------------------------
+
+--- Recompute the cached theme (called at login and on every zone change).
 function Color:Refresh()
-    if not LMC then
+    local db = ns.DB and ns:DB()
+    if db and db.theme and db.theme.useMonetColor ~= nil then
+        useMonetColor = db.theme.useMonetColor
+    end
+
+    if not (LMC and useMonetColor) then
         theme = FALLBACK
-        return
+        return theme
     end
 
     local er, eg, eb, ea = LMC:GetCurrentEdgeColor()
@@ -35,14 +71,18 @@ function Color:Refresh()
     local nr, ng, nb = LMC:GetCurrentNeutral()
 
     theme = {
-        edge = {r = er or 0.8, g = eg or 0.6, b = eb or 0.2, a = ea or 0.9},
-        ambient = {r = ar or 0.2, g = ag or 0.2, b = ab or 0.3, a = aa or 0.2},
-        highlight = {r = hr or 0.9, g = hg or 0.9, b = hb or 0.9, a = 0.5},
-        neutral = {r = nr or 0.5, g = ng or 0.5, b = nb or 0.5, a = 0.8},
-        health = FALLBACK.health,
-        resource = FALLBACK.resource,
-        danger = FALLBACK.danger,
+        edge      = { r = er or FALLBACK.edge.r, g = eg or FALLBACK.edge.g, b = eb or FALLBACK.edge.b, a = ea or FALLBACK.edge.a },
+        ambient   = { r = ar or FALLBACK.ambient.r, g = ag or FALLBACK.ambient.g, b = ab or FALLBACK.ambient.b, a = aa or FALLBACK.ambient.a },
+        highlight = { r = hr or FALLBACK.highlight.r, g = hg or FALLBACK.highlight.g, b = hb or FALLBACK.highlight.b, a = FALLBACK.highlight.a },
+        neutral   = { r = nr or FALLBACK.neutral.r, g = ng or FALLBACK.neutral.g, b = nb or FALLBACK.neutral.b, a = FALLBACK.neutral.a },
+
+        health    = FALLBACK.health,
+        resource  = FALLBACK.resource,
+        danger    = FALLBACK.danger,
+        primary   = { r = er or FALLBACK.primary.r, g = eg or FALLBACK.primary.g, b = eb or FALLBACK.primary.b, a = 1 },
     }
+
+    return theme
 end
 
 function Color:GetTheme()
@@ -52,47 +92,46 @@ function Color:GetTheme()
     return theme
 end
 
-function Color:GetEdge()
-    local t = self:GetTheme()
-    return t.edge.r, t.edge.g, t.edge.b, t.edge.a
+-- -- Getters ------------------------------------------------------------------
+
+local function unpackColor(c)
+    return c.r, c.g, c.b, c.a
 end
 
-function Color:GetAmbient()
-    local t = self:GetTheme()
-    return t.ambient.r, t.ambient.g, t.ambient.b, t.ambient.a
+function Color:GetEdge()      return unpackColor(self:GetTheme().edge) end
+function Color:GetAmbient()   return unpackColor(self:GetTheme().ambient) end
+function Color:GetHighlight() return unpackColor(self:GetTheme().highlight) end
+function Color:GetNeutral()   return unpackColor(self:GetTheme().neutral) end
+function Color:GetHealth()    return unpackColor(self:GetTheme().health) end
+function Color:GetResource()  return unpackColor(self:GetTheme().resource) end
+function Color:GetDanger()    return unpackColor(self:GetTheme().danger) end
+function Color:GetPrimary()   return unpackColor(self:GetTheme().primary) end
+
+--- Generic getter: Color:Get("edge") -> r, g, b, a
+function Color:Get(key)
+    local entry = self:GetTheme()[key or "edge"] or self:GetTheme().edge
+    return unpackColor(entry)
 end
 
-function Color:GetHighlight()
-    local t = self:GetTheme()
-    return t.highlight.r, t.highlight.g, t.highlight.b, t.highlight.a
+function Color:WithAlpha(r, g, b, a, alpha)
+    return r, g, b, (a or 1) * (alpha or 1)
 end
 
-function Color:GetNeutral()
-    local t = self:GetTheme()
-    return t.neutral.r, t.neutral.g, t.neutral.b, t.neutral.a
+function Color:Hex(r, g, b)
+    return ns.Math:RGBToHex(r, g, b)
 end
 
-function Color:GetHealth()
-    local t = self:GetTheme()
-    return t.health.r, t.health.g, t.health.b, t.health.a
-end
+-- -- Class colours ------------------------------------------------------------
 
-function Color:GetResource()
-    local t = self:GetTheme()
-    return t.resource.r, t.resource.g, t.resource.b, t.resource.a
+--- Class colour for a class file name ("MAGE", ...); nil when unknown.
+function Color:ClassColor(classFile)
+    if not classFile then return nil end
+    if _G.C_ClassColor and _G.C_ClassColor.GetClassColor then
+        local c = _G.C_ClassColor.GetClassColor(classFile)
+        if c then return c.r, c.g, c.b end
+    end
+    local table_ = _G.CUSTOM_CLASS_COLORS or _G.RAID_CLASS_COLORS
+    local c = table_ and table_[classFile]
+    if c then return c.r, c.g, c.b end
+    return nil
 end
-
-function Color:GetDanger()
-    local t = self:GetTheme()
-    return t.danger.r, t.danger.g, t.danger.b, t.danger.a
-end
-
-function Color:GetWithAlpha(color, alpha)
-    return color.r, color.g, color.b, (color.a or 1) * alpha
-end
-
-function Color:HasMonetColor()
-    return LMC ~= nil
-end
-
-return Color

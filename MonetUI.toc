@@ -1,11 +1,11 @@
-## Interface: 110007
+## Interface: 16001
 ## Title: MonetUI
 ## Notes: Monet-style UI addon - adaptive Impressionist color engine integration
 ## Author: EastHillGu
-## Version: 0.1.0
-## X-Category: Interface
+## Version: 0.2.0
+## Category: Interface
 ## X-Website: https://github.com/EastHillGu/MonetUI
-## OptionalDeps: LibMonetColor-1.0
+## SavedVariables: MonetUIDB
 
 # Libraries
 Libs\LibStub\LibStub.lua
@@ -13,6 +13,8 @@ Libs\LibMonetColor-1.0\LibMonetColor-1.0.lua
 
 # Utilities
 Utils\Math.lua
+Utils\Secrets.lua
+Utils\Media.lua
 Utils\EventBus.lua
 Utils\Color.lua
 Utils\Widget.lua

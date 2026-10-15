@@ -1,133 +1,212 @@
 -- Config/SimpleConfig.lua
--- Lightweight configuration panel (no Ace3 dependency)
+-- Lightweight, themed configuration panel (no Ace3 dependency).
+--
+-- All widgets bind straight to MonetUIDB, so changes apply immediately and
+-- survive a reload.
 
-local ADDON_NAME = ...
+local ADDON_NAME, ns = ...
+
+local Widget = ns.Widget
+local Color = ns.Color
+local Media = ns.Media
 
 local SimpleConfig = {}
+ns.Config = SimpleConfig
 
--- Private state
-local panel = nil
-local checkboxes = {}
-local sliders = {}
+local panel
+local moduleCheckboxes = {}
+local refreshStatus
 
--- ============================================================================
--- Default Settings
--- ============================================================================
-
-local defaults = {
-    enabled = true,
-    unitFrames = true,
-    cooldown = true,
-    buffFrame = true,
-    minimap = true,
-    bagFrame = true,
-    questTracker = true,
-    useMonetColor = true,
+local MODULE_ORDER = {
+    "UnitFrames", "Cooldown", "BuffFrame",
+    "Minimap", "BagFrame", "QuestTracker",
 }
 
--- ============================================================================
--- Panel Creation
--- ============================================================================
+local MODULE_LABEL = {
+    UnitFrames   = "单位框架 (UnitFrames)",
+    Cooldown     = "冷却计时 (Cooldown)",
+    BuffFrame    = "增益光环 (BuffFrame)",
+    Minimap      = "小地图 (Minimap)",
+    BagFrame     = "背包整合 (BagFrame)",
+    QuestTracker = "任务追踪 (QuestTracker)",
+}
 
-function SimpleConfig:CreatePanel()
+-- -- Widget helpers -----------------------------------------------------------
+
+local function MakeCheckbox(parent, label, yOffset, getter, setter)
+    local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+    cb:SetPoint("TOPLEFT", parent, "TOPLEFT", 24, yOffset)
+    cb:SetChecked(getter() and true or false)
+    cb:SetScript("OnClick", function(self)
+        setter(self:GetChecked() and true or false)
+    end)
+
+    local text = Widget:Font(parent, 13, "pixel", "neutral", "LEFT")
+    text:SetPoint("LEFT", cb, "RIGHT", 6, 0)
+    text:SetText(label)
+
+    return cb, text
+end
+
+local function MakeSeparator(parent, yOffset, caption)
+    local line = parent:CreateTexture(nil, "ARTWORK")
+    line:SetPoint("TOPLEFT", parent, "TOPLEFT", 20, yOffset)
+    line:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -20, yOffset)
+    line:SetHeight(1)
+    local r, g, b = Color:GetNeutral()
+    line:SetColorTexture(r, g, b, 0.35)
+
+    if caption then
+        local title = Widget:Font(parent, 12, "roadway", "edge", "LEFT")
+        title:SetPoint("BOTTOMLEFT", line, "TOPLEFT", 0, 4)
+        title:SetText(caption)
+    end
+
+    return line
+end
+
+-- -- Panel --------------------------------------------------------------------
+
+function SimpleConfig:Build()
     if panel then return panel end
 
-    panel = CreateFrame("Frame", "MonetUIConfigFrame", UIParent, "BackdropTemplate")
-    panel:SetSize(400, 500)
+    panel = Widget:CreateFrame("MonetUIConfigFrame", UIParent, 400, 460)
+    Widget:Theme(panel, { thickness = 2, bgAlpha = 0.96, borderAlpha = 1 })
     panel:SetPoint("CENTER")
-    panel:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        edgeSize = 16,
-        insets = {left = 4, right = 4, top = 4, bottom = 4},
-    })
-    panel:SetBackdropColor(0.1, 0.1, 0.15, 0.95)
-    panel:SetBackdropBorderColor(0.6, 0.4, 0.1, 1)
+    panel:SetFrameStrata("DIALOG")
     panel:SetMovable(true)
     panel:EnableMouse(true)
     panel:RegisterForDrag("LeftButton")
     panel:SetScript("OnDragStart", panel.StartMoving)
     panel:SetScript("OnDragStop", panel.StopMovingOrSizing)
+    panel:SetClampedToScreen(true)
     panel:Hide()
 
-    -- Title
-    local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOP", 0, -20)
-    title:SetText("MonetUI 配置")
-    title:SetTextColor(1, 0.85, 0.4, 1)
+    local title = Widget:Font(panel, 20, "roadway", "edge", "CENTER")
+    title:SetPoint("TOP", panel, "TOP", 0, -16)
+    title:SetText("MonetUI")
 
-    -- Close button
-    local closeBtn = CreateFrame("Button", nil, panel, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", -5, -5)
-    closeBtn:SetScript("OnClick", function() panel:Hide() end)
+    local subtitle = Widget:Font(panel, 11, "pixel", "neutral", "CENTER")
+    subtitle:SetPoint("TOP", title, "BOTTOM", 0, -4)
+    subtitle:SetText("v" .. ns.version .. " · 印象派自适应界面")
 
-    -- Module toggles
-    local modules = {
-        {"unitFrames", "单位框架 (UnitFrames)"},
-        {"cooldown", "冷却计时 (Cooldown)"},
-        {"buffFrame", "Buff 框架 (BuffFrame)"},
-        {"minimap", "小地图 (Minimap)"},
-        {"bagFrame", "背包 (BagFrame)"},
-        {"questTracker", "任务追踪 (QuestTracker)"},
-    }
+    local close = Widget:CloseButton(panel)
+    close:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -6, -6)
 
-    local yOffset = -60
-    for _, mod in ipairs(modules) do
-        local key, label = mod[1], mod[2]
-        local cb = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-        cb:SetPoint("LEFT", 30, yOffset)
-        cb:SetChecked(defaults[key])
-        cb:SetScript("OnClick", function(self)
-            defaults[key] = self:GetChecked()
+    local y = -62
+
+    -- -- Theme ---------------------------------------------------------------
+    MakeSeparator(panel, y, "主题")
+    y = y - 26
+
+    MakeCheckbox(panel, "使用 MonetColor 动态主题", y,
+        function()
+            local db = ns:DB()
+            return db.theme.useMonetColor
+        end,
+        function(value)
+            local db = ns:DB()
+            db.theme.useMonetColor = value
+            ns.RefreshTheme("config")
+            if refreshStatus then refreshStatus() end
         end)
+    y = y - 28
 
-        local text = cb:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        text:SetPoint("LEFT", cb, "RIGHT", 5, 0)
-        text:SetText(label)
-        text:SetTextColor(1, 1, 1, 1)
+    local statusText = Widget:Font(panel, 11, "pixel", "neutral", "LEFT")
+    statusText:SetPoint("TOPLEFT", panel, "TOPLEFT", 46, y)
+    statusText:SetWidth(330)
+    statusText:SetJustifyH("LEFT")
+    y = y - 20
 
-        checkboxes[key] = cb
-        yOffset = yOffset - 35
+    refreshStatus = function()
+        local source, profile = Color:GetSource()
+        local colorText
+        if source == "monet" then
+            colorText = string.format("引擎输出 · 配置 %s", tostring(profile))
+        else
+            colorText = ns:HasMonetColor() and "内置调色板（引擎已关闭）" or "内置调色板（未找到 LibMonetColor）"
+        end
+        statusText:SetText(colorText)
+    end
+    refreshStatus()
+
+    -- -- Modules -------------------------------------------------------------
+    MakeSeparator(panel, y, "模块")
+    y = y - 28
+
+    local function moduleGetter(name)
+        return function() return ns:IsModuleEnabled(name) end
+    end
+    local function moduleSetter(name)
+        return function(value)
+            ns:SetModuleEnabled(name, value)
+            if refreshStatus then refreshStatus() end
+        end
     end
 
-    -- Use MonetColor toggle
-    local mcCb = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-    mcCb:SetPoint("LEFT", 30, yOffset)
-    mcCb:SetChecked(defaults.useMonetColor)
-    mcCb:SetScript("OnClick", function(self)
-        defaults.useMonetColor = self:GetChecked()
+    for _, name in ipairs(MODULE_ORDER) do
+        moduleCheckboxes[name] = MakeCheckbox(panel, MODULE_LABEL[name] or name, y,
+            moduleGetter(name), moduleSetter(name))
+        y = y - 28
+    end
+
+    -- -- Frame options -------------------------------------------------------
+    y = y - 6
+    MakeSeparator(panel, y, "单位框架")
+    y = y - 28
+
+    MakeCheckbox(panel, "隐藏暴雪默认的玩家/目标框架（需重载恢复）", y,
+        function() return ns:DB().unitFrames.hideBlizzard end,
+        function(value)
+            ns:DB().unitFrames.hideBlizzard = value
+            if value then
+                local unitFrames = ns:GetModule("UnitFrames")
+                if unitFrames and unitFrames.SuppressBlizzard then
+                    unitFrames:SuppressBlizzard(true)
+                end
+            else
+                ns:Print("取消隐藏需要 /reload 才能恢复暴雪框架。")
+            end
+        end)
+    y = y - 30
+
+    -- -- Footer --------------------------------------------------------------
+    local hint = Widget:Font(panel, 11, "pixel", "neutral", "LEFT")
+    hint:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, y)
+    hint:SetWidth(340)
+    hint:SetText("提示：/mui status 查看模块状态，/mui reset 恢复默认设置。")
+    hint:SetJustifyH("LEFT")
+
+    local reload = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    reload:SetSize(120, 24)
+    reload:SetPoint("BOTTOM", panel, "BOTTOM", 0, 16)
+    reload:SetText("重载界面")
+    reload:SetScript("OnClick", function()
+        if _G.ReloadUI then _G.ReloadUI() end
     end)
-
-    local mcText = mcCb:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    mcText:SetPoint("LEFT", mcCb, "RIGHT", 5, 0)
-    mcText:SetText("使用 MonetColor 动态主题")
-    mcText:SetTextColor(1, 1, 1, 1)
-
-    checkboxes.useMonetColor = mcCb
-
-    -- Open button (chat command)
-    SLASH_MONETUI1 = "/monetui"
-    SLASH_MONETUI2 = "/mui"
-    SlashCmdList["MONETUI"] = function()
-        panel:Show()
-    end
 
     return panel
 end
 
 function SimpleConfig:Toggle()
-    if not panel then
-        self:CreatePanel()
-    end
-    if panel:IsShown() then
-        panel:Hide()
+    local frame = self:Build()
+    if frame:IsShown() then
+        frame:Hide()
     else
-        panel:Show()
+        if refreshStatus then refreshStatus() end
+        for name, checkbox in pairs(moduleCheckboxes) do
+            if checkbox and checkbox.SetChecked then
+                checkbox:SetChecked(ns:IsModuleEnabled(name) and true or false)
+            end
+        end
+        frame:Show()
     end
 end
 
-function SimpleConfig:GetSetting(key)
-    return defaults[key]
+function SimpleConfig:Show()
+    self:Build():Show()
 end
 
-return SimpleConfig
+function SimpleConfig:Hide()
+    if panel then panel:Hide() end
+end

@@ -1,0 +1,119 @@
+-- Utils/Secrets.lua
+-- Secret-value guard (保密值处理层) for the "Forever" client (Interface 16001).
+--
+-- The client may hand addons *secret* values for unit health, power, identity,
+-- auras and cooldowns while a restriction is active (combat, PvP, boss
+-- encounters, chat lockdown ...).  A secret value may be passed to most widgets
+-- untouched (e.g. StatusBar:SetValue), but the moment tainted addon code does
+-- arithmetic, comparison, formatting or concatenation with it the client raises
+--
+--     attempt to perform arithmetic on a secret number value
+--
+-- Every module must therefore ask this layer first and only fall back to plain
+-- computation when the client reports the value is NOT secret.
+
+local ADDON_NAME, ns = ...
+
+local Secrets = {}
+ns.Secrets = Secrets
+
+local function API()
+    return _G.C_Secrets
+end
+
+--- Is this client build capable of hiding values at all?
+function Secrets.Enabled()
+    local api = API()
+    if not api or not api.HasSecretRestrictions then return false end
+    local ok, restricted = pcall(api.HasSecretRestrictions)
+    return (ok and restricted) and true or false
+end
+
+-- Generic "should this be secret?" wrapper.  A missing client API is treated as
+-- *secret* so that a query we do not understand can never cause an error.
+local function Ask(query, ...)
+    if not Secrets.Enabled() then return false end
+    local api = API()
+    local fn = api and api[query]
+    if not fn then return true end
+    local ok, isSecret = pcall(fn, ...)
+    if not ok then return true end
+    return isSecret and true or false
+end
+
+-- -- Unit queries -------------------------------------------------------------
+
+function Secrets.HealthSecret(unit)     return Ask("ShouldUnitHealthMaxBeSecret", unit) end
+function Secrets.PowerSecret(unit, pt)  return Ask("ShouldUnitPowerBeSecret", unit, pt) end
+function Secrets.IdentitySecret(unit)   return Ask("ShouldUnitIdentityBeSecret", unit) end
+function Secrets.CastSecret(unit)       return Ask("ShouldUnitSpellCastingBeSecret", unit) end
+function Secrets.AurasSecret()          return Ask("ShouldAurasBeSecret") end
+function Secrets.CooldownsSecret()      return Ask("ShouldCooldownsBeSecret") end
+
+-- Convenience inverses: "can I do maths / read a string?"
+
+function Secrets.CanMeasureHealth(unit)     return not Secrets.HealthSecret(unit) end
+function Secrets.CanMeasurePower(unit, pt)  return not Secrets.PowerSecret(unit, pt) end
+function Secrets.CanReadIdentity(unit)      return not Secrets.IdentitySecret(unit) end
+function Secrets.CanReadAuras()             return not Secrets.AurasSecret() end
+
+-- -- Value helpers ------------------------------------------------------------
+
+local function Add0(value) return value + 0 end
+
+--- Plain boolean test for whether a value is a secret.
+function Secrets.IsSecret(value)
+    if value == nil then return false end
+    local is = _G.issecretvalue
+    if is then
+        local ok, res = pcall(is, value)
+        if ok then return res and true or false end
+    end
+    return false
+end
+
+--- Return `value` as a plain number, or nil when it is secret / not numeric.
+function Secrets.Number(value)
+    if value == nil then return nil end
+    if Secrets.IsSecret(value) then return nil end
+    local ok, number = pcall(Add0, value)
+    if ok and type(number) == "number" then return number end
+    return nil
+end
+
+local function TestBool(value)
+    if value then return true end
+    return false
+end
+
+--- Truthiness test that survives secret booleans.
+function Secrets.Bool(value, default)
+    local ok, result = pcall(TestBool, value)
+    if ok then return result end
+    return default
+end
+
+--- Run a function that may touch secret values; returns pcall's ok, ...
+function Secrets.Measure(fn, ...)
+    return pcall(fn, ...)
+end
+
+--- Feed a status bar without ever doing arithmetic on the values.
+-- Returns true when the widget accepted both calls.
+function Secrets.SetBar(bar, current, maximum)
+    if not bar then return false end
+    local okRange = pcall(bar.SetMinMaxValues, bar, 0, maximum)
+    if not okRange then
+        okRange = pcall(bar.SetMinMaxValues, bar, 0, 100)
+    end
+    local okValue = pcall(bar.SetValue, bar, current)
+    return okRange and okValue
+end
+
+--- Human readable description of the current restriction mode.
+function Secrets.Describe()
+    if not Secrets.Enabled() then
+        return "此客户端允许插件读取所有单位数值。"
+    end
+    return "此客户端在战斗等状态下会向插件隐藏部分单位数值；血条仍会填充，但数字可能暂时为空。"
+end
