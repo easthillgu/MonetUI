@@ -138,6 +138,26 @@ local LMC = LibStub("LibMonetColor-1.0", true)
 -- 无 MonetColor: 使用内置 Andromeda 风格默认配色
 ```
 
+**签名三色（edge / ambient / highlight）+ neutral 全部来自引擎**；health / resource / danger 由 UI 自己管，
+不做「Monet 化」。
+
+**边框颜色已经预留走 MonetColor**：单位框架、小地图面板、动作条、Buff 按钮、配置面板等所有边框都经
+`Widget:Theme()` 注册，刷新时读 `Color:GetEdge()`（背景读 `Color:GetAmbient()`）。所以引擎换色**不需要改任何
+模块代码** —— 只要 `Color:Refresh()` 后再广播 `MONETUI_THEME_CHANGED`，`Widget:RefreshThemes()` 就会把所有
+已注册控件重新染色。
+
+刷新时机：
+
+| 时机 | 触发 |
+|------|------|
+| 登录 / 区域变化 / 手动 `/mui theme` | Core 监听 `ZONE_CHANGED*`、`PLAYER_ENTERING_WORLD` → `ns.RefreshTheme()` |
+| 引擎主动通知（切换配置档、引擎侧刷新） | Core 订阅 LibMonetColor 的 `OnThemeColorsChanged` 回调 → `ns.RefreshTheme("monet")` |
+
+回调订阅做了**形态探测**：LibMonetColor 可能带 `CallbackHandler-1.0`，也可能走它内置的回退注册表，两者的
+`RegisterCallback` 调用形状不同（`LMC:RegisterCallback(事件, fn)` vs `LMC.events:RegisterCallback(键, fn)`）。
+Core 先探测、两路都试且都 `pcall`；都拿不到时静默跳过，**区域事件刷新仍是兜底**。订阅状态见
+`/mui status` 的 `回调: 已订阅 / 未订阅`。
+
 ### 4.4 Lua 5.1 兼容清单
 
 | 禁止 | 替代 |
@@ -480,7 +500,7 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 - [x] UnitFrames 单位框架（P0）— 玩家/目标/焦点/宠物、保密值适配、拖动保存
 - [x] UnitFrames 细条化（160/160/60/60 × 8，文字移至条上方，锚点照搬 Andromeda）
 - [x] Cooldown 冷却计时（P0）— 数字/充能字体 + 技能状态着色
-- [x] 与 MonetColor 联调（`Color:Refresh` + 区域变化刷新）
+- [x] 与 MonetColor 联调（`Color:Refresh` + 区域变化刷新 + `OnThemeColorsChanged` 回调订阅，见 4.3）
 - [ ] 游戏内验证（需游戏运行）
 
 ### Phase 2: 功能模块开发 ✅
@@ -495,6 +515,7 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 - [x] 配置面板完善（绑定 MonetUIDB，实时生效）
 - [x] 单位框架新增：能量条按类型分色、死亡/掉线变灰、数值平滑过渡（配置面板可选）
 - [x] 单位框架新增：连击点小格（盗贼 / 德鲁伊）+ 「连击点（盗贼 / 德鲁伊）」配置下拉
+- [x] 主题预留：所有边框/面板经 `Widget:Theme` → `Color:GetEdge()`，并订阅引擎 `OnThemeColorsChanged` 即时换色
 - [ ] 游戏内视觉验收
 - [ ] 压力测试
 - [x] 文档编写（MonetUI.md）
@@ -534,7 +555,7 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | 2026-10-15 | 全部单位数值访问走 Utils/Secrets.lua | 客户端在受限状态返回 `<secret>`，直接运算会报错 |
 | 2026-10-15 | EventBus 改为按需注册事件 | 固定事件表会注册受限/未知事件导致报错；且绝不能注册 CLEU |
 | 2026-10-15 | 使用现代命名空间 API（C_Spell/C_ActionBar/C_Container/C_UnitAuras） | 客户端手册中无 UnitAura/GetSpellInfo 等旧全局 |
-| 2026-10-15 | 不主动接 LibMonetColor 的 CallbackHandler 回调 | 有/无 CallbackHandler 时注册签名不一致，改为监听自身区域事件刷新 |
+| 2026-10-15 | 主动订阅 LibMonetColor 的 `OnThemeColorsChanged`（做注册形态探测：CallbackHandler / 内置回退两路都试、都 pcall） | 原决定因两种注册签名不一致而放弃回调；探测后两路都能接上，边框与血条可随引擎换色**即时**刷新；区域事件刷新保留为兜底 |
 | 2026-10-15 | 接管暴雪框架采用 oUF 式 UnregisterAllEvents + Hide | 业界通行做法；配置项可关闭（`hideBlizzard`） |
 | 2026-10-15 | 单位框细条化 = Andromeda 几何（血 4 / 能量 1 / 间隔 1 + 1px 边框） | 尺寸存入 `MonetUIDB.unitFrames`，方便后续微调 |
 | 2026-10-15 | 单位框文字全部置于条上方 3px | 照搬 Andromeda tag 锚点（`BOTTOM*` → `TOP*`, 0, 3） |

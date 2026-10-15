@@ -12,7 +12,7 @@ local LibStub = _G.LibStub
 local LMC = LibStub and LibStub("LibMonetColor-1.0", true)
 
 ns.name = ADDON_NAME
-ns.version = "0.6.0"
+ns.version = "0.6.1"
 
 -- -- Defaults ----------------------------------------------------------------
 
@@ -277,15 +277,59 @@ local function RefreshTheme(reason)
 end
 ns.RefreshTheme = RefreshTheme
 
+-- -- MonetColor callback reservation -------------------------------------------
+
+--- Opt into the engine's own "colours changed" notification, so a profile switch
+-- or an engine-side refresh re-tints every border / bar straight away instead of
+-- waiting for the next zone change.
+--
+-- LibMonetColor ships with or without CallbackHandler-1.0 and the two expose the
+-- registration differently:
+--   * CallbackHandler present : LMC:RegisterCallback("OnThemeColorsChanged", fn)
+--   * built-in fallback       : LMC.events:RegisterCallback("MonetUI", fn)
+-- so the shape is detected rather than assumed and both are pcall'd.  Either way
+-- the handler is handed the event name first, which is why it ignores its
+-- arguments.  No engine, or no notification, simply leaves the zone handlers
+-- below as the baseline -- this is the reservation every border colour (unit
+-- frames, minimap panel, action bars, buffs) hangs off through
+-- Widget:Theme -> Color:GetEdge.
+local function ReserveMonetColorCallback()
+    if not LMC then return false end
+
+    local handler = function() RefreshTheme("monet") end
+
+    -- CallbackHandler style: the method is embedded on the library itself.
+    if type(LMC.RegisterCallback) == "function" then
+        if pcall(LMC.RegisterCallback, LMC, "OnThemeColorsChanged", handler) then
+            return true
+        end
+    end
+
+    -- Built-in fallback registry: the method lives on LMC.events and keys on an
+    -- arbitrary consumer id.
+    local events = LMC.events
+    if events and type(events.RegisterCallback) == "function" then
+        if pcall(events.RegisterCallback, events, ADDON_NAME, handler) then
+            return true
+        end
+    end
+
+    return false
+end
+
+--- True when the engine itself will tell us about colour changes.
+ns.hasMonetColorCallback = ReserveMonetColorCallback()
+
 -- -- Slash commands -----------------------------------------------------------
 
 local function PrintStatus()
     local source, profile = ns.Color:GetSource()
-    ns:Print(string.format("v%s | MonetColor: %s | 主题来源: %s%s",
+    ns:Print(string.format("v%s | MonetColor: %s | 主题来源: %s%s | 回调: %s",
         ns.version,
         ns:HasMonetColor() and "|cff00ff00已接入|r" or "|cffff6b6b未找到|r",
         source,
-        source == "monet" and ("（" .. tostring(profile) .. "）") or ""))
+        source == "monet" and ("（" .. tostring(profile) .. "）") or "",
+        ns.hasMonetColorCallback and "|cff00ff00已订阅|r" or "|cff808080未订阅|r"))
 
     for _, name in ipairs(moduleOrder) do
         local module = modules[name]
