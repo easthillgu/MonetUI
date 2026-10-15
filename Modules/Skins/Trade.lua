@@ -85,9 +85,41 @@ local function SkinBank()
     end)
 end
 
-M:Panel("mail",        { label = "邮箱",   group = "交易", apply = SkinMail })
-M:Panel("merchant",    { label = "商贩",   group = "交易", apply = SkinMerchant })
-M:Panel("trainer",     { label = "训练师", group = "交易", apply = SkinTrainer })
-M:Panel("auction",     { label = "拍卖行", group = "交易", apply = SkinAuction })
-M:Panel("professions", { label = "专业 / 制造", group = "交易", apply = SkinProfessions })
-M:Panel("bank",        { label = "银行",   group = "交易", apply = SkinBank })
+M:Panel("mail", { label = "邮箱", group = "交易", apply = SkinMail,
+    frames = {
+        "MailFrame", "InboxFrame", "SendMailFrame", "OpenMailFrame",
+        "InboxFrameOpenButton", "InboxFrameReplyButton", "InboxFrameDeleteButton",
+        "InboxPrevPageButton", "InboxNextPageButton",
+        "SendMailMailButton", "SendMailCancelButton",
+    } })
+
+M:Panel("merchant", { label = "商贩", group = "交易", apply = SkinMerchant,
+    frames = {
+        "MerchantFrame", "MerchantNextPageButton", "MerchantPrevPageButton",
+        "MerchantRepairButton", "MerchantRepairAllButton",
+        "MerchantSellButton", "MerchantBuyBackButton", "MerchantFrameScrollFrame",
+    } })
+
+M:Panel("trainer", { label = "训练师", group = "交易", apply = SkinTrainer,
+    frames = {
+        "ClassTrainerFrame", "TrainerFrame",
+        "ClassTrainerTrainButton", "ClassTrainerCancelButton",
+    } })
+
+M:Panel("auction", { label = "拍卖行", group = "交易", apply = SkinAuction,
+    frames = {
+        "AuctionFrame", "AuctionFrameTab1", "AuctionFrameTab2", "AuctionFrameTab3",
+        "AuctionFrameBrowse", "AuctionFrameAuctions", "AuctionFrameBid",
+        "BrowseSearchButton", "BrowseResetButton", "BrowseBuyoutButton",
+        "AuctionsCreateAuctionButton", "AuctionsCancelAuctionButton", "BidBidButton",
+        "BrowseName", "BrowseMinLevel", "BrowseMaxLevel", "BrowsePrice",
+    } })
+
+M:Panel("professions", { label = "专业 / 制造", group = "交易", apply = SkinProfessions,
+    frames = {
+        "ProfessionsFrame", "TradeSkillFrame",
+        "ProfessionsFrameTab1", "ProfessionsFrameTab2", "TradeSkillFrameTab1",
+    } })
+
+M:Panel("bank", { label = "银行", group = "交易", apply = SkinBank,
+    frames = { "BankFrame", "WarbandBankFrame" } })

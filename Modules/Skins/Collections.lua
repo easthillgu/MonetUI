@@ -106,16 +106,41 @@ M:Panel("collections", {
     label = "收藏（坐骑 / 宠物 / 玩具 / 幻化）",
     group = "收藏",
     apply = SkinCollections,
+    frames = {
+        "CollectionsJournal", "CollectionsJournalCloseButton",
+        "CollectionsJournalTab1", "CollectionsJournalTab2", "CollectionsJournalTab3",
+        "CollectionsJournalTab4", "CollectionsJournalTab5", "CollectionsJournalTab6",
+        "CollectionsJournalTab7",
+        "MountJournal", "PetJournal", "ToyBox", "HeirloomsJournal",
+        "WardrobeCollectionFrame", "CampsitesJournal",
+        "CollectionsJournalSearchBox", "MountJournalSearchBox", "PetJournalSearchBox",
+        "ToyBoxSearchBox", "HeirloomsJournalSearchBox", "WardrobeCollectionFrameSearchBox",
+        "MountJournalFilterButton", "PetJournalFilterButton", "ToyBoxFilterButton",
+        "HeirloomsJournalFilterButton", "CollectionsJournalFilterButton",
+    },
 })
 
 M:Panel("achievements", {
     label = "成就",
     group = "收藏",
     apply = SkinAchievements,
+    frames = {
+        "AchievementFrame", "AchievementFrameCloseButton",
+        "AchievementFrameTab1", "AchievementFrameTab2",
+        "AchievementFrameCategories", "AchievementFrameAchievements", "AchievementFrameSummary",
+        "AchievementFrameCategoriesContainer", "AchievementFrameAchievementsContainer",
+        "AchievementFrameFilterButton", "AchievementFrameSearchBox",
+    },
 })
 
 M:Panel("encounterjournal", {
     label = "冒险指南",
     group = "收藏",
     apply = SkinEncounterJournal,
+    frames = {
+        "EncounterJournal", "EncounterJournalCloseButton",
+        "EncounterJournalTab1", "EncounterJournalTab2", "EncounterJournalTab3",
+        "EncounterJournalInstanceSelect",
+        "EncounterJournalBossButton1", "EncounterJournalBossButton2", "EncounterJournalBossButton3",
+    },
 })

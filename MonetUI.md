@@ -46,7 +46,7 @@ MonetUI 是一套**整合 UI 插件**，以**莫奈印象派色彩**为核心设
 | Skins | 完成 | 界面美化：给暴雪窗口（任务、世界地图、角色、收藏、成就、社交、邮件/商贩/拍卖/专业、拾取/弹窗/菜单/设置等）统一铺 Monet 底板 / 边框 / 字体；可逐窗口开关，模块关闭可完整回退 |
 | Forever 保密值适配 | 完成 | Utils/Secrets.lua，全部单位数值访问先查询 |
 | Lua 5.1 兼容性检查 | 完成 | 无 5.2+ 特性 |
-| wuxian check 语法验证 | 完成 | 0 error；有意 warning：覆写 `GetMinimapShape`、姓名板按阵营尺寸 API 未入手册（已特性探测） |
+| wuxian check 语法验证 | 完成 | 0 error / 1 warning（有意：覆写 `GetMinimapShape`）；参考插件来的 API 未入手册项已全部消除 |
 | 安装到游戏 AddOns | 完成 | 含 Assets/Fonts 共 30.8 MB / 30 个文件已同步 |
 
 ### 待完成
@@ -535,9 +535,10 @@ Bartender4、Dominos、ElvUI、Andromeda 都是同一个套路：**不驱动暴�
 暴雪姓名板的**可点击区域**默认比一条细条大得多，还会和隔壁板的区域重叠——"看着点前面的板，实际选到
 后面的单位"。模块在应用设置时把暴雪的框体尺寸**对齐到自己画的框**：
 
-- 优先用**按阵营分设**的 `C_NamePlate.SetNamePlateEnemySize` / `SetNamePlateFriendlySize`
-  （手册没列，但同客户端的 Andromedaforever 在用，所以**特性探测 + pcall**）；
-- 都没有时退回 `C_NamePlate.SetNamePlateSize`；
+- **只用文档化的** `C_NamePlate.SetNamePlateSize`：`api_search` 实测该命名空间的 `siblings`
+  只有 `GetNamePlateForUnit` / `GetNamePlateSize` / `GetNamePlates`，没有按阵营的 setter；
+  而且本模块对所有板用的是**同一套宽高**，按阵营分设本就多余。曾参考其他插件看到
+  `SetNamePlateEnemySize/FriendlySize`，查手册确认本客户端没有，已**从代码里删掉**；
 - 首次接管前用 `GetNamePlateSize` 记下旧尺寸，关闭模块时还原；
 - 战斗中 `InCombatLockdown()` 是受保护状态，改不了，先记 `sizePending`，`PLAYER_REGEN_ENABLED` 补做；
 - hook `NamePlateDriverFrame.UpdateNamePlateOptions`（同样特性探测）——暴雪在设置/CVar 变化时会重排，
@@ -656,7 +657,11 @@ Utils/Skin.lua               皮肤原语（剥皮、底板、按钮/页签/滚�
 - 各暴雪窗口的**内部条目**（任务正文、奖励物品、列表行）刻意不动，所以它们仍是原版字体与间距；
   想让正文也统一，开「统一字体（全局）」。
 - 暴雪窗口的**框架名 / 子控件名在不同版本会变**：皮肤全部经 `_G[name]` 取用并对缺失静默跳过，
-  所以某版本缺了一个名字只会少美化那一个控件，不会报错；精确到控件的名字需要**游戏内逐个核对**。
+  所以某版本缺了一个名字只会少美化那一个控件，不会报错 —— 代价是**静默失效**。
+  这已不再靠猜：每个窗口把"期望存在的暴雪对象"登记在自己的 `frames` 清单里，
+  **`/mui skins diagnose`** 逐条与当前客户端比对并打印 found/missing，
+  按打印出的缺失名单一次性补名字即可（`/mui nameplates diagnose` 对本模块同理）。
+  走 `module:HandleCommand(rest)` 通用转发，`Core` 不知道任何具体子命令。
 - **下拉菜单**与**编辑模式（Edit Mode）**自带的弹层样式未覆盖。
 
 ### 字体资源
@@ -819,7 +824,7 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | 2026-10-15 | 减益光环**借用暴雪**：把 `UnitFrame.AurasFrame` 重挂到自己板上，不读 `C_UnitAuras` | 受限状态下插件读不到光环，而暴雪自己的板仍能画；只借位置，不借数据（ForeverUI 技巧） |
 | 2026-10-15 | "显示哪些单位"通过**拨客户端 CVar**（`nameplateShow*` / `nameplateMaxDistance`），并在关闭时原样写回 | 有没有姓名板是客户端决定，插件无法事后加板；记下旧值逐个还原，不残留 |
 | 2026-10-15 | 敌对分类 = `UnitIsFriend("player", u)` 为假（**敌对玩家与敌对 NPC 都算**），友方 NPC 单独一档 | 只按 `UnitIsPlayer` 分会把"敌方开关"错配到友好 NPC，反而管不到怪物 |
-| 2026-10-15 | 点击区尺寸优先用按阵营的 `C_NamePlate.SetNamePlateEnemySize/FriendlySize`（**特性探测 + pcall**），退回 `SetNamePlateSize`；hook `NamePlateDriverFrame.UpdateNamePlateOptions` 重盖 | 手册没列按阵营的两个函数，但同客户端 Andromedaforever 在用；各版本 API 不同代，必须逐代探测 |
+| 2026-10-15 | 点击区尺寸**只用文档化的** `C_NamePlate.SetNamePlateSize`（特性探测 + pcall），并从代码里**删掉**曾从参考插件看来的 `SetNamePlateEnemySize/FriendlySize`；hook `NamePlateDriverFrame.UpdateNamePlateOptions` 重盖 | `api_search` 实测该命名空间 `siblings` 只有 `GetNamePlateForUnit/GetNamePlateSize/GetNamePlates`，**没有**按阵营 setter；本模块对所有板用同一套宽高，那两个本就冗余。参考插件的对象不能当本客户端的依据 |
 | 2026-10-15 | 战斗中不改点击区尺寸，记 `sizePending` 到 `PLAYER_REGEN_ENABLED` 补做 | `InCombatLockdown` 下改姓名板尺寸是受保护操作，会失败甚至报错 |
 | 2026-10-15 | 施法条填充用**只算 `GetTime()*1000`** 的 OnUpdate 交给 `SetValue`，倒计时文字仅在结束时间可读时生成 | 填充的裁剪由客户端完成（保密值也可），文字要真算术，读不到就留空（见 4.6） |
 | 2026-10-15 | 姓名板整体走 `Widget:Font/Bar/CreateFrame` + `Widget:Theme`，边框在 `MONETUI_THEME_CHANGED` 后按仇恨/目标重刷 | 与其它模块同一套主题管线；主题监听器先跑，模块后跑，同 tick 内边框覆盖胜出 |
@@ -830,6 +835,9 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | 2026-10-15 | 皮肤复用 `Widget:Theme` + `Color:GetBorderKey()` + `Media:Font`，不新造主题 | 一个「边框颜色」下拉即可给所有窗口换框色 —— 这就是"材质/色彩统一" |
 | 2026-10-15 | 全局字体替换（暴雪共享字体对象）默认**关闭**，做成显式选项 | 一次影响所有窗口文字，较激进；交给玩家选，且关闭需重载 |
 | 2026-10-15 | 下拉菜单/提示边框默认关闭，菜单只染 backdrop 不剥皮 | 菜单背景靠 backdrop 而非区域贴图，剥皮会变透明；菜单框架是版本相关的非文档 API |
+| 2026-10-15 | **参考插件的暴雪对象名与函数名一律不采信**：Skins 的窗口/控件名全部按现代暴雪 UI 自写，经 `_G[name]` 防御取用，取不到就静默跳过 | Andromeda 等参考是过期版本、在 Forever 上本就不工作；它的"正确对象"对我们没有约束力。名字错的代价是**静默失效**而非报错，所以更要在客户端上实测 —— 见下一行的 `diagnose` 自检 |
+| 2026-10-15 | 新增 `ns.ResolvePath(path)` 共享探测 + 斜杠自检：`/mui skins diagnose` 逐条核对每个皮肤期望的暴雪对象，`/mui nameplates diagnose` 同理 | 把"名字可能不对"从担忧变成可执行的事实清单：打印 found/missing 一次，缺的名字照单补即可。斜杠命令走 `module:HandleCommand(rest)` 通用转发，不给 `Core` 加硬编码分支 |
+| 2026-10-15 | 手册优先于参考插件：新用到的 API 先 `api_search`/`api_get` 核对（含 `siblings` 成员表与 `SecretArguments` 限制），拿不准就留特性探测 + pcall | `wuxian check` 的 `api-unknown` warning 就是这类"抄来的名字"的报警器；本次据此清零了姓名板 8 处 |
 
 ---
 

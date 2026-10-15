@@ -76,6 +76,15 @@ M:Panel("worldmap", {
     label = "世界地图",
     group = "地图",
     apply = SkinWorldMap,
+    frames = {
+        "WorldMapFrame", "WorldMapFrame.BorderFrame", "WorldMapFrame.TitleText",
+        "WorldMapFrameCloseButton", "WorldMapFrameMaximizeButton", "WorldMapFrameMinimizeButton",
+        "WorldMapFrameZoomInButton", "WorldMapFrameZoomOutButton",
+        "WorldMapFrame.MaximizeMinimizeFrame.MaximizeButton",
+        "WorldMapFrame.MaximizeMinimizeFrame.MinimizeButton",
+        "QuestMapFrame", "QuestMapFrame.DetailsFrame", "QuestMapFrame.QuestLog",
+        "QuestMapFrameDetailsFrame", "QuestMapFrameQuestLog",
+    },
 })
 
 M:OnEvent("WORLD_MAP_UPDATE", function()

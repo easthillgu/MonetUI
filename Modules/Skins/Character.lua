@@ -55,10 +55,21 @@ M:Panel("character", {
     label = "角色界面",
     group = "角色",
     apply = SkinCharacter,
+    frames = {
+        "CharacterFrame", "CharacterFrameCloseButton",
+        "CharacterFrameTab1", "CharacterFrameTab2", "CharacterFrameTab3",
+        "CharacterFrameTab4", "CharacterFrameTab5",
+        "PaperDollFrame", "ReputationFrame", "TokenFrame", "SkillFrame", "PVPFrame",
+    },
 })
 
 M:Panel("inspect", {
     label = "观察 / 装备对比",
     group = "角色",
     apply = SkinInspect,
+    frames = {
+        "InspectFrame", "InspectFrameCloseButton",
+        "InspectFrameTab1", "InspectFrameTab2",
+        "InspectPaperDollFrame", "InspectPVPFrame", "InspectTalentFrame",
+    },
 })

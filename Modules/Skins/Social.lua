@@ -72,22 +72,42 @@ M:Panel("friends", {
         SkinFriends()
         SkinWho()
     end,
+    frames = {
+        "FriendsFrame", "FriendsFrameCloseButton",
+        "FriendsFrameTab1", "FriendsFrameTab2", "FriendsFrameTab3",
+        "FriendsFrameTab4", "FriendsFrameTab5",
+        "FriendsFrameSendMessageButton", "FriendsFrameAddFriendButton",
+        "FriendsFrameAddIgnoreButton", "FriendsFrameBroadcastButton",
+        "FriendsFrameListScrollFrame",
+        "WhoFrame", "WhoListScrollFrame",
+        "WhoFrameWhoButton", "WhoFrameAddFriendButton", "WhoFrameGroupInviteButton",
+    },
 })
 
 M:Panel("communities", {
     label = "社区",
     group = "社交",
     apply = SkinCommunities,
+    frames = {
+        "CommunitiesFrame", "CommunitiesFrameCloseButton",
+        "CommunitiesFrameTab1", "CommunitiesFrameTab2", "CommunitiesFrameTab3",
+    },
 })
 
 M:Panel("guild", {
     label = "公会",
     group = "社交",
     apply = SkinGuild,
+    frames = {
+        "GuildFrame", "GuildControlUI", "GuildRegistrarFrame", "GuildInviteFrame",
+    },
 })
 
 M:Panel("calendar", {
     label = "日历",
     group = "社交",
     apply = SkinCalendar,
+    frames = {
+        "CalendarFrame", "GameCalendarFrame", "GameCalendarFrameSet",
+    },
 })

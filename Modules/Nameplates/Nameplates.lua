@@ -166,25 +166,21 @@ function M:ApplyPlateSize()
 
     if not C_NamePlate then return end
 
-    local applied = false
-    if type(C_NamePlate.SetNamePlateEnemySize) == "function" then
-        applied = pcall(C_NamePlate.SetNamePlateEnemySize, width, height) or applied
-    end
-    if type(C_NamePlate.SetNamePlateFriendlySize) == "function" then
-        applied = pcall(C_NamePlate.SetNamePlateFriendlySize, width, height) or applied
-    end
-    if not applied and type(C_NamePlate.SetNamePlateSize) == "function" then
+    -- Only the documented setter is used.  Reference addons reach for
+    -- `C_NamePlate.SetNamePlateEnemySize` / `SetNamePlateFriendlySize`, but the
+    -- API manual's `siblings` for this namespace lists `GetNamePlateForUnit`,
+    -- `GetNamePlateSize` and `GetNamePlates` -- there are no per-faction
+    -- setters -- and we never wanted different dimensions per faction anyway
+    -- (one box for every plate).  Borrowing an object from another addon instead
+    -- of the manual is precisely how an addon ends up silently failing on the
+    -- build it actually runs on.
+    if type(C_NamePlate.SetNamePlateSize) == "function" then
         pcall(C_NamePlate.SetNamePlateSize, width, height)
     end
 end
 
 function M:RestorePlateSize()
     if not savedPlateSize or not C_NamePlate then return end
-    local restore = function(fn)
-        if type(fn) == "function" then pcall(fn, savedPlateSize[1], savedPlateSize[2]) end
-    end
-    restore(C_NamePlate.SetNamePlateEnemySize)
-    restore(C_NamePlate.SetNamePlateFriendlySize)
     if type(C_NamePlate.SetNamePlateSize) == "function" then
         pcall(C_NamePlate.SetNamePlateSize, savedPlateSize[1], savedPlateSize[2])
     end
@@ -983,6 +979,46 @@ function M:SetEnabled(enabled)
 
     self:RestoreCVars()
     self:RestorePlateSize()
+end
+
+-- -- Verification -------------------------------------------------------------
+
+-- Which objects this module assumes exist on *this* client.  Functions can be
+-- checked against the API manual, but frames (`NamePlateDriverFrame`) are not
+-- part of it at all -- so for them the only verification is asking the running
+-- client, which is what this probe does (compare `/mui skins diagnose`).  A
+-- missing name costs a feature, never an error: everything here is type-guarded.
+local PROBED = {
+    "C_NamePlate",
+    "C_NamePlate.GetNamePlateForUnit",
+    "C_NamePlate.GetNamePlateSize",
+    "C_NamePlate.SetNamePlateSize",
+    "NamePlateDriverFrame",
+    "NamePlateDriverFrame.UpdateNamePlateOptions",
+}
+
+function M:HandleCommand(rest)
+    local sub = string.lower(rest or "")
+    if sub ~= "diagnose" and sub ~= "diag" and sub ~= "probe" then return false end
+
+    ns:Print("姓名板对象自检（本客户端实测）：")
+    local missing = 0
+    for i = 1, #PROBED do
+        if ns.ResolvePath(PROBED[i]) then
+            ns:Print(("|cff88ff88✓|r %s"):format(PROBED[i]))
+        else
+            missing = missing + 1
+            ns:Print(("|cffff6b6b✗|r %s（缺失）"):format(PROBED[i]))
+        end
+    end
+
+    if missing == 0 then
+        ns:Print("全部存在。")
+    else
+        ns:Print(string.format("%d 个缺失：全部已按特性探测跳过，不会报错；"
+            .. "`NamePlateDriverFrame` 缺失时点击区仍会在设置/区域变化时重设。", missing))
+    end
+    return true
 end
 
 ns:Register("Nameplates", M)

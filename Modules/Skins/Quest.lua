@@ -96,12 +96,28 @@ M:Panel("questlog", {
     label = "任务日志",
     group = "任务",
     apply = SkinQuestLog,
+    frames = {
+        "QuestLogFrame", "QuestLogDetailFrame", "QuestLogPopupDetailFrame",
+        "QuestLogFrameAbandonButton", "QuestLogFrameTrackButton", "QuestLogFrameShareButton",
+        "QuestLogFrameCancelButton", "QuestLogFramePushQuestButton",
+        "QuestLogFrameTab1", "QuestLogFrameTab2",
+        "QuestLogListScrollFrame", "QuestLogDetailScrollFrame", "QuestLogObjectiveScrollFrame",
+    },
 })
 
 M:Panel("questframe", {
     label = "任务 / 对话窗口",
     group = "任务",
     apply = SkinQuestFrame,
+    frames = {
+        "QuestFrame", "GossipFrame", "GossipFrameGreetingPanel",
+        "QuestFrameGreetingPanel", "QuestFrameProgressPanel",
+        "QuestFrameRewardPanel", "QuestFrameDetailPanel",
+        "QuestFrameAcceptButton", "QuestFrameDeclineButton", "QuestFrameCompleteButton",
+        "QuestFrameCompleteQuestButton", "QuestFrameGoodbyeButton", "QuestFramePushQuestButton",
+        "QuestProgressScrollFrame", "GossipGreetingScrollFrame", "QuestInfoObjectiveScrollFrame",
+        "GossipFrameGreetingGoodbyeButton", "GossipGreetingButton1",
+    },
 })
 
 -- The windows are load-on-demand and rebuilt as quests change; re-apply.

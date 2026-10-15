@@ -50,6 +50,13 @@ function M:Panel(key, opts)
         group   = opts.group or "其它",
         apply   = opts.apply,
         default = opts.default ~= false,
+        -- Every Blizzard object this skin looks up, as dotted paths.  The names
+        -- are our own recall of the retail UI (never lifted from a reference
+        -- addon, which may target another build), so they are the one thing in
+        -- this module that cannot be verified without the client -- see
+        -- M:Diagnose().  A wrong name skips that control silently, it does not
+        -- error, which is exactly why they are recorded here for probing.
+        frames  = opts.frames,
     }
 
     if not self.byKey[key] then
@@ -336,6 +343,64 @@ function M:SetEnabled(enabled)
         Skin:Rollback()
         Skin:HideAdded()
     end
+end
+
+-- -- Verification -------------------------------------------------------------
+
+-- Every frame name in this module is our own recall of the retail UI, never
+-- taken from a reference addon (those may target a different build and their
+-- object names are not reliable here).  Because each lookup is a guarded
+-- `_G[name]`, a wrong name silently skips that control rather than raising --
+-- which also means it fails *quietly*.  This turns that silence into a list:
+-- `/mui skins diagnose` walks each entry's `frames` (dotted paths descend into
+-- sub-frames) against the running client and reports exactly what is absent, so
+-- the missing names can be corrected in one pass instead of guessed at.
+local ResolvePath = ns.ResolvePath
+
+function M:Diagnose()
+    local totalFound, totalMissing = 0, 0
+
+    ns:Print("界面美化对象自检（本客户端实测）：")
+
+    for _, entry in ipairs(self.registry) do
+        local names = entry.frames
+        if names and #names > 0 then
+            local missing, found = {}, 0
+            for i = 1, #names do
+                if ResolvePath(names[i]) then
+                    found = found + 1
+                else
+                    missing[#missing + 1] = names[i]
+                end
+            end
+
+            totalFound = totalFound + found
+            totalMissing = totalMissing + #missing
+
+            if #missing == 0 then
+                ns:Print(("|cff88ff88✓|r [%s] %d/%d 对象存在"):format(entry.key, found, #names))
+            else
+                ns:Print(("|cffff6b6b✗|r [%s] %d/%d 存在，缺少: %s"):format(
+                    entry.key, found, #names, table.concat(missing, ", ")))
+            end
+        end
+    end
+
+    ns:Print(("合计 %d 存在 / %d 缺失。"):format(totalFound, totalMissing))
+    if totalMissing > 0 then
+        ns:Print("上面缺失的对象在本客户端用了别的名字，按行补进对应皮肤文件即可。")
+    end
+end
+
+--- `/mui Skins <sub>`.  Returns false when the sub-command is unknown, so the
+-- slash handler can fall back to printing the usage line.
+function M:HandleCommand(rest)
+    local sub = string.lower(rest or "")
+    if sub == "diagnose" or sub == "diag" or sub == "probe" then
+        self:Diagnose()
+        return true
+    end
+    return false
 end
 
 ns:Register("Skins", M)

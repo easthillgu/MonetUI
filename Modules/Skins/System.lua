@@ -140,10 +140,40 @@ end
 
 -- -- Registration -------------------------------------------------------------
 
-M:Panel("loot",     { label = "拾取 / 掷骰", group = "系统", apply = SkinLoot })
-M:Panel("popups",   { label = "确认弹窗",     group = "系统", apply = SkinPopups })
-M:Panel("gamemenu", { label = "游戏菜单",     group = "系统", apply = SkinGameMenu })
-M:Panel("settings", { label = "设置面板",     group = "系统", apply = SkinSettings })
-M:Panel("addonlist",{ label = "插件列表",     group = "系统", apply = SkinAddonList })
-M:Panel("menus",    { label = "下拉菜单",     group = "系统", apply = SkinMenus, default = false })
-M:Panel("tooltip",  { label = "鼠标提示边框", group = "系统", apply = SkinTooltip, default = false })
+M:Panel("loot", { label = "拾取 / 掷骰", group = "系统", apply = SkinLoot,
+    frames = {
+        "LootFrame", "LootFrameCloseButton",
+        "LootFramePrevPageButton", "LootFrameNextPageButton", "LootFrameScrollFrame",
+        "GroupLootFrame1", "GroupLootFrame2", "GroupLootFrame3", "GroupLootFrame4",
+    } })
+
+M:Panel("popups", { label = "确认弹窗", group = "系统", apply = SkinPopups,
+    frames = {
+        "StaticPopup1", "StaticPopup1Button1", "StaticPopup1Button2",
+        "StaticPopup2", "StaticPopup2Button1",
+        "StaticPopup3", "StaticPopup3Button1",
+        "StaticPopup4", "StaticPopup4Button1",
+    } })
+
+M:Panel("gamemenu", { label = "游戏菜单", group = "系统", apply = SkinGameMenu,
+    frames = {
+        "GameMenuFrame",
+        "GameMenuButtonContinue", "GameMenuButtonSettings", "GameMenuButtonMacros",
+        "GameMenuButtonAddons", "GameMenuButtonLogout", "GameMenuButtonQuit",
+        "GameMenuButtonExit", "GameMenuButtonStore",
+    } })
+
+M:Panel("settings", { label = "设置面板", group = "系统", apply = SkinSettings,
+    frames = { "SettingsPanel", "SettingsPanelCloseButton" } })
+
+M:Panel("addonlist", { label = "插件列表", group = "系统", apply = SkinAddonList,
+    frames = {
+        "AddonList", "AddonListEnableAllButton", "AddonListDisableAllButton",
+        "AddonListFilterButton", "AddonListScrollFrame",
+    } })
+
+M:Panel("menus", { label = "下拉菜单", group = "系统", apply = SkinMenus, default = false,
+    frames = { "UIDropDownMenu_CreateFrames", "DropDownList1" } })
+
+M:Panel("tooltip", { label = "鼠标提示边框", group = "系统", apply = SkinTooltip, default = false,
+    frames = { "GameTooltip" } })

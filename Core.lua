@@ -238,6 +238,25 @@ function ns:DB()
     return _G.MonetUIDB
 end
 
+--- Walk a dotted path through the global table ("WorldMapFrame.BorderFrame") and
+-- return the value, or false if any segment is missing.  Intermediate nodes must
+-- be tables, so indexing can never raise.
+--
+-- Modules use this to *probe* the objects they assume exist on this client.
+-- Reference addons target other builds, so a name observed in them (or recalled
+-- from another version) cannot be trusted here -- and because every real lookup
+-- is a guarded `_G[name]`, a wrong name fails silently rather than erroring.
+-- This makes that silence queryable: `/mui skins diagnose`.
+function ns.ResolvePath(path)
+    if type(path) ~= "string" or path == "" then return false end
+    local node = _G
+    for segment in string.gmatch(path, "[^%.]+") do
+        if type(node) ~= "table" then return false end
+        node = node[segment]
+    end
+    return node ~= nil
+end
+
 -- -- Module registry ----------------------------------------------------------
 
 function ns:Register(name, module)
@@ -418,6 +437,7 @@ local function PrintHelp()
     ns:Print("  |cffffd100/mui enable|r     启用本体")
     ns:Print("  |cffffd100/mui disable|r    禁用本体（需 /reload）")
     ns:Print("  |cffffd100/mui <模块> on|off|r  单独开关模块")
+    ns:Print("  |cffffd100/mui skins diagnose|r 探测本客户端缺少的暴雪对象名（nameplates 同）")
     ns:Print("  |cffffd100/mui reset|r      恢复默认设置（需 /reload）")
 end
 
@@ -467,6 +487,8 @@ local function HandleSlash(message)
         end
 
         if moduleName then
+            local module = modules[moduleName]
+
             if rest == "on" or rest == "1" then
                 ns:SetModuleEnabled(moduleName, true)
                 ns:Print("模块 " .. moduleName .. " 已开启。")
@@ -474,7 +496,22 @@ local function HandleSlash(message)
                 ns:SetModuleEnabled(moduleName, false)
                 ns:Print("模块 " .. moduleName .. " 已关闭。")
             else
-                ns:Print("用法：/mui " .. moduleName .. " on|off")
+                -- Modules may expose their own sub-commands (e.g. `/mui skins
+                -- diagnose`).  A handler returns true when it consumed the rest
+                -- of the line; otherwise fall through to the usage line.
+                local handled = false
+                if type(module.HandleCommand) == "function" then
+                    local ok, result = pcall(module.HandleCommand, module, rest)
+                    handled = ok and result and true or false
+                end
+
+                if not handled then
+                    local usage = "用法：/mui " .. moduleName .. " on|off"
+                    if type(module.HandleCommand) == "function" then
+                        usage = usage .. "  或  /mui " .. moduleName .. " diagnose"
+                    end
+                    ns:Print(usage)
+                end
             end
         else
             PrintHelp()
