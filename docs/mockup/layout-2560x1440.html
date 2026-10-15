@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>MonetUI 布局锚点示例 2560x1440</title>
+<style>
+@font-face {
+  font-family: 'PingFangPixel';
+  src: url('../../Assets/Fonts/Pingfangpixel.ttf') format('truetype');
+  font-display: swap;
+}
+:root{
+  --edge: 217,168,92;
+  --ambient: 61,66,92;
+  --neutral: 158,153,145;
+  --health: 51,204,51;
+  --resource: 51,128,230;
+  --danger: 230,51,51;
+  --panel: 21,23,32;
+  --accent: 122,224,255;
+}
+*{ box-sizing:border-box; }
+html,body{ margin:0; padding:0; width:2560px; height:1440px; overflow:hidden; background:#0d1420; }
+body{
+  font-family:'PingFangPixel','Microsoft YaHei UI','Microsoft YaHei','Segoe UI',sans-serif;
+  color:#e8e6e1;
+  -webkit-font-smoothing:antialiased;
+}
+.stage{ position:relative; width:2560px; height:1440px; overflow:hidden; }
+
+/* ---------------------------------------------------------------- scene --- */
+.scene{
+  position:absolute; inset:0;
+  background:
+    radial-gradient(1100px 620px at 79% 16%, rgba(255,220,158,.34), transparent 72%),
+    radial-gradient(880px 560px at 21% 27%, rgba(146,196,255,.20), transparent 72%),
+    radial-gradient(1500px 900px at 52% 88%, rgba(74,126,96,.38), transparent 76%),
+    radial-gradient(700px 420px at 38% 62%, rgba(196,164,220,.14), transparent 74%),
+    linear-gradient(163deg,#1a2740 0%,#22314a 34%,#2b3e44 62%,#1c2932 100%);
+}
+.scene i{ position:absolute; border-radius:50%; filter:blur(46px); opacity:.55; display:block; }
+.vignette{ position:absolute; inset:0;
+  background:radial-gradient(120% 90% at 50% 45%, transparent 45%, rgba(4,8,14,.62) 100%); }
+
+/* ------------------------------------------------------- context (dim) ---- */
+.ctx{ position:absolute; opacity:.34; }
+
+.abtn{ position:absolute; width:34px; height:34px; border:1px solid #6b6a63; border-radius:3px;
+  background:linear-gradient(180deg,rgba(58,62,74,.85),rgba(28,31,40,.9)); }
+.abtn b{ position:absolute; right:2px; bottom:0px; font-size:9px; color:#c9c6bd; font-weight:normal; }
+
+.chat{ position:absolute; left:20px; top:1240px; width:430px; height:180px;
+  border:1px solid rgba(120,118,110,.5); background:rgba(10,12,18,.42); }
+.chat div{ font-size:12px; padding:2px 6px; color:#cfcabf; }
+.xp{ position:absolute; left:0; top:1432px; width:2560px; height:8px;
+  background:linear-gradient(90deg,#3a2f5e,#5b4a8c); }
+.xp i{ display:block; height:100%; width:420px; background:linear-gradient(90deg,#8f7ad8,#c0aef5); }
+
+.obj{ position:absolute; left:2120px; top:300px; width:420px; height:380px;
+  border:1px solid rgba(120,118,110,.45); background:rgba(10,12,18,.34); padding:8px 10px; }
+.obj h4{ margin:0 0 8px; font-size:14px; color:#e2ddce; font-weight:normal; }
+.obj p{ margin:0 0 7px; font-size:12px; color:#bdb8ac; }
+.obj .done{ color:#7f8f6a; }
+
+/* --------------------------------------------------------- unit frames ---- */
+.uf{ position:absolute; width:260px; height:52px;
+  background:rgba(var(--panel),.92);
+  border:1px solid rgba(var(--edge),.95);
+  box-shadow:0 2px 10px rgba(0,0,0,.55); }
+.uf .health{ position:absolute; left:2px; top:2px; width:256px; height:48px; background:rgba(var(--health),.28); }
+.uf .health i{ display:block; height:100%; background:linear-gradient(180deg,rgba(var(--health),.95),rgba(20,120,40,.95)); }
+.uf .power{ position:absolute; left:2px; bottom:2px; width:256px; height:13px;
+  background:rgba(var(--resource),.28); }
+.uf .power i{ display:block; height:100%; background:linear-gradient(180deg,rgba(90,158,240,.98),rgba(var(--resource),.98)); }
+.uf .name{ position:absolute; left:8px; top:5px; font-size:14px; color:rgb(var(--edge)); text-shadow:0 1px 2px #000; }
+.uf .lvl{ position:absolute; right:8px; top:6px; font-size:11px; color:rgb(var(--neutral)); }
+.uf .hp{ position:absolute; right:8px; bottom:3px; font-size:12px; color:#fff; text-shadow:0 1px 2px #000; }
+.uf .badge{ position:absolute; top:-10px; left:-10px; width:19px; height:19px; border-radius:50%;
+  background:rgb(var(--accent)); color:#062028; font-size:12px; line-height:19px; text-align:center;
+  border:1px solid #0a2a33; box-shadow:0 0 8px rgba(var(--accent),.8); }
+
+/* --------------------------------------------------------------- auras ---- */
+.aura{ position:absolute; width:34px; height:34px; border-radius:3px;
+  border:1px solid rgba(var(--edge),.9);
+  box-shadow:0 2px 8px rgba(0,0,0,.6), inset 0 0 10px rgba(0,0,0,.35);
+}
+.aura.debuff{ border-color:rgba(var(--danger),.92); }
+.aura .ic{ position:absolute; inset:1px; border-radius:2px; }
+.aura .t{ position:absolute; left:0; right:0; top:0; font-size:11px; text-align:center;
+  color:#ffe9a8; text-shadow:0 1px 2px #000; }
+.aura .c{ position:absolute; right:1px; bottom:0; font-size:11px; color:#fff; text-shadow:0 1px 2px #000; }
+.aura .swipe{ position:absolute; inset:1px; border-radius:2px;
+  background:conic-gradient(from 0deg, rgba(0,0,0,.62) 0deg 205deg, rgba(0,0,0,0) 205deg 360deg); }
+
+/* ------------------------------------------------------------- minimap ---- */
+.mm-panel{ position:absolute; left:2395px; top:15px; width:150px; height:150px;
+  background:rgba(var(--panel),.55); border:1px solid rgba(var(--edge),.55); }
+.mm{ position:absolute; left:2400px; top:20px; width:140px; height:140px; border-radius:50%;
+  background:
+    radial-gradient(60px 60px at 38% 34%, rgba(150,190,140,.55), transparent 70%),
+    radial-gradient(90px 70px at 68% 68%, rgba(90,120,170,.5), transparent 72%),
+    linear-gradient(150deg,#2f4436,#22303f 60%,#1b2530);
+  border:2px solid rgba(var(--edge),.85);
+  box-shadow:0 0 0 3px rgba(12,16,24,.75), 0 4px 16px rgba(0,0,0,.6), inset 0 0 24px rgba(0,0,0,.6); }
+.mm .nub{ position:absolute; left:50%; top:50%; width:8px; height:8px; margin:-4px 0 0 -4px;
+  border-radius:50%; background:#ffe9a8; box-shadow:0 0 6px #ffd97a; }
+.mmtext{ position:absolute; left:2395px; top:164px; width:154px; height:18px;
+  display:flex; align-items:center; justify-content:center; gap:12px; font-size:12px; }
+.mmtext .clock{ color:rgb(var(--edge)); }
+.mmtext .coord{ color:rgb(var(--neutral)); }
+
+/* -------------------------------------------------------- annotation UI --- */
+.box{ position:absolute; border:1px solid rgba(var(--accent),.55); border-radius:6px;
+  background:rgba(8,20,28,.86); box-shadow:0 6px 24px rgba(0,0,0,.55); padding:10px 13px; }
+.box h3{ margin:0 0 7px; font-size:16px; font-weight:normal; color:rgb(var(--accent)); letter-spacing:.5px; }
+.box h3 em{ font-style:normal; color:#9fb3bd; font-size:12px; margin-left:6px; }
+.box p{ margin:0 0 5px; font-size:13px; color:#d7dee2; line-height:1.55; }
+.box p:last-child{ margin-bottom:0; }
+.box .k{ color:rgb(var(--edge)); }
+.box .dim{ color:#93a3ac; font-size:12px; }
+.box .n{ display:inline-block; width:17px; height:17px; line-height:17px; text-align:center;
+  border-radius:50%; background:rgb(var(--accent)); color:#062028; font-size:11px; margin-right:5px; }
+.banner{ position:absolute; left:620px; top:24px; width:1120px; height:76px;
+  border:1px solid rgba(var(--edge),.5); border-radius:6px; background:rgba(10,16,26,.8);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  box-shadow:0 6px 24px rgba(0,0,0,.55); }
+.banner h1{ margin:0; font-size:26px; font-weight:normal; color:#f2ead8; letter-spacing:2px; }
+.banner h1 b{ color:rgb(var(--edge)); font-weight:normal; }
+.banner span{ margin-top:5px; font-size:13px; color:#9fb3bd; letter-spacing:1px; }
+svg.ann{ position:absolute; inset:0; width:2560px; height:1440px; pointer-events:none; }
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <div class="scene">
+    <i style="left:180px; top:760px; width:520px; height:320px; background:#4e7f63;"></i>
+    <i style="left:640px; top:880px; width:640px; height:360px; background:#3f6f79;"></i>
+    <i style="left:1500px; top:700px; width:560px; height:340px; background:#6a7f4e;"></i>
+    <i style="left:1960px; top:960px; width:520px; height:300px; background:#3a5f6e;"></i>
+    <i style="left:1080px; top:1080px; width:820px; height:300px; background:#2f4a55;"></i>
+  </div>
+  <div class="vignette"></div>
+
+  <!-- ======================= context: Blizzard default (dimmed) ============ -->
+  <div class="ctx">
+    <div class="chat">
+      <div>[综合] 旅店老板: 欢迎来到无尽之地。</div>
+      <div>[队伍] Waterlily: 准备好就开怪。</div>
+      <div>[综合] Monet: 界面已经调好了。</div>
+    </div>
+    <div class="xp"><i></i></div>
+
+    <div class="obj">
+      <h4>任务</h4>
+      <p class="done">☑ 收集月光草 (12/12)</p>
+      <p>☐ 击败湖畔的守护者 (0/1)</p>
+      <p>&nbsp;&nbsp;&nbsp;湖畔的守护者 (0/1)</p>
+      <p>☐ 与村民交谈 (1/4)</p>
+      <p>&nbsp;&nbsp;&nbsp;与铁匠交谈 (1/1)</p>
+      <p>&nbsp;&nbsp;&nbsp;与农夫交谈 (0/1)</p>
+      <p>&nbsp;&nbsp;&nbsp;与长老交谈 (0/1)</p>
+      <p>&nbsp;&nbsp;&nbsp;与孩童交谈 (0/1)</p>
+    </div>
+
+    <div class="abtn" style="left:1043px; top:1300px;"><b>1</b></div>
+    <div class="abtn" style="left:1083px; top:1300px;"><b>2</b></div>
+    <div class="abtn" style="left:1123px; top:1300px;"><b>3</b></div>
+    <div class="abtn" style="left:1163px; top:1300px;"><b>4</b></div>
+    <div class="abtn" style="left:1203px; top:1300px;"><b>5</b></div>
+    <div class="abtn" style="left:1243px; top:1300px;"><b>6</b></div>
+    <div class="abtn" style="left:1283px; top:1300px;"><b>7</b></div>
+    <div class="abtn" style="left:1323px; top:1300px;"><b>8</b></div>
+    <div class="abtn" style="left:1363px; top:1300px;"><b>9</b></div>
+    <div class="abtn" style="left:1403px; top:1300px;"><b>0</b></div>
+    <div class="abtn" style="left:1443px; top:1300px;"><b>-</b></div>
+    <div class="abtn" style="left:1483px; top:1300px;"><b>=</b></div>
+
+    <div class="abtn" style="left:1043px; top:1344px;"><b>Q</b></div>
+    <div class="abtn" style="left:1083px; top:1344px;"><b>E</b></div>
+    <div class="abtn" style="left:1123px; top:1344px;"><b>R</b></div>
+    <div class="abtn" style="left:1163px; top:1344px;"><b>F</b></div>
+    <div class="abtn" style="left:1203px; top:1344px;"><b>T</b></div>
+    <div class="abtn" style="left:1243px; top:1344px;"><b>G</b></div>
+    <div class="abtn" style="left:1283px; top:1344px;"><b>Z</b></div>
+    <div class="abtn" style="left:1323px; top:1344px;"><b>X</b></div>
+    <div class="abtn" style="left:1363px; top:1344px;"><b>C</b></div>
+    <div class="abtn" style="left:1403px; top:1344px;"><b>V</b></div>
+    <div class="abtn" style="left:1443px; top:1344px;"><b>B</b></div>
+    <div class="abtn" style="left:1483px; top:1344px;"><b>N</b></div>
+
+    <div class="abtn" style="left:2112px; top:1344px; width:32px; height:32px;"></div>
+    <div class="abtn" style="left:2150px; top:1344px; width:32px; height:32px;"></div>
+    <div class="abtn" style="left:2188px; top:1344px; width:32px; height:32px;"></div>
+    <div class="abtn" style="left:2226px; top:1344px; width:32px; height:32px;"></div>
+    <div class="abtn" style="left:2264px; top:1344px; width:32px; height:32px;"></div>
+    <div class="abtn" style="left:2302px; top:1344px; width:32px; height:32px;"></div>
+
+    <div style="position:absolute; left:2140px; top:1070px; width:200px; height:260px;
+      border:1px solid rgba(120,118,110,.5); background:rgba(10,12,18,.4);"></div>
+  </div>
+
+  <!-- ======================= MonetUI: unit frames ========================= -->
+  <div class="uf" style="left:20px; top:20px;">
+    <div class="health"><i style="width:84%"></i></div>
+    <div class="power"><i style="width:62%"></i></div>
+    <div class="name">Monet</div><div class="lvl">Lv80</div>
+    <div class="hp">84.2K / 96.4K</div>
+    <div class="badge">1</div>
+  </div>
+
+  <div class="uf" style="left:300px; top:20px;">
+    <div class="health"><i style="width:71%"></i></div>
+    <div class="power"><i style="width:35%"></i></div>
+    <div class="name">Impressionist</div><div class="lvl">Lv80</div>
+    <div class="hp">62.0K / 87.1K</div>
+    <div class="badge">2</div>
+  </div>
+
+  <div class="uf" style="left:20px; top:80px;">
+    <div class="health"><i style="width:93%"></i></div>
+    <div class="power"><i style="width:78%"></i></div>
+    <div class="name">Waterlily</div><div class="lvl">Lv80</div>
+    <div class="hp">90.1K / 96.4K</div>
+    <div class="badge">3</div>
+  </div>
+
+  <div class="uf" style="left:300px; top:80px;">
+    <div class="health"><i style="width:100%"></i></div>
+    <div class="power"><i style="width:44%"></i></div>
+    <div class="name">Poppy</div><div class="lvl">Lv80</div>
+    <div class="hp">21.8K / 21.8K</div>
+    <div class="badge">4</div>
+  </div>
+
+  <!-- ======================= MonetUI: minimap ============================= -->
+  <div class="mm-panel"></div>
+  <div class="mm"><div class="nub"></div></div>
+  <div class="mmtext"><span class="clock">20:14</span><span class="coord">58.3, 41.7</span></div>
+
+  <!-- ======================= MonetUI: buffs / debuffs ===================== -->
+  <div class="aura" style="left:2506px; top:190px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#f0b27a,#a85c33);"></div><div class="swipe"></div><div class="t">2m</div></div>
+  <div class="aura" style="left:2468px; top:190px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#9ed0f5,#2f6ea8);"></div><div class="t">18s</div></div>
+  <div class="aura" style="left:2430px; top:190px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#b8e6a0,#4a8f3f);"></div><div class="t">45s</div></div>
+  <div class="aura" style="left:2392px; top:190px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#f2e08a,#a88b2f);"></div><div class="c">3</div></div>
+  <div class="aura" style="left:2354px; top:190px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#d7b6f0,#6a3f9f);"></div><div class="swipe"></div><div class="t">8m</div></div>
+  <div class="aura" style="left:2316px; top:190px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#a8ecdf,#2f8f80);"></div><div class="t">5s</div></div>
+  <div class="aura" style="left:2278px; top:190px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#f0a8c8,#a83f6a);"></div><div class="t">1m</div></div>
+
+  <div class="aura debuff" style="left:2506px; top:232px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#f0a0a0,#a83f3f);"></div><div class="swipe"></div><div class="t">12s</div></div>
+  <div class="aura debuff" style="left:2468px; top:232px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#c0a0f0,#5a3fa8);"></div><div class="t">30s</div></div>
+  <div class="aura debuff" style="left:2430px; top:232px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#f0cf9a,#a8782f);"></div><div class="c">5</div></div>
+  <div class="aura debuff" style="left:2392px; top:232px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#a8b8f0,#2f3fa8);"></div><div class="t">1m</div></div>
+
+  <!-- ======================= annotations ================================= -->
+  <svg class="ann" viewBox="0 0 2560 1440" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M0,0 L9,4.5 L0,9 z" fill="rgb(122,224,255)"/>
+      </marker>
+    </defs>
+    <g fill="none" stroke="rgb(122,224,255)" stroke-width="2" stroke-dasharray="9 7" opacity=".95">
+      <rect x="8"   y="8"   width="564" height="136" rx="7"/>
+      <rect x="2272" y="184" width="274" height="44"  rx="6"/>
+      <rect x="2386" y="230" width="160" height="44"  rx="6"/>
+      <rect x="2389" y="9"   width="163" height="163" rx="10"/>
+      <rect x="2393" y="162" width="154" height="20"  rx="6"/>
+    </g>
+    <g fill="none" stroke="rgb(122,224,255)" stroke-width="2" marker-end="url(#ar)">
+      <path d="M2080,205 L2268,205"/>
+      <path d="M2080,252 L2382,252"/>
+      <path d="M2375,60  L2385,60"/>
+      <path d="M2375,172 L2389,172"/>
+    </g>
+  </svg>
+
+  <div class="box" style="left:8px; top:152px; width:560px; height:130px;">
+    <h3>①-④ 单位框架<em>UnitFrames · 260 × 52</em></h3>
+    <p><span class="n">1</span><span class="k">player 玩家</span> 锚点 TOPLEFT (20, -20) &nbsp;&nbsp;
+       <span class="n">2</span><span class="k">target 目标</span> 锚点 TOPLEFT (300, -20)</p>
+    <p><span class="n">3</span><span class="k">focus 焦点</span> 锚点 TOPLEFT (20, -80) &nbsp;&nbsp;
+       <span class="n">4</span><span class="k">pet 宠物</span> 锚点 TOPLEFT (300, -80)</p>
+    <p class="dim">每框含：血条 · 能量条 · 名字(职业色) · 等级 · 血量文本；可拖动，位置存入 MonetUIDB。</p>
+  </div>
+
+  <div class="box" style="left:1760px; top:184px; width:320px; height:122px;">
+    <h3>⑤⑥ 增益 / 减益<em>Auras · 34×34</em></h3>
+    <p><span class="n">5</span><span class="k">Buff 增益</span> · 每行 8 个 · 间距 4px</p>
+    <p><span class="n">6</span><span class="k">Debuff 减益</span> · 位于增益下方 8px</p>
+    <p class="dim">锚点 TOPRIGHT (-20, -190) · 右对齐并贴合右边缘</p>
+  </div>
+
+  <div class="box" style="left:2080px; top:20px; width:295px; height:160px;">
+    <h3>⑦ 小地图<em>Minimap</em></h3>
+    <p>150 × 150 主题面板，圆形边框按主题边缘色染色</p>
+    <p>移除指南针与装饰纹理</p>
+    <p><span class="n">8</span><span class="k">坐标 + 时钟</span> 位于小地图下方</p>
+    <p class="dim">模块不替换小地图，只在其外层加框。</p>
+  </div>
+
+  <div class="banner">
+    <h1>MonetUI <b>·</b> 布局锚点示例</h1>
+    <span>2560 × 1440（UIParent 全屏）· 半透明部分为暴雪默认元素，仅作位置参照</span>
+  </div>
+
+  <div class="box" style="left:20px; top:1206px; width:440px; height:26px; padding:4px 12px;">
+    <p class="dim" style="margin:0;">以上为 Phase 1/2 已实现模块，其余 UI 为暴雪默认外观。</p>
+  </div>
+
+</div>
+</body>
+</html>

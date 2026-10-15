@@ -20,6 +20,24 @@ local ICON_GAP    = 4
 local PER_ROW     = 8
 local MAX_AURAS   = 32
 
+-- The buttons grow left / down from the container's TOP-RIGHT corner, so the
+-- container is sized to the rows it currently shows and always hugs the right
+-- edge of the screen instead of running off it.
+local ROW_STRIDE  = ICON_SIZE + ICON_GAP
+
+--- Resize a container to exactly hug the icons it currently shows.
+local function FitContainer(container, count)
+    if count <= 0 then
+        container:SetSize(0, 0)
+        return
+    end
+    local rows = math.ceil(count / PER_ROW)
+    local cols = math.min(count, PER_ROW)
+    container:SetSize(
+        cols * ROW_STRIDE - ICON_GAP,
+        rows * ROW_STRIDE - ICON_GAP)
+end
+
 local buffButtons, debuffButtons = {}, {}
 local buffContainer, debuffContainer
 local pending
@@ -89,8 +107,8 @@ local function ShowAura(button, aura, index)
     local row = math.floor((index - 1) / PER_ROW)
 
     button:ClearAllPoints()
-    button:SetPoint("TOPLEFT", button:GetParent(), "TOPLEFT",
-        column * (ICON_SIZE + ICON_GAP), -row * (ICON_SIZE + ICON_GAP))
+    button:SetPoint("TOPRIGHT", button:GetParent(), "TOPRIGHT",
+        -column * ROW_STRIDE, -row * ROW_STRIDE)
 
     -- Show first: everything below must be allowed to fail without leaving the
     -- button stuck hidden.
@@ -160,7 +178,9 @@ function M:Update()
     local debuffs = CollectAuras("player", "HARMFUL")
 
     UpdateRow(buffButtons, buffContainer, buffs)
+    FitContainer(buffContainer, #buffs)
     UpdateRow(debuffButtons, debuffContainer, debuffs)
+    FitContainer(debuffContainer, #debuffs)
 
     buffContainer:SetShown(#buffs > 0)
     debuffContainer:SetShown(#debuffs > 0)
@@ -208,7 +228,7 @@ function M:Initialize()
     buffContainer:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -20, -190)
 
     debuffContainer = Widget:CreateFrame("MonetUIDebuffFrame", UIParent, 1, 1)
-    debuffContainer:SetPoint("TOPLEFT", buffContainer, "BOTTOMLEFT", 0, -8)
+    debuffContainer:SetPoint("TOPRIGHT", buffContainer, "BOTTOMRIGHT", 0, -8)
 
     SuppressBlizzard()
 

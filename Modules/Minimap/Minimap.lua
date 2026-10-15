@@ -98,7 +98,9 @@ local function Skin()
     end
     if not clockText then
         clockText = Widget:Font(textParent, 12, "pixel", "edge", "CENTER")
-        clockText:SetPoint("TOP", coordText, "BOTTOM", 0, -2)
+        -- Side by side with the coordinates: a second line would collide with the
+        -- buff grid, which is anchored just below this cluster.
+        clockText:SetPoint("RIGHT", coordText, "LEFT", -12, 0)
     end
 
     return true
