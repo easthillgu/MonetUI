@@ -192,10 +192,10 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 
 | 优先级 | 模块 | 功能 | 状态 | 参考 |
 |--------|------|------|------|------|
-| **P0** | UnitFrames | 玩家/目标/焦点/宠物框架，血条能量条、名字等级、拖动保存 | ✅ 已实现 | Andromeda, EllesmereUI |
+| **P0** | UnitFrames | 玩家/目标/目标的目标/焦点/宠物框架，血条能量条、名字等级、拖动保存 | ✅ 已实现 | Andromeda, EllesmereUI |
 | **P0** | Cooldown | 冷却数字/充能/快捷键字体美化 + 技能可用状态着色 | ✅ 已实现 | EllesmereUICooldownManager |
 | **P1** | BuffFrame | 自绘 Buff/Debuff 网格，按时长排序，可读性守卫 | ✅ 已实现 | EllesmereUIAuraBuffReminders |
-| **P1** | Minimap | 矩形小地图（256×190）、去圆形边框/指南针、坐标 + 时钟 + 主题面板 | ✅ 已实现 | EllesmereUIMinimap, Andromeda |
+| **P1** | Minimap | 矩形小地图（256×190）、去圆形边框/指南针、主题面板 | ✅ 已实现 | EllesmereUIMinimap, Andromeda |
 | **P1** | BagFrame | 背包排列整合 + 主题边框 + 标题字体 | ✅ 已实现 | EllesmereUIBags |
 | **P2** | QuestTracker | 主题边框 + 标题栏拖动 + 位置保存 | ✅ 已实现 | EllesmereUIQuestTracker |
 | **P2** | ActionBars | 隐藏暴雪默认动作条与背包条（自绘动作条待建） | 🚧 占位 | EllesmereUIActionBars, Andromeda |
@@ -210,10 +210,10 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 |------|------|------|------|
 | player | `CENTER` / UIParent `CENTER` | `(0, -180)` | 160 × 8 |
 | target | `LEFT` / player `RIGHT` | `(40, 40)` | 160 × 8 |
+| targettarget | `LEFT` / target `RIGHT` | `(6, 0)` | 60 × 8 |
 | pet | `RIGHT` / player `LEFT` | `(-6, 0)` | 60 × 8 |
 | focus | `RIGHT` / player `LEFT` | `(-100, -40)` | 60 × 8 |
 | 小地图 | `BOTTOMRIGHT` / UIParent `BOTTOMRIGHT` | `(-33, 33)` | 256 宽 × 190 高（面板 264 × 198） |
-| 小地图坐标 / 时钟 | `BOTTOM` / 小地图 `TOP` | `(0, 6 - 33)` | — |
 | 增益 Buff | `TOPLEFT` / UIParent `TOPLEFT` | `(33, -33)`，每行 8 个 | 图标 34 × 34 |
 | 减益 Debuff | `TOPLEFT` / Buff容器 `BOTTOMLEFT` | `(0, -8)` | 图标 34 × 34 |
 
@@ -236,6 +236,7 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 |------|--------|--------|----------|
 | player | 名字 + 等级 | 血量 `当前 / 最大` | — |
 | target | 血量 `当前 / 最大` | 名字 + 等级 | — |
+| targettarget | — | — | 名字 |
 | focus | — | — | 名字 |
 | pet | — | — | —（无文字，同 Andromeda） |
 
@@ -244,6 +245,7 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 圆形画布仍是 256 × 256，用 `Assets/Textures/rectangle-mask.blp`（取自 Andromeda 的
 `rectangle-mask`）做遮罩，上下各裁 33px，得到 256 宽 × 190 高的可见区域；`SetHitRectInsets`
 同步收缩点击区，并把 `GetMinimapShape` 覆写为 `SQUARE`，让第三方小地图按钮按矩形排布。
+小地图**不显示坐标与时钟**；暴雪圆形边框/指南针/背板全部隐藏，由主题面板（264 × 198）替代。
 
 预览图：`docs/mockup/layout-2560x1440.png`（源文件 `docs/mockup/layout-2560x1440.html`）。
 
@@ -338,6 +340,9 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 | 2026-10-15 | focus 偏移改回 Andromeda 的 `-100` | 单位框已细条化到 60 宽，不再需要外推 |
 | 2026-10-15 | 小地图矩形化用遮罩纹理（256×256 裁上下各 33px → 256×190） | 与 Andromeda 的 `rectangle-mask` 同法，保持圆形画布不动 |
 | 2026-10-15 | 隐藏暴雪动作条/背包条用「重定位到隐藏父框」而非销毁 | 按键仍然可用，且不动 Blizzard 的动作条逻辑 |
+| 2026-10-15 | 新增 targettarget 单位框（60×8，居中名字） | 照搬 Andromeda `Positions.tot` = target `RIGHT` +(6,0) |
+| 2026-10-15 | 单位框拖动后按依赖顺序重排（player→target→targettarget） | 链式锚点（目标的的目标挂在目标上）也要跟随移动 |
+| 2026-10-15 | 小地图去掉坐标与时钟 | 右下角位置紧凑，用户不需要这两项文本 |
 
 ---
 

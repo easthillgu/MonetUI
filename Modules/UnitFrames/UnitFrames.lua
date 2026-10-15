@@ -18,14 +18,17 @@ local M = { name = "UnitFrames" }
 local frames = {}
 
 local UNIT_LABEL = {
-    player = "玩家",
-    target = "目标",
-    focus  = "焦点",
-    pet    = "宠物",
+    player       = "玩家",
+    target       = "目标",
+    targettarget = "目标的目标",
+    focus        = "焦点",
+    pet          = "宠物",
 }
 
 -- Units we build a frame for (and therefore take over from Blizzard).
-local UNITS = { "player", "target", "focus", "pet" }
+-- The order matters: every frame anchors to one earlier in the list
+-- (targettarget hangs off target, which hangs off player).
+local UNITS = { "player", "target", "targettarget", "focus", "pet" }
 
 -- Where each unit's text sits, following Andromeda's tag anchors: everything is
 -- drawn just above the bar, clear of the frame's top edge.
@@ -33,13 +36,15 @@ local UNITS = { "player", "target", "focus", "pet" }
 --   level      true when the level is drawn beside the name
 --   healthText "LEFT" | "RIGHT"
 -- Andromeda gives the player health/power above its bar, the target health left
--- and name right, and the focus a centred name; its pet frames carry no text at
--- all (60px is too narrow for a name), which MonetUI keeps.
+-- and name right, the focus a centred name and the target-of-target a centred
+-- name; its pet frames carry no text at all (60px is too narrow for a name),
+-- which MonetUI keeps.
 local TEXT_LAYOUT = {
-    player = { name = "LEFT",   level = true,  healthText = "RIGHT" },
-    target = { name = "RIGHT",  level = true,  healthText = "LEFT"  },
-    focus  = { name = "CENTER", level = false                       },
-    pet    = {},
+    player       = { name = "LEFT",   level = true,  healthText = "RIGHT" },
+    target       = { name = "RIGHT",  level = true,  healthText = "LEFT"  },
+    targettarget = { name = "CENTER", level = false                       },
+    focus        = { name = "CENTER", level = false                       },
+    pet          = {},
 }
 
 local TEXT_GAP   = 3   -- Andromeda's offset from the frame's top edge
@@ -50,10 +55,11 @@ local SMALL_SIZE = 11
 -- globals are PlayerFrame / TargetFrame / FocusFrame / PetFrame, not
 -- unit .. "Frame", so they must be looked up explicitly.
 local BLIZZARD_FRAMES = {
-    player = "PlayerFrame",
-    target = "TargetFrame",
-    focus  = "FocusFrame",
-    pet    = "PetFrame",
+    player       = "PlayerFrame",
+    target       = "TargetFrame",
+    targettarget = "TargetFrameToT",
+    focus        = "FocusFrame",
+    pet          = "PetFrame",
 }
 
 -- -- Blizzard takeover --------------------------------------------------------
@@ -274,12 +280,11 @@ local function CreateUnitFrame(unit, position)
         stored.x = Math:Round(x, 0)
         stored.y = Math:Round(y, 0)
 
-        -- Anything anchored to this frame has to follow it.
-        for _, other in pairs(frames) do
-            local target = other ~= self and db.unitFrames[other.unit]
-            if target and target.relativeTo == unit then
-                PositionFrame(other)
-            end
+        -- Re-anchor in dependency order so anything hanging off this frame
+        -- (directly or through a chain, e.g. player -> target -> targettarget)
+        -- follows it.
+        for _, name in ipairs(UNITS) do
+            if frames[name] then PositionFrame(frames[name]) end
         end
     end)
 
@@ -302,16 +307,23 @@ function M:UpdateUnit(unit, kind)
     end
 end
 
+--- Show / hide a frame for the unit and refresh all of its parts.
+local function RefreshUnit(unit)
+    local frame = frames[unit]
+    if not frame then return end
+    if UnitExists(unit) then
+        frame:Show()
+        UpdateHealth(frame)
+        UpdatePower(frame)
+        UpdateName(frame)
+    else
+        frame:Hide()
+    end
+end
+
 function M:UpdateAll()
-    for unit, frame in pairs(frames) do
-        if UnitExists(unit) then
-            frame:Show()
-            UpdateHealth(frame)
-            UpdatePower(frame)
-            UpdateName(frame)
-        else
-            frame:Hide()
-        end
+    for _, unit in ipairs(UNITS) do
+        RefreshUnit(unit)
     end
 end
 
@@ -341,14 +353,13 @@ function M:RegisterEvents()
     end
 
     EventBus:Register("PLAYER_TARGET_CHANGED", function()
-        local frame = frames.target
-        if not frame then return end
-        if UnitExists("target") then
-            frame:Show()
-            UpdateHealth(frame); UpdatePower(frame); UpdateName(frame)
-        else
-            frame:Hide()
-        end
+        RefreshUnit("target")
+        RefreshUnit("targettarget")
+    end)
+
+    -- A new target means a new target-of-target.
+    EventBus:Register("UNIT_TARGET", function(_, unit)
+        if unit == "target" then RefreshUnit("targettarget") end
     end)
 
     EventBus:Register("PLAYER_ENTERING_WORLD", function() M:UpdateAll() end)

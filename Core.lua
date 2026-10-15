@@ -45,6 +45,8 @@ local DEFAULTS = {
                    point = "CENTER", relativeTo = "UIParent", relativePoint = "CENTER", x = 0,    y = -180 },
         target = { width = 160, health = 4, power = 1,
                    point = "LEFT",   relativeTo = "player",   relativePoint = "RIGHT",  x = 40,   y = 40 },
+        targettarget = { width = 60, health = 4, power = 1,
+                   point = "LEFT",   relativeTo = "target",   relativePoint = "RIGHT",  x = 6,    y = 0 },
         pet    = { width = 60,  health = 4, power = 1,
                    point = "RIGHT",  relativeTo = "player",   relativePoint = "LEFT",   x = -6,   y = 0 },
         focus  = { width = 60,  health = 4, power = 1,

@@ -1,10 +1,10 @@
 -- Modules/Minimap/Minimap.lua
--- Minimap reshape + text.
+-- Minimap reshape.
 --
 -- The module does not replace the minimap, it reworks it: the cluster is moved
 -- to the bottom-right corner and the circular map becomes a 256x190 rectangle
 -- (Andromeda's shape), a themed panel is placed behind it and the default
--- circular art is removed.  Coordinates and a small clock sit above it.
+-- circular art is removed.
 
 local ADDON_NAME, ns = ...
 
@@ -13,42 +13,7 @@ local EventBus = ns.EventBus
 
 local M = { name = "Minimap" }
 
-local panel, coordText, clockText, driver
-
--- -- Data ---------------------------------------------------------------------
-
-local function GetPlayerPosition()
-    if not (C_Map and C_Map.GetBestMapForUnit and C_Map.GetPlayerMapPosition) then return nil end
-    local mapID = C_Map.GetBestMapForUnit("player")
-    if not mapID then return nil end
-
-    local position = C_Map.GetPlayerMapPosition(mapID, "player")
-    if not position then return nil end
-
-    if position.GetXY then
-        local x, y = position:GetXY()
-        return x, y
-    end
-    return nil
-end
-
-local function UpdateCoordinates()
-    if not coordText then return end
-    local x, y = GetPlayerPosition()
-    if x and y then
-        coordText:SetText(string.format("%.1f, %.1f", x * 100, y * 100))
-    else
-        coordText:SetText("")
-    end
-end
-
-local function UpdateClock()
-    if not clockText then return end
-    local hour, minute = GetGameTime()
-    if hour then
-        clockText:SetText(string.format("%02d:%02d", hour, minute))
-    end
-end
+local panel = nil
 
 -- -- Skinning -----------------------------------------------------------------
 
@@ -128,67 +93,23 @@ local function Skin()
     panel:ClearAllPoints()
     panel:SetPoint("CENTER", minimap, "CENTER", 0, 0)
 
-    -- coordinates + clock above the minimap (it now sits in the bottom-right,
-    -- so there is no room below it)
-    local textParent = _G.MinimapCluster or UIParent
-    if not coordText then
-        coordText = Widget:Font(textParent, 12, "pixel", "neutral", "CENTER")
-    end
-    coordText:ClearAllPoints()
-    coordText:SetPoint("BOTTOM", minimap, "TOP", 0, 6 - MINIMAP_CROP)
-
-    if not clockText then
-        clockText = Widget:Font(textParent, 12, "pixel", "edge", "CENTER")
-        clockText:SetPoint("RIGHT", coordText, "LEFT", -12, 0)
-    end
-
     return true
 end
 
 -- -- Lifecycle ----------------------------------------------------------------
 
 function M:Initialize()
-    if not Skin() then
-        -- The minimap is not ready yet, try again when the world / area loads.
-        EventBus:Register("PLAYER_ENTERING_WORLD", function() Skin() end)
-        EventBus:Register("ZONE_CHANGED_NEW_AREA", function() Skin() end)
-    end
+    -- Blizzard re-anchors the cluster when the area changes, so the skin is
+    -- re-applied rather than done once.
+    EventBus:Register("PLAYER_ENTERING_WORLD", function() Skin() end)
+    EventBus:Register("ZONE_CHANGED_NEW_AREA", function() Skin() end)
+    EventBus:Register("MONETUI_THEME_CHANGED", function() ClearDefaultArt() end)
 
-    if not driver then
-        driver = CreateFrame("Frame")
-        local coordElapsed, clockElapsed = 0, 0
-        driver:SetScript("OnUpdate", function(_, elapsed)
-            coordElapsed = coordElapsed + elapsed
-            clockElapsed = clockElapsed + elapsed
-            if coordElapsed >= 0.35 then
-                coordElapsed = 0
-                UpdateCoordinates()
-            end
-            if clockElapsed >= 10 then
-                clockElapsed = 0
-                UpdateClock()
-            end
-        end)
-    end
-
-    UpdateCoordinates()
-    UpdateClock()
-
-    EventBus:Register("ZONE_CHANGED", UpdateCoordinates)
-    EventBus:Register("ZONE_CHANGED_NEW_AREA", UpdateCoordinates)
-    EventBus:Register("MONETUI_THEME_CHANGED", function()
-        ClearDefaultArt()
-        UpdateClock()
-    end)
+    Skin()
 end
 
 function M:SetEnabled(enabled)
     if panel then panel:SetShown(enabled and true or false) end
-    if coordText then coordText:SetShown(enabled and true or false) end
-    if clockText then clockText:SetShown(enabled and true or false) end
-    if driver then
-        if enabled then driver:Show() else driver:Hide() end
-    end
 end
 
 ns:Register("Minimap", M)

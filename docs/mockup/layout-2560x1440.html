@@ -103,10 +103,6 @@ body{
     linear-gradient(150deg,#2f4436,#22303f 60%,#1b2530); }
 .mm .nub{ position:absolute; left:50%; top:50%; width:8px; height:8px; margin:-4px 0 0 -4px;
   border-radius:50%; background:#ffe9a8; box-shadow:0 0 6px #ffd97a; }
-.mmtext{ position:absolute; height:20px; display:flex; align-items:center; justify-content:center;
-  gap:14px; font-size:12px; }
-.mmtext .clock{ color:rgb(var(--edge)); }
-.mmtext .coord{ color:rgb(var(--neutral)); }
 
 /* -------------------------------------------------------- annotation UI --- */
 .box{ position:absolute; border:1px solid rgba(var(--accent),.55); border-radius:6px;
@@ -205,13 +201,20 @@ svg.ann{ position:absolute; inset:0; width:2560px; height:1440px; pointer-events
   </div>
   <div class="badge" style="left:1124px; top:886px;">4</div>
 
+  <!-- targettarget  LEFT = target RIGHT +(6,0)  60x8 -->
+  <div class="uftext center" style="left:1566px; top:839px; width:60px;">
+    <span class="nm">Shade</span>
+  </div>
+  <div class="uf" style="left:1566px; top:856px; width:60px; height:8px;">
+    <div class="health" style="width:57%"></div>
+    <div class="power" style="width:22%"></div>
+  </div>
+  <div class="badge" style="left:1636px; top:846px;">5</div>
+
   <!-- ======================= MonetUI: minimap (256x190, bottom-right) ===== -->
   <div class="mm-panel" style="left:2267px; top:1213px; width:264px; height:198px;"></div>
   <div class="mm" style="left:2271px; top:1217px; width:256px; height:190px;">
     <div class="nub"></div>
-  </div>
-  <div class="mmtext" style="left:2271px; top:1188px; width:256px;">
-    <span class="clock">20:14</span><span class="coord">58.3, 41.7</span>
   </div>
 
   <!-- ======================= MonetUI: buffs / debuffs (top-left) ========== -->
@@ -239,46 +242,46 @@ svg.ann{ position:absolute; inset:0; width:2560px; height:1440px; pointer-events
       <rect x="27"    y="27"   width="274" height="42"  rx="6"/>
       <rect x="27"    y="71"   width="160" height="44"  rx="6"/>
       <rect x="2262"  y="1212" width="278" height="204" rx="10"/>
-      <rect x="2267"  y="1186" width="264" height="24"  rx="6"/>
       <rect x="1196"  y="894"  width="8"   height="12"  rx="2"/>
       <rect x="1396"  y="854"  width="168" height="12"  rx="2"/>
       <rect x="1036"  y="854"  width="68"  height="12"  rx="2"/>
       <rect x="1130"  y="894"  width="68"  height="12"  rx="2"/>
+      <rect x="1562"  y="854"  width="68"  height="12"  rx="2"/>
     </g>
     <g fill="none" stroke="rgb(122,224,255)" stroke-width="2" marker-end="url(#ar)">
       <path d="M360,48   L305,48"/>
       <path d="M360,92   L191,92"/>
-      <path d="M2200,1240 L2258,1240"/>
-      <path d="M2200,1198 L2263,1198"/>
-      <path d="M1250,1010 L1250,910"/>
-      <path d="M1160,1010 L1160,910"/>
-      <path d="M1070,1010 L1070,872"/>
-      <path d="M1400,1030 L1600,1030 L1600,868 L1564,868"/>
+      <path d="M2200,1270 L2262,1270"/>
+      <path d="M1250,990 L1250,910"/>
+      <path d="M1160,990 L1160,910"/>
+      <path d="M1070,990 L1070,872"/>
+      <path d="M1500,990 L1500,872"/>
+      <path d="M1596,990 L1596,872"/>
     </g>
   </svg>
 
-  <div class="box" style="left:640px; top:1010px; width:700px; height:186px;">
-    <h3>①-④ 单位框架<em>UnitFrames · 细条 160/160/60/60 × 8</em></h3>
+  <div class="box" style="left:560px; top:990px; width:860px; height:186px;">
+    <h3>①-⑤ 单位框架<em>UnitFrames · 细条 160/160/60/60/60 × 8</em></h3>
     <p><span class="n">1</span><span class="k">player</span> CENTER (0,-180) · 160×8 &nbsp;·&nbsp;
        <span class="n">2</span><span class="k">target</span> LEFT = player RIGHT +(40,40) · 160×8</p>
     <p><span class="n">3</span><span class="k">focus</span> RIGHT = player LEFT +(-100,-40) · 60×8 &nbsp;·&nbsp;
        <span class="n">4</span><span class="k">pet</span> RIGHT = player LEFT +(-6,0) · 60×8</p>
+    <p><span class="n">5</span><span class="k">targettarget</span> LEFT = target RIGHT +(6,0) · 60×8 &nbsp;·&nbsp; 居中显示名字</p>
     <p class="dim">高度 = 边框 1 + 血条 4 + 间隔 1 + 能量条 1 + 边框 1 = 8；血条贴顶、能量条贴底（同 Andromeda）。</p>
   </div>
 
   <div class="box" style="left:360px; top:33px; width:430px; height:132px;">
-    <h3>⑤⑥ 增益 / 减益<em>Auras · 左上</em></h3>
-    <p><span class="n">5</span><span class="k">Buff</span> TOPLEFT (33,-33) · 每行 8 个 · 34×34</p>
-    <p><span class="n">6</span><span class="k">Debuff</span> 位于增益下方 8px · 左对齐</p>
+    <h3>⑥⑦ 增益 / 减益<em>Auras · 左上</em></h3>
+    <p><span class="n">6</span><span class="k">Buff</span> TOPLEFT (33,-33) · 每行 8 个 · 34×34</p>
+    <p><span class="n">7</span><span class="k">Debuff</span> 位于增益下方 8px · 左对齐</p>
     <p class="dim">照搬 Andromeda 的 BuffAnchor 锚点（UI_GAP = 33）。</p>
   </div>
 
-  <div class="box" style="left:1760px; top:1120px; width:440px; height:166px;">
-    <h3>⑦ 小地图<em>Minimap · 右下 · 256 宽 × 190 高</em></h3>
+  <div class="box" style="left:1760px; top:1160px; width:440px; height:120px;">
+    <h3>⑧ 小地图<em>Minimap · 右下 · 256 宽 × 190 高</em></h3>
     <p>圆形画布 256×256 + <b>矩形遮罩</b>裁掉上下各 33px，命中区同步收缩</p>
     <p>面板 264×198 描边 · 暴雪圆形边框/指南针全部隐藏</p>
-    <p><span class="n">8</span><span class="k">坐标 + 时钟</span> 位于小地图<b>上方</b> 6px</p>
-    <p class="dim">锚点 BOTTOMRIGHT (-33, 33)，遮罩取自 Andromeda 的 rectangle-mask。</p>
+    <p class="dim">锚点 BOTTOMRIGHT (-33, 33)；遮罩取自 Andromeda 的 rectangle-mask。</p>
   </div>
 
   <div class="banner" style="left:900px; top:24px; width:1000px; height:76px;">
