@@ -19,7 +19,7 @@ local refreshStatus
 
 local MODULE_ORDER = {
     "UnitFrames", "Cooldown", "BuffFrame",
-    "Minimap", "BagFrame", "QuestTracker", "ActionBars", "Nameplates",
+    "Minimap", "BagFrame", "QuestTracker", "ActionBars", "Nameplates", "Skins",
 }
 
 local MODULE_LABEL = {
@@ -31,6 +31,7 @@ local MODULE_LABEL = {
     QuestTracker = "任务追踪 (QuestTracker)",
     ActionBars   = "动作条 (ActionBars)",
     Nameplates   = "姓名板 (Nameplates)",
+    Skins        = "界面美化 (Skins)",
 }
 
 -- -- Widget helpers -----------------------------------------------------------
@@ -633,6 +634,64 @@ function SimpleConfig:Build()
     MakeDropdown(panel, y, "显示距离", NP_DISTANCE,
         function() return NameplateSetting("viewDistance") end, NameplateSetter("viewDistance"))
     y = y - 30
+
+    -- -- Skins (Blizzard panel beautification) -------------------------------
+    local skins = ns:GetModule("Skins")
+    if skins then
+        MakeSeparator(panel, y, "界面美化")
+        y = y - 26
+
+        local FONT_ITEMS = {
+            { value = "off",     text = "关闭（原生字体）" },
+            { value = "pixel",   text = "像素字体（正文）" },
+            { value = "roadway", text = "标题字体" },
+            { value = "number",  text = "数字字体" },
+        }
+        MakeDropdown(panel, y, "统一字体（全局）", FONT_ITEMS,
+            function() return ns:DB().skins.font end,
+            function(value)
+                ns:DB().skins.font = value
+                if skins.active then
+                    skins:ApplyFont()
+                    ns:Print("切换字体：重启界面可完全恢复原生字体。")
+                end
+            end)
+        y = y - 24
+
+        local fontHint = Widget:Font(panel, 11, "pixel", "neutral", "LEFT")
+        fontHint:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, y)
+        fontHint:SetWidth(350)
+        fontHint:SetJustifyH("LEFT")
+        fontHint:SetText("统一字体影响所有暴雪窗口文字；关闭需重载界面恢复。")
+        y = y - 26
+
+        -- Group the windows by section, in registration order.
+        local groups, seen = {}, {}
+        for _, entry in ipairs(skins.registry) do
+            if not seen[entry.group] then
+                seen[entry.group] = true
+                groups[#groups + 1] = entry.group
+            end
+        end
+
+        for _, group in ipairs(groups) do
+            local caption = Widget:Font(panel, 12, "roadway", "edge", "LEFT")
+            caption:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, y)
+            caption:SetText("· " .. group)
+            y = y - 20
+
+            for _, entry in ipairs(skins.registry) do
+                if entry.group == group then
+                    MakeCheckbox(panel, entry.label, y,
+                        function() return skins:IsEnabled(entry.key) end,
+                        function(value) skins:SetPanelEnabled(entry.key, value) end)
+                    y = y - 26
+                end
+            end
+        end
+
+        y = y - 4
+    end
 
     -- -- Footer --------------------------------------------------------------
     -- The row stack keeps growing as features land, so the panel is sized to

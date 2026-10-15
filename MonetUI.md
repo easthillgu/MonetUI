@@ -1,8 +1,8 @@
 # MonetUI 开发计划
 
 > **创建日期**: 2026-10-13
-> **最后更新**: 2026-10-15（新增姓名板模块，v0.8.0；Phase 1 + Phase 2 模块实现完成，等待游戏内验证）
-> **当前阶段**: Phase 1/2 — 七个模块已实现并通过 `wuxian check`，待游戏内 `load`/`try` 验证
+> **最后更新**: 2026-10-15（新增界面美化模块 Skins，v0.9.0；暴雪窗口统一走 Monet 材质 / 色彩）
+> **当前阶段**: Phase 1/2 — 八个模块已实现并通过 `wuxian check`，待游戏内 `load`/`try` 验证
 > **目标**: 为魔兽世界无限 (WoW Forever) 打造一套莫奈风格整合 UI 插件
 
 ---
@@ -31,7 +31,7 @@ MonetUI 是一套**整合 UI 插件**，以**莫奈印象派色彩**为核心设
 | 任务 | 状态 | 说明 |
 |------|------|------|
 | 目录结构创建 | 完成 | 19 个源文件，15 个目录 |
-| Utils 层 | 完成 | Widget/Color/EventBus/Math/Secrets/Media |
+| Utils 层 | 完成 | Widget/Color/EventBus/Math/Secrets/Media/Skin |
 | 命名空间共享 | 完成 | 统一使用插件私有表 `ns`（`...` 第二个返回值） |
 | Core.lua | 完成 | SavedVariables + 模块注册/生命周期 + 主题管线 + 斜杠命令 |
 | Config 面板 | 完成 | SimpleConfig.lua，绑定 MonetUIDB，实时生效 |
@@ -43,6 +43,7 @@ MonetUI 是一套**整合 UI 插件**，以**莫奈印象派色彩**为核心设
 | QuestTracker | 完成 | 主题边框 + 标题栏拖动 + 位置保存 |
 | ActionBars | 完成 | 1–8 号自绘动作条（LibActionButton-1.0）+ 接管宠物/姿态条 + 隐藏暴雪动作条/背包条 |
 | Nameplates | 完成 | 挂在暴雪姓名板底座上的细条姓名板：血条/名字等级/百分比/施法条/借用暴雪减益/仇恨与目标描边；CVar 接管 + 点击区同步 + 完整回退 |
+| Skins | 完成 | 界面美化：给暴雪窗口（任务、世界地图、角色、收藏、成就、社交、邮件/商贩/拍卖/专业、拾取/弹窗/菜单/设置等）统一铺 Monet 底板 / 边框 / 字体；可逐窗口开关，模块关闭可完整回退 |
 | Forever 保密值适配 | 完成 | Utils/Secrets.lua，全部单位数值访问先查询 |
 | Lua 5.1 兼容性检查 | 完成 | 无 5.2+ 特性 |
 | wuxian check 语法验证 | 完成 | 0 error；有意 warning：覆写 `GetMinimapShape`、姓名板按阵营尺寸 API 未入手册（已特性探测） |
@@ -75,7 +76,8 @@ MonetUI/
 │   ├── Media.lua               # 字体/纹理注册表
 │   ├── EventBus.lua            # 事件总线（按需注册，含单位事件）
 │   ├── Color.lua               # 颜色接入层（MonetColor 封装 + 降级）
-│   └── Widget.lua              # 控件工厂 + 主题注册表
+│   ├── Widget.lua              # 控件工厂 + 主题注册表
+│   └── Skin.lua                # 暴雪窗口皮肤原语（剥皮/底板/控件/文本，可回滚）
 ├── Modules/                    # 功能模块
 │   ├── UnitFrames/             # 单位框架
 │   ├── Cooldown/               # 冷却计时
@@ -84,7 +86,16 @@ MonetUI/
 │   ├── BagFrame/               # 背包
 │   ├── QuestTracker/           # 任务追踪
 │   ├── ActionBars/             # 动作条（1–8 号自绘 + 接管宠物/姿态条）
-│   └── Nameplates/             # 姓名板（暴雪底座 + 自绘细条）
+│   ├── Nameplates/             # 姓名板（暴雪底座 + 自绘细条）
+│   └── Skins/                  # 界面美化（暴雪窗口皮肤引擎 + 分窗口皮肤）
+│       ├── Skins.lua           # 引擎：注册表 / 生命周期 / 完整回退 / 全局字体
+│       ├── Quest.lua           # 任务日志 + 任务 / 对话窗口
+│       ├── WorldMap.lua        # 世界地图 + 地图内任务面板
+│       ├── Character.lua       # 角色界面 + 观察
+│       ├── Collections.lua     # 收藏 / 成就 / 冒险指南
+│       ├── Social.lua          # 好友 / 社区 / 公会 / 日历
+│       ├── Trade.lua           # 邮件 / 商贩 / 训练师 / 拍卖 / 专业 / 银行
+│       └── System.lua          # 拾取 / 弹窗 / 游戏菜单 / 设置 / 插件列表 / 菜单 / 提示
 ├── Config/
 │   └── SimpleConfig.lua        # 轻量配置面板（无 Ace3）
 ├── Assets/
@@ -247,6 +258,7 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 | **P2** | ActionBars | 1–8 号自绘动作条（LibActionButton 驱动、安全翻页、原按键沿用）+ 接管宠物/姿态条 + 隐藏暴雪动作条与背包条 | ✅ 已实现 | EllesmereUIActionBars, Andromeda |
 | **P2** | Chat | 聊天框美化 | 待建 | EllesmereUIChat |
 | **P2** | Nameplates | 姓名板美化（暴雪底座 + 自绘细条、CVar 接管、借用暴雪减益、施法条、仇恨/目标描边） | ✅ 已实现 | EllesmereUINameplates, ForeverUI, Andromeda |
+| **P2** | Skins | 界面美化：暴雪窗口（任务/地图/角色/收藏/社交/交易/系统）统一铺 Monet 底板、边框与字体；逐窗口开关、模块可完整回退 | ✅ 已实现 | EllesmereUIBlizzardSkin, Andromeda, ForeverUI, ElvUI Skins |
 | **P3** | RaidFrames | 团队框架（队伍/团队） | 待建 | EllesmereUIRaidFrames |
 | **P3** | ResourceBars | 资源条（备用能量 `AltPower`、符文等剩余资源显示） | 待建 | EllesmereUIResourceBars |
 
@@ -566,6 +578,87 @@ Bartender4、Dominos、ElvUI、Andromeda 都是同一个套路：**不驱动暴�
 名字牌模式（只显示名字）、姓名板**堆叠/间距** CVar、目标板的职业资源、以及对姓名板的**拖动**
 （板的位置由暴雪决定并始终贴着单位头顶）。
 
+### 界面美化（Skins）
+
+#### 为什么加这一层
+
+在姓名板之前，MonetUI 只美化了"战斗 HUD"（单位框、动作条、背包、Buff、小地图、追踪），而玩家停留时间
+最长的**暴雪原生窗口**（任务、世界地图、角色、收藏、社交、邮件/商贩/拍卖、弹窗/设置）依旧是原版外观 ——
+于是整套 UI 风格是断的。这一层把那些窗口也拉进同一套 Monet 材质与配色。
+
+参考实现（Andromeda / EllesmereUIBlizzardSkin / ElvUI Skins / ForeverUI）的做法分两种：
+
+| 路线 | 代表 | 做法 |
+|------|------|------|
+| **皮肤引擎 + 逐窗口皮肤** | ElvUI（约 135 个文件）、Andromeda（三注册表 + 90+ 文件）、EllesmereUI（`WSkin.RegisterWindow` + 45 个 window pack） | 抹掉原画（`StripTextures`）→ 铺底（`CreateBackdrop`）+ 重做控件（`Handle*/Reskin*`）→ `hooksecurefunc` 追动态更新；颜色统一取一个调色中枢 |
+| **只做 HUD，不碰暴雪窗口** | ForeverUI | 刻意不动世界地图 / 角色界面 / 任务日志，只把背包/聊天/小地图/冷却换皮 |
+
+MonetUI 取两者之间：**做引擎 + 分窗口皮肤（ElvUI 路线）**，但**不复制任何一份 Andromeda/ElvUI 代码**，
+且因为已经有 `Utils/Color.lua` + `Utils/Widget.lua` + `Utils/Media.lua` 这套统一底色，皮肤代码量远小于
+ElvUI（它们要自己维持一套主题，我们只是接进去）。
+
+#### 分层
+
+```
+Modules/Skins/Skins.lua      引擎：注册表 + 生命周期 + 完整回退 + 全局字体
+Modules/Skins/*.lua          分窗口皮肤（Quest / WorldMap / Character / Collections / Social / Trade / System）
+Utils/Skin.lua               皮肤原语（剥皮、底板、按钮/页签/滚动条/复选框/下拉/编辑框/图标、字体/着色）
+```
+
+- 每个窗口在文件加载时 `Skins:Panel(key, { group, label, apply, default })` 登记；`apply` 必须**幂等**。
+- 引擎在 `PLAYER_LOGIN` 应用一次，`ADDON_LOADED`（暴雪窗口按需加载）与 `PLAYER_ENTERING_WORLD`
+  （编辑模式/读条可能重建）各再应用一次；已在用的窗口因幂等而几乎零成本。
+- `MONETUI_THEME_CHANGED` 时皮肤自己注册的"补色"闭包（`Skin:OnTheme`）与普通 `Widget:Theme` 一起刷新。
+
+#### 与既有主题管线的关系（这就是"材质 / 色彩统一"）
+
+皮肤**不新造一套配色**，而是复用现有管线：
+
+1. 底板 / 边框一律 `Skin:Panel(frame)` → `Widget:Theme`，于是边框色相自动跟随
+   `Color:GetBorderKey()`（配置面板「边框颜色」那一个下拉即可给**所有**窗口换框色）；
+2. 文本一律 `Skin:Font` → `Media:Font` + `Widget:ColorText`，与其它模块同一字体、同一色槽；
+3. 我们额外画的条/拇指/下划线（`Skin:OnTheme` 注册）同样读 `Color:GetBorder()`；
+4. **语义色不动**：品质色、职业色、血/资源/危险色保持原样，只"Monet 化"底板/边框/页签/字体这些
+   *chrome* —— 与 4.3 的"health / resource / danger 不做 Monet 化"一致。
+
+#### 安全与可逆（对齐 ActionBars / Nameplates 的既有原则）
+
+- **只改贴图，不动脚本/父级**：整层**从不**对暴雪框体 `SetScript` / `SetParent` / `SetShown` / `Hide`。
+  剥皮只是把原画 `SetAlpha(0)`、底板是挂一个**属于我们自己的**子框体；暴雪按钮的悬停反馈用
+  `HookScript`（保留原有脚本）实现。
+- **可回滚**：每次对暴雪对象的改动都记一条还原闭包（`Skin:Record`），我们自建的框体只做显隐
+  （`Skin:Track`）。关掉模块（`/mui Skins off` 或配置勾选框）时 `Skin:Rollback` + `HideAdded`
+  **即时还原、无需重载**，再打开则重新应用。
+- **不误伤图标**：剥皮只作用于**框体自身的区域**（`frame:GetRegions()`），不递归进子按钮；批量美化子按钮
+  时用 `SkinButtonsIn`，**跳过带 `icon` 字段的物品按钮**（任务奖励、坐骑/宠物/幻化条目、动作技能行等）。
+- **受限值无关**：这些窗口都在非战斗场景操作，皮肤本身不读任何单位数值，因此不新增保密值风险；
+  仍然不注册任何受限事件。
+
+#### 逐窗口开关
+
+每个窗口是一个开关，存于 `MonetUIDB.skins.panels[key]`（缺省用各自登记时的 `default`）。窗口分组
+（任务 / 地图 / 角色 / 收藏 / 社交 / 交易 / 系统）与开关一起呈现在配置面板「界面美化」一栏。**开启**
+即时生效；**关闭**某一窗口后其暴雪原画要下次 `/reload` 才完全回来（与 ElvUI/Andromeda 的皮肤一致），
+面板里有提示。
+
+默认开启：任务日志、任务/对话窗口、世界地图、角色界面、观察、收藏、成就、冒险指南、好友/查询、社区、
+公会、日历、邮箱、商贩、训练师、拍卖行、专业/制造、银行、拾取/掷骰、确认弹窗、游戏菜单、设置面板、
+插件列表。默认关闭（较激进）：**下拉菜单**、**统一字体（全局）**、**鼠标提示边框**。
+
+#### 全局字体（可选）
+
+`MonetUIDB.skins.font`（`off` / `pixel` / `roadway` / `number`）：开启后替换暴雪**共享字体对象**
+（`GameFontNormal*` / `GameFontHighlight*` / `NumberFontNormal*` 等）的字体，让原生静态文本也统一。
+默认 `off`：它一次影响所有窗口文字，交由玩家显式选择；**关闭需重载**（与逐窗口开关同理）。
+
+#### 已知限制（本版不做 / 需游戏内调）
+
+- 各暴雪窗口的**内部条目**（任务正文、奖励物品、列表行）刻意不动，所以它们仍是原版字体与间距；
+  想让正文也统一，开「统一字体（全局）」。
+- 暴雪窗口的**框架名 / 子控件名在不同版本会变**：皮肤全部经 `_G[name]` 取用并对缺失静默跳过，
+  所以某版本缺了一个名字只会少美化那一个控件，不会报错；精确到控件的名字需要**游戏内逐个核对**。
+- **下拉菜单**与**编辑模式（Edit Mode）**自带的弹层样式未覆盖。
+
 ### 字体资源
 
 | 字体 | 文件 | 用途 | 来源 |
@@ -591,6 +684,7 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | 4 个字体文件（`Assets/Fonts/`） | 第三方字体；按**用户确认**不涉及版权问题，继续保留 |
 | `Libs/LibActionButton-1.0/` | **BSD-3-Clause** 第三方库（作者 nevcairiel），取自 Andromeda 随包的 forever 适配版。MonetUI 只做了 3 处改动，全部标有 `MonetUI change:`：库名改为 `LibActionButton-1.0-MonetUI`、静态引用的 LibCustomGlow 改为标准 LibStub 查找、缺 CallbackHandler 时用内联空实现。BSD-3 与 GPL-3 不冲突（BSD 代码既可作为 GPL 项目的一部分，也可被独立项目使用），所以它不会把 MonetUI 拖进 GPL。许可原文见 `Libs/LibActionButton-1.0/LICENSE.txt` |
 | 布局坐标与尺寸数值 | 参考 **Andromeda**（GPL-3.0）的 `modules/unitframe/unitframe.lua`、`gui/configs.lua` 与 `core/uiscale.lua`。布局思路与数字本身不受版权保护，且已按 MonetUI 的 1:1 坐标系重新取值（血条高度即取其实际厚度的约 50%） |
+| 界面美化（Skins）思路 | 参考 **EllesmereUIBlizzardSkin**（window engine + 逐窗口 pack）、**Andromeda**（theme 注册表 + 逐面板 reskin）、**ElvUI Skins**（sink 注册 + `StripTextures`/backdrop）与 **ForeverUI**（刻意只做 HUD）。只借鉴**分层与接口用法**，Lua 全部独立实现，未拷贝任一份代码 |
 | 动作条架构 | 参考 Andromeda（GPL-3.0）`modules/actionbar/` 的**结构与取值**：header + `_onstate-page` + `RegisterStateDriver` 的分工、每页 12 槽的编号方式、`fullPage` 条件串与各条固定页号、"重定位暴雪框体"而非销毁。这些是接口用法与配置值，不含 Andromeda 的代码 |
 | 小地图矩形遮罩 | 起初拷贝了 Andromeda 的 `rectangle-mask.blp`；现已**改为自绘**（`tools/make-minimap-mask.ps1` 生成并自校验） |
 
@@ -630,6 +724,7 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 - [x] QuestTracker（P2）
 - [x] ActionBars（P2）— 1–8 号自绘动作条（LibActionButton-1.0）+ 接管宠物/姿态条 + 隐藏暴雪动作条与背包条
 - [x] Nameplates（P2）— 暴雪底座 + 自绘细条、CVar 接管、借用暴雪减益、施法条、仇恨/目标描边、点击区同步
+- [x] Skins（P2）— 界面美化：皮肤引擎（Utils/Skin.lua + Modules/Skins/）+ 分窗口皮肤（任务/地图/角色/收藏/社交/交易/系统）
 - [ ] 游戏内视觉验收（需游戏运行）
 
 ### Phase 3: 完善与发布
@@ -656,6 +751,7 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 - [x] Forever 保密值安全（所有单位数值读取先查询 C_Secrets）
 - [x] 不注册受限事件（无 CLEU）
 - [x] 姓名板可完整回退（关闭模块 / 过滤单位：暴雪姓名板、CVar、点击区尺寸全部还原）
+- [x] 界面美化（Skins）可逐窗口开关；关闭模块即时完整回退（暴雪原画 / 字体 / 底板全部还原，无需重载）
 
 ---
 
@@ -727,6 +823,13 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | 2026-10-15 | 战斗中不改点击区尺寸，记 `sizePending` 到 `PLAYER_REGEN_ENABLED` 补做 | `InCombatLockdown` 下改姓名板尺寸是受保护操作，会失败甚至报错 |
 | 2026-10-15 | 施法条填充用**只算 `GetTime()*1000`** 的 OnUpdate 交给 `SetValue`，倒计时文字仅在结束时间可读时生成 | 填充的裁剪由客户端完成（保密值也可），文字要真算术，读不到就留空（见 4.6） |
 | 2026-10-15 | 姓名板整体走 `Widget:Font/Bar/CreateFrame` + `Widget:Theme`，边框在 `MONETUI_THEME_CHANGED` 后按仇恨/目标重刷 | 与其它模块同一套主题管线；主题监听器先跑，模块后跑，同 tick 内边框覆盖胜出 |
+| 2026-10-15 | 新增界面美化层 `Skins`：走"皮肤引擎 + 逐窗口皮肤"路线（ElvUI/Andromeda/Ellesmere 同路），而不是 ForeverUI 的"只做 HUD" | 玩家点名要统一任务/世界地图/角色等原生窗口；已有 Color/Widget/Media 底色，接入成本远低于 ElvUI |
+| 2026-10-15 | 皮肤**只剥贴图、加自建子框体**，绝不对暴雪框体 `SetScript`/`SetParent`/`Hide` | 避免污染受保护 UI、保留编辑模式布局与暴雪脚本；与动作条"藏而不销毁"、姓名板"藏底座"同一克制原则 |
+| 2026-10-15 | 每次改动暴雪对象都记**还原闭包**，自建框体只做显隐 | 模块关闭要能**即时完整回退、无需重载**（对齐姓名板的回退标准） |
+| 2026-10-15 | 批量美化按钮时用 `icon` 字段**跳过物品按钮** | 剥皮会抹掉奖励/坐骑/幻化/技能图标；只挑 chrome 按钮重做 |
+| 2026-10-15 | 皮肤复用 `Widget:Theme` + `Color:GetBorderKey()` + `Media:Font`，不新造主题 | 一个「边框颜色」下拉即可给所有窗口换框色 —— 这就是"材质/色彩统一" |
+| 2026-10-15 | 全局字体替换（暴雪共享字体对象）默认**关闭**，做成显式选项 | 一次影响所有窗口文字，较激进；交给玩家选，且关闭需重载 |
+| 2026-10-15 | 下拉菜单/提示边框默认关闭，菜单只染 backdrop 不剥皮 | 菜单背景靠 backdrop 而非区域贴图，剥皮会变透明；菜单框架是版本相关的非文档 API |
 
 ---
 

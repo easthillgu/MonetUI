@@ -12,7 +12,7 @@ local LibStub = _G.LibStub
 local LMC = LibStub and LibStub("LibMonetColor-1.0", true)
 
 ns.name = ADDON_NAME
-ns.version = "0.8.0"
+ns.version = "0.9.0"
 
 -- -- Defaults ----------------------------------------------------------------
 
@@ -27,6 +27,7 @@ local DEFAULTS = {
         QuestTracker = true,
         ActionBars   = true,
         Nameplates   = true,
+        Skins        = true,
     },
     theme = {
         useMonetColor  = true,
@@ -158,6 +159,16 @@ local DEFAULTS = {
         smooth          = true,
         forcePlateSize  = true,
         auraGap         = 4,
+    },
+    -- Blizzard panel beautification (see Modules/Skins/Skins.lua): the vanilla
+    -- windows (quests, world map, character sheet, collections, social, mail /
+    -- merchants, system dialogs) are re-plated in the Monet palette so the whole
+    -- UI reads as one style.  Each window is a switch under `panels` (whose
+    -- shipped defaults live with each skin); `font` is an optional global font
+    -- override: "off" | "pixel" | "roadway" | "number".
+    skins = {
+        font   = "off",
+        panels = {},
     },
 }
 ns.DEFAULTS = DEFAULTS
