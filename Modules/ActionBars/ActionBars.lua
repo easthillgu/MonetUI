@@ -147,15 +147,15 @@ local BAR_DEFS = {
     { key = "Bar2", index = 2, page = 6,  bind = "MULTIACTIONBAR1BUTTON",
       blizzard = "MultiBarBottomLeft",
       point = "BOTTOM", relativeTo = "Bar1",     relativePoint = "TOP",    x = 0,   y = 2 },
-    { key = "Bar3", index = 3, page = 5,  bind = "MULTIACTIONBAR2BUTTON", perRow = 6,
+    { key = "Bar3", index = 3, page = 5,  bind = "MULTIACTIONBAR2BUTTON",
       blizzard = "MultiBarBottomRight",
-      point = "RIGHT",  relativeTo = "Bar1",     relativePoint = "LEFT",   x = -14, y = 0 },
-    { key = "Bar4", index = 4, page = 3,  bind = "MULTIACTIONBAR3BUTTON", perRow = 6,
+      point = "BOTTOM", relativeTo = "Bar2",     relativePoint = "TOP",    x = 0,   y = 2 },
+    { key = "Bar4", index = 4, page = 3,  bind = "MULTIACTIONBAR3BUTTON",
       blizzard = "MultiBarRight",
-      point = "LEFT",   relativeTo = "Bar1",     relativePoint = "RIGHT",  x = 14,  y = 0 },
+      point = "BOTTOM", relativeTo = "Bar3",     relativePoint = "TOP",    x = 0,   y = 2 },
     { key = "Bar5", index = 5, page = 4,  bind = "MULTIACTIONBAR4BUTTON",
       blizzard = "MultiBarLeft",
-      point = "BOTTOM", relativeTo = "Bar2",     relativePoint = "TOP",    x = 0,   y = 2 },
+      point = "BOTTOM", relativeTo = "Bar4",     relativePoint = "TOP",    x = 0,   y = 2 },
     { key = "Bar6", index = 6, page = 13, bind = "MULTIACTIONBAR5BUTTON",
       blizzard = "MultiBar5",
       point = "BOTTOM", relativeTo = "Bar5",     relativePoint = "TOP",    x = 0,   y = 2 },
@@ -172,13 +172,16 @@ local BAR_DEFS = {
 -- 搬的是**最外层**那个框体（`containers` 里第一个存在的）：暴雪显隐宠物的做法
 -- 可能是 Hide 外层容器、也可能是 Hide 里面的条，搬外层两种情况都还归它管。
 -- 只搬内层的话，暴雪一 Hide 外层，我们的条就留在屏幕上了。
+--
+-- 位置：都在 3 号条上方那一行，宠物条右对齐、姿态条左对齐（两条通常不会同时
+-- 出现；死骑的食尸鬼 + 灵气是例外，那时它们会重叠，改 positions 错开即可）。
 local ADOPTED_DEFS = {
     { key = "BarPet",    containers = { "PetActionBarFrame", "PetActionBar" },
       pattern = "PetActionButton%d", count = 10, label = "宠物",
-      point = "BOTTOM", relativeTo = "Bar3", relativePoint = "TOP", x = 0, y = 2 },
+      point = "BOTTOMRIGHT", relativeTo = "Bar3", relativePoint = "TOPRIGHT", x = 0, y = 2 },
     { key = "BarStance", containers = { "StanceBarFrame", "StanceBar" },
       pattern = "StanceButton%d", count = 10, label = "姿态",
-      point = "BOTTOM", relativeTo = "Bar4", relativePoint = "TOP", x = 0, y = 2 },
+      point = "BOTTOMLEFT", relativeTo = "Bar3", relativePoint = "TOPLEFT", x = 0, y = 2 },
 }
 
 -- 暴雪自己的动作条，顺序和它们的按钮绑定一致：1 号条的按键是 ACTIONBUTTON<i>，

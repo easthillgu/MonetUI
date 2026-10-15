@@ -81,11 +81,15 @@ local DEFAULTS = {
     -- the Blizzard bars are kept, and only "hideBlizzard" can still hide them.
     -- barCount / buttonSize / spacing describe the look; positions holds an
     -- optional per-bar override of the first-run anchors in BAR_DEFS.
+    --
+    -- First-run layout (see BAR_DEFS): 1/2/3 stacked bottom-centre, the pet bar
+    -- right-aligned and the stance bar left-aligned on the row above 3, and
+    -- 4..8 stacked on upward but hidden until barCount is raised.
     actionBars = {
         ownBars      = true,
         hideBlizzard = true,
         hideBagBar   = true,
-        barCount     = 5,
+        barCount     = 3,
         buttonSize   = 28,
         spacing      = 2,
         showHotkey   = true,
