@@ -19,7 +19,7 @@ local refreshStatus
 
 local MODULE_ORDER = {
     "UnitFrames", "Cooldown", "BuffFrame",
-    "Minimap", "BagFrame", "QuestTracker", "ActionBars",
+    "Minimap", "BagFrame", "QuestTracker", "ActionBars", "Nameplates",
 }
 
 local MODULE_LABEL = {
@@ -30,6 +30,7 @@ local MODULE_LABEL = {
     BagFrame     = "背包整合 (BagFrame)",
     QuestTracker = "任务追踪 (QuestTracker)",
     ActionBars   = "动作条 (ActionBars)",
+    Nameplates   = "姓名板 (Nameplates)",
 }
 
 -- -- Widget helpers -----------------------------------------------------------
@@ -201,6 +202,35 @@ end
 local function RefreshActionBars()
     local actionBars = ns:GetModule("ActionBars")
     if actionBars and actionBars.Apply then actionBars:Apply() end
+end
+
+--- Nameplate settings live in MonetUIDB.nameplates; Apply re-pushes the CVars,
+-- the hitbox size and repaints whatever is on screen.
+local function RefreshNameplates()
+    local nameplates = ns:GetModule("Nameplates")
+    if nameplates and nameplates.Apply then nameplates:Apply() end
+end
+
+--- Read a nameplate setting through the module (so it falls back to Core's
+-- shipped defaults), then write it back and repaint.
+local function NameplateSetting(key)
+    local nameplates = ns:GetModule("Nameplates")
+    if nameplates and nameplates.Setting then return nameplates.Setting(key) end
+    return (ns.DEFAULTS.nameplates or {})[key]
+end
+
+local function NameplateSetter(key)
+    return function(value)
+        local db = ns:DB()
+        db.nameplates = db.nameplates or {}
+        db.nameplates[key] = value
+        RefreshNameplates()
+    end
+end
+
+--- Build a getter/setter pair for a checkbox row (checked when not false).
+local function NameplateCheckbox(key)
+    return function() return NameplateSetting(key) ~= false end, NameplateSetter(key)
 end
 
 --- One setting, read from a group of units and written to all of them.  The
@@ -514,6 +544,94 @@ function SimpleConfig:Build()
             ns:DB().actionBars.showMacro = value
             RefreshActionBars()
         end)
+    y = y - 30
+
+    -- -- Nameplate options ----------------------------------------------------
+    MakeSeparator(panel, y, "姓名板")
+    y = y - 28
+
+    -- Which units get a plate at all (CVars; see Modules/Nameplates).
+    MakeCheckbox(panel, "显示敌方姓名板", y, NameplateCheckbox("showEnemy"))
+    y = y - 28
+    MakeCheckbox(panel, "显示友方玩家姓名板", y, NameplateCheckbox("showFriendly"))
+    y = y - 28
+    MakeCheckbox(panel, "显示友方 NPC 姓名板", y, NameplateCheckbox("showNPC"))
+    y = y - 28
+    MakeCheckbox(panel, "显示低等级（minus）敌人", y, NameplateCheckbox("showMinor"))
+    y = y - 28
+    MakeCheckbox(panel, "显示图腾", y, NameplateCheckbox("showTotems"))
+    y = y - 28
+    MakeCheckbox(panel, "显示自己的姓名板", y, NameplateCheckbox("showSelf"))
+    y = y - 28
+    MakeCheckbox(panel, "过滤小动物", y, NameplateCheckbox("hideCritters"))
+    y = y - 28
+    MakeCheckbox(panel, "过滤死亡单位", y, NameplateCheckbox("hideDead"))
+    y = y - 30
+
+    -- What the plate draws.
+    MakeCheckbox(panel, "显示名称", y, NameplateCheckbox("showName"))
+    y = y - 28
+    MakeCheckbox(panel, "显示等级 / 精英标记", y, NameplateCheckbox("showLevel"))
+    y = y - 28
+    MakeCheckbox(panel, "显示血量百分比", y, NameplateCheckbox("showPercent"))
+    y = y - 28
+    MakeCheckbox(panel, "显示施法条", y, NameplateCheckbox("showCast"))
+    y = y - 28
+    MakeCheckbox(panel, "显示减益光环（借用暴雪）", y, NameplateCheckbox("showDebuffs"))
+    y = y - 28
+    MakeCheckbox(panel, "职业 / 阵营着色", y, NameplateCheckbox("classColor"))
+    y = y - 28
+    MakeCheckbox(panel, "仇恨描边", y, NameplateCheckbox("showThreat"))
+    y = y - 28
+    MakeCheckbox(panel, "当前目标描边高亮", y, NameplateCheckbox("highlightTarget"))
+    y = y - 28
+    MakeCheckbox(panel, "数值平滑过渡", y, NameplateCheckbox("smooth"))
+    y = y - 28
+    MakeCheckbox(panel, "同步暴雪点击区域", y, NameplateCheckbox("forcePlateSize"))
+    y = y - 30
+
+    local NP_WIDTH = {}
+    for _, w in ipairs({ 90, 100, 110, 120, 130, 140, 160 }) do
+        NP_WIDTH[#NP_WIDTH + 1] = { value = w, text = w .. " px" }
+    end
+    local NP_HEIGHT = {}
+    for _, h in ipairs({ 8, 10, 12, 14, 16 }) do
+        NP_HEIGHT[#NP_HEIGHT + 1] = { value = h, text = h .. " px" }
+    end
+    local NP_FONT = {}
+    for _, s in ipairs({ 9, 10, 11, 12, 13 }) do
+        NP_FONT[#NP_FONT + 1] = { value = s, text = s .. " px" }
+    end
+    local NP_CAST = {}
+    for _, h in ipairs({ 11, 12, 13, 14, 16 }) do
+        NP_CAST[#NP_CAST + 1] = { value = h, text = h .. " px" }
+    end
+    local NP_LENGTH = {}
+    for _, n in ipairs({ 8, 12, 16, 20, 24 }) do
+        NP_LENGTH[#NP_LENGTH + 1] = { value = n, text = n .. " 字" }
+    end
+    local NP_DISTANCE = {}
+    for _, d in ipairs({ 20, 30, 40, 50, 60, 80, 100 }) do
+        NP_DISTANCE[#NP_DISTANCE + 1] = { value = d, text = d .. " 码" }
+    end
+
+    MakeDropdown(panel, y, "姓名板宽度", NP_WIDTH,
+        function() return NameplateSetting("width") end, NameplateSetter("width"))
+    y = y - 28
+    MakeDropdown(panel, y, "姓名板高度", NP_HEIGHT,
+        function() return NameplateSetting("height") end, NameplateSetter("height"))
+    y = y - 28
+    MakeDropdown(panel, y, "字号", NP_FONT,
+        function() return NameplateSetting("nameSize") end, NameplateSetter("nameSize"))
+    y = y - 28
+    MakeDropdown(panel, y, "施法条高度", NP_CAST,
+        function() return NameplateSetting("castHeight") end, NameplateSetter("castHeight"))
+    y = y - 28
+    MakeDropdown(panel, y, "名称截断长度", NP_LENGTH,
+        function() return NameplateSetting("nameLength") end, NameplateSetter("nameLength"))
+    y = y - 28
+    MakeDropdown(panel, y, "显示距离", NP_DISTANCE,
+        function() return NameplateSetting("viewDistance") end, NameplateSetter("viewDistance"))
     y = y - 30
 
     -- -- Footer --------------------------------------------------------------

@@ -12,7 +12,7 @@ local LibStub = _G.LibStub
 local LMC = LibStub and LibStub("LibMonetColor-1.0", true)
 
 ns.name = ADDON_NAME
-ns.version = "0.7.0"
+ns.version = "0.8.0"
 
 -- -- Defaults ----------------------------------------------------------------
 
@@ -26,6 +26,7 @@ local DEFAULTS = {
         BagFrame     = true,
         QuestTracker = true,
         ActionBars   = true,
+        Nameplates   = true,
     },
     theme = {
         useMonetColor  = true,
@@ -113,6 +114,50 @@ local DEFAULTS = {
         showCount    = true,
         showMacro    = true,
         positions    = {},
+    },
+    -- Nameplates (姓名板) sit on top of Blizzard's own plate bases (see
+    -- Modules/Nameplates/Nameplates.lua): the base owns targeting/clicks, the
+    -- module draws a Monet slim bar on it and hides Blizzard's UnitFrame child.
+    --
+    -- Which units the *game* gives a plate to is a CVar, so the show* switches
+    -- below are pushed into nameplateShowFriends/Enemies/... on Apply, and put
+    -- back when the module is turned off.  hideCritters/hideDead are an extra
+    -- addon-side filter on top of that.
+    --
+    -- width/height are the health box; nameSize is the name/level row above it
+    -- and castHeight the cast bar below.  forcePlateSize matches Blizzard's
+    -- clickable hitbox to the drawn box (much smaller than its default), so a
+    -- click lands on the plate you actually see.
+    nameplates = {
+        showFriendly = false,   -- friendly players (Blizzard default: off)
+        showEnemy    = true,    -- hostile players and npcs
+        showNPC      = false,   -- friendly npcs (guard / quest givers)
+        showMinor    = true,    -- "minus" mobs (the client's enemy-minus CVar)
+        showTotems   = true,
+        showSelf     = false,
+        hideCritters = true,
+        hideDead     = false,
+        viewDistance = 60,      -- nameplateMaxDistance
+
+        width        = 120,
+        height       = 12,
+        nameSize     = 11,
+        showName     = true,
+        showLevel    = true,
+        showPercent  = true,
+        truncate     = true,
+        nameLength   = 16,
+
+        showCast     = true,
+        castHeight   = 13,
+
+        showThreat      = true,
+        highlightTarget = true,
+        showDebuffs     = true,
+        classColor      = true,
+        smooth          = true,
+        forcePlateSize  = true,
+        auraGap         = 4,
     },
 }
 ns.DEFAULTS = DEFAULTS
