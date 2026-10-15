@@ -16,7 +16,7 @@ MonetUI 是一套**整合 UI 插件**，以**莫奈印象派色彩**为核心设
 - 精简依赖、低复杂度的代码架构
 
 **设计原则**：
-1. **依赖精简** — 仅依赖 LibStub（必需）+ LibMonetColor（可选）+ CallbackHandler（可选）
+1. **依赖精简** — 仅依赖 LibStub（必需）+ LibMonetColor（可选）+ LibActionButton（随包，动作条用）
 2. **模块松耦合** — 模块间通过 EventBus 通信，不直接依赖
 3. **私有 API** — 公共工具封装在 Utils 中，避免重复代码
 4. **优雅降级** — MonetColor 缺失时使用内置默认配色
@@ -80,7 +80,7 @@ MonetUI/
 │   ├── Minimap/                # 小地图
 │   ├── BagFrame/               # 背包
 │   ├── QuestTracker/           # 任务追踪
-│   └── ActionBars/             # 动作条（暂只隐藏暴雪默认动作条/背包条）
+│   └── ActionBars/             # 动作条（1–8 号自绘 + 接管宠物/姿态条）
 ├── Config/
 │   └── SimpleConfig.lua        # 轻量配置面板（无 Ace3）
 ├── Assets/
@@ -95,7 +95,9 @@ MonetUI/
 │   └── make-minimap-mask.ps1   # 生成小地图矩形遮罩（自绘，不含第三方素材）
 └── Libs/
     ├── LibStub/                # LibStub 库
-    └── LibMonetColor-1.0/      # 色彩引擎库
+    ├── LibMonetColor-1.0/      # 色彩引擎库
+    ├── LibActionButton-1.0/    # 动作按钮库（BSD-3，见 Libs/NOTICE.md）
+    └── NOTICE.md               # 随包库的来源与许可说明
 ```
 
 ---
@@ -106,10 +108,13 @@ MonetUI/
 
 ```
 必需: LibStub
-可选: CallbackHandler-1.0 (有 fallback)
 可选: LibMonetColor-1.0 (有 fallback)
-不引入: Ace3, Masque, SharedMedia, oUF, cargBags
+随包: LibActionButton-1.0 (BSD-3-Clause；仅动作条模块使用，缺失时退回暴雪默认动作条)
+不引入: Ace3, CallbackHandler, Masque, SharedMedia, oUF, cargBags
 ```
+
+> `CallbackHandler-1.0` 没有被随包：LibActionButton 内部对它是**可选**依赖，缺失时退化成
+> 空实现（见 `Libs/NOTICE.md`），因此 MonetUI 不需要额外带一个库来满足它。
 
 ### 4.2 模块间通信
 
@@ -200,7 +205,7 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 | **P1** | Minimap | 矩形小地图（256×190）、去圆形边框/指南针、主题面板 | ✅ 已实现 | EllesmereUIMinimap, Andromeda |
 | **P1** | BagFrame | 背包排列整合 + 主题边框 + 标题字体 | ✅ 已实现 | EllesmereUIBags |
 | **P2** | QuestTracker | 主题边框 + 标题栏拖动 + 位置保存 | ✅ 已实现 | EllesmereUIQuestTracker |
-| **P2** | ActionBars | 隐藏暴雪默认动作条与背包条（自绘动作条待建） | 🚧 占位 | EllesmereUIActionBars, Andromeda |
+| **P2** | ActionBars | 1–8 号自绘动作条（LibActionButton 驱动、安全翻页、原按键沿用）+ 接管宠物/姿态条 + 隐藏暴雪动作条与背包条 | ✅ 已实现 | EllesmereUIActionBars, Andromeda |
 | **P2** | Chat | 聊天框美化 | 待建 | EllesmereUIChat |
 | **P2** | Nameplates | 姓名板美化 | 待建 | EllesmereUINameplates |
 | **P3** | RaidFrames | 团队框架（队伍/团队） | 待建 | EllesmereUIRaidFrames |
@@ -300,6 +305,78 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 
 预览图：`docs/mockup/layout-2560x1440.png`（源文件 `docs/mockup/layout-2560x1440.html`）。
 
+### 动作条（ActionBars）
+
+#### 主流做法：藏掉暴雪的条，自己在安全模板上画
+
+Bartender4、Dominos、ElvUI、Andromeda 都是同一个套路：**不驱动暴雪自带的按钮**，而是
+把默认动作条移出屏幕，自己在客户端的**安全模板**上新建按钮。原因很实际：
+
+- 暴雪的按钮绑死在编辑模式（Edit Mode）、固定几何和它自己的翻页状态上，外面 `SetPoint` /
+  `SetSize` 之后随时会被暴雪的排版改回去；
+- `SecureActionButtonTemplate` 的按钮由客户端自己施法，战斗中不失效，也不会因为插件代码
+  碰了它而"污染"（taint）暴雪 UI；
+- 翻页（载具 / 覆盖 / 附身 / 变形 / 额外动作条）在安全环境里只换几个属性，Lua 完全不参与。
+
+只有 Masque 这类纯美化插件会反其道而行：不建按钮，只给暴雪按钮换贴图。MonetUI 选前者。
+
+#### 实现：LibActionButton-1.0
+
+按钮来自 **LibActionButton-1.0**（`Libs/LibActionButton-1.0/`，BSD-3-Clause，见
+`Libs/NOTICE.md`），与 Bartender4 / ElvUI / Andromeda 用的是同一个库。MonetUI 只写
+"怎么用"和"长什么样"：
+
+| 关注点 | 做法 |
+|--------|------|
+| 头框体 | 每条条一个 `SecureHandlerStateTemplate` 框体，`_onstate-page` 片段把新页号 `control:ChildUpdate` 给每个按钮 |
+| 翻页 | `RegisterStateDriver(frame, "page", …)`；1 号条挂完整条件串（`[vehicleui]16;[overridebar]18;[shapeshift]17;[bonusbar:n]…`），2–8 号条挂**常量页号**（6/5/3/4/13/14/15） |
+| 状态表 | 每个按钮 `SetState(0..18, "action", slot)`：状态 0 是"翻页驱动缺失"时的兜底（1 号条停在第一页），1–18 是驱动换页时要查的表 |
+| 显隐 | 1 号条 `[petbattle] hide; show`（同暴雪 MainMenuBar）；2–8 号条在载具/覆盖/附身/变形/宠物对战时让位 |
+| 按键 | 玩家的旧按键原样沿用：`ClearOverrideBindings` + `SetOverrideBindingClick(frame, false, key, 按钮名)`，键名从暴雪绑定名（`ACTIONBUTTON<i>`、`MULTIACTIONBAR1BUTTON<i>`…）反查；战斗中只打标记，`PLAYER_REGEN_ENABLED` 后再补 |
+| 点击时机 | 读 `ActionButtonUseKeyDown`（`C_CVar.GetCVarBool`）传给库，决定按下即施法还是抬起施法；`CVAR_UPDATE` 时刷新 |
+| 外观 | 图标内缩 1px + `SetTexCoord(0.08, 0.92, …)`，露出的那一圈底色就是描边；暴雪的空槽方框/装备绿光/闪光/新技能提示全部关掉；冷却、射程着色、自动施法光圈等仍由库与客户端驱动 |
+| 描边语义 | 库用 `Border` 的显隐表达"这件装备在身"，`hooksecurefunc(border, "Show"/"Hide")` 把描边换成主题高亮色（不额外轮询） |
+| 字体 | `UpdateConfig` 传入像素字体与显式字号（快捷键 10 / 数量 11 / 宏名 10），不依赖库的全局字体；快捷键用 `SetText` 钩子缩写成 `s1` / `MU`（用 `SetFormattedText` 回写，不会自我递归） |
+| 冷却数字 | `Widget:StyleCooldownText` 套用 `cooldown` 字体 |
+| 下车按钮 | 自建一个（暴雪的下车按钮长在已被藏起来的主菜单条上），可见性交给 `[canexitvehicle]` / `[mounted]` 状态驱动，点击时飞行中请求提前落地、否则下车 |
+
+库自己处理冷却、堆叠数量、可用性着色、射程、拖放与 `UPDATE_BINDINGS`，所以模块**没有轮询**，
+只在主题或设置变化时刷一遍 `UpdateConfig`。
+
+#### 宠物条 / 姿态条：接管，但不重画
+
+这两条条不做自绘（重画要重新实现暴雪的一整套图标/自动施法/形态逻辑）。做法是：把暴雪的
+`PetActionBar` / `StanceBar` 从被藏起来的父框体里**搬出来**、按 `buttonSize` **等比缩放**、放到
+存档里的位置，再把图标裁切与字体调成 MonetUI 的样子。图标更新、自动施法光圈、当前形态环、
+冷却全部还是暴雪自己的代码在管，因此永远不会失同步。
+
+> 代价：暴雪在宠物变化、编辑模式换布局时会重排这两条条，MonetUI 只能在**战斗外**把它们放
+> 回去（`PET_BAR_UPDATE` / `UNIT_PET` / `UPDATE_SHAPESHIFT_FORMS` 等事件 + `PLAYER_REGEN_ENABLED`
+> 补做）。战斗中如果正好发生重排，位置会在战斗结束后恢复。
+
+#### 暴雪框体：藏，不销毁
+
+被收起来的是 `MainMenuBar`、`MultiBar*`、`OverrideActionBar`、`PossessActionBar` 以及背包条
+（`BagsBar` / `MainMenuBarBackpackButton`）：`SetParent(隐藏框体)` + 保留事件。按钮本身仍在，
+所以：
+
+- 玩家的旧按键、宏、`/cast` 都不受影响；
+- 自绘动作条万一建不出来（库缺失 / 安全模板缺失），模块会**放弃接管并打印提示**，暴雪的
+  动作条原样回到屏幕上，而不是让玩家失去全部技能。
+
+#### 配置项（`MonetUIDB.actionBars`）
+
+| 键 | 默认 | 说明 |
+|----|------|------|
+| `ownBars` | `true` | 自绘 1–8 号动作条并接管暴雪动作条；关掉就完全回到暴雪 |
+| `hideBlizzard` | `true` | 隐藏暴雪默认动作条（`ownBars` 关掉时仍然生效） |
+| `hideBagBar` | `true` | 隐藏暴雪背包条 |
+| `barCount` | `5` | 显示几组动作条（1–8） |
+| `buttonSize` | `28` | 按钮边长 |
+| `spacing` | `2` | 按钮间距 |
+| `showHotkey` / `showCount` / `showMacro` | `true` | 快捷键 / 堆叠数量 / 宏名 |
+| `positions` | `{}` | 按条覆盖 `BAR_DEFS` 里的首跑锚点（`point` / `relativeTo` / `x` / `y`） |
+
 ### 字体资源
 
 | 字体 | 文件 | 用途 | 来源 |
@@ -323,13 +400,16 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | 内容 | 说明 |
 |------|------|
 | 4 个字体文件（`Assets/Fonts/`） | 第三方字体；按**用户确认**不涉及版权问题，继续保留 |
+| `Libs/LibActionButton-1.0/` | **BSD-3-Clause** 第三方库（作者 nevcairiel），取自 Andromeda 随包的 forever 适配版。MonetUI 只做了 3 处改动，全部标有 `MonetUI change:`：库名改为 `LibActionButton-1.0-MonetUI`、静态引用的 LibCustomGlow 改为标准 LibStub 查找、缺 CallbackHandler 时用内联空实现。BSD-3 与 GPL-3 不冲突（BSD 代码既可作为 GPL 项目的一部分，也可被独立项目使用），所以它不会把 MonetUI 拖进 GPL。许可原文见 `Libs/LibActionButton-1.0/LICENSE.txt` |
 | 布局坐标与尺寸数值 | 参考 **Andromeda**（GPL-3.0）的 `modules/unitframe/unitframe.lua`、`gui/configs.lua` 与 `core/uiscale.lua`。布局思路与数字本身不受版权保护，且已按 MonetUI 的 1:1 坐标系重新取值（血条高度即取其实际厚度的约 50%） |
+| 动作条架构 | 参考 Andromeda（GPL-3.0）`modules/actionbar/` 的**结构与取值**：header + `_onstate-page` + `RegisterStateDriver` 的分工、每页 12 槽的编号方式、`fullPage` 条件串与各条固定页号、"重定位暴雪框体"而非销毁。这些是接口用法与配置值，不含 Andromeda 的代码 |
 | 小地图矩形遮罩 | 起初拷贝了 Andromeda 的 `rectangle-mask.blp`；现已**改为自绘**（`tools/make-minimap-mask.ps1` 生成并自校验） |
 
 > Andromeda 以 **GPL-3.0** 发布，而 GPL 具有传染性：若 MonetUI 的分发中包含 Andromeda
 > 受版权保护的**代码**，MonetUI 亦须以 GPL-3.0 发布并附源码。因此 MonetUI 的 Lua 全部独立
-> 重写，只借鉴**布局思路与数值**（不受版权保护），并且不引用 Andromeda 的任何代码；素材方面
-> 唯二的文件级拷贝是小地图遮罩（已换成自绘）与 4 个字体（已确认不涉及版权）。
+> 重写，只借鉴**布局思路、接口用法与数值**（不受版权保护），不含 Andromeda 的任何代码。
+> 文件级的分发只有两类：4 个字体（已确认不涉及版权）与 BSD-3 的 `Libs/LibActionButton-1.0/`
+> （按许可允许再分发，且与 GPL 不冲突）；小地图遮罩已换成自绘。
 
 ---
 
@@ -359,7 +439,7 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 - [x] Minimap（P1）— 矩形化 256×190
 - [x] BagFrame（P1）
 - [x] QuestTracker（P2）
-- [x] ActionBars（P2，占位）— 隐藏暴雪默认动作条与背包条
+- [x] ActionBars（P2）— 1–8 号自绘动作条（LibActionButton-1.0）+ 接管宠物/姿态条 + 隐藏暴雪动作条与背包条
 - [ ] 游戏内视觉验收（需游戏运行）
 
 ### Phase 3: 完善与发布
@@ -426,6 +506,14 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | 2026-10-15 | 死亡/掉线用 `StatusBar:SetStatusBarDesaturated` 变灰 | 变灰由客户端完成（`SecretAspect.Desaturation`），不需要读数值 |
 | 2026-10-15 | 能量条按 `UnitPowerType` 分色，自带 `POWER_COLOR` 表 | 旧实现依赖未文档化的全局 `PowerBarColor`；自建表可调且不产生全局依赖 |
 | 2026-10-15 | 配置面板血条风格用**自绘下拉**，不用 `UIDropDownMenu`/`MenuUtil` | 暴雪菜单框架不在文档化 API 内且各版本不同；自绘可套用 Monet 主题、零模板依赖 |
+| 2026-10-15 | 动作条走"藏掉暴雪、自建安全按钮"路线（Bartender4/Dominos/ElvUI/Andromeda 同路），只有 Masque 那种纯美化才去改暴雪按钮 | 暴雪按钮绑死编辑模式与自己的排版，外部改动会被改回；安全模板按钮由客户端施法，战斗中不失效 |
+| 2026-10-15 | 按钮用**随包的 LibActionButton-1.0**（BSD-3）而不是自己手写 | 手写要覆盖拖放、冷却、堆叠、射程、可用性、按键、翻页等一大堆边界情况；BSD-3 与 GPL 不冲突，不会带来许可问题 |
+| 2026-10-15 | 翻页放在安全环境里（header + `_onstate-page` + `RegisterStateDriver`），固定条挂常量页号 | 载具/覆盖/变形换页是客户端行为，Lua 插手既不安全也不及时 |
+| 2026-10-15 | 按键用 `SetOverrideBindingClick` 指到自绘按钮，沿用暴雪的绑定名 | 玩家的旧按键设置零迁移；暴雪按钮仍在（只是藏起来），覆盖绑定优先，失效也只是回到暴雪行为 |
+| 2026-10-15 | 宠物/姿态条**接管但不重画**（搬出父框体 + 等比缩放 + 裁图标） | 重画要重新实现暴雪的图标/自动施法/形态逻辑；只搬家则永远不失同步，代价是暴雪重排后要在战斗外放回去 |
+| 2026-10-15 | 自绘动作条建不出来时**放弃接管并保留暴雪动作条**，同时打印提示 | 宁可不好看，也不能让玩家一下子失去全部技能 |
+| 2026-10-15 | 堆叠数量的显隐自己管（`Count:Hide/Show`） | 库里对 Count 只 `SetText` 不控制显隐，配置项能随时开关而不需要重载 |
+| 2026-10-15 | 快捷键缩写成 `s1` / `MU` 等（`SetText` 钩子 + `SetFormattedText` 回写） | 完整键名（如 `SHIFT-1`）会顶出 28px 按钮；用 `SetFormattedText` 回写可避开自我递归 |
 
 ---
 
@@ -436,6 +524,8 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | MonetColor 引擎 | `monetcolors\LibMonetColor-1.0.lua` | 色彩计算引擎 |
 | MonetColor 测试 | `monetcolors\test_phase1.lua` | 45 个单元测试 |
 | Andromeda 参考 | `wowaddonsdev\Andromeda\` | UI 设计参考 |
+| Andromeda forever 参考 | `wowaddonsdev\Andromedaforever\` | 动作条（`modules\actionbar\`）架构与取值参考 |
+| LibActionButton-1.0 | `MonetUI\Libs\LibActionButton-1.0\` | 动作按钮库（BSD-3），随包 |
 | EllesmereUI 参考 | `wowaddonsdev\EllesmereUI-v9.4\` | 模块实现参考 |
 | ForeverUI 参考 | `wowaddonsdev\ForeverUI-0.4.24\` | 轻量实现参考 |
 | wuxian MCP | 已连接 | 游戏内调试工具 |

@@ -196,6 +196,13 @@ local function RefreshUnitFrames()
     if unitFrames and unitFrames.UpdateAll then unitFrames:UpdateAll() end
 end
 
+--- Action-bar changes go through Apply: it re-parks Blizzard's chrome, rebuilds
+-- the visibility drivers and re-lays the bars out.
+local function RefreshActionBars()
+    local actionBars = ns:GetModule("ActionBars")
+    if actionBars and actionBars.Apply then actionBars:Apply() end
+end
+
 --- One setting, read from a group of units and written to all of them.  The
 -- units ship with different defaults (player/pet are lit, enemy frames follow
 -- the game's own colour) but a group is meant to move together.
@@ -382,12 +389,19 @@ function SimpleConfig:Build()
     MakeSeparator(panel, y, "动作条")
     y = y - 28
 
+    MakeCheckbox(panel, "自绘动作条（LibActionButton）", y,
+        function() return ns:DB().actionBars.ownBars end,
+        function(value)
+            ns:DB().actionBars.ownBars = value
+            RefreshActionBars()
+        end)
+    y = y - 28
+
     MakeCheckbox(panel, "隐藏暴雪默认动作条", y,
         function() return ns:DB().actionBars.hideBlizzard end,
         function(value)
             ns:DB().actionBars.hideBlizzard = value
-            local bars = ns:GetModule("ActionBars")
-            if bars and bars.Apply then bars:Apply() end
+            RefreshActionBars()
         end)
     y = y - 28
 
@@ -395,8 +409,70 @@ function SimpleConfig:Build()
         function() return ns:DB().actionBars.hideBagBar end,
         function(value)
             ns:DB().actionBars.hideBagBar = value
-            local bars = ns:GetModule("ActionBars")
-            if bars and bars.Apply then bars:Apply() end
+            RefreshActionBars()
+        end)
+    y = y - 28
+
+    local SIZE_ITEMS = {}
+    for _, size in ipairs({ 20, 24, 28, 32, 36 }) do
+        SIZE_ITEMS[#SIZE_ITEMS + 1] = { value = size, text = size .. " px" }
+    end
+
+    local SPACING_ITEMS = {}
+    for _, gap in ipairs({ 0, 2, 4, 6 }) do
+        SPACING_ITEMS[#SPACING_ITEMS + 1] = { value = gap, text = gap .. " px" }
+    end
+
+    local COUNT_ITEMS = {}
+    for count = 1, 8 do
+        COUNT_ITEMS[#COUNT_ITEMS + 1] = { value = count, text = count .. " 组" }
+    end
+
+    MakeDropdown(panel, y, "按钮尺寸", SIZE_ITEMS,
+        function() return ns:DB().actionBars.buttonSize end,
+        function(value)
+            ns:DB().actionBars.buttonSize = value
+            RefreshActionBars()
+        end)
+    y = y - 28
+
+    MakeDropdown(panel, y, "按钮间距", SPACING_ITEMS,
+        function() return ns:DB().actionBars.spacing end,
+        function(value)
+            ns:DB().actionBars.spacing = value
+            RefreshActionBars()
+        end)
+    y = y - 28
+
+    MakeDropdown(panel, y, "显示动作条数量", COUNT_ITEMS,
+        function() return ns:DB().actionBars.barCount end,
+        function(value)
+            ns:DB().actionBars.barCount = value
+            RefreshActionBars()
+        end)
+    y = y - 28
+
+    MakeCheckbox(panel, "显示快捷键", y,
+        function() return ns:DB().actionBars.showHotkey end,
+        function(value)
+            ns:DB().actionBars.showHotkey = value
+            RefreshActionBars()
+        end)
+    y = y - 28
+
+    MakeCheckbox(panel, "显示堆叠数量", y,
+        function() return ns:DB().actionBars.showCount end,
+        function(value)
+            ns:DB().actionBars.showCount = value
+            RefreshActionBars()
+        end)
+    y = y - 28
+
+    MakeCheckbox(panel, "显示宏名", y,
+        function() return ns:DB().actionBars.showMacro end,
+        function(value)
+            ns:DB().actionBars.showMacro = value
+            RefreshActionBars()
         end)
     y = y - 30
 

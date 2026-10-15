@@ -12,7 +12,7 @@ local LibStub = _G.LibStub
 local LMC = LibStub and LibStub("LibMonetColor-1.0", true)
 
 ns.name = ADDON_NAME
-ns.version = "0.4.0"
+ns.version = "0.5.0"
 
 -- -- Defaults ----------------------------------------------------------------
 
@@ -75,9 +75,23 @@ local DEFAULTS = {
     },
     -- Blizzard's default bottom chrome is taken off screen; the buttons keep
     -- working for keybinds because they are re-parented, not destroyed.
+    --
+    -- ownBars: MonetUI draws its own 1..8 keyed on LibActionButton-1.0 (see
+    -- Modules/ActionBars/ActionBars.lua) and parks Blizzard's bars.  With it off
+    -- the Blizzard bars are kept, and only "hideBlizzard" can still hide them.
+    -- barCount / buttonSize / spacing describe the look; positions holds an
+    -- optional per-bar override of the first-run anchors in BAR_DEFS.
     actionBars = {
+        ownBars      = true,
         hideBlizzard = true,
         hideBagBar   = true,
+        barCount     = 5,
+        buttonSize   = 28,
+        spacing      = 2,
+        showHotkey   = true,
+        showCount    = true,
+        showMacro    = true,
+        positions    = {},
     },
 }
 ns.DEFAULTS = DEFAULTS

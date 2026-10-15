@@ -2,7 +2,7 @@
 ## Title: MonetUI
 ## Notes: Monet-style UI addon - adaptive Impressionist color engine integration
 ## Author: EastHillGu
-## Version: 0.2.0
+## Version: 0.5.0
 ## Category: Interface
 ## X-Website: https://github.com/EastHillGu/MonetUI
 ## SavedVariables: MonetUIDB
@@ -10,6 +10,7 @@
 # Libraries
 Libs\LibStub\LibStub.lua
 Libs\LibMonetColor-1.0\LibMonetColor-1.0.lua
+Libs\LibActionButton-1.0\LibActionButton-1.0.lua
 
 # Utilities
 Utils\Math.lua
