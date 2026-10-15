@@ -54,11 +54,11 @@ local DEFAULTS = {
     -- smoothBars eases every bar towards its new value (the client does the
     -- easing, so it still works while the values are hidden).
     --
-    -- classPower draws the player's *class resource* -- a rogue's combo points,
-    -- holy power, chi, soul shards ... -- as one slim pip per point under the
-    -- player frame.  Blizzard keeps that display inside PlayerFrame, which this
-    -- addon hides, so without it a rogue would see its energy bar and no combo
-    -- points at all (see CLASS_POWER in Modules/UnitFrames/UnitFrames.lua).
+    -- classPower draws the player's combo points (rogue / feral druid) as one
+    -- slim pip per point under the player frame.  Blizzard keeps that display
+    -- inside PlayerFrame, which this addon hides, so without it a rogue would see
+    -- its energy bar and no combo points at all
+    -- (see CLASS_POWER in Modules/UnitFrames/UnitFrames.lua).
     --   classPower        false turns the pips off
     --   classPowerHeight  how tall one pip is
     --   classPowerGap     gap between pips (also the breathing room under the frame)

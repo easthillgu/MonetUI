@@ -378,7 +378,7 @@ function SimpleConfig:Build()
         { value = 5, text = "5 px" },
     }
 
-    MakeDropdown(panel, y, "连击点 / 职业资源", CLASS_ITEMS,
+    MakeDropdown(panel, y, "连击点（盗贼 / 德鲁伊）", CLASS_ITEMS,
         function()
             local db = ns:DB().unitFrames
             if db.classPower == false then return 0 end

@@ -262,45 +262,38 @@ local function UpdatePowerColor(frame)
     frame.power:SetStatusBarColor(Color:GetResource())
 end
 
--- -- Class resource (combo points, holy power, ...) ----------------------------
+-- -- Class resource (combo points) ----------------------------------------------
 
--- Blizzard draws the player's class resource -- a rogue's combo points, holy
--- power, chi, soul shards, arcane charges, essence -- inside
--- PlayerFrame.classPowerBar, and its alternate power bar in
--- PlayerFrame.powerBarAlt.  Both are *children* of PlayerFrame, so hiding
+-- Blizzard draws the player's class resource -- a rogue's or a feral druid's
+-- combo points -- inside PlayerFrame.classPowerBar, and its alternate power bar
+-- in PlayerFrame.powerBarAlt.  Both are *children* of PlayerFrame, so hiding
 -- PlayerFrame (see SuppressBlizzard) takes them off screen with it: a rogue
 -- would keep the energy bar drawn above and lose the combo points entirely.
--- This block is the replacement -- one slim pip per point, under the frame.
+-- This block is the replacement -- one slim pip per combo point, under the frame.
+--
+-- Only the classes the Forever client actually has a combo point resource for are
+-- listed.  Holy power / chi / soul shards / arcane charges / essence do not exist
+-- on this build, so they are not drawn.
 --
 -- Nothing here ever does maths on a unit value: every pip is a StatusBar whose
 -- range is (i - 1, i), so handing it the raw point count lets the *client* clamp
 -- and decide which pips are lit, exactly like the health/power bars
 -- (see Utils/Secrets.lua).
 local POWER = (_G.Enum and _G.Enum.PowerType) or {}
-local COMBO_POINTS   = POWER.ComboPoints   or 4
-local ENERGY         = POWER.Energy        or 3
-local SOUL_SHARDS    = POWER.SoulShards    or 7
-local HOLY_POWER     = POWER.HolyPower     or 9
-local CHI            = POWER.Chi           or 12
-local ARCANE_CHARGES = POWER.ArcaneCharges or 16
-local ESSENCE        = POWER.Essence       or 19
+local COMBO_POINTS = POWER.ComboPoints or 4
+local ENERGY       = POWER.Energy      or 3
 
 -- Per class: the power the resource lives in, its `POWER_COLOR` token, how many
 -- pips to draw before the client tells us the real maximum, and an optional gate
--- on the unit's *primary* power type.
+-- on the unit's *primary* power type (a druid only has combo points as a cat).
 --
--- Death knight runes are deliberately absent: six runes are cooldown-driven
+-- Death knight runes are deliberately absent too: six runes are cooldown-driven
 -- rather than points, and UnitPower(Runes) is not what the client animates for
 -- them (the reference implementations read GetRuneCooldown instead).
 local CLASS_POWER = {
-    ROGUE   = { power = COMBO_POINTS,   token = "COMBO_POINTS",   max = 5 },
-    DRUID   = { power = COMBO_POINTS,   token = "COMBO_POINTS",   max = 5,
-                requirePower = ENERGY },                    -- combo points are a cat thing
-    PALADIN = { power = HOLY_POWER,     token = "HOLY_POWER",     max = 5 },
-    MONK    = { power = CHI,            token = "CHI",            max = 5 },
-    WARLOCK = { power = SOUL_SHARDS,    token = "SOUL_SHARDS",    max = 5 },
-    MAGE    = { power = ARCANE_CHARGES, token = "ARCANE_CHARGES", max = 4 },
-    EVOKER  = { power = ESSENCE,        token = "ESSENCE",        max = 5 },
+    ROGUE = { power = COMBO_POINTS, token = "COMBO_POINTS", max = 5 },
+    DRUID = { power = COMBO_POINTS, token = "COMBO_POINTS", max = 5,
+              requirePower = ENERGY },
 }
 
 -- Defensive ceiling: a garbage maximum must not build a hundred bars.
