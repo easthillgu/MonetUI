@@ -386,6 +386,25 @@ function M:Diagnose()
         end
     end
 
+    -- Shared font objects belong to no window (the option is global, and off by
+    -- default), so they are checked separately -- and for the same reason: a
+    -- wrong name would be invisible until the player switches the option on and
+    -- nothing changes.
+    local fontMissing = {}
+    for i = 1, #FONT_OBJECTS do
+        if not ResolvePath(FONT_OBJECTS[i]) then
+            fontMissing[#fontMissing + 1] = FONT_OBJECTS[i]
+        end
+    end
+    totalFound = totalFound + (#FONT_OBJECTS - #fontMissing)
+    totalMissing = totalMissing + #fontMissing
+    if #fontMissing == 0 then
+        ns:Print(("|cff88ff88✓|r [统一字体] %d 个共享字体对象全部存在"):format(#FONT_OBJECTS))
+    else
+        ns:Print(("|cffff6b6b✗|r [统一字体] %d/%d 存在，缺少: %s"):format(
+            #FONT_OBJECTS - #fontMissing, #FONT_OBJECTS, table.concat(fontMissing, ", ")))
+    end
+
     ns:Print(("合计 %d 存在 / %d 缺失。"):format(totalFound, totalMissing))
     if totalMissing > 0 then
         ns:Print("上面缺失的对象在本客户端用了别的名字，按行补进对应皮肤文件即可。")
