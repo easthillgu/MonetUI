@@ -38,13 +38,14 @@ MonetUI 是一套**整合 UI 插件**，以**莫奈印象派色彩**为核心设
 | UnitFrames | 完成 | 玩家/目标/焦点/宠物，血条/能量/名字/等级/提示，可拖动并保存位置 |
 | Cooldown | 完成 | 冷却数字/充能/快捷键字体美化 + 技能可用状态着色 |
 | BuffFrame | 完成 | 自绘增益/减益网格，按时长排序，可读性守卫 |
-| Minimap | 完成 | 边框染色 + 坐标 + 时钟 + 面板 |
+| Minimap | 完成 | 矩形化 256×190 + 去坐标/时钟 + 主题面板 |
 | BagFrame | 完成 | 背包排列整合 + 主题边框 |
 | QuestTracker | 完成 | 主题边框 + 标题栏拖动 + 位置保存 |
+| ActionBars | 完成 | 1–8 号自绘动作条（LibActionButton-1.0）+ 接管宠物/姿态条 + 隐藏暴雪动作条/背包条 |
 | Forever 保密值适配 | 完成 | Utils/Secrets.lua，全部单位数值访问先查询 |
 | Lua 5.1 兼容性检查 | 完成 | 无 5.2+ 特性 |
-| wuxian check 语法验证 | 完成 | 0 error / 0 warning |
-| 安装到游戏 AddOns | 完成 | 含 Assets/Fonts 共 30.6 MB 已同步 |
+| wuxian check 语法验证 | 完成 | 0 error / 1 处有意 warning（覆写 `GetMinimapShape`） |
+| 安装到游戏 AddOns | 完成 | 含 Assets/Fonts 共 30.8 MB / 30 个文件已同步 |
 
 ### 待完成
 
@@ -54,7 +55,7 @@ MonetUI 是一套**整合 UI 插件**，以**莫奈印象派色彩**为核心设
 | 游戏内视觉验收 | P0 | 三地图验证 + 暴雪框架接管是否产生 taint |
 | MonetColor Phase 2 联调 | P0 | 环境采样器（引擎侧） |
 | 队伍/团队框架 | P1 | RaidFrames（当前仅单人单位） |
-| 聊天框 / 姓名板 / 动作条美化 | P2 | 见模块清单 |
+| 聊天框 / 姓名板美化 | P2 | 见模块清单 |
 | 压力测试 | P1 | 10 万次 API 调用 |
 | 发布 v1.0.0 | P2 | 文档 + 打包 |
 
@@ -346,9 +347,12 @@ Bartender4、Dominos、ElvUI、Andromeda 都是同一个套路：**不驱动暴�
 #### 宠物条 / 姿态条：接管，但不重画
 
 这两条条不做自绘（重画要重新实现暴雪的一整套图标/自动施法/形态逻辑）。做法是：把暴雪的
-`PetActionBar` / `StanceBar` 从被藏起来的父框体里**搬出来**、按 `buttonSize` **等比缩放**、放到
-存档里的位置，再把图标裁切与字体调成 MonetUI 的样子。图标更新、自动施法光圈、当前形态环、
-冷却全部还是暴雪自己的代码在管，因此永远不会失同步。
+`PetActionBarFrame`（外层容器，没有就退回 `PetActionBar`）/ `StanceBar` 从被藏起来的父框体里
+**搬出来**、按 `buttonSize` **等比缩放**、放到存档里的位置，再把图标裁切与字体调成 MonetUI 的
+样子。图标更新、自动施法光圈、当前形态环、冷却全部还是暴雪自己的代码在管，因此永远不会失同步。
+
+> 搬的是**最外层**那个框体：暴雪显隐宠物的做法可能是 Hide 外层容器、也可能是 Hide 里面的条，
+> 搬外层两种情况都还归它管；只搬内层的话，暴雪一 Hide 外层，我们的条就留在屏幕上了。
 
 > 代价：暴雪在宠物变化、编辑模式换布局时会重排这两条条，MonetUI 只能在**战斗外**把它们放
 > 回去（`PET_BAR_UPDATE` / `UNIT_PET` / `UPDATE_SHAPESHIFT_FORMS` 等事件 + `PLAYER_REGEN_ENABLED`
@@ -368,14 +372,24 @@ Bartender4、Dominos、ElvUI、Andromeda 都是同一个套路：**不驱动暴�
 
 | 键 | 默认 | 说明 |
 |----|------|------|
-| `ownBars` | `true` | 自绘 1–8 号动作条并接管暴雪动作条；关掉就完全回到暴雪 |
+| `ownBars` | `true` | 自绘 1–8 号动作条并接管宠物/姿态条；关掉就完全回到暴雪 |
 | `hideBlizzard` | `true` | 隐藏暴雪默认动作条（`ownBars` 关掉时仍然生效） |
 | `hideBagBar` | `true` | 隐藏暴雪背包条 |
 | `barCount` | `5` | 显示几组动作条（1–8） |
 | `buttonSize` | `28` | 按钮边长 |
 | `spacing` | `2` | 按钮间距 |
 | `showHotkey` / `showCount` / `showMacro` | `true` | 快捷键 / 堆叠数量 / 宏名 |
-| `positions` | `{}` | 按条覆盖 `BAR_DEFS` 里的首跑锚点（`point` / `relativeTo` / `x` / `y`） |
+| `positions` | `{}` | 按条覆盖 `BAR_DEFS` 里的首跑锚点（`point` / `relativeTo` / `relativePoint` / `x` / `y`） |
+
+#### 已知限制
+
+- **暂时不能拖动**。位置来自 `BAR_DEFS` 的首跑锚点（1 号条底部居中、2 号条在其上方、3/4 号条
+  分列左右、5–8 号条依次叠上去；宠物条接 3 号条、姿态条接 4 号条），想改就写
+  `MonetUIDB.actionBars.positions["Bar2"] = { point = "BOTTOM", relativeTo = "Bar1",
+  relativePoint = "TOP", x = 0, y = 2 }`。动作条上按钮全是安全按钮，把拖动做进按钮会
+  抢掉"从条上拿起技能"的手感，所以拖动（含 `/mui` 里的解锁开关）留给下一版。
+- 2–8 号条锚在 1 号条/其它条上，所以它们会跟着 1 号条走；这也是为什么拖动必须做在条框体上。
+- 暴雪在**编辑模式**里会重新摆它自己的条，宠物条与姿态条的位置会在离开战斗后被我们抢回来。
 
 ### 字体资源
 
@@ -514,6 +528,8 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | 2026-10-15 | 自绘动作条建不出来时**放弃接管并保留暴雪动作条**，同时打印提示 | 宁可不好看，也不能让玩家一下子失去全部技能 |
 | 2026-10-15 | 堆叠数量的显隐自己管（`Count:Hide/Show`） | 库里对 Count 只 `SetText` 不控制显隐，配置项能随时开关而不需要重载 |
 | 2026-10-15 | 快捷键缩写成 `s1` / `MU` 等（`SetText` 钩子 + `SetFormattedText` 回写） | 完整键名（如 `SHIFT-1`）会顶出 28px 按钮；用 `SetFormattedText` 回写可避开自我递归 |
+| 2026-10-15 | 宠物/姿态条搬**最外层容器**（`PetActionBarFrame`，退回 `PetActionBar`） | 暴雪可能 Hide 外层也可能 Hide 内层；搬外层时两种做法都还归它管，不会留下一条"停尸"的宠物条 |
+| 2026-10-15 | 动作条这一版**不做拖动**，位置交由默认锚点 + `positions` 覆盖 | 按钮都是安全按钮，把拖动挂到按钮上会抢掉"从条上拿起技能"；解锁模式（条框体留边、拖动条本身）留给下一版 |
 
 ---
 

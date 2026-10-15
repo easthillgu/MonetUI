@@ -168,12 +168,16 @@ local BAR_DEFS = {
 }
 
 -- 我们自己接管的那几条暴雪动作条：不重画，只搬家、缩放和裁图标。
+--
+-- 搬的是**最外层**那个框体（`containers` 里第一个存在的）：暴雪显隐宠物的做法
+-- 可能是 Hide 外层容器、也可能是 Hide 里面的条，搬外层两种情况都还归它管。
+-- 只搬内层的话，暴雪一 Hide 外层，我们的条就留在屏幕上了。
 local ADOPTED_DEFS = {
-    { key = "BarPet",    global = "PetActionBar", pattern = "PetActionButton%d",
-      count = 10, label = "宠物",
+    { key = "BarPet",    containers = { "PetActionBarFrame", "PetActionBar" },
+      pattern = "PetActionButton%d", count = 10, label = "宠物",
       point = "BOTTOM", relativeTo = "Bar3", relativePoint = "TOP", x = 0, y = 2 },
-    { key = "BarStance", global = "StanceBar",    pattern = "StanceButton%d",
-      count = 10, label = "姿态",
+    { key = "BarStance", containers = { "StanceBarFrame", "StanceBar" },
+      pattern = "StanceButton%d", count = 10, label = "姿态",
       point = "BOTTOM", relativeTo = "Bar4", relativePoint = "TOP", x = 0, y = 2 },
 }
 
@@ -323,16 +327,24 @@ local RINGS = setmetatable({}, { __mode = "k" })
 
 --- 描边颜色：装着装备的槽位用高亮色（和暴雪一样表达"这件装备在身"），
 -- 其余用主题的边色。库里用 Border 的显隐表示"已装备"，这里跟着它走。
+--
+-- 每个按钮两块底色：
+--   ring 铺满整个按钮，只在图标外圈露出 1 像素，那就是描边；
+--   well 只铺图标范围，空槽时它就是"空格子"的底色（有图标时被图标完全盖住）。
 local function RefreshRing(button)
-    local ring = RINGS[button]
-    if not ring then return end
+    local parts = RINGS[button]
+    if not parts then return end
+
     local r, g, b
     if button.Border and button.Border:IsShown() then
         r, g, b = Color:GetHealth()
     else
         r, g, b = Color:GetEdge()
     end
-    ring:SetColorTexture(r, g, b, 0.9)
+    parts.ring:SetColorTexture(r, g, b, 0.9)
+
+    local nr, ng, nb = Color:GetNeutral()
+    parts.well:SetColorTexture(nr, ng, nb, 0.45)
 end
 
 local function RefreshRings()
@@ -341,7 +353,7 @@ local function RefreshRings()
     end
 end
 
---- 堆叠数量库里只有\"写字\"没有开关（它只对 FontString SetText，不控制显隐），
+--- 堆叠数量库里只有写字、没有开关（它只对 FontString SetText，不控制显隐），
 -- 所以显隐归我们管，而且随时可以改回来。
 local function ApplyCountVisibility(button)
     local count = button and button.Count
@@ -384,10 +396,15 @@ local function SkinButton(button)
 
     local icon = button.icon
 
-    -- 图标往后缩 1 像素，露出来的底色就是描边。
+    -- 图标往后缩 1 像素，露出来的底色就是描边；空槽时 well 顶上（见 RefreshRing）。
     local ring = button:CreateTexture(nil, "BACKGROUND", nil, 0)
     ring:SetAllPoints(button)
-    RINGS[button] = ring
+
+    local well = button:CreateTexture(nil, "BACKGROUND", nil, 1)
+    well:SetPoint("TOPLEFT", button, "TOPLEFT", BORDER, -BORDER)
+    well:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -BORDER, BORDER)
+
+    RINGS[button] = { ring = ring, well = well }
 
     if icon then
         icon:ClearAllPoints()
@@ -696,27 +713,48 @@ end
 -- 按钮一样大、放到存档里的位置。图标更新、自动施法光圈、当前形态环、冷却全
 -- 都还是暴雪自己的代码在管，所以永远不会失同步。
 
+--- 取 def.containers 里第一个真正存在的框体（优先最外层）。
+local function ResolveContainer(def)
+    for _, name in ipairs(def.containers) do
+        local frame = _G[name]
+        if frame then return frame, name end
+    end
+    return nil
+end
+
 local function AdoptBar(def)
-    local bar = _G[def.global]
+    local bar, name = ResolveContainer(def)
     if not bar then return nil end
 
     local entry = adopted[def.key]
     if not entry then
-        entry = { def = def, frame = bar }
+        entry = {}
         adopted[def.key] = entry
     end
+
+    -- 换过容器（比如暴雪这次才把外层建出来）就把缩放的基准丢掉重算。
+    if entry.frame ~= bar then
+        if entry.frame then pcall(entry.frame.SetScale, entry.frame, 1) end
+        entry.base = nil
+    end
+    entry.def  = def
     entry.frame = bar
+    entry.name  = name
 
     -- 1. 从被藏起来的父框体里搬出来
     if bar:GetParent() ~= UIParent then
         pcall(bar.SetParent, bar, UIParent)
     end
 
-    -- 2. 缩放到自绘按钮的尺寸；暴雪条内部的排布原样不动
+    -- 2. 缩放到自绘按钮的尺寸；暴雪条内部的排布原样不动。
+    --    基准宽度只量一次（量的时候缩放还是 1），免得每次都乘一遍自己设的缩放。
     local first = _G[def.pattern:format(1)]
-    local base  = first and first:GetWidth() or 0
+    if not entry.base and first then
+        local base = first:GetWidth()
+        if base and base > 8 then entry.base = base end
+    end
     local size  = ButtonSize()
-    local scale = (base and base > 8) and (size / base) or 1
+    local scale = entry.base and (size / entry.base) or 1
     pcall(bar.SetScale, bar, scale)
 
     -- 3. 摆到设置里的位置
