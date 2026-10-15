@@ -58,14 +58,27 @@ body{
 .obj .done{ color:#7f8f6a; }
 
 /* --------------------------------------------------------- unit frames ---- */
-/* border 1px + health 4px + split 1px + power 1px + border 1px = 8px tall */
-.uf{ position:absolute; background:rgba(var(--panel),.92);
+/* border 1px + health 2px + split 1px + power 1px + border 1px = 6px tall.
+   The frame background *is* the "lost" health: the fill only covers what is
+   left, so the background shows through exactly where the unit has taken
+   damage.  Two layers, and neither has to read a unit value. */
+.uf{ position:absolute;
   border:1px solid rgba(var(--edge),.95);
   box-shadow:0 1px 6px rgba(0,0,0,.6); }
-.uf .health{ position:absolute; left:0; top:1px; height:4px;
-  background:linear-gradient(180deg,rgba(var(--health),.98),rgba(24,124,44,.98)); }
-.uf .power{ position:absolute; left:0; top:6px; height:1px;
+
+/* lost health: black reads as background (player / pet), red as damage taken */
+.uf.lost-black{  background:#050608; }
+.uf.lost-danger{ background:rgba(var(--danger),.95); }
+
+.uf .health{ position:absolute; left:0; top:1px; height:2px; }
+.uf .power{ position:absolute; left:0; top:4px; height:1px;
   background:linear-gradient(90deg,rgba(96,164,244,.98),rgba(var(--resource),.98)); }
+
+/* current health: Monet highlight wash for yourself, class colour for foes */
+.uf.f-self   .health{ background:linear-gradient(180deg,#f7f2df,#d9a85c); }
+.uf.f-mage   .health{ background:#3fc7eb; }
+.uf.f-priest .health{ background:#ffffff; }
+.uf.f-rogue  .health{ background:#fff569; }
 
 /* text row sits just above the bar (Andromeda's 0,3 offset) */
 .uftext{ position:absolute; height:15px; display:flex; align-items:flex-end;
@@ -158,54 +171,54 @@ svg.ann{ position:absolute; inset:0; width:2560px; height:1440px; pointer-events
   </div>
 
   <!-- ======================= MonetUI: unit frames ========================= -->
-  <!-- player  CENTER UIParent (0,-180)  160x8 -->
+  <!-- player  CENTER UIParent (0,-180)  160x6  ·  highlight fill + black lost -->
   <div class="uftext" style="left:1200px; top:879px; width:160px;">
     <span class="nm">Monet</span><span class="lv">Lv80</span>
   </div>
   <div class="uftext right" style="left:1200px; top:879px; width:160px;">
-    <span class="hp">84.2K / 96.4K</span>
+    <span class="hp" style="color:rgb(146,223,102)">84.2K / 96.4K</span>
   </div>
-  <div class="uf" style="left:1200px; top:896px; width:160px; height:8px;">
-    <div class="health" style="width:84%"></div>
+  <div class="uf lost-black f-self" style="left:1200px; top:896px; width:160px; height:6px;">
+    <div class="health" style="width:87%"></div>
     <div class="power" style="width:62%"></div>
   </div>
   <div class="badge" style="left:1190px; top:886px;">1</div>
 
-  <!-- target  LEFT = player RIGHT +(40,40)  160x8 -->
+  <!-- target  LEFT = player RIGHT +(40,40)  160x6  ·  class fill + red lost -->
   <div class="uftext" style="left:1400px; top:839px; width:160px;">
-    <span class="hp">62.0K / 87.1K</span>
+    <span class="hp" style="color:rgb(201,221,96)">62.0K / 87.1K</span>
   </div>
   <div class="uftext right" style="left:1400px; top:839px; width:160px;">
     <span class="nm">Impressionist</span><span class="lv">Lv80</span>
   </div>
-  <div class="uf" style="left:1400px; top:856px; width:160px; height:8px;">
+  <div class="uf lost-danger f-mage" style="left:1400px; top:856px; width:160px; height:6px;">
     <div class="health" style="width:71%"></div>
     <div class="power" style="width:35%"></div>
   </div>
   <div class="badge" style="left:1390px; top:846px;">2</div>
 
-  <!-- focus  RIGHT = player LEFT +(-100,-40)  60x8 -->
+  <!-- focus  RIGHT = player LEFT +(-100,-40)  60x6  ·  class fill + red lost -->
   <div class="uftext center" style="left:1040px; top:839px; width:60px;">
     <span class="nm">Waterlily</span>
   </div>
-  <div class="uf" style="left:1040px; top:856px; width:60px; height:8px;">
+  <div class="uf lost-danger f-priest" style="left:1040px; top:856px; width:60px; height:6px;">
     <div class="health" style="width:93%"></div>
     <div class="power" style="width:78%"></div>
   </div>
   <div class="badge" style="left:1030px; top:846px;">3</div>
 
-  <!-- pet  RIGHT = player LEFT +(-6,0)  60x8（无文字，同 Andromeda） -->
-  <div class="uf" style="left:1134px; top:896px; width:60px; height:8px;">
+  <!-- pet  RIGHT = player LEFT +(-6,0)  60x6（无文字，同 Andromeda） -->
+  <div class="uf lost-black f-self" style="left:1134px; top:896px; width:60px; height:6px;">
     <div class="health" style="width:100%"></div>
     <div class="power" style="width:44%"></div>
   </div>
   <div class="badge" style="left:1124px; top:886px;">4</div>
 
-  <!-- targettarget  LEFT = target RIGHT +(6,0)  60x8 -->
+  <!-- targettarget  LEFT = target RIGHT +(6,0)  60x6  ·  class fill + red lost -->
   <div class="uftext center" style="left:1566px; top:839px; width:60px;">
     <span class="nm">Shade</span>
   </div>
-  <div class="uf" style="left:1566px; top:856px; width:60px; height:8px;">
+  <div class="uf lost-danger f-rogue" style="left:1566px; top:856px; width:60px; height:6px;">
     <div class="health" style="width:57%"></div>
     <div class="power" style="width:22%"></div>
   </div>
@@ -242,32 +255,32 @@ svg.ann{ position:absolute; inset:0; width:2560px; height:1440px; pointer-events
       <rect x="27"    y="27"   width="274" height="42"  rx="6"/>
       <rect x="27"    y="71"   width="160" height="44"  rx="6"/>
       <rect x="2262"  y="1212" width="278" height="204" rx="10"/>
-      <rect x="1196"  y="894"  width="8"   height="12"  rx="2"/>
-      <rect x="1396"  y="854"  width="168" height="12"  rx="2"/>
-      <rect x="1036"  y="854"  width="68"  height="12"  rx="2"/>
-      <rect x="1130"  y="894"  width="68"  height="12"  rx="2"/>
-      <rect x="1562"  y="854"  width="68"  height="12"  rx="2"/>
+      <rect x="1196"  y="894"  width="8"   height="10"  rx="2"/>
+      <rect x="1396"  y="854"  width="168" height="10"  rx="2"/>
+      <rect x="1036"  y="854"  width="68"  height="10"  rx="2"/>
+      <rect x="1130"  y="894"  width="68"  height="10"  rx="2"/>
+      <rect x="1562"  y="854"  width="68"  height="10"  rx="2"/>
     </g>
     <g fill="none" stroke="rgb(122,224,255)" stroke-width="2" marker-end="url(#ar)">
       <path d="M360,48   L305,48"/>
       <path d="M360,92   L191,92"/>
       <path d="M2200,1270 L2262,1270"/>
-      <path d="M1250,990 L1250,910"/>
-      <path d="M1160,990 L1160,910"/>
-      <path d="M1070,990 L1070,872"/>
-      <path d="M1500,990 L1500,872"/>
-      <path d="M1596,990 L1596,872"/>
+      <path d="M1250,990 L1250,908"/>
+      <path d="M1160,990 L1160,908"/>
+      <path d="M1070,990 L1070,868"/>
+      <path d="M1500,990 L1500,868"/>
+      <path d="M1596,990 L1596,868"/>
     </g>
   </svg>
 
   <div class="box" style="left:560px; top:990px; width:860px; height:186px;">
-    <h3>①-⑤ 单位框架<em>UnitFrames · 细条 160/160/60/60/60 × 8</em></h3>
-    <p><span class="n">1</span><span class="k">player</span> CENTER (0,-180) · 160×8 &nbsp;·&nbsp;
-       <span class="n">2</span><span class="k">target</span> LEFT = player RIGHT +(40,40) · 160×8</p>
-    <p><span class="n">3</span><span class="k">focus</span> RIGHT = player LEFT +(-100,-40) · 60×8 &nbsp;·&nbsp;
-       <span class="n">4</span><span class="k">pet</span> RIGHT = player LEFT +(-6,0) · 60×8</p>
-    <p><span class="n">5</span><span class="k">targettarget</span> LEFT = target RIGHT +(6,0) · 60×8 &nbsp;·&nbsp; 居中显示名字</p>
-    <p class="dim">高度 = 边框 1 + 血条 4 + 间隔 1 + 能量条 1 + 边框 1 = 8；血条贴顶、能量条贴底（同 Andromeda）。</p>
+    <h3>①-⑤ 单位框架<em>UnitFrames · 细条 160/160/60/60/60 × 6</em></h3>
+    <p><span class="n">1</span><span class="k">player</span> CENTER (0,-180) · 160×6 &nbsp;·&nbsp;
+       <span class="n">2</span><span class="k">target</span> LEFT = player RIGHT +(40,40) · 160×6</p>
+    <p><span class="n">3</span><span class="k">focus</span> RIGHT = player LEFT +(-100,-40) · 60×6 &nbsp;·&nbsp;
+       <span class="n">4</span><span class="k">pet</span> RIGHT = player LEFT +(-6,0) · 60×6</p>
+    <p><span class="n">5</span><span class="k">targettarget</span> LEFT = target RIGHT +(6,0) · 60×6 &nbsp;·&nbsp; 居中显示名字</p>
+    <p class="dim">高 6 = 边框1 + 血条2 + 间隔1 + 能量1 + 边框1；血条 = 当前色 + 损失底色，数字按血量百分比着色。</p>
   </div>
 
   <div class="box" style="left:360px; top:33px; width:430px; height:132px;">
@@ -281,7 +294,7 @@ svg.ann{ position:absolute; inset:0; width:2560px; height:1440px; pointer-events
     <h3>⑧ 小地图<em>Minimap · 右下 · 256 宽 × 190 高</em></h3>
     <p>圆形画布 256×256 + <b>矩形遮罩</b>裁掉上下各 33px，命中区同步收缩</p>
     <p>面板 264×198 描边 · 暴雪圆形边框/指南针全部隐藏</p>
-    <p class="dim">锚点 BOTTOMRIGHT (-33, 33)；遮罩取自 Andromeda 的 rectangle-mask。</p>
+    <p class="dim">锚点 BOTTOMRIGHT (-33, 33)；遮罩自绘（见 tools/ 脚本）。</p>
   </div>
 
   <div class="banner" style="left:900px; top:24px; width:1000px; height:76px;">

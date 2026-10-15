@@ -85,12 +85,14 @@ MonetUI/
 │   └── SimpleConfig.lua        # 轻量配置面板（无 Ace3）
 ├── Assets/
 │   ├── Textures/
-│   │   └── rectangle-mask.blp  # 小地图矩形遮罩（256×256）
+│   │   └── minimap-rect-mask.tga  # 小地图矩形遮罩（256×256，脚本生成）
 │   └── Fonts/                  # 字体资源
 │       ├── Pingfangpixel.ttf   # 中文像素字体 — 所有中文文本
 │       ├── combat.ttf          # 战斗字体 — 仅数字（伤害/治疗数值）
 │       ├── super-effective.ttf # 冷却字体 — 冷却计时数字
 │       └── roadway.ttf         # 标题字体 — 标题/装饰
+├── tools/
+│   └── make-minimap-mask.ps1   # 生成小地图矩形遮罩（自绘，不含第三方素材）
 └── Libs/
     ├── LibStub/                # LibStub 库
     └── LibMonetColor-1.0/      # 色彩引擎库
@@ -208,11 +210,11 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 
 | 元素 | 锚点 | 坐标 | 尺寸（宽 × 高） |
 |------|------|------|------|
-| player | `CENTER` / UIParent `CENTER` | `(0, -180)` | 160 × 8 |
-| target | `LEFT` / player `RIGHT` | `(40, 40)` | 160 × 8 |
-| targettarget | `LEFT` / target `RIGHT` | `(6, 0)` | 60 × 8 |
-| pet | `RIGHT` / player `LEFT` | `(-6, 0)` | 60 × 8 |
-| focus | `RIGHT` / player `LEFT` | `(-100, -40)` | 60 × 8 |
+| player | `CENTER` / UIParent `CENTER` | `(0, -180)` | 160 × 6 |
+| target | `LEFT` / player `RIGHT` | `(40, 40)` | 160 × 6 |
+| targettarget | `LEFT` / target `RIGHT` | `(6, 0)` | 60 × 6 |
+| pet | `RIGHT` / player `LEFT` | `(-6, 0)` | 60 × 6 |
+| focus | `RIGHT` / player `LEFT` | `(-100, -40)` | 60 × 6 |
 | 小地图 | `BOTTOMRIGHT` / UIParent `BOTTOMRIGHT` | `(-33, 33)` | 256 宽 × 190 高（面板 264 × 198） |
 | 增益 Buff | `TOPLEFT` / UIParent `TOPLEFT` | `(33, -33)`，每行 8 个 | 图标 34 × 34 |
 | 减益 Debuff | `TOPLEFT` / Buff容器 `BOTTOMLEFT` | `(0, -8)` | 图标 34 × 34 |
@@ -224,11 +226,35 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 #### 个单位框高度构成
 
 ```
-总高 = 边框 1 + 血条 4 + 间隔 1 + 能量条 1 + 边框 1 = 8
+总高 = 边框 1 + 血条 2 + 间隔 1 + 能量条 1 + 边框 1 = 6
 ```
 
 血条贴顶、能量条贴底（与 Andromeda 的 `Health` / `Power` 锚点一致）；`间隔` 对应 Andromeda 的
 `C.MULT`（1440p 下约为 1）。数值均可在 `MonetUIDB.unitFrames` 调整。
+
+> **为什么血条是 2 而不是 Andromeda 的 4**：Andromeda 会执行
+> `UIParent:SetScale(clamp(768 / 屏幕高, 0.4, 1.15))`（1440p 约 **0.53**，见其 `core/uiscale.lua`），
+> 它的整个坐标系比我们小一半左右 —— 配置里写的 4 实际只画到约 2。MonetUI 不缩放 UIParent
+> （`Frame:SetScale` 是受保护方法，缩 UIParent 等于连暴雪 UI 一起缩），所以取 Andromeda 的 50%。
+
+#### 血条着色
+
+血条由两层组成：底层一张铺满的贴图表示**损失**掉的部分，上层 `StatusBar` 只填到当前值，
+因此底层只在掉血的那一段露出来。**两层都不需要读任何单位数值**，所以战斗中客户端把血量变成
+`<secret>` 时着色依然正确（只有百分比数字要读值，读不到就不显示数字）。
+
+| 单位 | 当前血量（`fillColor`） | 损失部分（`lostColor`） |
+|------|------------------------|------------------------|
+| player / pet | `highlight` — Monet 高亮奶油色 | `black` — 读作背景 |
+| target / focus / targettarget | `class` — 职业色（NPC 用阵营反应色） | `danger` — 读作已造成的伤害 |
+
+`fillColor = "class"` 用 `UnitSelectionColor(unit)` 取色：一次调用同时给出玩家职业色与 NPC 的
+反应色，而且**不返回保密值**（不像 `UnitClass` 需要先用 `Secrets.CanReadIdentity` 守卫）。
+
+血量数字按百分比着色（`textColorByPercent`，4 个定点插值：绿 → 黄 → 橙 → 红）——不用红绿直接
+线性插值（中间会发褐），对色盲也更友好。
+
+`fillColor` / `lostColor` / `textColorByPercent` 都存在 `MonetUIDB.unitFrames`，改值即可换风格。
 
 #### 文字位置（参考 Andromeda 的 tag 锚点，全部在条**上方** 3px）
 
@@ -242,8 +268,9 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 
 #### 小地图矩形化
 
-圆形画布仍是 256 × 256，用 `Assets/Textures/rectangle-mask.blp`（取自 Andromeda 的
-`rectangle-mask`）做遮罩，上下各裁 33px，得到 256 宽 × 190 高的可见区域；`SetHitRectInsets`
+圆形画布仍是 256 × 256，用 `Assets/Textures/minimap-rect-mask.tga` 做遮罩（**自绘资源**，
+由 `tools/make-minimap-mask.ps1` 生成：上下各 33px 全透明黑、中间 190px 不透明白，脚本写完后
+会把文件解码回来校验一遍），上下各裁 33px，得到 256 宽 × 190 高的可见区域；`SetHitRectInsets`
 同步收缩点击区，并把 `GetMinimapShape` 覆写为 `SQUARE`，让第三方小地图按钮按矩形排布。
 小地图**不显示坐标与时钟**；暴雪圆形边框/指南针/背板全部隐藏，由主题面板（264 × 198）替代。
 
@@ -260,6 +287,23 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 
 > 字体路径在 `Utils/Media.lua` 里由 `ADDON_NAME` 拼出，因此**安装目录必须叫 `MonetUI`**。
 > Buff/Debuff 图标上的持续时间数字使用 `pixel` 字体（中文友好），不使用 `combat`。
+
+### 参考与致谢
+
+MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方框架，UI 控件、事件总线、
+保密值处理、模块注册、拖动保存都是本项目自己写的。
+
+以下第三方内容需要说明：
+
+| 内容 | 说明 |
+|------|------|
+| 4 个字体文件（`Assets/Fonts/`） | 取自 **Andromeda**（GPL-3.0）的 `assets/fonts/`，属**文件级拷贝**，字体自身的授权需单独确认 |
+| 布局坐标与尺寸数值 | 参考 **Andromeda**（GPL-3.0）的 `modules/unitframe/unitframe.lua`、`gui/configs.lua` 与 `core/uiscale.lua`。布局思路与数字本身不受版权保护，且已按 MonetUI 的 1:1 坐标系重新取值（血条高度即取其实际厚度的约 50%） |
+| 小地图矩形遮罩 | 起初拷贝了 Andromeda 的 `rectangle-mask.blp`；现已**改为自绘**（`tools/make-minimap-mask.ps1` 生成并自校验） |
+
+> Andromeda 以 **GPL-3.0** 发布，而 GPL 具有传染性：若 MonetUI 的分发中包含 Andromeda
+> 受版权保护的代码或素材，MonetUI 亦须以 GPL-3.0 发布并附源码。因此本项目只借鉴**布局思路
+> 与数值**，并已开始替换一切文件级拷贝（素材优先）。发布前请自行确认上面 4 个字体的授权条款。
 
 ---
 
@@ -343,6 +387,13 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 | 2026-10-15 | 新增 targettarget 单位框（60×8，居中名字） | 照搬 Andromeda `Positions.tot` = target `RIGHT` +(6,0) |
 | 2026-10-15 | 单位框拖动后按依赖顺序重排（player→target→targettarget） | 链式锚点（目标的的目标挂在目标上）也要跟随移动 |
 | 2026-10-15 | 小地图去掉坐标与时钟 | 右下角位置紧凑，用户不需要这两项文本 |
+| 2026-10-15 | 血条高度 4 → 2（= Andromeda 实际厚度的约 50%） | Andromeda 会 `UIParent:SetScale(clamp(768/屏幕高, .4, 1.15))`（1440p≈0.53），照抄 4 会厚近一倍 |
+| 2026-10-15 | 血条着色 = 底层「损失」贴图 + 上层 StatusBar 填充 | 两层都不读单位数值，受限状态下着色依然正确（保密值安全） |
+| 2026-10-15 | 玩家/宠物：当前=高亮、损失=黑；目标/焦点/目标的目标：当前=`UnitSelectionColor`、损失=danger | 一次调用即得职业色（玩家）/反应色（NPC），且不返回保密值，无需身份守卫 |
+| 2026-10-15 | 血量数字按百分比 4 定点插值着色（绿→黄→橙→红） | 避免红绿直接线性插值经过脏褐色，对色盲也更友好 |
+| 2026-10-15 | 新增 `SCHEMA` 迁移，默认值语义变化时显式覆盖旧存档 | `MergeDefaults` 只补缺失键，改了数值的老存档不会自动更新 |
+| 2026-10-15 | 小地图遮罩改为自绘（`tools/make-minimap-mask.ps1`） | 去掉对 Andromeda `rectangle-mask.blp` 的文件级拷贝，规避 GPL 传染 |
+| 2026-10-15 | 素材策略：只借鉴布局思路与数值，不做文件级拷贝 | Andromeda 为 GPL-3.0；4 个字体文件的授权仍待确认 |
 
 ---
 

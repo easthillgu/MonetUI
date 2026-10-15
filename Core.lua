@@ -12,7 +12,7 @@ local LibStub = _G.LibStub
 local LMC = LibStub and LibStub("LibMonetColor-1.0", true)
 
 ns.name = ADDON_NAME
-ns.version = "0.2.0"
+ns.version = "0.3.0"
 
 -- -- Defaults ----------------------------------------------------------------
 
@@ -31,25 +31,40 @@ local DEFAULTS = {
         useMonetColor  = true,
         tintBlizzard   = true,
     },
-    -- Slim bars in Andromeda's layout (see docs/mockup).  Sizes and positions are
+    -- Thin bars in Andromeda's layout (see docs/mockup).  Sizes and positions are
     -- both stored per unit so they can be tuned without touching the code; the
     -- "relativeTo" field names either UIParent or another unit frame, which lets
     -- target / focus / pet follow the player frame.
+    --
+    -- Health is 2px: half of Andromeda's configured 4.  Andromeda also rescales
+    -- UIParent (~0.53 at 1440p) while MonetUI draws 1:1, so copying its number
+    -- straight over would come out about twice as thick here.
+    --
+    -- Health colouring, per unit:
+    --   fillColor = "highlight"  the Monet signature wash (player, pet)
+    --             = "class"      the colour the game itself draws the unit in:
+    --                            class colour for players, reaction colour for
+    --                            NPCs (target, focus, targettarget)
+    --             = "health"     the flat UI health green
+    --   lostColor = "black"      the missing part reads as background (player, pet)
+    --             = "danger"     the missing part reads as damage taken (target)
+    -- textColorByPercent ramps the health number green -> red as health drops.
     unitFrames = {
         hideBlizzard = true,
         -- 1px Monet border, then the gap Andromeda keeps between its health and
         -- power bars (its C.MULT, ~1px at 1440p).
         border = 1,
         split  = 1,
-        player = { width = 160, health = 4, power = 1,
+        textColorByPercent = true,
+        player = { width = 160, health = 2, power = 1, fillColor = "highlight", lostColor = "black",
                    point = "CENTER", relativeTo = "UIParent", relativePoint = "CENTER", x = 0,    y = -180 },
-        target = { width = 160, health = 4, power = 1,
+        target = { width = 160, health = 2, power = 1, fillColor = "class", lostColor = "danger",
                    point = "LEFT",   relativeTo = "player",   relativePoint = "RIGHT",  x = 40,   y = 40 },
-        targettarget = { width = 60, health = 4, power = 1,
+        targettarget = { width = 60, health = 2, power = 1, fillColor = "class", lostColor = "danger",
                    point = "LEFT",   relativeTo = "target",   relativePoint = "RIGHT",  x = 6,    y = 0 },
-        pet    = { width = 60,  health = 4, power = 1,
+        pet    = { width = 60,  health = 2, power = 1, fillColor = "highlight", lostColor = "black",
                    point = "RIGHT",  relativeTo = "player",   relativePoint = "LEFT",   x = -6,   y = 0 },
-        focus  = { width = 60,  health = 4, power = 1,
+        focus  = { width = 60,  health = 2, power = 1, fillColor = "class", lostColor = "danger",
                    point = "RIGHT",  relativeTo = "player",   relativePoint = "LEFT",   x = -100, y = -40 },
     },
     -- Blizzard's default bottom chrome is taken off screen; the buttons keep
@@ -77,6 +92,41 @@ local function MergeDefaults(dst, src)
         end
     end
     return dst
+end
+
+--- Database schema.  Bumping this re-applies the settings that changed their
+-- meaning in the shipped defaults (see Migrate).
+local SCHEMA = 2
+
+--- One-off adjustments to a database written by an older MonetUI.
+-- MergeDefaults only fills in *missing* keys, so a value whose number changed
+-- has to be pushed explicitly.  Stored positions are the player's and are never
+-- touched here.
+local function Migrate(db)
+    if (db.schema or 1) >= SCHEMA then return end
+
+    -- v2: health bars halved to Andromeda's real thickness, plus health colour
+    -- rules (fillColor / lostColor) for the new bar styling.
+    for unit, defaults in pairs(DEFAULTS.unitFrames) do
+        if type(defaults) == "table" then
+            local stored = db.unitFrames[unit]
+            if type(stored) == "table" then
+                stored.health    = defaults.health
+                stored.power     = defaults.power
+                stored.fillColor = defaults.fillColor
+                stored.lostColor = defaults.lostColor
+            end
+        end
+    end
+
+    db.schema = SCHEMA
+end
+
+local function LoadDatabase()
+    local db = ns:DB()
+    MergeDefaults(db, DEFAULTS)
+    Migrate(db)
+    return db
 end
 
 function ns:Print(message)
@@ -300,11 +350,11 @@ SlashCmdList["MONETUI"] = HandleSlash
 
 ns.EventBus:Register("ADDON_LOADED", function(_, addonName)
     if addonName ~= ADDON_NAME then return end
-    MergeDefaults(ns:DB(), DEFAULTS)
+    LoadDatabase()
 end)
 
 ns.EventBus:Register("PLAYER_LOGIN", function()
-    MergeDefaults(ns:DB(), DEFAULTS)
+    LoadDatabase()
     RefreshTheme("login")
     ns:StartModules()
 

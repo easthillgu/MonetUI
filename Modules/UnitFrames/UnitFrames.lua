@@ -85,30 +85,116 @@ function M:SuppressBlizzard(enable)
     end
 end
 
--- -- Geometry ----------------------------------------------------------------
+-- -- Settings ----------------------------------------------------------------
 
---- Per-unit width and bar heights, with the stored value winning over the
--- shipped default so the numbers stay tweakable from MonetUIDB.
+local function Shared(key)
+    local stored = (ns:DB().unitFrames or {})[key]
+    if stored ~= nil then return stored end
+    return (ns.DEFAULTS.unitFrames or {})[key]
+end
+
+--- One setting for one unit: the stored value wins, then the shipped per-unit
+-- default, then the shared option block (border / split / textColorByPercent).
+-- Everything is read from MonetUIDB so the numbers stay tweakable without a
+-- code change.
+local function Setting(unit, key)
+    local stored = (ns:DB().unitFrames or {})[unit]
+    local value = stored and stored[key]
+    if value ~= nil then return value end
+    local fallback = (ns.DEFAULTS.unitFrames or {})[unit]
+    value = fallback and fallback[key]
+    if value ~= nil then return value end
+    return Shared(key)
+end
+
 local function UnitGeometry(unit)
-    local stored  = ns:DB().unitFrames[unit] or {}
-    local default = ns.DEFAULTS.unitFrames[unit] or {}
-    return stored.width  or default.width  or 160,
-           stored.health or default.health or 4,
-           stored.power  or default.power  or 1
+    return Setting(unit, "width")  or 160,
+           Setting(unit, "health") or 2,
+           Setting(unit, "power")  or 1
 end
 
 local function FrameChrome()
-    local db = ns:DB().unitFrames
-    return db.border or 1, db.split or 1
+    return Shared("border") or 1, Shared("split") or 1
+end
+
+-- -- Health colours ------------------------------------------------------------
+
+--- The "current" part of a health bar.
+--   "highlight" : the Monet signature wash            (player, pet)
+--   "class"     : the colour the game itself draws the unit in (target, focus)
+--   "health"    : the flat UI health green
+-- UnitSelectionColor gives class colours for players and reaction colours for
+-- NPCs in a single call, and -- unlike UnitClass -- it is never secret, so no
+-- identity guard is needed even in combat.
+local function FillColor(unit)
+    local style = Setting(unit, "fillColor")
+    if style == "class" then
+        local ok, r, g, b = pcall(UnitSelectionColor, unit)
+        if ok and r then return r, g, b, 1 end
+    elseif style == "health" then
+        return Color:GetHealth()
+    end
+    local r, g, b = Color:GetHighlight()
+    return r, g, b, 1
+end
+
+--- The *missing* part of a health bar.  It is pure background, so it needs no
+-- unit value at all and stays correct while the client hides health.
+local function LostColor(unit)
+    if Setting(unit, "lostColor") == "danger" then
+        return Color:GetDanger()
+    end
+    return 0, 0, 0, 1
+end
+
+local function UpdateHealthColor(frame)
+    frame.health:SetStatusBarColor(FillColor(frame.unit))
+
+    local lost = frame.healthLost
+    if lost then
+        local r, g, b, a = LostColor(frame.unit)
+        lost:SetVertexColor(r, g, b, a or 1)
+    end
+end
+
+--- Health-percentage ramp for the numeric text.  Explicit stops are interpolated
+-- rather than lerping red straight to green, which would pass through a muddy
+-- brown in the middle (and stay hard to read for colour-blind players).
+local HEALTH_RAMP = {
+    { at = 1.00, r = 0.40, g = 0.88, b = 0.42 },
+    { at = 0.60, r = 0.94, g = 0.86, b = 0.36 },
+    { at = 0.30, r = 0.95, g = 0.58, b = 0.24 },
+    { at = 0.00, r = 0.94, g = 0.26, b = 0.26 },
+}
+
+local function PercentColor(pct)
+    if pct < 0 then pct = 0 elseif pct > 1 then pct = 1 end
+    for i = 1, #HEALTH_RAMP - 1 do
+        local high, low = HEALTH_RAMP[i], HEALTH_RAMP[i + 1]
+        if pct >= low.at then
+            local span = high.at - low.at
+            local t = span > 0 and (pct - low.at) / span or 0
+            return low.r + (high.r - low.r) * t,
+                   low.g + (high.g - low.g) * t,
+                   low.b + (high.b - low.b) * t
+        end
+    end
+    local last = HEALTH_RAMP[#HEALTH_RAMP]
+    return last.r, last.g, last.b
 end
 
 -- -- Text ---------------------------------------------------------------------
 
 local function UpdateName(frame)
-    local nameText = frame.name
-    if not nameText then return end   -- pet frames carry no text
     local unit = frame.unit
     if not UnitExists(unit) then return end
+
+    -- Colouring follows identity, so it is refreshed here -- the pet frame has
+    -- no name text but still needs its bar coloured.
+    UpdateHealthColor(frame)
+
+    local nameText = frame.name
+    if not nameText then return end   -- pet frames carry no text
 
     local name, classFile
     if Secrets.CanReadIdentity(unit) then
@@ -151,6 +237,9 @@ local function UpdateHealth(frame)
         local maximum = Secrets.Number(UnitHealthMax(unit))
         if current and maximum and maximum > 0 then
             healthText:SetText(Math:ShortNumber(current) .. " / " .. Math:ShortNumber(maximum))
+            if Setting(unit, "textColorByPercent") ~= false then
+                healthText:SetTextColor(PercentColor(current / maximum))
+            end
         else
             healthText:SetText("")
         end
@@ -227,7 +316,14 @@ local function CreateUnitFrame(unit, position)
     local health = Widget:Bar(frame, width - border * 2, healthHeight)
     health:SetPoint("TOPLEFT", frame, "TOPLEFT", border, -border)
     health:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -border, -border)
-    health:SetStatusBarColor(Color:GetHealth())
+
+    -- The *missing* part of the bar: a plain texture behind the fill.  A
+    -- StatusBar only covers the health that is left, so this shows through
+    -- exactly where the unit has taken damage -- and, unlike sizing an overlay,
+    -- it never has to look at a unit value.  UpdateHealthColor tints it.
+    local lost = health:CreateTexture(nil, "BACKGROUND")
+    lost:SetAllPoints(health)
+    lost:SetColorTexture(1, 1, 1, 1)
 
     local power = Widget:Bar(frame)
     power:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", border, border)
@@ -236,7 +332,10 @@ local function CreateUnitFrame(unit, position)
     power:SetStatusBarColor(Color:GetResource())
 
     frame.health = health
+    frame.healthLost = lost
     frame.power = power
+
+    UpdateHealthColor(frame)
 
     local layout = TEXT_LAYOUT[unit] or {}
     if layout.name then
