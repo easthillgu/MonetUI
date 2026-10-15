@@ -44,9 +44,10 @@ MonetUI 是一套**整合 UI 插件**，以**莫奈印象派色彩**为核心设
 | ActionBars | 完成 | 1–8 号自绘动作条（LibActionButton-1.0）+ 接管宠物/姿态条 + 隐藏暴雪动作条/背包条 |
 | Nameplates | 完成 | 挂在暴雪姓名板底座上的细条姓名板：血条/名字等级/百分比/施法条/借用暴雪减益/仇恨与目标描边；CVar 接管 + 点击区同步 + 完整回退 |
 | Skins | 完成 | 界面美化：给暴雪窗口（任务、世界地图、角色、收藏、成就、社交、邮件/商贩/拍卖/专业、拾取/弹窗/菜单/设置等）统一铺 Monet 底板 / 边框 / 字体；可逐窗口开关，模块关闭可完整回退 |
+| InfoBar | 完成 | 信息栏：贴顶边（可切底边）的整幅细条 + 6 个数据块（金钱 / 耐久 / 货币 / 延迟帧率内存 / 专精 / 好友），默认悬停淡入、战斗呼吸闪烁、宠物对战自动隐藏；`/mui infobar diagnose` 自检 |
 | Forever 保密值适配 | 完成 | Utils/Secrets.lua，全部单位数值访问先查询 |
 | Lua 5.1 兼容性检查 | 完成 | 无 5.2+ 特性 |
-| wuxian check 语法验证 | 完成 | 0 error / 1 warning（有意：覆写 `GetMinimapShape`）；参考插件来的 API 未入手册项已全部消除 |
+| wuxian check 语法验证 | 完成 | 30 个 Lua 文件，0 error / 1 warning（有意：覆写 `GetMinimapShape`）；参考插件来的 API 未入手册项与改名的全局均已消除 |
 | 安装到游戏 AddOns | 完成 | 含 Assets/Fonts 共 30.8 MB / 30 个文件已同步 |
 
 ### 待完成
@@ -54,6 +55,7 @@ MonetUI 是一套**整合 UI 插件**，以**莫奈印象派色彩**为核心设
 | 任务 | 优先级 | 说明 |
 |------|--------|------|
 | wuxian load 热加载验证 | P0 | 需游戏运行（当前离线） |
+| 信息栏游戏内验收 | P0 | 先 `/mui infobar diagnose` 读 PROBED 与耐久签名实测结果，再逐块 snap；验证悬停淡入 / 战斗呼吸 / 宠物对战隐藏 / 模块关掉即时还原 |
 | 游戏内视觉验收 | P0 | 三地图验证 + 暴雪框架接管是否产生 taint |
 | MonetColor Phase 2 联调 | P0 | 环境采样器（引擎侧） |
 | 队伍/团队框架 | P1 | RaidFrames（当前仅单人单位） |
@@ -87,6 +89,9 @@ MonetUI/
 │   ├── QuestTracker/           # 任务追踪
 │   ├── ActionBars/             # 动作条（1–8 号自绘 + 接管宠物/姿态条）
 │   ├── Nameplates/             # 姓名板（暴雪底座 + 自绘细条）
+│   ├── InfoBar/                # 信息栏（贴边细条 + 6 个数据块）
+│   │   ├── InfoBar.lua         # 引擎：容器 / 排版 / 淡入呼吸动画 / 自检
+│   │   └── Blocks.lua          # 数据块：金钱 / 耐久 / 货币 / 系统 / 专精 / 好友
 │   └── Skins/                  # 界面美化（暴雪窗口皮肤引擎 + 分窗口皮肤）
 │       ├── Skins.lua           # 引擎：注册表 / 生命周期 / 完整回退 / 全局字体
 │       ├── Quest.lua           # 任务日志 + 任务 / 对话窗口
@@ -259,6 +264,7 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 | **P2** | Chat | 聊天框美化 | 待建 | EllesmereUIChat |
 | **P2** | Nameplates | 姓名板美化（暴雪底座 + 自绘细条、CVar 接管、借用暴雪减益、施法条、仇恨/目标描边） | ✅ 已实现 | EllesmereUINameplates, ForeverUI, Andromeda |
 | **P2** | Skins | 界面美化：暴雪窗口（任务/地图/角色/收藏/社交/交易/系统）统一铺 Monet 底板、边框与字体；逐窗口开关、模块可完整回退 | ✅ 已实现 | EllesmereUIBlizzardSkin, Andromeda, ForeverUI, ElvUI Skins |
+| **P2** | InfoBar | 信息栏：贴顶边（可切底边）的整幅细条 + 6 个数据块（金钱/耐久/货币/系统/专精/好友），悬停淡入、战斗呼吸闪烁、宠物对战自动隐藏 | ✅ 已实现 | Andromeda `modules/infobar/`（只借结构与取值） |
 | **P3** | RaidFrames | 团队框架（队伍/团队） | 待建 | EllesmereUIRaidFrames |
 | **P3** | ResourceBars | 资源条（备用能量 `AltPower`、符文等剩余资源显示） | 待建 | EllesmereUIResourceBars |
 
@@ -538,7 +544,8 @@ Bartender4、Dominos、ElvUI、Andromeda 都是同一个套路：**不驱动暴�
 - **只用文档化的** `C_NamePlate.SetNamePlateSize`：`api_search` 实测该命名空间的 `siblings`
   只有 `GetNamePlateForUnit` / `GetNamePlateSize` / `GetNamePlates`，没有按阵营的 setter；
   而且本模块对所有板用的是**同一套宽高**，按阵营分设本就多余。曾参考其他插件看到
-  `SetNamePlateEnemySize/FriendlySize`，查手册确认本客户端没有，已**从代码里删掉**；
+  `SetNamePlateEnemySize/FriendlySize`，**手册未收录**，且本模块对所有板用同一套宽高、本就用不上，
+  已**从代码里删掉**；
 - 首次接管前用 `GetNamePlateSize` 记下旧尺寸，关闭模块时还原；
 - 战斗中 `InCombatLockdown()` 是受保护状态，改不了，先记 `sizePending`，`PLAYER_REGEN_ENABLED` 补做；
 - hook `NamePlateDriverFrame.UpdateNamePlateOptions`（同样特性探测）——暴雪在设置/CVar 变化时会重排，
@@ -666,6 +673,56 @@ Utils/Skin.lua               皮肤原语（剥皮、底板、按钮/页签/滚�
   走 `module:HandleCommand(rest)` 通用转发，`Core` 不知道任何具体子命令。
 - **下拉菜单**与**编辑模式（Edit Mode）**自带的弹层样式未覆盖。
 
+### 信息栏（InfoBar）
+
+贴**顶边**（可切到底边）的一整幅细条，默认高 14px，默认**悬停淡入**：
+平时只露出 0.25 不透明度的底板，鼠标移上去文字才浮现（底板升到 0.5）、移开再淡出；
+关掉「悬停淡入」则始终以 0.65 底板 + 全不透明文字常显。
+进战斗时边缘按 `danger` 色呼吸闪烁，日历有**待处理邀请**时转黄；
+宠物对战开启时整条隐藏。横条 `BACKGROUND` 层级（与本插件其它自建面板一致），
+永远不会盖住游戏 UI —— 顶边默认位置也不会压到小地图（Minimap 模块已把它移到右下角）。
+
+#### 6 个数据块（每个可单独开关）
+
+| 块 | 显示 | 数据来源 | 本客户端实测 |
+|----|------|----------|--------------|
+| `gold` 金钱 | 当前金额；悬停显示本次会话收入 / 支出 / 净额；左键开角色面板 | `GetMoney` + `PLAYER_MONEY` | ✅ 但 **`GetMoneyString` 不存在** → 金额格式化在本插件内自己写 |
+| `durability` 耐久 | 10 个可耐久槽位的平均百分比 | `GetInventoryItemDurability` + `UPDATE_INVENTORY_DURABILITY` | ⚠️ 手册写的是 `(slot)`，零售是 `(unit, slot)` → **运行期两种都试**，以不抛 Usage 错的为准，结果打印进 diagnose |
+| `currency` 货币 | 背包里显示的货币（最多 2 种） | `C_CurrencyInfo.GetCurrencyListInfo` + `CURRENCY_DISPLAY_UPDATE` | ✅ 但零售的 `isWatched` 字段本客户端**没有**，改用 `CurrencyInfo.isShowInBackpack` 等价替代 |
+| `system` 系统 | `延迟 · FPS · 插件内存`（每秒刷新，内存每 5 秒重算一次） | `GetNetStats` / `GetFramerate` / `C_AddOns.GetNumAddOns` + `GetAddOnMemoryUsage` | ✅ `GetNetStats` 第三个返回值是**数字**（不是列表）；计数与取名在 `C_AddOns` 命名空间下，**裸全局 `GetNumAddOns` / `GetAddOnName` 不是本客户端全局** |
+| `spec` 专精 | 当前专精名；悬停列出全部专精与职责；左键开天赋/专精面板 | `C_SpecializationInfo.GetSpecialization` / `GetSpecializationInfo` | ✅ 命名空间从全局改到了 `C_SpecializationInfo.` |
+| `friends` 好友 | 在线 / 总数；左键开好友列表 | `C_FriendList.GetNumFriends` / `GetNumOnlineFriends` + `FRIENDLIST_UPDATE` | ⚠️ 两个都标 `RequiresFriendList`，列表未加载时读作 0；**刻意不列具体好友名** —— 本客户端 `GetFriendInfo` 的参数是 name 而非零售的 index，猜不得 |
+
+**取不到数据就把自己藏起来**：`SetText("")` 会隐藏该块并重新排版，
+所以某个数据源在这台客户端上失效时，代价是**少一个数字**，而不是条上留一个空洞或打印一条错误。
+整块 updater 抛错时只报一次（`block.reported`），不会每来一个事件刷一次屏。
+
+#### 关键取舍
+
+- **不用 `RegisterStateDriver`**（手册未收录）：宠物对战隐藏改用
+  `PET_BATTLE_OPENING_START` / `PET_BATTLE_CLOSE` 两个事件显隐，效果等价。
+- **悬停判定用「进入 / 离开计数」**：从条本体走到数据块会先触发条的 `OnLeave`，
+  只看一次 OnLeave 会在光标明明还在条上时把整条淡出。
+- **淡入与呼吸闪烁共用一个 `OnUpdate`**：文字 alpha、底板 alpha、闪烁相位三者驱动全部绘制，
+  静止时 `SetScript("OnUpdate", nil)` 自动停表。
+- **主题刷新后补回动画 alpha**：`Widget:RefreshThemes` 会按注册时的 `bgAlpha` 整体平铺，
+  本模块的 `MONETUI_THEME_CHANGED` 监听在它之后（工具层文件期注册、模块登录期注册），
+  负责把动画值重新盖上去。
+- **打开暴雪面板一律 `_G[名字]` + `InCombatLockdown` + pcall**：
+  `ToggleCharacter` / `ToggleFriends` / `ToggleTalentFrame` 都不在手册里，缺了只是点不动。
+- **金额、延迟、帧率、耐久、货币数量、好友数全部先过 `Secrets.Number`**，读不到就留空。
+- 块宽度**按文字自适应**（`GetStringWidth + 16`，下限 40），文字变了会立刻重新排版。
+
+配置项在「信息栏」分组：贴边（顶/底）、高度（12/14/16/18）、悬停淡入、战斗呼吸闪烁、6 个块的开关。
+模块开关与配置变更都**即时生效、无需重载**。
+
+#### 自检
+
+`/mui infobar diagnose` 打印三段：`PROBED` 里 20 个函数的存在 / 缺失、
+耐久签名的实测结果（`slot` 还是 `unit, slot`，尚未探测时会说明怎么触发）、
+以及 6 个块各自的状态（配置关闭 / 未构建 / 已隐藏无数据 / 显示中）与可见计数。
+同样走 `module:HandleCommand(rest)` 通用转发。
+
 ### 字体资源
 
 | 字体 | 文件 | 用途 | 来源 |
@@ -692,6 +749,7 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | `Libs/LibActionButton-1.0/` | **BSD-3-Clause** 第三方库（作者 nevcairiel），取自 Andromeda 随包的 forever 适配版。MonetUI 只做了 3 处改动，全部标有 `MonetUI change:`：库名改为 `LibActionButton-1.0-MonetUI`、静态引用的 LibCustomGlow 改为标准 LibStub 查找、缺 CallbackHandler 时用内联空实现。BSD-3 与 GPL-3 不冲突（BSD 代码既可作为 GPL 项目的一部分，也可被独立项目使用），所以它不会把 MonetUI 拖进 GPL。许可原文见 `Libs/LibActionButton-1.0/LICENSE.txt` |
 | 布局坐标与尺寸数值 | 参考 **Andromeda**（GPL-3.0）的 `modules/unitframe/unitframe.lua`、`gui/configs.lua` 与 `core/uiscale.lua`。布局思路与数字本身不受版权保护，且已按 MonetUI 的 1:1 坐标系重新取值（血条高度即取其实际厚度的约 50%） |
 | 界面美化（Skins）思路 | 参考 **EllesmereUIBlizzardSkin**（window engine + 逐窗口 pack）、**Andromeda**（theme 注册表 + 逐面板 reskin）、**ElvUI Skins**（sink 注册 + `StripTextures`/backdrop）与 **ForeverUI**（刻意只做 HUD）。只借鉴**分层与接口用法**，Lua 全部独立实现，未拷贝任一份代码 |
+| 信息栏（InfoBar）结构 | 参考 **Andromeda**（GPL-3.0）`modules/infobar/` 的**结构与取值**：一条贴边横条 + 按左右两侧累加偏移排布的数据块、默认高 14、悬停淡入的 0.25/0.5 与战斗闪烁。数据块的 API 选择、读取方式与全部实现代码为本项目独立编写（且该参考在本客户端本就不可用：`RegisterStateDriver`/`GetMoneyString`/`ToggleCharacter` 均不在本客户端手册内） |
 | 动作条架构 | 参考 Andromeda（GPL-3.0）`modules/actionbar/` 的**结构与取值**：header + `_onstate-page` + `RegisterStateDriver` 的分工、每页 12 槽的编号方式、`fullPage` 条件串与各条固定页号、"重定位暴雪框体"而非销毁。这些是接口用法与配置值，不含 Andromeda 的代码 |
 | 小地图矩形遮罩 | 起初拷贝了 Andromeda 的 `rectangle-mask.blp`；现已**改为自绘**（`tools/make-minimap-mask.ps1` 生成并自校验） |
 
@@ -826,7 +884,7 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | 2026-10-15 | 减益光环**借用暴雪**：把 `UnitFrame.AurasFrame` 重挂到自己板上，不读 `C_UnitAuras` | 受限状态下插件读不到光环，而暴雪自己的板仍能画；只借位置，不借数据（ForeverUI 技巧） |
 | 2026-10-15 | "显示哪些单位"通过**拨客户端 CVar**（`nameplateShow*` / `nameplateMaxDistance`），并在关闭时原样写回 | 有没有姓名板是客户端决定，插件无法事后加板；记下旧值逐个还原，不残留 |
 | 2026-10-15 | 敌对分类 = `UnitIsFriend("player", u)` 为假（**敌对玩家与敌对 NPC 都算**），友方 NPC 单独一档 | 只按 `UnitIsPlayer` 分会把"敌方开关"错配到友好 NPC，反而管不到怪物 |
-| 2026-10-15 | 点击区尺寸**只用文档化的** `C_NamePlate.SetNamePlateSize`（特性探测 + pcall），并从代码里**删掉**曾从参考插件看来的 `SetNamePlateEnemySize/FriendlySize`；hook `NamePlateDriverFrame.UpdateNamePlateOptions` 重盖 | `api_search` 实测该命名空间 `siblings` 只有 `GetNamePlateForUnit/GetNamePlateSize/GetNamePlates`，**没有**按阵营 setter；本模块对所有板用同一套宽高，那两个本就冗余。参考插件的对象不能当本客户端的依据 |
+| 2026-10-15 | 点击区尺寸**只用文档化的** `C_NamePlate.SetNamePlateSize`（特性探测 + pcall），并从代码里**删掉**曾从参考插件看来的 `SetNamePlateEnemySize/FriendlySize`；hook `NamePlateDriverFrame.UpdateNamePlateOptions` 重盖 | `api_search` 给出的 `siblings` 只有 `GetNamePlateForUnit/GetNamePlateSize/GetNamePlates`，**未收录**按阵营 setter；真正的原因是我们对所有板用同一套宽高，那两个本就用不上。注意手册并不完整（缺 `GetMoneyString`、`GetGuildInfo` 等常见 API），**"未收录"≠"不存在"**，所以结论靠的是"用不上"而非"不存在"。参考插件的对象不能当本客户端的依据 |
 | 2026-10-15 | 战斗中不改点击区尺寸，记 `sizePending` 到 `PLAYER_REGEN_ENABLED` 补做 | `InCombatLockdown` 下改姓名板尺寸是受保护操作，会失败甚至报错 |
 | 2026-10-15 | 施法条填充用**只算 `GetTime()*1000`** 的 OnUpdate 交给 `SetValue`，倒计时文字仅在结束时间可读时生成 | 填充的裁剪由客户端完成（保密值也可），文字要真算术，读不到就留空（见 4.6） |
 | 2026-10-15 | 姓名板整体走 `Widget:Font/Bar/CreateFrame` + `Widget:Theme`，边框在 `MONETUI_THEME_CHANGED` 后按仇恨/目标重刷 | 与其它模块同一套主题管线；主题监听器先跑，模块后跑，同 tick 内边框覆盖胜出 |
@@ -839,7 +897,15 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | 2026-10-15 | 下拉菜单/提示边框默认关闭，菜单只染 backdrop 不剥皮 | 菜单背景靠 backdrop 而非区域贴图，剥皮会变透明；菜单框架是版本相关的非文档 API |
 | 2026-10-15 | **参考插件的暴雪对象名与函数名一律不采信**：Skins 的窗口/控件名全部按现代暴雪 UI 自写，经 `_G[name]` 防御取用，取不到就静默跳过 | Andromeda 等参考是过期版本、在 Forever 上本就不工作；它的"正确对象"对我们没有约束力。名字错的代价是**静默失效**而非报错，所以更要在客户端上实测 —— 见下一行的 `diagnose` 自检 |
 | 2026-10-15 | 新增 `ns.ResolvePath(path)` 共享探测 + 斜杠自检：`/mui skins diagnose` 逐条核对每个皮肤期望的暴雪对象，`/mui nameplates diagnose` 同理 | 把"名字可能不对"从担忧变成可执行的事实清单：打印 found/missing 一次，缺的名字照单补即可。斜杠命令走 `module:HandleCommand(rest)` 通用转发，不给 `Core` 加硬编码分支 |
-| 2026-10-15 | 手册优先于参考插件：新用到的 API 先 `api_search`/`api_get` 核对（含 `siblings` 成员表与 `SecretArguments` 限制），拿不准就留特性探测 + pcall | `wuxian check` 的 `api-unknown` warning 就是这类"抄来的名字"的报警器；本次据此清零了姓名板 8 处 |
+| 2026-10-15 | 手册优先于参考插件：新用到的 API 先 `api_search`/`api_get` 核对（含 `siblings` 成员表与 `SecretArguments` 限制），拿不准就留特性探测 + pcall，最后用 `diagnose` 在真机上验 | `wuxian check` 的 `api-unknown` warning 就是这类"抄来的名字"的报警器，据此清零了姓名板 8 处。**但手册本身不完整**（`GetMoneyString`/`GetGuildInfo`/`RegisterStateDriver` 等常见 API 都查不到），所以"手册没有"只是一条弱证据，落点必须是真机探测 |
+| 2026-10-15 | 新增信息栏 `InfoBar`，沿用"引擎层 + 数据块层"结构（`InfoBar.lua` 容器/排版/动画/自检，`Blocks.lua` 按 key 注册 6 个块） | 与 Skins 的"引擎 + 分窗口"同构：块可单独开关，某个数据源失效只塌自己，不牵连整条 |
+| 2026-10-15 | 信息栏**不使用 `RegisterStateDriver`**，宠物对战隐藏改用 `PET_BATTLE_OPENING_START` / `PET_BATTLE_CLOSE` 事件 | 手册未收录 `RegisterStateDriver`；事件方案在任何客户端都成立，不需要"状态驱动"这层间接 |
+| 2026-10-15 | 数据块**取不到数据就自隐藏**（`SetText("")` → 隐藏该块 + 重排版），整块 updater 抛错只报一次 | 这台客户端"手册没有 / 参数不同"已被反复证实；宁可少显示一个数字，也不要在条上留空洞、更不能刷屏报错 |
+| 2026-10-15 | 耐久签名**运行期探测**：先 `pcall(fn, slot)`，不抛 Usage 错就用，否则再试 `pcall(fn, "player", slot)` | 手册写 `(slot)`、零售是 `(unit, slot)`，而"参数"正是参考插件最不可信的部分；抛错而不是返回 nil，是这次能靠 pcall 判定的**前提**，结论打印进 diagnose |
+| 2026-10-15 | 货币的"已跟踪"标记用 `CurrencyInfo.isShowInBackpack`，不做零售的 `isWatched` | 本客户端 `CurrencyInfo` 结构里没有 `isWatched` 字段；`isShowInBackpack`（背包栏旁显示的那种货币）语义等价 |
+| 2026-10-15 | 插件内存自己累加（`C_AddOns.GetNumAddOns` + `GetAddOnName` + `GetAddOnMemoryUsage`），没有合计接口就不假装有 | 没有"总内存"API。**更要紧的是计数与取名都在 `C_AddOns` 命名空间**：裸全局 `GetNumAddOns`/`GetAddOnName` 不是本客户端全局，是 `wuxian check` 的 `moved` 警告抓出来的 |
+| 2026-10-15 | **`api_get` 会静默模糊匹配，不能当"这个名字可用"的证据**；改名的全局以 `wuxian check` 的 `moved` 警告为准 | 查 `GetNumAddOns` 得到 `FOUND`，实际对应的是 `C_AddOns.GetNumAddOns` —— 两条工具链各覆盖一半，缺一就会把"换过名的全局"当成"没换名" |
+| 2026-10-15 | 信息栏默认贴顶边、默认**悬停淡入**；悬停判定用「进入/离开计数」而不是单次 `OnLeave` | 顶边避开底部动作条（Minimap 模块已把小地图移到右下角，顶边整条是空的）。条本体与数据块之间移动时父 `OnLeave` 会先于子 `OnEnter`，单次判定会把光标仍在条上的整条误淡出 |
 
 ---
 

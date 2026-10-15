@@ -2,7 +2,7 @@
 ## Title: MonetUI
 ## Notes: Monet-style UI addon - adaptive Impressionist color engine integration
 ## Author: EastHillGu
-## Version: 0.9.0
+## Version: 0.10.0
 ## Category: Interface
 ## X-Website: https://github.com/EastHillGu/MonetUI
 ## SavedVariables: MonetUIDB
@@ -36,6 +36,10 @@ Modules\BagFrame\BagFrame.lua
 Modules\QuestTracker\QuestTracker.lua
 Modules\ActionBars\ActionBars.lua
 Modules\Nameplates\Nameplates.lua
+
+# InfoBar (screen-edge strip with data blocks)
+Modules\InfoBar\InfoBar.lua
+Modules\InfoBar\Blocks.lua
 
 # Skins (Blizzard panel beautification)
 Modules\Skins\Skins.lua

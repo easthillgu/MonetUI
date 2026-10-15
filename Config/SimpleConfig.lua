@@ -20,6 +20,7 @@ local refreshStatus
 local MODULE_ORDER = {
     "UnitFrames", "Cooldown", "BuffFrame",
     "Minimap", "BagFrame", "QuestTracker", "ActionBars", "Nameplates", "Skins",
+    "InfoBar",
 }
 
 local MODULE_LABEL = {
@@ -32,6 +33,7 @@ local MODULE_LABEL = {
     ActionBars   = "动作条 (ActionBars)",
     Nameplates   = "姓名板 (Nameplates)",
     Skins        = "界面美化 (Skins)",
+    InfoBar      = "信息栏 (InfoBar)",
 }
 
 -- -- Widget helpers -----------------------------------------------------------
@@ -688,6 +690,76 @@ function SimpleConfig:Build()
                     y = y - 26
                 end
             end
+        end
+
+        y = y - 4
+    end
+
+    -- -- InfoBar (screen-edge strip) ----------------------------------------
+    local infobar = ns:GetModule("InfoBar")
+    if infobar then
+        MakeSeparator(panel, y, "信息栏")
+        y = y - 26
+
+        -- Rebuild nothing on a settings change: the strip is re-anchored and
+        -- the blocks re-measured in place.
+        local function ApplyBar()
+            if infobar.Reapply then infobar.Reapply()
+            else infobar:ApplyLayout() end
+        end
+
+        MakeDropdown(panel, y, "贴边", {
+            { value = true,  text = "顶边" },
+            { value = false, text = "底边" },
+        },
+            function() return infobar:Settings().anchorTop end,
+            function(value)
+                infobar:Settings().anchorTop = value
+                ApplyBar()
+            end)
+        y = y - 28
+
+        MakeDropdown(panel, y, "高度", {
+            { value = 12, text = "12 px" },
+            { value = 14, text = "14 px" },
+            { value = 16, text = "16 px" },
+            { value = 18, text = "18 px" },
+        },
+            function() return infobar:Settings().height end,
+            function(value)
+                infobar:Settings().height = value
+                ApplyBar()
+            end)
+        y = y - 28
+
+        MakeCheckbox(panel, "悬停淡入（平时只露底板）", y,
+            function() return infobar:Settings().mouseover end,
+            function(value)
+                infobar:Settings().mouseover = value and true or false
+                ApplyBar()
+            end)
+        y = y - 26
+
+        MakeCheckbox(panel, "战斗时边缘呼吸闪烁", y,
+            function() return infobar:Settings().combatPulse end,
+            function(value)
+                infobar:Settings().combatPulse = value and true or false
+                if infobar.RefreshPulse then infobar.RefreshPulse() end
+            end)
+        y = y - 26
+
+        -- One switch per block, in registration order (gold, durability,
+        -- currency | system, spec, friends).
+        for _, block in ipairs(infobar.blocks) do
+            MakeCheckbox(panel, block.label, y,
+                function() return infobar:BlockEnabled(block.key) end,
+                function(value)
+                    local settings = infobar:Settings()
+                    if type(settings.blocks) ~= "table" then settings.blocks = {} end
+                    settings.blocks[block.key] = value and true or false
+                    ApplyBar()
+                end)
+            y = y - 26
         end
 
         y = y - 4

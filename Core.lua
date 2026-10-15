@@ -12,7 +12,7 @@ local LibStub = _G.LibStub
 local LMC = LibStub and LibStub("LibMonetColor-1.0", true)
 
 ns.name = ADDON_NAME
-ns.version = "0.9.0"
+ns.version = "0.10.0"
 
 -- -- Defaults ----------------------------------------------------------------
 
@@ -28,6 +28,7 @@ local DEFAULTS = {
         ActionBars   = true,
         Nameplates   = true,
         Skins        = true,
+        InfoBar      = true,
     },
     theme = {
         useMonetColor  = true,
@@ -169,6 +170,32 @@ local DEFAULTS = {
     skins = {
         font   = "off",
         panels = {},
+    },
+    -- Info bar (信息栏, see Modules/InfoBar/InfoBar.lua): one full-width strip
+    -- along an edge of the screen carrying small data blocks.
+    --   anchorTop   true = pinned to the top edge (the default, so it clears the
+    --               action bars at the bottom); false = bottom edge.
+    --   height      strip height in pixels.  14 matches Andromeda's default and
+    --               fits an 11px font with a little air.
+    --   mouseover   blocks stay invisible and only the faint backdrop shows
+    --               until the cursor is on the strip (Andromeda ships this on).
+    --   combatPulse the edge breathes red while in combat, and turns yellow
+    --               while the calendar has pending invites.
+    --   blocks      one switch per data block; a block whose data source turns
+    --               out to be missing on this client hides itself as well.
+    infobar = {
+        anchorTop   = true,
+        height      = 14,
+        mouseover   = true,
+        combatPulse = true,
+        blocks = {
+            gold       = true,
+            durability = true,
+            currency   = true,
+            system     = true,
+            spec       = true,
+            friends    = true,
+        },
     },
 }
 ns.DEFAULTS = DEFAULTS
@@ -437,7 +464,7 @@ local function PrintHelp()
     ns:Print("  |cffffd100/mui enable|r     启用本体")
     ns:Print("  |cffffd100/mui disable|r    禁用本体（需 /reload）")
     ns:Print("  |cffffd100/mui <模块> on|off|r  单独开关模块")
-    ns:Print("  |cffffd100/mui skins diagnose|r 探测本客户端缺少的暴雪对象名（nameplates 同）")
+    ns:Print("  |cffffd100/mui skins diagnose|r 探测本客户端缺少的对象名（skins / nameplates / infobar 同）")
     ns:Print("  |cffffd100/mui reset|r      恢复默认设置（需 /reload）")
 end
 
