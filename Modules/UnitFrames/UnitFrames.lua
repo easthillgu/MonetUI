@@ -1,5 +1,5 @@
 -- Modules/UnitFrames/UnitFrames.lua
--- Player / target unit frames.
+-- Player / target / focus / pet unit frames in Andromeda's slim-bar style.
 --
 -- The client can hide unit values from addons (see Utils/Secrets.lua).  Bars are
 -- therefore fed the raw values through Secrets.SetBar, while numeric text is only
@@ -27,8 +27,24 @@ local UNIT_LABEL = {
 -- Units we build a frame for (and therefore take over from Blizzard).
 local UNITS = { "player", "target", "focus", "pet" }
 
-local FRAME_WIDTH  = 260
-local FRAME_HEIGHT = 52
+-- Where each unit's text sits, following Andromeda's tag anchors: everything is
+-- drawn just above the bar, clear of the frame's top edge.
+--   name       "LEFT" (above-left) | "RIGHT" (above-right) | "CENTER" (above)
+--   level      true when the level is drawn beside the name
+--   healthText "LEFT" | "RIGHT"
+-- Andromeda gives the player health/power above its bar, the target health left
+-- and name right, and the focus a centred name; its pet frames carry no text at
+-- all (60px is too narrow for a name), which MonetUI keeps.
+local TEXT_LAYOUT = {
+    player = { name = "LEFT",   level = true,  healthText = "RIGHT" },
+    target = { name = "RIGHT",  level = true,  healthText = "LEFT"  },
+    focus  = { name = "CENTER", level = false                       },
+    pet    = {},
+}
+
+local TEXT_GAP   = 3   -- Andromeda's offset from the frame's top edge
+local NAME_SIZE  = 12
+local SMALL_SIZE = 11
 
 -- Blizzard frames we optionally take over.  Note the capitalisation: the frame
 -- globals are PlayerFrame / TargetFrame / FocusFrame / PetFrame, not
@@ -63,36 +79,55 @@ function M:SuppressBlizzard(enable)
     end
 end
 
--- -- Construction -------------------------------------------------------------
+-- -- Geometry ----------------------------------------------------------------
+
+--- Per-unit width and bar heights, with the stored value winning over the
+-- shipped default so the numbers stay tweakable from MonetUIDB.
+local function UnitGeometry(unit)
+    local stored  = ns:DB().unitFrames[unit] or {}
+    local default = ns.DEFAULTS.unitFrames[unit] or {}
+    return stored.width  or default.width  or 160,
+           stored.health or default.health or 4,
+           stored.power  or default.power  or 1
+end
+
+local function FrameChrome()
+    local db = ns:DB().unitFrames
+    return db.border or 1, db.split or 1
+end
+
+-- -- Text ---------------------------------------------------------------------
 
 local function UpdateName(frame)
+    local nameText = frame.name
+    if not nameText then return end   -- pet frames carry no text
     local unit = frame.unit
     if not UnitExists(unit) then return end
 
-    local name
-    local classFile
+    local name, classFile
     if Secrets.CanReadIdentity(unit) then
         name = UnitName(unit)
         local _, class = UnitClass(unit)
         classFile = class
     end
-    frame.name:SetText(name or frame.label)
+    nameText:SetText(name or frame.label)
 
     local r, g, b = Color:ClassColor(classFile)
     if not r then
         r, g, b = Color:GetEdge()
     end
-    frame.name:SetTextColor(r, g, b, 1)
+    nameText:SetTextColor(r, g, b, 1)
 
-    local level = Secrets.Number(UnitLevel(unit))
-    if level and level > 0 then
-        frame.level:SetText("Lv" .. level)
-        frame.level:Show()
-    elseif level == -1 then
-        frame.level:SetText("??")
-        frame.level:Show()
-    else
-        frame.level:Hide()
+    local levelText = frame.level
+    if levelText then
+        local level = Secrets.Number(UnitLevel(unit))
+        if level and level > 0 then
+            levelText:SetText("Lv" .. level)
+        elseif level == -1 then
+            levelText:SetText("??")
+        else
+            levelText:SetText("")
+        end
     end
 end
 
@@ -102,18 +137,20 @@ local function UpdateHealth(frame)
 
     Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))
 
+    local healthText = frame.healthText
+    if not healthText then return end -- pet frames carry no text
+
     if Secrets.CanMeasureHealth(unit) then
         local current = Secrets.Number(UnitHealth(unit))
         local maximum = Secrets.Number(UnitHealthMax(unit))
         if current and maximum and maximum > 0 then
-            frame.healthText:SetText(Math:ShortNumber(current) .. " / " .. Math:ShortNumber(maximum))
-            frame.healthText:Show()
+            healthText:SetText(Math:ShortNumber(current) .. " / " .. Math:ShortNumber(maximum))
         else
-            frame.healthText:Hide()
+            healthText:SetText("")
         end
     else
         -- restricted: keep the bar, hide the numbers
-        frame.healthText:Hide()
+        healthText:SetText("")
     end
 end
 
@@ -137,6 +174,8 @@ local function UpdatePower(frame)
     frame.power:SetShown(maximum == nil or maximum > 0)
 end
 
+-- -- Construction -------------------------------------------------------------
+
 --- Resolve the frame a stored position is anchored to.
 -- "UIParent" (or nil) means the screen; anything else names another unit frame
 -- built by this module, which lets target / focus / pet follow the player.
@@ -155,38 +194,68 @@ local function PositionFrame(frame)
     frame:SetPoint(point, ResolveRelative(stored), relativePoint, stored.x or 0, stored.y or 0)
 end
 
+--- A FontString anchored above the bar: side "LEFT", "RIGHT" or "CENTER".
+local function TextAbove(frame, side, size, key, colorKey, justify)
+    local text = Widget:Font(frame, size, key, colorKey, justify or side)
+    if side == "CENTER" then
+        text:SetPoint("BOTTOM", frame, "TOP", 0, TEXT_GAP)
+    elseif side == "RIGHT" then
+        text:SetPoint("BOTTOMRIGHT", frame, "TOPRIGHT", 0, TEXT_GAP)
+    else
+        text:SetPoint("BOTTOMLEFT", frame, "TOPLEFT", 0, TEXT_GAP)
+    end
+    return text
+end
+
 local function CreateUnitFrame(unit, position)
+    local border, split = FrameChrome()
+    local width, healthHeight, powerHeight = UnitGeometry(unit)
+    local height = border * 2 + healthHeight + split + powerHeight
+
     local frame = Widget:CreateFrame("MonetUI" .. unit:gsub("^%l", string.upper) .. "Frame",
-        UIParent, FRAME_WIDTH, FRAME_HEIGHT)
+        UIParent, width, height)
     frame.unit = unit
     frame.label = UNIT_LABEL[unit] or unit
 
-    local health = Widget:Bar(frame, FRAME_WIDTH - 4, FRAME_HEIGHT - 4)
-    health:SetPoint("TOPLEFT", frame, "TOPLEFT", 2, -2)
+    -- Slim bars: health hugs the top inset, power the bottom one.
+    local health = Widget:Bar(frame, width - border * 2, healthHeight)
+    health:SetPoint("TOPLEFT", frame, "TOPLEFT", border, -border)
+    health:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -border, -border)
     health:SetStatusBarColor(Color:GetHealth())
 
     local power = Widget:Bar(frame)
-    power:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 2, 2)
-    power:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -2, 2)
-    power:SetHeight(13)
+    power:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", border, border)
+    power:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -border, border)
+    power:SetHeight(powerHeight)
     power:SetStatusBarColor(Color:GetResource())
-
-    local name = Widget:Font(frame, 14, "pixel", "edge", "LEFT")
-    name:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -7)
-
-    local level = Widget:Font(frame, 11, "pixel", "neutral", "RIGHT")
-    level:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -8)
-
-    local healthText = Widget:Font(frame, 12, "pixel", { r = 1, g = 1, b = 1 }, "RIGHT")
-    healthText:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -8, 5)
 
     frame.health = health
     frame.power = power
-    frame.name = name
-    frame.level = level
-    frame.healthText = healthText
 
-    Widget:Theme(frame, { thickness = 1, bgAlpha = 0.9 })
+    local layout = TEXT_LAYOUT[unit] or {}
+    if layout.name then
+        frame.name = TextAbove(frame, layout.name, NAME_SIZE, "pixel", "edge",
+            layout.name == "CENTER" and "CENTER" or layout.name)
+    end
+
+    if frame.name and layout.level then
+        -- Beside the name, on the inner side so it never leaves the bar.
+        local level = Widget:Font(frame, SMALL_SIZE, "pixel", "neutral",
+            layout.name == "RIGHT" and "RIGHT" or "LEFT")
+        if layout.name == "RIGHT" then
+            level:SetPoint("RIGHT", frame.name, "LEFT", -5, 0)
+        else
+            level:SetPoint("LEFT", frame.name, "RIGHT", 5, 0)
+        end
+        frame.level = level
+    end
+
+    if layout.healthText then
+        frame.healthText = TextAbove(frame, layout.healthText, SMALL_SIZE, "pixel",
+            { r = 1, g = 1, b = 1 })
+    end
+
+    Widget:Theme(frame, { thickness = border, bgAlpha = 0.9 })
     Widget:UnitTooltip(frame, unit)
 
     frame:SetMovable(true)
@@ -197,18 +266,18 @@ local function CreateUnitFrame(unit, position)
         self:StopMovingOrSizing()
         local point, relativeTo, relativePoint, x, y = self:GetPoint()
         local db = ns:DB()
-        db.unitFrames[unit] = {
-            point         = point,
-            relativeTo    = (relativeTo == UIParent) and "UIParent"
-                            or (relativeTo and relativeTo.unit) or "UIParent",
-            relativePoint = relativePoint,
-            x = Math:Round(x, 0),
-            y = Math:Round(y, 0),
-        }
+        local stored = db.unitFrames[unit]
+        stored.point         = point
+        stored.relativeTo    = (relativeTo == UIParent) and "UIParent"
+                               or (relativeTo and relativeTo.unit) or "UIParent"
+        stored.relativePoint = relativePoint
+        stored.x = Math:Round(x, 0)
+        stored.y = Math:Round(y, 0)
+
         -- Anything anchored to this frame has to follow it.
         for _, other in pairs(frames) do
-            local stored = other ~= self and db.unitFrames[other.unit]
-            if stored and stored.relativeTo == unit then
+            local target = other ~= self and db.unitFrames[other.unit]
+            if target and target.relativeTo == unit then
                 PositionFrame(other)
             end
         end

@@ -32,6 +32,9 @@ Media.texture = {
     mask      = "Interface\\CharacterFrame\\TempPortraitAlphaMask",
     ring      = "Interface\\Minimap\\MiniMap-TrackingBorder",
     glow      = "Interface\\SpellActivationOverlay\\IconAlertAnts",
+    -- 256x256 alpha mask that keeps only the middle 190px band: it turns the
+    -- circular minimap into Andromeda's 256x190 rectangle.
+    minimapRect = ASSET .. "Textures\\rectangle-mask",
 }
 
 --- Resolve a font key to a path (unknown keys fall back to the pixel font).

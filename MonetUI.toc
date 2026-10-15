@@ -32,3 +32,4 @@ Modules\BuffFrame\BuffFrame.lua
 Modules\Minimap\Minimap.lua
 Modules\BagFrame\BagFrame.lua
 Modules\QuestTracker\QuestTracker.lua
+Modules\ActionBars\ActionBars.lua

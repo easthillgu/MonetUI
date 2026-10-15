@@ -1,16 +1,14 @@
 -- Modules/Minimap/Minimap.lua
--- Minimap border / text beautification.
+-- Minimap reshape + text.
 --
--- The module does not replace the minimap, it frames it: the cluster is moved to
--- the bottom-right corner (Andromeda's placement), the default border is tinted
--- with the Monet edge colour, the decorative compass is removed and a themed
--- panel is placed behind the cluster.  Coordinates and a small clock sit above
--- it.
+-- The module does not replace the minimap, it reworks it: the cluster is moved
+-- to the bottom-right corner and the circular map becomes a 256x190 rectangle
+-- (Andromeda's shape), a themed panel is placed behind it and the default
+-- circular art is removed.  Coordinates and a small clock sit above it.
 
 local ADDON_NAME, ns = ...
 
 local Widget   = ns.Widget
-local Color    = ns.Color
 local EventBus = ns.EventBus
 
 local M = { name = "Minimap" }
@@ -54,9 +52,14 @@ end
 
 -- -- Skinning -----------------------------------------------------------------
 
--- Andromeda parks the minimap in the bottom-right corner; its UI_GAP is 33.
-local MINIMAP_GAP = 33
+-- Andromeda parks the minimap in the bottom-right corner and stretches it into a
+-- 256x190 rectangle; its UI_GAP is 33.
+local MINIMAP_GAP    = 33
+local MINIMAP_CANVAS = 256          -- the (square) minimap canvas
+local MINIMAP_CROP   = 33           -- (256 - 190) / 2, hidden above and below
+local MINIMAP_HEIGHT = MINIMAP_CANVAS - MINIMAP_CROP * 2
 local minimapWarned = false
+local shapeOverridden = false
 
 --- Move Blizzard's minimap cluster to the bottom-right corner.
 -- Guarded: Edit Mode also anchors this frame, and a failure here (which would
@@ -75,12 +78,34 @@ local function MoveCluster()
     end
 end
 
-local function ApplyBorderTint()
-    local er, eg, eb = Color:GetEdge()
-    local border = _G.MinimapBorder
-    if border and border.SetVertexColor then border:SetVertexColor(er, eg, eb) end
-    local borderTop = _G.MinimapBorderTop
-    if borderTop and borderTop.SetVertexColor then borderTop:SetVertexColor(er, eg, eb) end
+--- Turn the circular minimap into a 256x190 rectangle the way Andromeda does:
+-- the canvas stays 256x256 and a mask texture blanks the top and bottom bands,
+-- while the hit rectangle is shrunk to match what is actually visible.
+local function ReshapeMinimap(minimap)
+    pcall(minimap.SetMaskTexture, minimap, ns.Media:Texture("minimapRect"))
+    pcall(minimap.SetSize, minimap, MINIMAP_CANVAS, MINIMAP_CANVAS)
+    pcall(minimap.SetHitRectInsets, minimap, 0, 0, MINIMAP_CROP, MINIMAP_CROP)
+    pcall(minimap.SetClampRectInsets, minimap, 0, 0, 0, 0)
+    pcall(minimap.SetClampedToScreen, minimap, true)
+
+    -- Third-party minimap buttons ask this to place themselves; telling them the
+    -- map is square keeps them inside the rectangle (this is what Andromeda
+    -- does).  Overriding a Blizzard global is deliberate here, hence the write.
+    if not shapeOverridden then
+        shapeOverridden = true
+        _G.GetMinimapShape = function() return "SQUARE" end
+    end
+end
+
+--- Remove the default circular art: it no longer fits the rectangular map (the
+-- themed panel behind the cluster is the frame now).
+local function ClearDefaultArt()
+    for _, name in ipairs({ "MinimapBorder", "MinimapBorderTop", "MinimapCompassTexture",
+                            "MinimapBackdrop", "MinimapNorthTag" }) do
+        local region = _G[name]
+        if region and region.Hide then region:Hide() end
+        if region and region.SetAlpha then region:SetAlpha(0) end
+    end
 end
 
 local function Skin()
@@ -88,38 +113,30 @@ local function Skin()
     if not minimap then return false end
 
     MoveCluster()
-    ApplyBorderTint()
+    ReshapeMinimap(minimap)
+    ClearDefaultArt()
 
-    local compass = _G.MinimapCompassTexture
-    if compass then compass:Hide() end
-
-    local backdrop = _G.MinimapBackdrop
-    if backdrop then backdrop:Hide() end
-
-    local northTag = _G.MinimapNorthTag
-    if northTag and northTag.SetVertexColor then
-        local r, g, b = Color:GetNeutral()
-        northTag:SetVertexColor(r, g, b)
-    end
-
-    -- framed panel behind the minimap
+    -- framed panel hugging the visible rectangle
     if not panel then
-        panel = Widget:CreateFrame("MonetUIMinimapPanel", UIParent, 150, 150)
+        panel = Widget:CreateFrame("MonetUIMinimapPanel", UIParent,
+            MINIMAP_CANVAS + 8, MINIMAP_HEIGHT + 8)
         panel:SetFrameStrata("BACKGROUND")
         panel:SetFrameLevel(1)
         panel:EnableMouse(false)
-        panel:SetPoint("CENTER", minimap, "CENTER", 0, 0)
-        panel:SetSize(150, 150)
         Widget:Theme(panel, { thickness = 2, bgAlpha = 0.35 })
     end
+    panel:ClearAllPoints()
+    panel:SetPoint("CENTER", minimap, "CENTER", 0, 0)
 
     -- coordinates + clock above the minimap (it now sits in the bottom-right,
     -- so there is no room below it)
     local textParent = _G.MinimapCluster or UIParent
     if not coordText then
         coordText = Widget:Font(textParent, 12, "pixel", "neutral", "CENTER")
-        coordText:SetPoint("BOTTOM", minimap, "TOP", 0, 6)
     end
+    coordText:ClearAllPoints()
+    coordText:SetPoint("BOTTOM", minimap, "TOP", 0, 6 - MINIMAP_CROP)
+
     if not clockText then
         clockText = Widget:Font(textParent, 12, "pixel", "edge", "CENTER")
         clockText:SetPoint("RIGHT", coordText, "LEFT", -12, 0)
@@ -160,7 +177,7 @@ function M:Initialize()
     EventBus:Register("ZONE_CHANGED", UpdateCoordinates)
     EventBus:Register("ZONE_CHANGED_NEW_AREA", UpdateCoordinates)
     EventBus:Register("MONETUI_THEME_CHANGED", function()
-        ApplyBorderTint()
+        ClearDefaultArt()
         UpdateClock()
     end)
 end

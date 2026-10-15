@@ -44,11 +44,6 @@ body{
 
 /* ------------------------------------------------------- context (dim) ---- */
 .ctx{ position:absolute; opacity:.32; }
-
-.abtn{ position:absolute; width:34px; height:34px; border:1px solid #6b6a63; border-radius:3px;
-  background:linear-gradient(180deg,rgba(58,62,74,.85),rgba(28,31,40,.9)); }
-.abtn b{ position:absolute; right:2px; bottom:0px; font-size:9px; color:#c9c6bd; font-weight:normal; }
-
 .chat{ position:absolute; left:20px; top:1240px; width:430px; height:180px;
   border:1px solid rgba(120,118,110,.5); background:rgba(10,12,18,.42); }
 .chat div{ font-size:12px; padding:2px 6px; color:#cfcabf; }
@@ -63,27 +58,33 @@ body{
 .obj .done{ color:#7f8f6a; }
 
 /* --------------------------------------------------------- unit frames ---- */
-.uf{ position:absolute; width:260px; height:52px;
-  background:rgba(var(--panel),.92);
+/* border 1px + health 4px + split 1px + power 1px + border 1px = 8px tall */
+.uf{ position:absolute; background:rgba(var(--panel),.92);
   border:1px solid rgba(var(--edge),.95);
-  box-shadow:0 2px 10px rgba(0,0,0,.55); }
-.uf .health{ position:absolute; left:2px; top:2px; width:256px; height:48px; background:rgba(var(--health),.28); }
-.uf .health i{ display:block; height:100%; background:linear-gradient(180deg,rgba(var(--health),.95),rgba(20,120,40,.95)); }
-.uf .power{ position:absolute; left:2px; bottom:2px; width:256px; height:13px;
-  background:rgba(var(--resource),.28); }
-.uf .power i{ display:block; height:100%; background:linear-gradient(180deg,rgba(90,158,240,.98),rgba(var(--resource),.98)); }
-.uf .name{ position:absolute; left:8px; top:5px; font-size:14px; color:rgb(var(--edge)); text-shadow:0 1px 2px #000; }
-.uf .lvl{ position:absolute; right:8px; top:6px; font-size:11px; color:rgb(var(--neutral)); }
-.uf .hp{ position:absolute; right:8px; bottom:3px; font-size:12px; color:#fff; text-shadow:0 1px 2px #000; }
-.uf .badge{ position:absolute; top:-10px; left:-10px; width:19px; height:19px; border-radius:50%;
+  box-shadow:0 1px 6px rgba(0,0,0,.6); }
+.uf .health{ position:absolute; left:0; top:1px; height:4px;
+  background:linear-gradient(180deg,rgba(var(--health),.98),rgba(24,124,44,.98)); }
+.uf .power{ position:absolute; left:0; top:6px; height:1px;
+  background:linear-gradient(90deg,rgba(96,164,244,.98),rgba(var(--resource),.98)); }
+
+/* text row sits just above the bar (Andromeda's 0,3 offset) */
+.uftext{ position:absolute; height:15px; display:flex; align-items:flex-end;
+  font-size:12px; line-height:15px; white-space:nowrap; }
+.uftext .nm{ color:rgb(var(--edge)); text-shadow:0 1px 2px #000; }
+.uftext .lv{ color:rgb(var(--neutral)); font-size:11px; margin-left:5px; }
+.uftext .hp{ color:#fff; font-size:11px; text-shadow:0 1px 2px #000; }
+.uftext.right{ justify-content:flex-end; }
+.uftext.center{ justify-content:center; }
+.uftext.right .lv{ order:-1; margin-left:0; margin-right:5px; }
+
+.badge{ position:absolute; width:19px; height:19px; border-radius:50%;
   background:rgb(var(--accent)); color:#062028; font-size:12px; line-height:19px; text-align:center;
   border:1px solid #0a2a33; box-shadow:0 0 8px rgba(var(--accent),.8); }
 
 /* --------------------------------------------------------------- auras ---- */
 .aura{ position:absolute; width:34px; height:34px; border-radius:3px;
   border:1px solid rgba(var(--edge),.9);
-  box-shadow:0 2px 8px rgba(0,0,0,.6), inset 0 0 10px rgba(0,0,0,.35);
-}
+  box-shadow:0 2px 8px rgba(0,0,0,.6), inset 0 0 10px rgba(0,0,0,.35); }
 .aura.debuff{ border-color:rgba(var(--danger),.92); }
 .aura .ic{ position:absolute; inset:1px; border-radius:2px; }
 .aura .t{ position:absolute; left:0; right:0; top:0; font-size:11px; text-align:center;
@@ -93,25 +94,23 @@ body{
   background:conic-gradient(from 0deg, rgba(0,0,0,.62) 0deg 205deg, rgba(0,0,0,0) 205deg 360deg); }
 
 /* ------------------------------------------------------------- minimap ---- */
-.mm-panel{ position:absolute; left:2382px; top:1262px; width:150px; height:150px;
-  background:rgba(var(--panel),.55); border:1px solid rgba(var(--edge),.55); }
-.mm{ position:absolute; left:2387px; top:1267px; width:140px; height:140px; border-radius:50%;
+.mm-panel{ position:absolute; background:rgba(var(--panel),.55);
+  border:1px solid rgba(var(--edge),.55); }
+.mm{ position:absolute; overflow:hidden;
   background:
-    radial-gradient(60px 60px at 38% 34%, rgba(150,190,140,.55), transparent 70%),
-    radial-gradient(90px 70px at 68% 68%, rgba(90,120,170,.5), transparent 72%),
-    linear-gradient(150deg,#2f4436,#22303f 60%,#1b2530);
-  border:2px solid rgba(var(--edge),.85);
-  box-shadow:0 0 0 3px rgba(12,16,24,.75), 0 4px 16px rgba(0,0,0,.6), inset 0 0 24px rgba(0,0,0,.6); }
+    radial-gradient(120px 80px at 34% 34%, rgba(150,190,140,.6), transparent 70%),
+    radial-gradient(180px 130px at 70% 66%, rgba(90,120,170,.55), transparent 72%),
+    linear-gradient(150deg,#2f4436,#22303f 60%,#1b2530); }
 .mm .nub{ position:absolute; left:50%; top:50%; width:8px; height:8px; margin:-4px 0 0 -4px;
   border-radius:50%; background:#ffe9a8; box-shadow:0 0 6px #ffd97a; }
-.mmtext{ position:absolute; left:2382px; top:1240px; width:154px; height:18px;
-  display:flex; align-items:center; justify-content:center; gap:12px; font-size:12px; }
+.mmtext{ position:absolute; height:20px; display:flex; align-items:center; justify-content:center;
+  gap:14px; font-size:12px; }
 .mmtext .clock{ color:rgb(var(--edge)); }
 .mmtext .coord{ color:rgb(var(--neutral)); }
 
 /* -------------------------------------------------------- annotation UI --- */
 .box{ position:absolute; border:1px solid rgba(var(--accent),.55); border-radius:6px;
-  background:rgba(8,20,28,.86); box-shadow:0 6px 24px rgba(0,0,0,.55); padding:10px 13px; }
+  background:rgba(8,20,28,.88); box-shadow:0 6px 24px rgba(0,0,0,.55); padding:10px 13px; }
 .box h3{ margin:0 0 7px; font-size:16px; font-weight:normal; color:rgb(var(--accent)); letter-spacing:.5px; }
 .box h3 em{ font-style:normal; color:#9fb3bd; font-size:12px; margin-left:6px; }
 .box p{ margin:0 0 5px; font-size:13px; color:#d7dee2; line-height:1.5; }
@@ -120,11 +119,10 @@ body{
 .box .dim{ color:#93a3ac; font-size:12px; }
 .box .n{ display:inline-block; width:17px; height:17px; line-height:17px; text-align:center;
   border-radius:50%; background:rgb(var(--accent)); color:#062028; font-size:11px; margin-right:5px; }
-.banner{ position:absolute; left:900px; top:24px; width:1000px; height:76px;
-  border:1px solid rgba(var(--edge),.5); border-radius:6px; background:rgba(10,16,26,.8);
+.banner{ position:absolute; border:1px solid rgba(var(--edge),.5); border-radius:6px; background:rgba(10,16,26,.82);
   display:flex; flex-direction:column; align-items:center; justify-content:center;
   box-shadow:0 6px 24px rgba(0,0,0,.55); }
-.banner h1{ margin:0; font-size:26px; font-weight:normal; color:#f2ead8; letter-spacing:2px; }
+.banner h1{ margin:0; font-size:25px; font-weight:normal; color:#f2ead8; letter-spacing:2px; }
 .banner h1 b{ color:rgb(var(--edge)); font-weight:normal; }
 .banner span{ margin-top:5px; font-size:13px; color:#9fb3bd; letter-spacing:1px; }
 svg.ann{ position:absolute; inset:0; width:2560px; height:1440px; pointer-events:none; }
@@ -161,82 +159,60 @@ svg.ann{ position:absolute; inset:0; width:2560px; height:1440px; pointer-events
       <p>&nbsp;&nbsp;&nbsp;与长老交谈 (0/1)</p>
       <p>&nbsp;&nbsp;&nbsp;与孩童交谈 (0/1)</p>
     </div>
-
-    <div class="abtn" style="left:1043px; top:1300px;"><b>1</b></div>
-    <div class="abtn" style="left:1083px; top:1300px;"><b>2</b></div>
-    <div class="abtn" style="left:1123px; top:1300px;"><b>3</b></div>
-    <div class="abtn" style="left:1163px; top:1300px;"><b>4</b></div>
-    <div class="abtn" style="left:1203px; top:1300px;"><b>5</b></div>
-    <div class="abtn" style="left:1243px; top:1300px;"><b>6</b></div>
-    <div class="abtn" style="left:1283px; top:1300px;"><b>7</b></div>
-    <div class="abtn" style="left:1323px; top:1300px;"><b>8</b></div>
-    <div class="abtn" style="left:1363px; top:1300px;"><b>9</b></div>
-    <div class="abtn" style="left:1403px; top:1300px;"><b>0</b></div>
-    <div class="abtn" style="left:1443px; top:1300px;"><b>-</b></div>
-    <div class="abtn" style="left:1483px; top:1300px;"><b>=</b></div>
-
-    <div class="abtn" style="left:1043px; top:1344px;"><b>Q</b></div>
-    <div class="abtn" style="left:1083px; top:1344px;"><b>E</b></div>
-    <div class="abtn" style="left:1123px; top:1344px;"><b>R</b></div>
-    <div class="abtn" style="left:1163px; top:1344px;"><b>F</b></div>
-    <div class="abtn" style="left:1203px; top:1344px;"><b>T</b></div>
-    <div class="abtn" style="left:1243px; top:1344px;"><b>G</b></div>
-    <div class="abtn" style="left:1283px; top:1344px;"><b>Z</b></div>
-    <div class="abtn" style="left:1323px; top:1344px;"><b>X</b></div>
-    <div class="abtn" style="left:1363px; top:1344px;"><b>C</b></div>
-    <div class="abtn" style="left:1403px; top:1344px;"><b>V</b></div>
-    <div class="abtn" style="left:1443px; top:1344px;"><b>B</b></div>
-    <div class="abtn" style="left:1483px; top:1344px;"><b>N</b></div>
-
-    <div class="abtn" style="left:2112px; top:1344px; width:32px; height:32px;"></div>
-    <div class="abtn" style="left:2150px; top:1344px; width:32px; height:32px;"></div>
-    <div class="abtn" style="left:2188px; top:1344px; width:32px; height:32px;"></div>
-    <div class="abtn" style="left:2226px; top:1344px; width:32px; height:32px;"></div>
-    <div class="abtn" style="left:2264px; top:1344px; width:32px; height:32px;"></div>
-    <div class="abtn" style="left:2302px; top:1344px; width:32px; height:32px;"></div>
   </div>
 
   <!-- ======================= MonetUI: unit frames ========================= -->
-  <!-- player  CENTER UIParent (0,-180) -->
-  <div class="uf" style="left:1150px; top:874px;">
-    <div class="health"><i style="width:84%"></i></div>
-    <div class="power"><i style="width:62%"></i></div>
-    <div class="name">Monet</div><div class="lvl">Lv80</div>
-    <div class="hp">84.2K / 96.4K</div>
-    <div class="badge">1</div>
+  <!-- player  CENTER UIParent (0,-180)  160x8 -->
+  <div class="uftext" style="left:1200px; top:879px; width:160px;">
+    <span class="nm">Monet</span><span class="lv">Lv80</span>
   </div>
-
-  <!-- target  LEFT = player RIGHT +(40,40) -->
-  <div class="uf" style="left:1450px; top:834px;">
-    <div class="health"><i style="width:71%"></i></div>
-    <div class="power"><i style="width:35%"></i></div>
-    <div class="name">Impressionist</div><div class="lvl">Lv80</div>
-    <div class="hp">62.0K / 87.1K</div>
-    <div class="badge">2</div>
+  <div class="uftext right" style="left:1200px; top:879px; width:160px;">
+    <span class="hp">84.2K / 96.4K</span>
   </div>
-
-  <!-- focus  RIGHT = player LEFT -(272,-40) -->
-  <div class="uf" style="left:618px; top:914px;">
-    <div class="health"><i style="width:93%"></i></div>
-    <div class="power"><i style="width:78%"></i></div>
-    <div class="name">Waterlily</div><div class="lvl">Lv80</div>
-    <div class="hp">90.1K / 96.4K</div>
-    <div class="badge">3</div>
+  <div class="uf" style="left:1200px; top:896px; width:160px; height:8px;">
+    <div class="health" style="width:84%"></div>
+    <div class="power" style="width:62%"></div>
   </div>
+  <div class="badge" style="left:1190px; top:886px;">1</div>
 
-  <!-- pet  RIGHT = player LEFT -(6,0) -->
-  <div class="uf" style="left:884px; top:874px;">
-    <div class="health"><i style="width:100%"></i></div>
-    <div class="power"><i style="width:44%"></i></div>
-    <div class="name">Poppy</div><div class="lvl">Lv80</div>
-    <div class="hp">21.8K / 21.8K</div>
-    <div class="badge">4</div>
+  <!-- target  LEFT = player RIGHT +(40,40)  160x8 -->
+  <div class="uftext" style="left:1400px; top:839px; width:160px;">
+    <span class="hp">62.0K / 87.1K</span>
   </div>
+  <div class="uftext right" style="left:1400px; top:839px; width:160px;">
+    <span class="nm">Impressionist</span><span class="lv">Lv80</span>
+  </div>
+  <div class="uf" style="left:1400px; top:856px; width:160px; height:8px;">
+    <div class="health" style="width:71%"></div>
+    <div class="power" style="width:35%"></div>
+  </div>
+  <div class="badge" style="left:1390px; top:846px;">2</div>
 
-  <!-- ======================= MonetUI: minimap (bottom-right) ============== -->
-  <div class="mm-panel"></div>
-  <div class="mm"><div class="nub"></div></div>
-  <div class="mmtext"><span class="clock">20:14</span><span class="coord">58.3, 41.7</span></div>
+  <!-- focus  RIGHT = player LEFT +(-100,-40)  60x8 -->
+  <div class="uftext center" style="left:1040px; top:839px; width:60px;">
+    <span class="nm">Waterlily</span>
+  </div>
+  <div class="uf" style="left:1040px; top:856px; width:60px; height:8px;">
+    <div class="health" style="width:93%"></div>
+    <div class="power" style="width:78%"></div>
+  </div>
+  <div class="badge" style="left:1030px; top:846px;">3</div>
+
+  <!-- pet  RIGHT = player LEFT +(-6,0)  60x8（无文字，同 Andromeda） -->
+  <div class="uf" style="left:1134px; top:896px; width:60px; height:8px;">
+    <div class="health" style="width:100%"></div>
+    <div class="power" style="width:44%"></div>
+  </div>
+  <div class="badge" style="left:1124px; top:886px;">4</div>
+
+  <!-- ======================= MonetUI: minimap (256x190, bottom-right) ===== -->
+  <div class="mm-panel" style="left:2267px; top:1213px; width:264px; height:198px;"></div>
+  <div class="mm" style="left:2271px; top:1217px; width:256px; height:190px;">
+    <div class="nub"></div>
+  </div>
+  <div class="mmtext" style="left:2271px; top:1188px; width:256px;">
+    <span class="clock">20:14</span><span class="coord">58.3, 41.7</span>
+  </div>
 
   <!-- ======================= MonetUI: buffs / debuffs (top-left) ========== -->
   <div class="aura" style="left:33px; top:33px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#f0b27a,#a85c33);"></div><div class="swipe"></div><div class="t">2m</div></div>
@@ -261,52 +237,58 @@ svg.ann{ position:absolute; inset:0; width:2560px; height:1440px; pointer-events
     </defs>
     <g fill="none" stroke="rgb(122,224,255)" stroke-width="2" stroke-dasharray="9 7" opacity=".95">
       <rect x="27"    y="27"   width="274" height="42"  rx="6"/>
-      <rect x="27"    y="71"   width="164" height="44"  rx="6"/>
-      <rect x="2377"  y="1257" width="160" height="160" rx="10"/>
-      <rect x="2377"  y="1236" width="160" height="20"  rx="6"/>
+      <rect x="27"    y="71"   width="160" height="44"  rx="6"/>
+      <rect x="2262"  y="1212" width="278" height="204" rx="10"/>
+      <rect x="2267"  y="1186" width="264" height="24"  rx="6"/>
+      <rect x="1196"  y="894"  width="8"   height="12"  rx="2"/>
+      <rect x="1396"  y="854"  width="168" height="12"  rx="2"/>
+      <rect x="1036"  y="854"  width="68"  height="12"  rx="2"/>
+      <rect x="1130"  y="894"  width="68"  height="12"  rx="2"/>
     </g>
     <g fill="none" stroke="rgb(122,224,255)" stroke-width="2" marker-end="url(#ar)">
-      <path d="M360,48  L307,48"/>
-      <path d="M360,92  L195,92"/>
-      <path d="M2310,1245 L2373,1245"/>
-      <path d="M2310,1262 L2373,1262"/>
-      <path d="M1180,1030 L1180,930"/>
-      <path d="M900,1030  L900,930"/>
-      <path d="M700,1030  L700,970"/>
-      <path d="M1260,1060 L1740,1060 L1740,890 L1714,890"/>
+      <path d="M360,48   L305,48"/>
+      <path d="M360,92   L191,92"/>
+      <path d="M2200,1240 L2258,1240"/>
+      <path d="M2200,1198 L2263,1198"/>
+      <path d="M1250,1010 L1250,910"/>
+      <path d="M1160,1010 L1160,910"/>
+      <path d="M1070,1010 L1070,872"/>
+      <path d="M1400,1030 L1600,1030 L1600,868 L1564,868"/>
     </g>
   </svg>
 
-  <div class="box" style="left:640px; top:1030px; width:620px; height:150px;">
-    <h3>①-④ 单位框架<em>UnitFrames · 260 × 52 · 位置照搬 Andromeda</em></h3>
-    <p><span class="n">1</span><span class="k">player 玩家</span> CENTER, UIParent CENTER (0, -180) &nbsp;·&nbsp;
-       <span class="n">2</span><span class="k">target 目标</span> LEFT = player RIGHT +(40, 40)</p>
-    <p><span class="n">4</span><span class="k">pet 宠物</span> RIGHT = player LEFT +(-6, 0) &nbsp;·&nbsp;
-       <span class="n">3</span><span class="k">focus 焦点</span> RIGHT = player LEFT +(-272, -40)</p>
-    <p class="dim">Andromeda 的 focus 偏移是 -100，但那边框只有 60 宽；本框 260 宽，外推避免与宠物重叠。</p>
+  <div class="box" style="left:640px; top:1010px; width:700px; height:186px;">
+    <h3>①-④ 单位框架<em>UnitFrames · 细条 160/160/60/60 × 8</em></h3>
+    <p><span class="n">1</span><span class="k">player</span> CENTER (0,-180) · 160×8 &nbsp;·&nbsp;
+       <span class="n">2</span><span class="k">target</span> LEFT = player RIGHT +(40,40) · 160×8</p>
+    <p><span class="n">3</span><span class="k">focus</span> RIGHT = player LEFT +(-100,-40) · 60×8 &nbsp;·&nbsp;
+       <span class="n">4</span><span class="k">pet</span> RIGHT = player LEFT +(-6,0) · 60×8</p>
+    <p class="dim">高度 = 边框 1 + 血条 4 + 间隔 1 + 能量条 1 + 边框 1 = 8；血条贴顶、能量条贴底（同 Andromeda）。</p>
   </div>
 
-  <div class="box" style="left:360px; top:33px; width:420px; height:120px;">
+  <div class="box" style="left:360px; top:33px; width:430px; height:132px;">
     <h3>⑤⑥ 增益 / 减益<em>Auras · 左上</em></h3>
-    <p><span class="n">5</span><span class="k">Buff 增益</span> TOPLEFT (33, -33) · 每行 8 个 · 34×34</p>
-    <p><span class="n">6</span><span class="k">Debuff 减益</span> 位于增益下方 8px · 左对齐</p>
+    <p><span class="n">5</span><span class="k">Buff</span> TOPLEFT (33,-33) · 每行 8 个 · 34×34</p>
+    <p><span class="n">6</span><span class="k">Debuff</span> 位于增益下方 8px · 左对齐</p>
     <p class="dim">照搬 Andromeda 的 BuffAnchor 锚点（UI_GAP = 33）。</p>
   </div>
 
-  <div class="box" style="left:1880px; top:1140px; width:430px; height:150px;">
-    <h3>⑦ 小地图<em>Minimap · 右下</em></h3>
-    <p>150 × 150 面板 · 圆形边框按主题边缘色染色，移除指南针</p>
-    <p><span class="n">8</span><span class="k">坐标 + 时钟</span> 改到小地图<b>上方</b></p>
-    <p class="dim">锚点 BOTTOMRIGHT (-33, 33)（Andromeda 为 256×256 小地图）。</p>
+  <div class="box" style="left:1760px; top:1120px; width:440px; height:166px;">
+    <h3>⑦ 小地图<em>Minimap · 右下 · 256 宽 × 190 高</em></h3>
+    <p>圆形画布 256×256 + <b>矩形遮罩</b>裁掉上下各 33px，命中区同步收缩</p>
+    <p>面板 264×198 描边 · 暴雪圆形边框/指南针全部隐藏</p>
+    <p><span class="n">8</span><span class="k">坐标 + 时钟</span> 位于小地图<b>上方</b> 6px</p>
+    <p class="dim">锚点 BOTTOMRIGHT (-33, 33)，遮罩取自 Andromeda 的 rectangle-mask。</p>
   </div>
 
-  <div class="banner">
+  <div class="banner" style="left:900px; top:24px; width:1000px; height:76px;">
     <h1>MonetUI <b>·</b> 布局锚点示例（参考 Andromeda）</h1>
     <span>2560 × 1440（UIParent 全屏）· 半透明部分为暴雪默认元素，仅作位置参照</span>
   </div>
 
-  <div class="box" style="left:20px; top:1206px; width:520px; height:26px; padding:4px 12px;">
-    <p class="dim" style="margin:0;">尺寸沿用 MonetUI 现设定；若也要照搬 Andromeda 的细条尺寸（160 / 60 宽）请说一声。</p>
+  <div class="box" style="left:20px; top:1180px; width:660px; height:52px; padding:8px 14px;">
+    <p style="margin:0;"><span class="k">暴雪默认动作条与背包条已隐藏</span>（ActionBars 模块，重定位到隐藏框，按键仍然可用）。</p>
+    <p class="dim" style="margin:4px 0 0;">因此右下角只剩小地图；聊天框与任务追踪保留。</p>
   </div>
 
 </div>

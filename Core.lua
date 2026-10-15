@@ -25,22 +25,36 @@ local DEFAULTS = {
         Minimap      = true,
         BagFrame     = true,
         QuestTracker = true,
+        ActionBars   = true,
     },
     theme = {
         useMonetColor  = true,
         tintBlizzard   = true,
     },
+    -- Slim bars in Andromeda's layout (see docs/mockup).  Sizes and positions are
+    -- both stored per unit so they can be tuned without touching the code; the
+    -- "relativeTo" field names either UIParent or another unit frame, which lets
+    -- target / focus / pet follow the player frame.
     unitFrames = {
         hideBlizzard = true,
-        -- Positions follow Andromeda's layout (see docs/mockup).  "relativeTo"
-        -- names either UIParent or another unit frame, so target / focus / pet
-        -- are anchored off the player frame.
-        player = { point = "CENTER", relativeTo = "UIParent", relativePoint = "CENTER", x = 0,    y = -180 },
-        target = { point = "LEFT",   relativeTo = "player",   relativePoint = "RIGHT",  x = 40,   y = 40 },
-        pet    = { point = "RIGHT",  relativeTo = "player",   relativePoint = "LEFT",   x = -6,   y = 0 },
-        -- Andromeda uses -100 here, but its focus frame is only 60 wide; ours is
-        -- 260 wide, so the offset is pushed out until it clears the pet frame.
-        focus  = { point = "RIGHT",  relativeTo = "player",   relativePoint = "LEFT",   x = -272, y = -40 },
+        -- 1px Monet border, then the gap Andromeda keeps between its health and
+        -- power bars (its C.MULT, ~1px at 1440p).
+        border = 1,
+        split  = 1,
+        player = { width = 160, health = 4, power = 1,
+                   point = "CENTER", relativeTo = "UIParent", relativePoint = "CENTER", x = 0,    y = -180 },
+        target = { width = 160, health = 4, power = 1,
+                   point = "LEFT",   relativeTo = "player",   relativePoint = "RIGHT",  x = 40,   y = 40 },
+        pet    = { width = 60,  health = 4, power = 1,
+                   point = "RIGHT",  relativeTo = "player",   relativePoint = "LEFT",   x = -6,   y = 0 },
+        focus  = { width = 60,  health = 4, power = 1,
+                   point = "RIGHT",  relativeTo = "player",   relativePoint = "LEFT",   x = -100, y = -40 },
+    },
+    -- Blizzard's default bottom chrome is taken off screen; the buttons keep
+    -- working for keybinds because they are re-parented, not destroyed.
+    actionBars = {
+        hideBlizzard = true,
+        hideBagBar   = true,
     },
 }
 ns.DEFAULTS = DEFAULTS

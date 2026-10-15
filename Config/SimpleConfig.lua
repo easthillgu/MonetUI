@@ -19,7 +19,7 @@ local refreshStatus
 
 local MODULE_ORDER = {
     "UnitFrames", "Cooldown", "BuffFrame",
-    "Minimap", "BagFrame", "QuestTracker",
+    "Minimap", "BagFrame", "QuestTracker", "ActionBars",
 }
 
 local MODULE_LABEL = {
@@ -29,6 +29,7 @@ local MODULE_LABEL = {
     Minimap      = "小地图 (Minimap)",
     BagFrame     = "背包整合 (BagFrame)",
     QuestTracker = "任务追踪 (QuestTracker)",
+    ActionBars   = "动作条 (ActionBars)",
 }
 
 -- -- Widget helpers -----------------------------------------------------------
@@ -70,7 +71,7 @@ end
 function SimpleConfig:Build()
     if panel then return panel end
 
-    panel = Widget:CreateFrame("MonetUIConfigFrame", UIParent, 400, 460)
+    panel = Widget:CreateFrame("MonetUIConfigFrame", UIParent, 400, 570)
     Widget:Theme(panel, { thickness = 2, bgAlpha = 0.96, borderAlpha = 1 })
     panel:SetPoint("CENTER")
     panel:SetFrameStrata("DIALOG")
@@ -167,6 +168,28 @@ function SimpleConfig:Build()
             else
                 ns:Print("取消隐藏需要 /reload 才能恢复暴雪框架。")
             end
+        end)
+    y = y - 30
+
+    -- -- Action bar options ---------------------------------------------------
+    MakeSeparator(panel, y, "动作条")
+    y = y - 28
+
+    MakeCheckbox(panel, "隐藏暴雪默认动作条", y,
+        function() return ns:DB().actionBars.hideBlizzard end,
+        function(value)
+            ns:DB().actionBars.hideBlizzard = value
+            local bars = ns:GetModule("ActionBars")
+            if bars and bars.Apply then bars:Apply() end
+        end)
+    y = y - 28
+
+    MakeCheckbox(panel, "隐藏暴雪默认背包条", y,
+        function() return ns:DB().actionBars.hideBagBar end,
+        function(value)
+            ns:DB().actionBars.hideBagBar = value
+            local bars = ns:GetModule("ActionBars")
+            if bars and bars.Apply then bars:Apply() end
         end)
     y = y - 30
 

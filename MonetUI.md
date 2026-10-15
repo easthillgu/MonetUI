@@ -79,11 +79,13 @@ MonetUI/
 │   ├── BuffFrame/              # Buff 框架
 │   ├── Minimap/                # 小地图
 │   ├── BagFrame/               # 背包
-│   └── QuestTracker/           # 任务追踪
+│   ├── QuestTracker/           # 任务追踪
+│   └── ActionBars/             # 动作条（暂只隐藏暴雪默认动作条/背包条）
 ├── Config/
 │   └── SimpleConfig.lua        # 轻量配置面板（无 Ace3）
 ├── Assets/
-│   ├── Textures/               # 纹理资源
+│   ├── Textures/
+│   │   └── rectangle-mask.blp  # 小地图矩形遮罩（256×256）
 │   └── Fonts/                  # 字体资源
 │       ├── Pingfangpixel.ttf   # 中文像素字体 — 所有中文文本
 │       ├── combat.ttf          # 战斗字体 — 仅数字（伤害/治疗数值）
@@ -193,30 +195,55 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 | **P0** | UnitFrames | 玩家/目标/焦点/宠物框架，血条能量条、名字等级、拖动保存 | ✅ 已实现 | Andromeda, EllesmereUI |
 | **P0** | Cooldown | 冷却数字/充能/快捷键字体美化 + 技能可用状态着色 | ✅ 已实现 | EllesmereUICooldownManager |
 | **P1** | BuffFrame | 自绘 Buff/Debuff 网格，按时长排序，可读性守卫 | ✅ 已实现 | EllesmereUIAuraBuffReminders |
-| **P1** | Minimap | 边框染色、去指南针、坐标 + 时钟 + 主题面板 | ✅ 已实现 | EllesmereUIMinimap |
+| **P1** | Minimap | 矩形小地图（256×190）、去圆形边框/指南针、坐标 + 时钟 + 主题面板 | ✅ 已实现 | EllesmereUIMinimap, Andromeda |
 | **P1** | BagFrame | 背包排列整合 + 主题边框 + 标题字体 | ✅ 已实现 | EllesmereUIBags |
 | **P2** | QuestTracker | 主题边框 + 标题栏拖动 + 位置保存 | ✅ 已实现 | EllesmereUIQuestTracker |
+| **P2** | ActionBars | 隐藏暴雪默认动作条与背包条（自绘动作条待建） | 🚧 占位 | EllesmereUIActionBars, Andromeda |
 | **P2** | Chat | 聊天框美化 | 待建 | EllesmereUIChat |
 | **P2** | Nameplates | 姓名板美化 | 待建 | EllesmereUINameplates |
 | **P3** | RaidFrames | 团队框架（队伍/团队） | 待建 | EllesmereUIRaidFrames |
 | **P3** | ResourceBars | 资源条 | 待建 | EllesmereUIResourceBars |
-| **P3** | ActionBars | 动作条美化 | 待建 | EllesmereUIActionBars |
 
 ### 布局锚点（照搬 Andromeda，`UI_GAP = 33`）
 
-| 元素 | 锚点 | 坐标 |
-|------|------|------|
-| player | `CENTER` / UIParent `CENTER` | `(0, -180)` |
-| target | `LEFT` / player `RIGHT` | `(40, 40)` |
-| pet | `RIGHT` / player `LEFT` | `(-6, 0)` |
-| focus | `RIGHT` / player `LEFT` | `(-272, -40)` |
-| 小地图 | `BOTTOMRIGHT` / UIParent `BOTTOMRIGHT` | `(-33, 33)` |
-| 增益 Buff | `TOPLEFT` / UIParent `TOPLEFT` | `(33, -33)`，每行 8 个 |
-| 减益 Debuff | `TOPLEFT` / Buff容器 `BOTTOMLEFT` | `(0, -8)` |
+| 元素 | 锚点 | 坐标 | 尺寸（宽 × 高） |
+|------|------|------|------|
+| player | `CENTER` / UIParent `CENTER` | `(0, -180)` | 160 × 8 |
+| target | `LEFT` / player `RIGHT` | `(40, 40)` | 160 × 8 |
+| pet | `RIGHT` / player `LEFT` | `(-6, 0)` | 60 × 8 |
+| focus | `RIGHT` / player `LEFT` | `(-100, -40)` | 60 × 8 |
+| 小地图 | `BOTTOMRIGHT` / UIParent `BOTTOMRIGHT` | `(-33, 33)` | 256 宽 × 190 高（面板 264 × 198） |
+| 小地图坐标 / 时钟 | `BOTTOM` / 小地图 `TOP` | `(0, 6 - 33)` | — |
+| 增益 Buff | `TOPLEFT` / UIParent `TOPLEFT` | `(33, -33)`，每行 8 个 | 图标 34 × 34 |
+| 减益 Debuff | `TOPLEFT` / Buff容器 `BOTTOMLEFT` | `(0, -8)` | 图标 34 × 34 |
 
-> player / target / pet / focus 的坐标与 Andromeda 一致，仅 `focus` 例外：Andromeda 的 focus 框宽
-> 仅 60，本 UI 为 260，因此 x 偏移外推到 `-272` 才不会与宠物框重叠。
-> 单位框位置存在 `MonetUIDB.unitFrames`，拖动后按**相对锚点**保存（拖 player 时依赖它的框会自动跟随）。
+> 坐标与 Andromeda 完全一致（含 `focus` 的 `-100`：由于单位框已细条化到 60 宽，不再需要外推）。
+> 每个单位的 `width` / `health` / `power` 都存在 `MonetUIDB.unitFrames[unit]`，可直接调数值微调。
+> 单位框位置也存同一张表，拖动后按**相对锚点**保存（拖 player 时依赖它的框会自动跟随）。
+
+#### 个单位框高度构成
+
+```
+总高 = 边框 1 + 血条 4 + 间隔 1 + 能量条 1 + 边框 1 = 8
+```
+
+血条贴顶、能量条贴底（与 Andromeda 的 `Health` / `Power` 锚点一致）；`间隔` 对应 Andromeda 的
+`C.MULT`（1440p 下约为 1）。数值均可在 `MonetUIDB.unitFrames` 调整。
+
+#### 文字位置（参考 Andromeda 的 tag 锚点，全部在条**上方** 3px）
+
+| 单位 | 左上方 | 右上方 | 居中上方 |
+|------|--------|--------|----------|
+| player | 名字 + 等级 | 血量 `当前 / 最大` | — |
+| target | 血量 `当前 / 最大` | 名字 + 等级 | — |
+| focus | — | — | 名字 |
+| pet | — | — | —（无文字，同 Andromeda） |
+
+#### 小地图矩形化
+
+圆形画布仍是 256 × 256，用 `Assets/Textures/rectangle-mask.blp`（取自 Andromeda 的
+`rectangle-mask`）做遮罩，上下各裁 33px，得到 256 宽 × 190 高的可见区域；`SetHitRectInsets`
+同步收缩点击区，并把 `GetMinimapShape` 覆写为 `SQUARE`，让第三方小地图按钮按矩形排布。
 
 预览图：`docs/mockup/layout-2560x1440.png`（源文件 `docs/mockup/layout-2560x1440.html`）。
 
@@ -250,15 +277,17 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 
 ### Phase 1: 核心模块开发 ✅
 - [x] UnitFrames 单位框架（P0）— 玩家/目标/焦点/宠物、保密值适配、拖动保存
+- [x] UnitFrames 细条化（160/160/60/60 × 8，文字移至条上方，锚点照搬 Andromeda）
 - [x] Cooldown 冷却计时（P0）— 数字/充能字体 + 技能状态着色
 - [x] 与 MonetColor 联调（`Color:Refresh` + 区域变化刷新）
 - [ ] 游戏内验证（需游戏运行）
 
 ### Phase 2: 功能模块开发 ✅
 - [x] BuffFrame（P1）
-- [x] Minimap（P1）
+- [x] Minimap（P1）— 矩形化 256×190
 - [x] BagFrame（P1）
 - [x] QuestTracker（P2）
+- [x] ActionBars（P2，占位）— 隐藏暴雪默认动作条与背包条
 - [ ] 游戏内视觉验收（需游戏运行）
 
 ### Phase 3: 完善与发布
@@ -278,7 +307,7 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 - [x] 配置面板可保存设置（MonetUIDB）
 - [ ] 内存占用 < 5MB
 - [x] 代码无重复（通过 Utils 复用）
-- [x] Lua 5.1 兼容（`wuxian check` 0 error / 0 warning）
+- [x] Lua 5.1 兼容（`wuxian check` 0 error / 1 intended warning：覆写 `GetMinimapShape`）
 - [x] Forever 保密值安全（所有单位数值读取先查询 C_Secrets）
 - [x] 不注册受限事件（无 CLEU）
 
@@ -304,6 +333,11 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 | 2026-10-15 | 使用现代命名空间 API（C_Spell/C_ActionBar/C_Container/C_UnitAuras） | 客户端手册中无 UnitAura/GetSpellInfo 等旧全局 |
 | 2026-10-15 | 不主动接 LibMonetColor 的 CallbackHandler 回调 | 有/无 CallbackHandler 时注册签名不一致，改为监听自身区域事件刷新 |
 | 2026-10-15 | 接管暴雪框架采用 oUF 式 UnregisterAllEvents + Hide | 业界通行做法；配置项可关闭（`hideBlizzard`） |
+| 2026-10-15 | 单位框细条化 = Andromeda 几何（血 4 / 能量 1 / 间隔 1 + 1px 边框） | 尺寸存入 `MonetUIDB.unitFrames`，方便后续微调 |
+| 2026-10-15 | 单位框文字全部置于条上方 3px | 照搬 Andromeda tag 锚点（`BOTTOM*` → `TOP*`, 0, 3） |
+| 2026-10-15 | focus 偏移改回 Andromeda 的 `-100` | 单位框已细条化到 60 宽，不再需要外推 |
+| 2026-10-15 | 小地图矩形化用遮罩纹理（256×256 裁上下各 33px → 256×190） | 与 Andromeda 的 `rectangle-mask` 同法，保持圆形画布不动 |
+| 2026-10-15 | 隐藏暴雪动作条/背包条用「重定位到隐藏父框」而非销毁 | 按键仍然可用，且不动 Blizzard 的动作条逻辑 |
 
 ---
 
