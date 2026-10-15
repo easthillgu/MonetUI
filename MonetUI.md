@@ -202,6 +202,24 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 | **P3** | ResourceBars | 资源条 | 待建 | EllesmereUIResourceBars |
 | **P3** | ActionBars | 动作条美化 | 待建 | EllesmereUIActionBars |
 
+### 布局锚点（照搬 Andromeda，`UI_GAP = 33`）
+
+| 元素 | 锚点 | 坐标 |
+|------|------|------|
+| player | `CENTER` / UIParent `CENTER` | `(0, -180)` |
+| target | `LEFT` / player `RIGHT` | `(40, 40)` |
+| pet | `RIGHT` / player `LEFT` | `(-6, 0)` |
+| focus | `RIGHT` / player `LEFT` | `(-272, -40)` |
+| 小地图 | `BOTTOMRIGHT` / UIParent `BOTTOMRIGHT` | `(-33, 33)` |
+| 增益 Buff | `TOPLEFT` / UIParent `TOPLEFT` | `(33, -33)`，每行 8 个 |
+| 减益 Debuff | `TOPLEFT` / Buff容器 `BOTTOMLEFT` | `(0, -8)` |
+
+> player / target / pet / focus 的坐标与 Andromeda 一致，仅 `focus` 例外：Andromeda 的 focus 框宽
+> 仅 60，本 UI 为 260，因此 x 偏移外推到 `-272` 才不会与宠物框重叠。
+> 单位框位置存在 `MonetUIDB.unitFrames`，拖动后按**相对锚点**保存（拖 player 时依赖它的框会自动跟随）。
+
+预览图：`docs/mockup/layout-2560x1440.png`（源文件 `docs/mockup/layout-2560x1440.html`）。
+
 ### 字体资源
 
 | 字体 | 文件 | 用途 | 来源 |
