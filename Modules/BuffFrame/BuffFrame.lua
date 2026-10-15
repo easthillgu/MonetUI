@@ -140,7 +140,7 @@ local function ShowAura(button, aura, index)
         pcall(button.cooldown.Clear, button.cooldown)
     end
 
-    local r, g, b = Color:GetEdge()
+    local r, g, b = Color:GetBorder()
     if Secrets.Bool(aura.isHarmful, false) then
         r, g, b = Color:GetDanger()
     end
@@ -237,6 +237,8 @@ function M:Initialize()
     EventBus:Register("PLAYER_ENTERING_WORLD", function() M:Update() end)
     EventBus:Register("PLAYER_SPECIALIZATION_CHANGED", function() M:Update() end)
     EventBus:Register("MONETUI_RESTRICTION_CHANGED", function() M:Update() end)
+    -- Re-tint the aura borders when the border colour changes.
+    EventBus:Register("MONETUI_THEME_CHANGED", function() M:Update() end)
 
     self:Update()
 end

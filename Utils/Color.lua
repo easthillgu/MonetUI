@@ -113,6 +113,31 @@ function Color:Get(key)
     return unpackColor(entry)
 end
 
+-- -- Border source -------------------------------------------------------------
+
+-- The slots a border may be drawn from.  Only the three signature colours (plus
+-- the Monet neutral) are offered: health / resource / danger keep their own UI
+-- meaning and must not be "spent" on chrome.
+local BORDER_KEYS = { edge = true, ambient = true, highlight = true, neutral = true }
+
+--- Which slot the borders come from.  This is a single user setting, so one
+-- dropdown re-tints every frame at once; a module may still override it per
+-- widget with Widget:Theme(..., { borderKey = ... }).  "edge" -- the signature
+-- glowing edge -- is the default, and the fallback for an unknown value.
+function Color:GetBorderKey()
+    local db = ns.DB and ns:DB()
+    local key = db and db.theme and db.theme.borderKey
+    if type(key) == "string" and BORDER_KEYS[key] then return key end
+    return "edge"
+end
+
+--- The border colour for the current key.  RGB only: every call site picks its
+-- own opacity (panels are solid, hand-drawn rings use 0.9).
+function Color:GetBorder()
+    local r, g, b = self:Get(self:GetBorderKey())
+    return r, g, b
+end
+
 function Color:WithAlpha(r, g, b, a, alpha)
     return r, g, b, (a or 1) * (alpha or 1)
 end

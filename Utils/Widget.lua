@@ -17,6 +17,16 @@ ns.Widget = Widget
 -- weak keys so hidden / discarded widgets do not leak
 local themed = setmetatable({}, { __mode = "k" })
 
+--- The border colour for a widget: its own override if it set one, otherwise the
+-- user's global slot (see Color:GetBorderKey).  Only the hue comes from the key:
+-- the opacity stays the edge slot's, so switching to the (translucent) ambient
+-- tint can never make a border invisible.
+local function BorderColor(opts)
+    local key = (opts and opts.borderKey) or Color:GetBorderKey()
+    local r, g, b = Color:Get(key)
+    return r, g, b
+end
+
 -- -- Frame creation -----------------------------------------------------------
 
 function Widget:CreateFrame(name, parent, width, height, template)
@@ -127,7 +137,7 @@ end
 -- -- Theming ------------------------------------------------------------------
 
 --- Register a frame for themed background + border.
--- @param opts table { thickness=, bgAlpha=, borderAlpha=, bgTexture= }
+-- @param opts table { thickness=, bgAlpha=, borderAlpha=, bgTexture=, borderKey= }
 function Widget:Theme(frame, opts)
     if not frame then return frame end
     opts = opts or {}
@@ -166,10 +176,12 @@ function Widget:Refresh(frame, opts)
     elseif opts.kind == "text" then
         Widget:ColorText(frame, opts.colorKey)
     elseif frame.SetBackdropColor then
-        local er, eg, eb, ea = Color:GetEdge()
         local ar, ag, ab = Color:GetAmbient()
         frame:SetBackdropColor(ar * 0.35, ag * 0.35, ab * 0.35, opts.bgAlpha or 0.85)
-        frame:SetBackdropBorderColor(er, eg, eb, opts.borderAlpha or ea or 1)
+
+        local kr, kg, kb = BorderColor(opts)
+        local _, _, _, ka = Color:GetEdge()
+        frame:SetBackdropBorderColor(kr, kg, kb, opts.borderAlpha or ka or 1)
     end
 end
 
@@ -182,9 +194,15 @@ function Widget:RefreshThemes()
     end
 end
 
---- Border only (no background) using the current edge colour.
-function Widget:ApplyBorder(frame, thickness)
-    local r, g, b, a = Color:GetEdge()
+--- Border only (no background) using the current border colour.
+function Widget:ApplyBorder(frame, thickness, borderKey)
+    local r, g, b
+    if borderKey then
+        r, g, b = Color:Get(borderKey)
+    else
+        r, g, b = Color:GetBorder()
+    end
+    local _, _, _, a = Color:GetEdge()
     thickness = thickness or 1
     if not frame.backdrop then
         frame.backdrop = {
@@ -214,7 +232,8 @@ function Widget:Highlight(frame, alpha)
     frame:SetScript("OnLeave", function(self)
         if self.icon then self.icon:SetVertexColor(1, 1, 1) end
         if self.SetBackdropBorderColor then
-            local r, g, b, a = Color:GetEdge()
+            local r, g, b = BorderColor(themed[self])
+            local _, _, _, a = Color:GetEdge()
             self:SetBackdropBorderColor(r, g, b, a or 1)
         end
     end)

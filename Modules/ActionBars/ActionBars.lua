@@ -329,7 +329,8 @@ end
 local RINGS = setmetatable({}, { __mode = "k" })
 
 --- 描边颜色：装着装备的槽位用高亮色（和暴雪一样表达"这件装备在身"），
--- 其余用主题的边色。库里用 Border 的显隐表示"已装备"，这里跟着它走。
+-- 其余用当前边框色（配置项「边框颜色」，见 Color:GetBorder）。
+-- 库里用 Border 的显隐表示"已装备"，这里跟着它走。
 --
 -- 每个按钮两块底色：
 --   ring 铺满整个按钮，只在图标外圈露出 1 像素，那就是描边；
@@ -342,7 +343,7 @@ local function RefreshRing(button)
     if button.Border and button.Border:IsShown() then
         r, g, b = Color:GetHealth()
     else
-        r, g, b = Color:GetEdge()
+        r, g, b = Color:GetBorder()
     end
     parts.ring:SetColorTexture(r, g, b, 0.9)
 

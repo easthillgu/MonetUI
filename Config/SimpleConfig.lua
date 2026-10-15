@@ -294,6 +294,23 @@ function SimpleConfig:Build()
     end
     refreshStatus()
 
+    -- Border colour source: one row re-tints every border in the addon -- unit
+    -- frames, the minimap panel, action bars, buffs, bags, the tracker and this
+    -- panel -- because they all draw through Widget:Theme -> Color:GetBorder.
+    local BORDER_ITEMS = {
+        { value = "edge",      text = "边缘色（Monet 签名）" },
+        { value = "ambient",   text = "环境色" },
+        { value = "highlight", text = "高亮色" },
+        { value = "neutral",   text = "中性灰" },
+    }
+    MakeDropdown(panel, y, "边框颜色", BORDER_ITEMS,
+        function() return Color:GetBorderKey() end,
+        function(value)
+            ns:DB().theme.borderKey = value
+            ns.RefreshTheme("config")
+        end)
+    y = y - 28
+
     -- -- Modules -------------------------------------------------------------
     MakeSeparator(panel, y, "模块")
     y = y - 28

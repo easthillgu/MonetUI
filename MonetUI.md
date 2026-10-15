@@ -142,7 +142,7 @@ local LMC = LibStub("LibMonetColor-1.0", true)
 不做「Monet 化」。
 
 **边框颜色已经预留走 MonetColor**：单位框架、小地图面板、动作条、Buff 按钮、配置面板等所有边框都经
-`Widget:Theme()` 注册，刷新时读 `Color:GetEdge()`（背景读 `Color:GetAmbient()`）。所以引擎换色**不需要改任何
+`Widget:Theme()` 注册，刷新时读 `Color:GetBorder()`（背景读 `Color:GetAmbient()`）。所以引擎换色**不需要改任何
 模块代码** —— 只要 `Color:Refresh()` 后再广播 `MONETUI_THEME_CHANGED`，`Widget:RefreshThemes()` 就会把所有
 已注册控件重新染色。
 
@@ -157,6 +157,21 @@ local LMC = LibStub("LibMonetColor-1.0", true)
 `RegisterCallback` 调用形状不同（`LMC:RegisterCallback(事件, fn)` vs `LMC.events:RegisterCallback(键, fn)`）。
 Core 先探测、两路都试且都 `pcall`；都拿不到时静默跳过，**区域事件刷新仍是兜底**。订阅状态见
 `/mui status` 的 `回调: 已订阅 / 未订阅`。
+
+**边框色槽可切换（配置面板「边框颜色」）**：边框取哪个引擎色槽由用户选择，存于 `MonetUIDB.theme.borderKey`
+（默认 `edge`）：
+
+| 值 | 含义 |
+|----|------|
+| `edge` | 边缘色（Monet 签名，默认） |
+| `ambient` | 环境色 |
+| `highlight` | 高亮色 |
+| `neutral` | 中性灰 |
+
+`Widget:Theme` 通过 `Color:GetBorderKey()` 决定色相；单个控件仍可用
+`Widget:Theme(frame, { borderKey = "highlight" })` 单独覆盖。**只有色相跟着色槽走，透明度固定用 edge 的**，
+所以选到半透明的 `ambient` 也不会让边框淡到看不见。改这一项后走 `RefreshTheme`，全部边框（含动作条按钮描边、
+Buff 边框）即时生效。
 
 ### 4.4 Lua 5.1 兼容清单
 
@@ -515,7 +530,7 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 - [x] 配置面板完善（绑定 MonetUIDB，实时生效）
 - [x] 单位框架新增：能量条按类型分色、死亡/掉线变灰、数值平滑过渡（配置面板可选）
 - [x] 单位框架新增：连击点小格（盗贼 / 德鲁伊）+ 「连击点（盗贼 / 德鲁伊）」配置下拉
-- [x] 主题预留：所有边框/面板经 `Widget:Theme` → `Color:GetEdge()`，并订阅引擎 `OnThemeColorsChanged` 即时换色
+- [x] 主题预留：所有边框经 `Widget:Theme` → `Color:GetBorder()`（色槽可选，配置项「边框颜色」），并订阅引擎 `OnThemeColorsChanged` 即时换色
 - [ ] 游戏内视觉验收
 - [ ] 压力测试
 - [x] 文档编写（MonetUI.md）
@@ -595,6 +610,7 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | 2026-10-15 | 死亡骑士符文与「充能连击点」高亮本版不做 | 符文是冷却驱动（参考实现读 `GetRuneCooldown`）且有血液/冰霜/邪恶分色；先把盗贼这类「点数型」资源做扎实，符文留给 P3 ResourceBars |
 | 2026-10-15 | `CLASS_POWER` 只列盗贼与德鲁伊 | Forever 版本没有圣能/气/灵魂碎片/奥术充能/精华这些职业资源，写了也是死代码；表结构是通用的，该版本将来补了再加一行即可 |
 | 2026-10-15 | 配置面板高度改为按内容自适应（`panel:SetHeight(math.abs(y) + 78)`），提示行改挂面板底部 | 行数只增不减，硬编码 800 已经装不下（最后几行与提示会跑到面板外） |
+| 2026-10-15 | 边框颜色改为**可选引擎色槽**（`theme.borderKey`，默认 `edge`），`Widget:Theme` 支持 `borderKey` 按控件覆盖 | 预留「边框用哪个 MonetColor 色槽」的可能；集中成一个配置项，模块零改动即可整体换色；透明度仍取 edge 的，避免选 ambient 后边框淡到看不见 |
 
 ---
 

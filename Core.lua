@@ -12,7 +12,7 @@ local LibStub = _G.LibStub
 local LMC = LibStub and LibStub("LibMonetColor-1.0", true)
 
 ns.name = ADDON_NAME
-ns.version = "0.6.1"
+ns.version = "0.7.0"
 
 -- -- Defaults ----------------------------------------------------------------
 
@@ -30,6 +30,11 @@ local DEFAULTS = {
     theme = {
         useMonetColor  = true,
         tintBlizzard   = true,
+        -- Which engine slot borders are drawn from: "edge" | "ambient" |
+        -- "highlight" | "neutral" (see Color:GetBorderKey).  Unit frames, the
+        -- minimap panel, action bars, buffs, bags, the quest tracker and the
+        -- config panel all follow it, so one dropdown re-tints every border.
+        borderKey      = "edge",
     },
     -- Thin bars in Andromeda's layout (see docs/mockup).  Sizes and positions are
     -- both stored per unit so they can be tuned without touching the code; the
