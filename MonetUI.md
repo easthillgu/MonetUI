@@ -35,7 +35,7 @@ MonetUI 是一套**整合 UI 插件**，以**莫奈印象派色彩**为核心设
 | 命名空间共享 | 完成 | 统一使用插件私有表 `ns`（`...` 第二个返回值） |
 | Core.lua | 完成 | SavedVariables + 模块注册/生命周期 + 主题管线 + 斜杠命令 |
 | Config 面板 | 完成 | SimpleConfig.lua，绑定 MonetUIDB，实时生效 |
-| UnitFrames | 完成 | 玩家/目标/焦点/宠物，血条/能量/名字/等级/提示，可拖动并保存位置 |
+| UnitFrames | 完成 | 玩家/目标/焦点/宠物，血条/能量/名字/等级/提示，连击点/职业资源小格，可拖动并保存位置 |
 | Cooldown | 完成 | 冷却数字/充能/快捷键字体美化 + 技能可用状态着色 |
 | BuffFrame | 完成 | 自绘增益/减益网格，按时长排序，可读性守卫 |
 | Minimap | 完成 | 矩形化 256×190 + 去坐标/时钟 + 主题面板 |
@@ -55,6 +55,7 @@ MonetUI 是一套**整合 UI 插件**，以**莫奈印象派色彩**为核心设
 | 游戏内视觉验收 | P0 | 三地图验证 + 暴雪框架接管是否产生 taint |
 | MonetColor Phase 2 联调 | P0 | 环境采样器（引擎侧） |
 | 队伍/团队框架 | P1 | RaidFrames（当前仅单人单位） |
+| 备用能量条（真 `AltPower`，载具/任务/首领）与 DK 符文 | P3 | 暴雪 `PlayerFrame.powerBarAlt` 目前跟着 `PlayerFrame` 一起被隐藏，尚无替代；见「连击点 / 职业资源」一节 |
 | 聊天框 / 姓名板美化 | P2 | 见模块清单 |
 | 压力测试 | P1 | 10 万次 API 调用 |
 | 发布 v1.0.0 | P2 | 文档 + 打包 |
@@ -200,7 +201,7 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 
 | 优先级 | 模块 | 功能 | 状态 | 参考 |
 |--------|------|------|------|------|
-| **P0** | UnitFrames | 玩家/目标/目标的目标/焦点/宠物框架，血条能量条、名字等级、拖动保存 | ✅ 已实现 | Andromeda, EllesmereUI |
+| **P0** | UnitFrames | 玩家/目标/目标的目标/焦点/宠物框架，血条能量条、连击点/职业资源、名字等级、拖动保存 | ✅ 已实现 | Andromeda, EllesmereUI |
 | **P0** | Cooldown | 冷却数字/充能/快捷键字体美化 + 技能可用状态着色 | ✅ 已实现 | EllesmereUICooldownManager |
 | **P1** | BuffFrame | 自绘 Buff/Debuff 网格，按时长排序，可读性守卫 | ✅ 已实现 | EllesmereUIAuraBuffReminders |
 | **P1** | Minimap | 矩形小地图（256×190）、去圆形边框/指南针、主题面板 | ✅ 已实现 | EllesmereUIMinimap, Andromeda |
@@ -210,7 +211,7 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 | **P2** | Chat | 聊天框美化 | 待建 | EllesmereUIChat |
 | **P2** | Nameplates | 姓名板美化 | 待建 | EllesmereUINameplates |
 | **P3** | RaidFrames | 团队框架（队伍/团队） | 待建 | EllesmereUIRaidFrames |
-| **P3** | ResourceBars | 资源条 | 待建 | EllesmereUIResourceBars |
+| **P3** | ResourceBars | 资源条（备用能量 `AltPower`、符文等剩余资源显示） | 待建 | EllesmereUIResourceBars |
 
 ### 布局锚点（照搬 Andromeda，`UI_GAP = 33`）
 
@@ -221,6 +222,7 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 | targettarget | `LEFT` / target `RIGHT` | `(6, 0)` | 60 × 6 |
 | pet | `RIGHT` / player `LEFT` | `(-6, 0)` | 60 × 6 |
 | focus | `RIGHT` / player `LEFT` | `(-100, -40)` | 60 × 6 |
+| 连击点/职业资源 | `TOPLEFT` / player `BOTTOMLEFT` | `(0, -3)` | 玩家框宽 × 3，5 格（见下） |
 | 小地图 | `BOTTOMRIGHT` / UIParent `BOTTOMRIGHT` | `(-33, 33)` | 256 宽 × 190 高（面板 264 × 198） |
 | 增益 Buff | `TOPLEFT` / UIParent `TOPLEFT` | `(33, -33)`，每行 8 个 | 图标 34 × 34 |
 | 减益 Debuff | `TOPLEFT` / Buff容器 `BOTTOMLEFT` | `(0, -8)` | 图标 34 × 34 |
@@ -260,8 +262,9 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 血量数字按百分比着色（`textColorByPercent`，4 个定点插值：绿 → 黄 → 橙 → 红）——不用红绿直接
 线性插值（中间会发褐），对色盲也更友好。
 
-`fillColor` / `lostColor` / `textColorByPercent` / `powerColor` / `smoothBars` 都存在
-`MonetUIDB.unitFrames`，改值即可换风格；配置面板「单位框架」一栏有对应的下拉与勾选框。
+`fillColor` / `lostColor` / `textColorByPercent` / `powerColor` / `smoothBars` / `classPower` /
+`classPowerHeight` / `classPowerGap` 都存在 `MonetUIDB.unitFrames`，改值即可换风格；配置面板「单位框架」
+一栏有对应的下拉与勾选框。
 
 ##### 能量条分色
 
@@ -285,6 +288,41 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 `Enum.StatusBarInterpolation.ExponentialEaseOut`，让条子缓动到新值而不是瞬间跳变 —— 插值在客户端
 内部完成（`Enum.SecretAspect.BarValue`），因此**机密值也能走平滑路径**。`smoothBars = false` 关闭。
 `Utils/Secrets.lua` 在加载时查一次该枚举，查不到就退回不带插值的旧调用。
+
+##### 连击点 / 职业资源（classPower）
+
+暴雪把玩家的**职业资源**画在 `PlayerFrame.classPowerBar` 里（盗贼的连击点、圣能、气、灵魂碎片、
+奥术充能、精华），备用能量条画在 `PlayerFrame.powerBarAlt` 里。这两个都是 `PlayerFrame` 的**子框体**，
+`SuppressBlizzard` 一 Hide 父框体就一起消失了 —— 也就是说，不做替代的话盗贼会只剩那条能量条、
+**连击点完全看不到**。本模块因此在玩家框体下方补了一排小格（`CLASS_POWER` 表）：
+
+| 职业 | 资源 | 能量类型 | 默认格数 |
+|------|------|----------|----------|
+| ROGUE | 连击点 | `ComboPoints` | 5 |
+| DRUID | 连击点 | `ComboPoints` | 5（仅猫形态：`UnitPowerType == ENERGY`） |
+| PALADIN | 圣能 | `HolyPower` | 5 |
+| MONK | 气 | `Chi` | 5 |
+| WARLOCK | 灵魂碎片 | `SoulShards` | 5 |
+| MAGE | 奥术充能 | `ArcaneCharges` | 4 |
+| EVOKER | 精华 | `Essence` | 5 |
+
+- **几何**：格子条 = 单位框宽度 × `classPowerHeight`（默认 3），挂在玩家框 `BOTTOMLEFT` 下方
+  `classPowerGap`（默认 3）处，格与格之间也留 `classPowerGap`；颜色查 `POWER_COLOR` 的
+  `COMBO_POINTS` / `HOLY_POWER` / … 项。
+- **保密值安全**：每格是一个 `StatusBar`，范围写成 `(i-1, i)`，把原始点数（可能是 `<secret>`）直接丢给
+  `SetValue`，由客户端自己裁剪 —— 我们这边**不做任何比较或减法**。只有「满了变红」要同时读到当前值与
+  上限，读不到就保持普通颜色。
+- 格数取 `UnitPowerMax(unit, power)`；该值被隐藏时**不重排**（沿用上次读到的格数，首次用表里的默认值），
+  避免机密值一出现整排格子跳动。防御性上限 10 格。
+- 该专精没有这个资源（如非奥术法师，上限为 0）时整排隐藏；`UNIT_DISPLAYPOWER` 驱动德鲁伊形态切换，
+  `UNIT_POWER_UPDATE` 用事件带回来的 token 过滤（能量每秒跳十次，只有本资源类型的事件才刷新），
+  `UNIT_MAXPOWER` 处理天赋改变上限；死亡/掉线时和血条一样 `SetStatusBarDesaturated` 变灰。
+- 配置面板「单位框架」一栏的 **连击点 / 职业资源** 下拉：`关闭` / `2–5 px`（一个下拉同时管开关与高度）。
+
+**尚未覆盖**：死亡骑士的符文（六枚符文是冷却驱动且有血液/冰霜/邪恶分色，`UnitPower(Runes)` 并不是客户端
+画符文用的数据，参考实现读的是 `GetRuneCooldown`），以及「充能连击点」高亮（`GetUnitChargedPowerPoints`）。
+另外 `PlayerFrame.powerBarAlt`（真正的备用能量条：载具 / 任务 / 遭遇战给的那条）目前也仍只是跟着暴雪框体
+一起被隐藏，**没有替代实现**。
 
 #### 文字位置（参考 Andromeda 的 tag 锚点，全部在条**上方** 3px）
 
@@ -460,6 +498,7 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 ### Phase 3: 完善与发布
 - [x] 配置面板完善（绑定 MonetUIDB，实时生效）
 - [x] 单位框架新增：能量条按类型分色、死亡/掉线变灰、数值平滑过渡（配置面板可选）
+- [x] 单位框架新增：职业资源（连击点/圣能/气/灵魂碎片/奥术充能/精华）小格 + 「连击点 / 职业资源」配置下拉
 - [ ] 游戏内视觉验收
 - [ ] 压力测试
 - [x] 文档编写（MonetUI.md）
@@ -532,6 +571,12 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | 2026-10-15 | 宠物/姿态条搬**最外层容器**（`PetActionBarFrame`，退回 `PetActionBar`） | 暴雪可能 Hide 外层也可能 Hide 内层；搬外层时两种做法都还归它管，不会留下一条"停尸"的宠物条 |
 | 2026-10-15 | 动作条这一版**不做拖动**，位置交由默认锚点 + `positions` 覆盖 | 按钮都是安全按钮，把拖动挂到按钮上会抢掉"从条上拿起技能"；解锁模式（条框体留边、拖动条本身）留给下一版 |
 | 2026-10-15 | 默认布局：`barCount = 3`，1/2/3 底部居中往上叠；宠物条右对齐、姿态条左对齐放在 3 号条上方那一行；4–8 号条继续往上叠但默认隐藏 | 玩家指定的布局：底部三条 + 宠物/姿态一行，其余按需往上加，不占屏幕 |
+| 2026-10-15 | 玩家职业资源自己做（`CLASS_POWER` 表 + 一格一个 `StatusBar`），不接暴雪的 `PlayerFrame.classPowerBar` | 暴雪的职业资源是 `PlayerFrame` 的**子框体**，`SuppressBlizzard` 一 Hide 父框体就一起消失；接暴雪显示等于被它的接管逻辑牵着走，自己画完全可控 |
+| 2026-10-15 | 连击点用「一格一点的细条」而不是第二条能量条 | 连击点/圣能/气本身是**离散**资源：暴雪默认、Andromeda/oUF 的 ClassPower 都用点阵；细条表达不了「几点」 |
+| 2026-10-15 | 每格 `StatusBar` 范围写 `(i-1, i)`，把原始点数直接交给 `SetValue` | 裁剪由客户端完成，我们不做比较/减法 —— 数值是 `<secret>` 时依然能正确点亮（见 4.6） |
+| 2026-10-15 | 上限读不到时沿用上次格数（首次用职业默认值），不重排 | 机密值出现/消失时整排格子弹跳比格数略不准更糟 |
+| 2026-10-15 | 死亡骑士符文与「充能连击点」高亮本版不做 | 符文是冷却驱动（参考实现读 `GetRuneCooldown`）且有血液/冰霜/邪恶分色；先把盗贼这类「点数型」资源做扎实，符文留给 P3 ResourceBars |
+| 2026-10-15 | 配置面板高度改为按内容自适应（`panel:SetHeight(math.abs(y) + 78)`），提示行改挂面板底部 | 行数只增不减，硬编码 800 已经装不下（最后几行与提示会跑到面板外） |
 
 ---
 

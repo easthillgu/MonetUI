@@ -12,7 +12,7 @@ local LibStub = _G.LibStub
 local LMC = LibStub and LibStub("LibMonetColor-1.0", true)
 
 ns.name = ADDON_NAME
-ns.version = "0.5.0"
+ns.version = "0.6.0"
 
 -- -- Defaults ----------------------------------------------------------------
 
@@ -53,6 +53,15 @@ local DEFAULTS = {
     -- textColorByPercent ramps the health number green -> red as health drops.
     -- smoothBars eases every bar towards its new value (the client does the
     -- easing, so it still works while the values are hidden).
+    --
+    -- classPower draws the player's *class resource* -- a rogue's combo points,
+    -- holy power, chi, soul shards ... -- as one slim pip per point under the
+    -- player frame.  Blizzard keeps that display inside PlayerFrame, which this
+    -- addon hides, so without it a rogue would see its energy bar and no combo
+    -- points at all (see CLASS_POWER in Modules/UnitFrames/UnitFrames.lua).
+    --   classPower        false turns the pips off
+    --   classPowerHeight  how tall one pip is
+    --   classPowerGap     gap between pips (also the breathing room under the frame)
     unitFrames = {
         hideBlizzard = true,
         -- 1px Monet border, then the gap Andromeda keeps between its health and
@@ -62,6 +71,9 @@ local DEFAULTS = {
         textColorByPercent = true,
         smoothBars = true,
         powerColor = "type",
+        classPower       = true,
+        classPowerHeight = 3,
+        classPowerGap    = 3,
         player = { width = 160, health = 2, power = 1, fillColor = "highlight", lostColor = "black",
                    point = "CENTER", relativeTo = "UIParent", relativePoint = "CENTER", x = 0,    y = -180 },
         target = { width = 160, health = 2, power = 1, fillColor = "class", lostColor = "danger",

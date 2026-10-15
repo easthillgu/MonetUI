@@ -176,6 +176,15 @@ local function UpdateDesaturation(frame)
     if frame.health then frame.health:SetStatusBarDesaturated(grey) end
     if frame.power  then frame.power:SetStatusBarDesaturated(grey)  end
 
+    -- The class-resource pips empty out on death anyway, but greying them keeps
+    -- the whole player frame reading the same way.
+    local pips = frame.classPower and frame.classPower.pips
+    if pips then
+        for i = 1, #pips do
+            pips[i]:SetStatusBarDesaturated(grey)
+        end
+    end
+
     -- A dead unit has no health left, so the bar shows its *missing* overlay end
     -- to end -- and that overlay is a plain texture the client will not
     -- desaturate for us.  Grey it by hand so a corpse still reads as a corpse.
@@ -251,6 +260,186 @@ local function UpdatePowerColor(frame)
     end
 
     frame.power:SetStatusBarColor(Color:GetResource())
+end
+
+-- -- Class resource (combo points, holy power, ...) ----------------------------
+
+-- Blizzard draws the player's class resource -- a rogue's combo points, holy
+-- power, chi, soul shards, arcane charges, essence -- inside
+-- PlayerFrame.classPowerBar, and its alternate power bar in
+-- PlayerFrame.powerBarAlt.  Both are *children* of PlayerFrame, so hiding
+-- PlayerFrame (see SuppressBlizzard) takes them off screen with it: a rogue
+-- would keep the energy bar drawn above and lose the combo points entirely.
+-- This block is the replacement -- one slim pip per point, under the frame.
+--
+-- Nothing here ever does maths on a unit value: every pip is a StatusBar whose
+-- range is (i - 1, i), so handing it the raw point count lets the *client* clamp
+-- and decide which pips are lit, exactly like the health/power bars
+-- (see Utils/Secrets.lua).
+local POWER = (_G.Enum and _G.Enum.PowerType) or {}
+local COMBO_POINTS   = POWER.ComboPoints   or 4
+local ENERGY         = POWER.Energy        or 3
+local SOUL_SHARDS    = POWER.SoulShards    or 7
+local HOLY_POWER     = POWER.HolyPower     or 9
+local CHI            = POWER.Chi           or 12
+local ARCANE_CHARGES = POWER.ArcaneCharges or 16
+local ESSENCE        = POWER.Essence       or 19
+
+-- Per class: the power the resource lives in, its `POWER_COLOR` token, how many
+-- pips to draw before the client tells us the real maximum, and an optional gate
+-- on the unit's *primary* power type.
+--
+-- Death knight runes are deliberately absent: six runes are cooldown-driven
+-- rather than points, and UnitPower(Runes) is not what the client animates for
+-- them (the reference implementations read GetRuneCooldown instead).
+local CLASS_POWER = {
+    ROGUE   = { power = COMBO_POINTS,   token = "COMBO_POINTS",   max = 5 },
+    DRUID   = { power = COMBO_POINTS,   token = "COMBO_POINTS",   max = 5,
+                requirePower = ENERGY },                    -- combo points are a cat thing
+    PALADIN = { power = HOLY_POWER,     token = "HOLY_POWER",     max = 5 },
+    MONK    = { power = CHI,            token = "CHI",            max = 5 },
+    WARLOCK = { power = SOUL_SHARDS,    token = "SOUL_SHARDS",    max = 5 },
+    MAGE    = { power = ARCANE_CHARGES, token = "ARCANE_CHARGES", max = 4 },
+    EVOKER  = { power = ESSENCE,        token = "ESSENCE",        max = 5 },
+}
+
+-- Defensive ceiling: a garbage maximum must not build a hundred bars.
+local MAX_PIPS = 10
+
+--- The player's class file name ("ROGUE", ...), read once and cached.
+-- UnitClassBase is preferred (it never hands back a localised name); both calls
+-- are pcall'd because identity can be hidden from addons in restricted states.
+local playerClass
+local function PlayerClass()
+    if playerClass then return playerClass end
+
+    local class
+    if _G.UnitClassBase then
+        local ok, file = pcall(_G.UnitClassBase, "player")
+        if ok then class = file end
+    end
+    if not class and _G.UnitClass then
+        local ok, _, file = pcall(_G.UnitClass, "player")
+        if ok then class = file end
+    end
+
+    if type(class) == "string" then playerClass = class end
+    return playerClass
+end
+
+--- Does this power event concern the frame's class resource?
+-- UNIT_POWER_UPDATE hands over the power type *token* ("ENERGY",
+-- "COMBO_POINTS", ...) and energy ticks several times a second, so anything
+-- that is not the resource itself is skipped.  A missing or non-string token
+-- (UNIT_MAXPOWER, a full refresh) always refreshes.
+local function ClassPowerIn(frame, powerType)
+    if not frame.classPower then return false end
+    if type(powerType) ~= "string" then return true end
+
+    local class = PlayerClass()
+    local def = class and CLASS_POWER[class]
+    return (not def) or powerType == def.token
+end
+
+--- Build the pip holder: an invisible strip under the player frame.
+local function CreateClassPower(frame)
+    local holder = CreateFrame("Frame", nil, frame)
+    holder:SetSize(Setting(frame.unit, "width") or 160, Shared("classPowerHeight") or 3)
+    holder:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 0, -(Shared("classPowerGap") or 3))
+    holder.pips = {}
+    frame.classPower = holder
+    holder:Hide()
+    return holder
+end
+
+--- (Re)build the pips so that `count` of them fill the holder.
+local function LayoutClassPower(holder, count)
+    local gap = Shared("classPowerGap") or 3
+    local pipWidth = (holder:GetWidth() - (count - 1) * gap) / count
+    if pipWidth < 1 then pipWidth = 1 end
+
+    for i = 1, count do
+        local pip = holder.pips[i]
+        if not pip then
+            -- Widget:Bar already brings the dim "empty" background along.
+            pip = Widget:Bar(holder)
+            pip:SetHeight(holder:GetHeight())
+            holder.pips[i] = pip
+        end
+
+        pip:ClearAllPoints()
+        if i > 1 then
+            pip:SetPoint("LEFT", holder.pips[i - 1], "RIGHT", gap, 0)
+        else
+            pip:SetPoint("LEFT", holder, "LEFT", 0, 0)
+        end
+        pip:SetWidth(pipWidth)
+        pip:Show()
+    end
+
+    for i = count + 1, #holder.pips do
+        holder.pips[i]:Hide()
+    end
+
+    holder.count = count
+end
+
+--- Refresh the player's class resource pips.
+local function UpdateClassPower(frame)
+    local holder = frame.classPower
+    if not holder then return end
+
+    local class = PlayerClass()
+    local def = class and CLASS_POWER[class]
+    if not def or Shared("classPower") == false then
+        holder:Hide()
+        return
+    end
+
+    local unit = frame.unit
+
+    -- Shapeshifters only have the resource in one form (a druid's combo points
+    -- exist while it is a cat).  UnitPowerType reports the *primary* power and is
+    -- never secret, so it is a safe gate; UNIT_DISPLAYPOWER drives it.
+    if def.requirePower and UnitPowerType(unit) ~= def.requirePower then
+        holder:Hide()
+        return
+    end
+
+    local maximum = Secrets.Number(UnitPowerMax(unit, def.power))
+    if maximum and maximum <= 0 then
+        holder:Hide()   -- this class / spec does not have the resource
+        return
+    end
+
+    -- A hidden maximum must not re-layout the row: keep the last count we could
+    -- read, or the class default before the first readable one.
+    local count = maximum or holder.count or def.max
+    if count > MAX_PIPS then count = MAX_PIPS end
+    if count ~= holder.count then
+        LayoutClassPower(holder, count)
+    end
+
+    local current = UnitPower(unit, def.power)
+    local r, g, b = Color:GetResource()
+    local tuned = POWER_COLOR[def.token]
+    if tuned then r, g, b = tuned[1], tuned[2], tuned[3] end
+
+    -- "Full" is the one state worth shouting about (the reference UIs tint it
+    -- too); it needs both numbers readable, so a secret pair keeps the colour.
+    local cur = Secrets.Number(current)
+    if cur and maximum and cur >= maximum then
+        r, g, b = Color:GetDanger()
+    end
+
+    for i = 1, holder.count do
+        local pip = holder.pips[i]
+        pip:SetStatusBarColor(r, g, b)
+        pcall(pip.SetMinMaxValues, pip, i - 1, i)
+        pcall(pip.SetValue, pip, current)
+    end
+
+    holder:Show()
 end
 
 --- The interpolation to hand to the client: nil means "snap straight to it".
@@ -432,6 +621,12 @@ local function CreateUnitFrame(unit, position)
     frame.healthLost = lost
     frame.power = power
 
+    -- The class resource (combo points ...) hangs under the player frame only:
+    -- it is the unit that owns Blizzard's class power display.
+    if unit == "player" then
+        CreateClassPower(frame)
+    end
+
     UpdateBarLook(frame)
 
     local layout = TEXT_LAYOUT[unit] or {}
@@ -491,13 +686,18 @@ end
 
 -- -- Public -------------------------------------------------------------------
 
-function M:UpdateUnit(unit, kind)
+function M:UpdateUnit(unit, kind, powerType)
     local frame = frames[unit]
     if not frame or not frame:IsShown() then return end
     if kind == "health" then
         UpdateHealth(frame)
     elseif kind == "power" then
         UpdatePower(frame)
+        -- The resource shares the power events, but only the resource's own
+        -- power type is worth a refresh (energy ticks all the time).
+        if ClassPowerIn(frame, powerType) then
+            UpdateClassPower(frame)
+        end
     else
         UpdateName(frame)
     end
@@ -511,6 +711,7 @@ local function RefreshUnit(unit)
         frame:Show()
         UpdateHealth(frame)
         UpdatePower(frame)
+        UpdateClassPower(frame)
         UpdateName(frame)
     else
         frame:Hide()
@@ -536,8 +737,8 @@ local UNIT_EVENTS = {
 -- Build the handler through a factory: the loop variable must not be captured
 -- directly (its identity across iterations is not something to rely on).
 local function MakeUnitHandler(kind)
-    return function(_, changedUnit)
-        M:UpdateUnit(changedUnit, kind)
+    return function(_, changedUnit, ...)
+        M:UpdateUnit(changedUnit, kind, ...)
     end
 end
 

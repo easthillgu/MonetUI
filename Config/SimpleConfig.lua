@@ -369,6 +369,29 @@ function SimpleConfig:Build()
         end)
     y = y - 28
 
+    -- One row for two settings: 0 means "off", anything else is the pip height.
+    local CLASS_ITEMS = {
+        { value = 0, text = "关闭" },
+        { value = 2, text = "2 px" },
+        { value = 3, text = "3 px" },
+        { value = 4, text = "4 px" },
+        { value = 5, text = "5 px" },
+    }
+
+    MakeDropdown(panel, y, "连击点 / 职业资源", CLASS_ITEMS,
+        function()
+            local db = ns:DB().unitFrames
+            if db.classPower == false then return 0 end
+            return db.classPowerHeight
+        end,
+        function(value)
+            local db = ns:DB().unitFrames
+            db.classPower = value > 0
+            if value > 0 then db.classPowerHeight = value end
+            RefreshUnitFrames()
+        end)
+    y = y - 28
+
     MakeCheckbox(panel, "血量数字按百分比着色", y,
         function() return ns:DB().unitFrames.textColorByPercent end,
         function(value)
@@ -477,8 +500,13 @@ function SimpleConfig:Build()
     y = y - 30
 
     -- -- Footer --------------------------------------------------------------
+    -- The row stack keeps growing as features land, so the panel is sized to
+    -- whatever was just built rather than to a hard-coded number; the hint and
+    -- the reload button live in the strip below the last row.
+    panel:SetHeight(math.abs(y) + 78)
+
     local hint = Widget:Font(panel, 11, "pixel", "neutral", "LEFT")
-    hint:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, y)
+    hint:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 24, 52)
     hint:SetWidth(352)
     hint:SetText("提示：/mui status 查看模块状态，/mui reset 恢复默认设置。")
     hint:SetJustifyH("LEFT")
