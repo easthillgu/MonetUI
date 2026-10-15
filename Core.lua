@@ -12,7 +12,7 @@ local LibStub = _G.LibStub
 local LMC = LibStub and LibStub("LibMonetColor-1.0", true)
 
 ns.name = ADDON_NAME
-ns.version = "0.3.0"
+ns.version = "0.4.0"
 
 -- -- Defaults ----------------------------------------------------------------
 
@@ -48,7 +48,11 @@ local DEFAULTS = {
     --             = "health"     the flat UI health green
     --   lostColor = "black"      the missing part reads as background (player, pet)
     --             = "danger"     the missing part reads as damage taken (target)
+    --   powerColor = "type"      the power bar is coloured by UnitPowerType
+    --              = "theme"     the power bar keeps the flat theme resource colour
     -- textColorByPercent ramps the health number green -> red as health drops.
+    -- smoothBars eases every bar towards its new value (the client does the
+    -- easing, so it still works while the values are hidden).
     unitFrames = {
         hideBlizzard = true,
         -- 1px Monet border, then the gap Andromeda keeps between its health and
@@ -56,6 +60,8 @@ local DEFAULTS = {
         border = 1,
         split  = 1,
         textColorByPercent = true,
+        smoothBars = true,
+        powerColor = "type",
         player = { width = 160, health = 2, power = 1, fillColor = "highlight", lostColor = "black",
                    point = "CENTER", relativeTo = "UIParent", relativePoint = "CENTER", x = 0,    y = -180 },
         target = { width = 160, health = 2, power = 1, fillColor = "class", lostColor = "danger",

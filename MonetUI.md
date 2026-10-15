@@ -254,7 +254,31 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 血量数字按百分比着色（`textColorByPercent`，4 个定点插值：绿 → 黄 → 橙 → 红）——不用红绿直接
 线性插值（中间会发褐），对色盲也更友好。
 
-`fillColor` / `lostColor` / `textColorByPercent` 都存在 `MonetUIDB.unitFrames`，改值即可换风格。
+`fillColor` / `lostColor` / `textColorByPercent` / `powerColor` / `smoothBars` 都存在
+`MonetUIDB.unitFrames`，改值即可换风格；配置面板「单位框架」一栏有对应的下拉与勾选框。
+
+##### 能量条分色
+
+每次刷新都用 `UnitPowerType(unit)` 重新取一次类型（变身 / 姿态 / 载具 / 遭遇战机制都会换能量），
+返回的 token（`MANA` / `RAGE` / `ENERGY` / `RUNIC_POWER` …）查 `POWER_COLOR` 表上色；表里没有的
+类型退回到 `UnitPowerType` 一并返回的客户端自带颜色，再退回主题的资源色。`powerColor = "theme"`
+可以关掉分色、统一用主题色。用 `UNIT_DISPLAYPOWER` 事件驱动，切换形态时立刻换色。
+
+##### 死亡 / 掉线变灰
+
+`UnitIsDeadOrGhost` 或 `UnitIsConnected` 为假时，对血条与能量条调用
+`StatusBar:SetStatusBarDesaturated(true)`。**变灰由客户端完成**（`Enum.SecretAspect.Desaturation`），
+我们只传一个自己算出来的布尔值，不读任何单位数值，所以战斗中数值被隐藏时同样有效。
+另外，单位死亡后血量归零、整条都露出「损失」贴图，而那张贴图是普通纹理、客户端不会替我们褪色，
+所以死亡时把它的顶点色单独改成中性灰，尸体的条才不会还是一整条红。
+驱动事件：`PLAYER_DEAD` / `PLAYER_ALIVE` / `PLAYER_UNGHOST` / `UNIT_CONNECTION`。
+
+##### 数值平滑
+
+血条与能量条的 `SetMinMaxValues` / `SetValue` 都会带上
+`Enum.StatusBarInterpolation.ExponentialEaseOut`，让条子缓动到新值而不是瞬间跳变 —— 插值在客户端
+内部完成（`Enum.SecretAspect.BarValue`），因此**机密值也能走平滑路径**。`smoothBars = false` 关闭。
+`Utils/Secrets.lua` 在加载时查一次该枚举，查不到就退回不带插值的旧调用。
 
 #### 文字位置（参考 Andromeda 的 tag 锚点，全部在条**上方** 3px）
 
@@ -280,11 +304,12 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 
 | 字体 | 文件 | 用途 | 来源 |
 |------|------|------|------|
-| 中文像素字体 | `Pingfangpixel.ttf` | 所有中文文本 | Andromeda |
-| 战斗字体 | `combat.ttf` | 仅数字（伤害/治疗数值） | Andromeda |
-| 冷却字体 | `super-effective.ttf` | 动作条冷却计时数字 | Andromeda |
-| 标题字体 | `roadway.ttf` | 标题/装饰（配置面板标题、任务追踪标题、背包标题） | Andromeda |
+| 中文像素字体 | `Pingfangpixel.ttf` | 所有中文文本 | 第三方字体，随 Andromeda 的 `assets/fonts/` 一并提供 |
+| 战斗字体 | `combat.ttf` | 仅数字（伤害/治疗数值） | 同上 |
+| 冷却字体 | `super-effective.ttf` | 动作条冷却计时数字 | 同上 |
+| 标题字体 | `roadway.ttf` | 标题/装饰（配置面板标题、任务追踪标题、背包标题） | 同上 |
 
+> 以上 4 个字体按**用户确认**可继续使用（不涉及版权问题），继续随包分发，文件名与路径保持不变。
 > 字体路径在 `Utils/Media.lua` 里由 `ADDON_NAME` 拼出，因此**安装目录必须叫 `MonetUI`**。
 > Buff/Debuff 图标上的持续时间数字使用 `pixel` 字体（中文友好），不使用 `combat`。
 
@@ -297,13 +322,14 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 
 | 内容 | 说明 |
 |------|------|
-| 4 个字体文件（`Assets/Fonts/`） | 取自 **Andromeda**（GPL-3.0）的 `assets/fonts/`，属**文件级拷贝**，字体自身的授权需单独确认 |
+| 4 个字体文件（`Assets/Fonts/`） | 第三方字体；按**用户确认**不涉及版权问题，继续保留 |
 | 布局坐标与尺寸数值 | 参考 **Andromeda**（GPL-3.0）的 `modules/unitframe/unitframe.lua`、`gui/configs.lua` 与 `core/uiscale.lua`。布局思路与数字本身不受版权保护，且已按 MonetUI 的 1:1 坐标系重新取值（血条高度即取其实际厚度的约 50%） |
 | 小地图矩形遮罩 | 起初拷贝了 Andromeda 的 `rectangle-mask.blp`；现已**改为自绘**（`tools/make-minimap-mask.ps1` 生成并自校验） |
 
 > Andromeda 以 **GPL-3.0** 发布，而 GPL 具有传染性：若 MonetUI 的分发中包含 Andromeda
-> 受版权保护的代码或素材，MonetUI 亦须以 GPL-3.0 发布并附源码。因此本项目只借鉴**布局思路
-> 与数值**，并已开始替换一切文件级拷贝（素材优先）。发布前请自行确认上面 4 个字体的授权条款。
+> 受版权保护的**代码**，MonetUI 亦须以 GPL-3.0 发布并附源码。因此 MonetUI 的 Lua 全部独立
+> 重写，只借鉴**布局思路与数值**（不受版权保护），并且不引用 Andromeda 的任何代码；素材方面
+> 唯二的文件级拷贝是小地图遮罩（已换成自绘）与 4 个字体（已确认不涉及版权）。
 
 ---
 
@@ -338,6 +364,7 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 
 ### Phase 3: 完善与发布
 - [x] 配置面板完善（绑定 MonetUIDB，实时生效）
+- [x] 单位框架新增：能量条按类型分色、死亡/掉线变灰、数值平滑过渡（配置面板可选）
 - [ ] 游戏内视觉验收
 - [ ] 压力测试
 - [x] 文档编写（MonetUI.md）
@@ -384,7 +411,7 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | 2026-10-15 | focus 偏移改回 Andromeda 的 `-100` | 单位框已细条化到 60 宽，不再需要外推 |
 | 2026-10-15 | 小地图矩形化用遮罩纹理（256×256 裁上下各 33px → 256×190） | 与 Andromeda 的 `rectangle-mask` 同法，保持圆形画布不动 |
 | 2026-10-15 | 隐藏暴雪动作条/背包条用「重定位到隐藏父框」而非销毁 | 按键仍然可用，且不动 Blizzard 的动作条逻辑 |
-| 2026-10-15 | 新增 targettarget 单位框（60×8，居中名字） | 照搬 Andromeda `Positions.tot` = target `RIGHT` +(6,0) |
+| 2026-10-15 | 新增 targettarget 单位框（60×6，居中名字） | 照搬 Andromeda `Positions.tot` = target `RIGHT` +(6,0) |
 | 2026-10-15 | 单位框拖动后按依赖顺序重排（player→target→targettarget） | 链式锚点（目标的的目标挂在目标上）也要跟随移动 |
 | 2026-10-15 | 小地图去掉坐标与时钟 | 右下角位置紧凑，用户不需要这两项文本 |
 | 2026-10-15 | 血条高度 4 → 2（= Andromeda 实际厚度的约 50%） | Andromeda 会 `UIParent:SetScale(clamp(768/屏幕高, .4, 1.15))`（1440p≈0.53），照抄 4 会厚近一倍 |
@@ -393,7 +420,12 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | 2026-10-15 | 血量数字按百分比 4 定点插值着色（绿→黄→橙→红） | 避免红绿直接线性插值经过脏褐色，对色盲也更友好 |
 | 2026-10-15 | 新增 `SCHEMA` 迁移，默认值语义变化时显式覆盖旧存档 | `MergeDefaults` 只补缺失键，改了数值的老存档不会自动更新 |
 | 2026-10-15 | 小地图遮罩改为自绘（`tools/make-minimap-mask.ps1`） | 去掉对 Andromeda `rectangle-mask.blp` 的文件级拷贝，规避 GPL 传染 |
-| 2026-10-15 | 素材策略：只借鉴布局思路与数值，不做文件级拷贝 | Andromeda 为 GPL-3.0；4 个字体文件的授权仍待确认 |
+| 2026-10-15 | 素材策略：只借鉴布局思路与数值，不做文件级拷贝 | Andromeda 为 GPL-3.0；小地图遮罩已自绘，4 个字体经确认不涉及版权 |
+| 2026-10-15 | 字体文件保留（`Assets/Fonts/` 4 个） | 用户确认字体不涉及版权问题，无需替换 |
+| 2026-10-15 | 血条/能量条用 `Enum.StatusBarInterpolation.ExponentialEaseOut` 平滑 | 插值在客户端内部完成（`SecretAspect.BarValue`），机密值同样可走平滑路径 |
+| 2026-10-15 | 死亡/掉线用 `StatusBar:SetStatusBarDesaturated` 变灰 | 变灰由客户端完成（`SecretAspect.Desaturation`），不需要读数值 |
+| 2026-10-15 | 能量条按 `UnitPowerType` 分色，自带 `POWER_COLOR` 表 | 旧实现依赖未文档化的全局 `PowerBarColor`；自建表可调且不产生全局依赖 |
+| 2026-10-15 | 配置面板血条风格用**自绘下拉**，不用 `UIDropDownMenu`/`MenuUtil` | 暴雪菜单框架不在文档化 API 内且各版本不同；自绘可套用 Monet 主题、零模板依赖 |
 
 ---
 

@@ -157,6 +157,109 @@ local function UpdateHealthColor(frame)
     end
 end
 
+-- -- Dead / offline -----------------------------------------------------------
+
+--- Is this unit dead, a ghost or disconnected?  Both calls return plain
+-- booleans and are safe in combat; Secrets.Bool only guards against a build that
+-- starts hiding them.
+local function IsUnavailable(unit)
+    if not UnitExists(unit) then return false end
+    if Secrets.Bool(UnitIsDeadOrGhost(unit), false) then return true end
+    return not Secrets.Bool(UnitIsConnected(unit), true)
+end
+
+--- Grey the bars out rather than recolouring them by hand: the client performs
+-- the desaturation, so it keeps working while the bar values are hidden.
+local function UpdateDesaturation(frame)
+    local grey = IsUnavailable(frame.unit)
+
+    if frame.health then frame.health:SetStatusBarDesaturated(grey) end
+    if frame.power  then frame.power:SetStatusBarDesaturated(grey)  end
+
+    -- A dead unit has no health left, so the bar shows its *missing* overlay end
+    -- to end -- and that overlay is a plain texture the client will not
+    -- desaturate for us.  Grey it by hand so a corpse still reads as a corpse.
+    local lost = frame.healthLost
+    if lost then
+        if grey then
+            local r, g, b = Color:GetNeutral()
+            lost:SetVertexColor(r, g, b, 1)
+        else
+            lost:SetVertexColor(LostColor(frame.unit))
+        end
+    end
+end
+
+--- Everything about a bar that does not depend on its current value.
+local function UpdateBarLook(frame)
+    UpdateHealthColor(frame)
+    UpdateDesaturation(frame)
+end
+
+-- -- Power colour -------------------------------------------------------------
+
+-- A unit can change power type at runtime (shapeshifts, stances, vehicles,
+-- encounter mechanics), so this is re-read on every UNIT_DISPLAYPOWER rather
+-- than decided once.  UnitPowerType returns both the token and the client's own
+-- colour for it; the table below only overrides the ones worth tuning, and
+-- anything unknown falls through to the client colour and then to the theme.
+local POWER_COLOR = {
+    MANA           = { 0.20, 0.50, 0.90 },
+    RAGE           = { 0.85, 0.20, 0.20 },
+    FOCUS          = { 0.85, 0.45, 0.15 },
+    ENERGY         = { 0.90, 0.85, 0.25 },
+    COMBO_POINTS   = { 0.85, 0.35, 0.55 },
+    RUNES          = { 0.45, 0.75, 0.85 },
+    RUNIC_POWER    = { 0.30, 0.80, 0.90 },
+    SOUL_SHARDS    = { 0.55, 0.35, 0.85 },
+    LUNAR_POWER    = { 0.35, 0.45, 0.90 },
+    HOLY_POWER     = { 0.95, 0.90, 0.55 },
+    ALTERNATE      = { 0.55, 0.80, 0.35 },
+    MAELSTROM      = { 0.25, 0.60, 0.95 },
+    CHI            = { 0.60, 0.95, 0.85 },
+    INSANITY       = { 0.55, 0.25, 0.75 },
+    BURNING_EMBERS = { 0.90, 0.45, 0.10 },
+    DEMONIC_FURY   = { 0.60, 0.35, 0.80 },
+    ARCANE_CHARGES = { 0.35, 0.65, 0.95 },
+    FURY           = { 0.80, 0.25, 0.55 },
+    PAIN           = { 0.90, 0.50, 0.10 },
+    ESSENCE        = { 0.45, 0.75, 0.85 },
+}
+
+local function UpdatePowerColor(frame)
+    local unit = frame.unit
+
+    if Setting(unit, "powerColor") == "theme" then
+        frame.power:SetStatusBarColor(Color:GetResource())
+        return
+    end
+
+    -- The token is a plain string; the extra guard keeps a client that starts
+    -- hiding it from ever handing us a secret table key.
+    local _, token, r, g, b = UnitPowerType(unit)
+    local tuned = (type(token) == "string" and not Secrets.IsSecret(token))
+                  and POWER_COLOR[token] or nil
+    if tuned then
+        frame.power:SetStatusBarColor(tuned[1], tuned[2], tuned[3])
+        return
+    end
+
+    local nr, ng, nb = Secrets.Number(r), Secrets.Number(g), Secrets.Number(b)
+    if nr and ng and nb and (nr + ng + nb) > 0 then
+        frame.power:SetStatusBarColor(nr, ng, nb)
+        return
+    end
+
+    frame.power:SetStatusBarColor(Color:GetResource())
+end
+
+--- The interpolation to hand to the client: nil means "snap straight to it".
+-- Easing is a user-facing preference, so it is read from the saved settings.
+local function Smoothing()
+    if Shared("smoothBars") == false then return nil end
+    return Secrets.SMOOTH
+end
+
 --- Health-percentage ramp for the numeric text.  Explicit stops are interpolated
 -- rather than lerping red straight to green, which would pass through a muddy
 -- brown in the middle (and stay hard to read for colour-blind players).
@@ -191,7 +294,7 @@ local function UpdateName(frame)
 
     -- Colouring follows identity, so it is refreshed here -- the pet frame has
     -- no name text but still needs its bar coloured.
-    UpdateHealthColor(frame)
+    UpdateBarLook(frame)
 
     local nameText = frame.name
     if not nameText then return end   -- pet frames carry no text
@@ -227,7 +330,8 @@ local function UpdateHealth(frame)
     local unit = frame.unit
     if not UnitExists(unit) then return end
 
-    Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))
+    Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit), Smoothing())
+    UpdateDesaturation(frame)
 
     local healthText = frame.healthText
     if not healthText then return end -- pet frames carry no text
@@ -253,16 +357,9 @@ local function UpdatePower(frame)
     local unit = frame.unit
     if not UnitExists(unit) then return end
 
-    local _, powerToken = UnitPowerType(unit)
-    Secrets.SetBar(frame.power, UnitPower(unit), UnitPowerMax(unit))
-
-    local palette = _G.PowerBarColor
-    local color = palette and powerToken and palette[powerToken]
-    if color then
-        frame.power:SetStatusBarColor(color.r, color.g, color.b)
-    else
-        frame.power:SetStatusBarColor(Color:GetResource())
-    end
+    Secrets.SetBar(frame.power, UnitPower(unit), UnitPowerMax(unit), Smoothing())
+    UpdatePowerColor(frame)
+    UpdateDesaturation(frame)
 
     -- Hide a bar the unit simply does not have (e.g. a rogue with 0 max energy).
     local maximum = Secrets.Number(UnitPowerMax(unit))
@@ -335,7 +432,7 @@ local function CreateUnitFrame(unit, position)
     frame.healthLost = lost
     frame.power = power
 
-    UpdateHealthColor(frame)
+    UpdateBarLook(frame)
 
     local layout = TEXT_LAYOUT[unit] or {}
     if layout.name then
@@ -464,6 +561,10 @@ function M:RegisterEvents()
     EventBus:Register("PLAYER_ENTERING_WORLD", function() M:UpdateAll() end)
     EventBus:Register("GROUP_ROSTER_UPDATE", function() M:UpdateAll() end)
     EventBus:Register("PLAYER_REGEN_ENABLED", function() M:UpdateAll() end)
+    -- Death / resurrection: the bars grey out and come back.
+    EventBus:Register("PLAYER_DEAD", function() M:UpdateAll() end)
+    EventBus:Register("PLAYER_ALIVE", function() M:UpdateAll() end)
+    EventBus:Register("PLAYER_UNGHOST", function() M:UpdateAll() end)
     EventBus:Register("MONETUI_RESTRICTION_CHANGED", function() M:UpdateAll() end)
     EventBus:Register("MONETUI_THEME_CHANGED", function() M:UpdateAll() end)
 end

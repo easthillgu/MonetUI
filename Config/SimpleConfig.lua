@@ -66,12 +66,168 @@ local function MakeSeparator(parent, yOffset, caption)
     return line
 end
 
+-- -- Dropdown ----------------------------------------------------------------
+
+-- Blizzard's menu framework (UIDropDownMenu / MenuUtil) is not part of the
+-- documented client API and differs between builds, so the panel paints its own
+-- small themed list instead of depending on either.
+
+local dropdowns = {}   -- list of refreshers, run when the panel is shown
+local openList         -- the list currently on screen, if any
+local catcher          -- the click-anywhere-else closer
+
+local function CloseDropdown()
+    if openList then openList:Hide() end
+    openList = nil
+    if catcher then catcher:Hide() end
+end
+
+--- Covers the screen while a list is open and closes it on any click elsewhere.
+-- Clicking the dropdown button itself also closes (the catcher is above it); a
+-- second click re-opens it, which reads naturally enough.
+local function Catcher()
+    if catcher then return catcher end
+    catcher = CreateFrame("Frame", nil, UIParent)
+    catcher:SetAllPoints(UIParent)
+    catcher:SetFrameStrata("FULLSCREEN")
+    catcher:EnableMouse(true)
+    catcher:SetScript("OnMouseDown", CloseDropdown)
+    catcher:Hide()
+    return catcher
+end
+
+local function RefreshDropdowns()
+    for i = 1, #dropdowns do
+        dropdowns[i]()
+    end
+end
+
+--- A settings row: caption on the left, the current choice on the right, and a
+-- floating list of the alternatives under it.
+-- @param items { { value = <stored value>, text = <shown label> }, ... }
+local function MakeDropdown(parent, y, caption, items, getter, setter)
+    local label = Widget:Font(parent, 12, "pixel", "neutral", "LEFT")
+    label:SetPoint("TOPLEFT", parent, "TOPLEFT", 24, y - 4)
+    label:SetText(caption)
+
+    local button = Widget:CreateFrame(nil, parent, 190, 20)
+    Widget:Theme(button, { thickness = 1, bgAlpha = 0.9 })
+    button:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -24, y)
+    button:EnableMouse(true)
+
+    local value = Widget:Font(button, 12, "pixel", "edge", "LEFT")
+    value:SetPoint("LEFT", button, "LEFT", 7, 0)
+    value:SetPoint("RIGHT", button, "RIGHT", -16, 0)
+
+    local chevron = Widget:Font(button, 10, "pixel", "neutral", "RIGHT")
+    chevron:SetPoint("RIGHT", button, "RIGHT", -5, 0)
+    chevron:SetText("v")
+
+    -- The list hangs off the panel (UIParent) so the panel can never clip it.
+    local list = Widget:CreateFrame(nil, UIParent, 190, #items * 20 + 4)
+    Widget:Theme(list, { thickness = 1, bgAlpha = 0.98 })
+    list:SetFrameStrata("FULLSCREEN_DIALOG")
+    list:SetPoint("TOPRIGHT", button, "BOTTOMRIGHT", 0, -2)
+    list:EnableMouse(true)
+    list:SetClampedToScreen(true)
+    list:Hide()
+
+    local function Selected()
+        local wanted = getter()
+        for _, item in ipairs(items) do
+            if item.value == wanted then return item end
+        end
+        return items[1]
+    end
+
+    local function Refresh()
+        local item = Selected()
+        value:SetText(item and item.text or "?")
+    end
+
+    for index, item in ipairs(items) do
+        local row = CreateFrame("Button", nil, list)
+        row:SetPoint("TOPLEFT", list, "TOPLEFT", 2, -2 - (index - 1) * 20)
+        row:SetSize(186, 20)
+
+        local hover = row:CreateTexture(nil, "HIGHLIGHT")
+        hover:SetAllPoints()
+        -- The HIGHLIGHT texture is only shown on hover, so its colour is
+        -- sampled then and follows the theme wherever the player is.
+        row:SetScript("OnEnter", function()
+            local hr, hg, hb = Color:GetHighlight()
+            hover:SetColorTexture(hr, hg, hb, 0.3)
+        end)
+
+        local rowText = Widget:Font(row, 12, "pixel", "neutral", "LEFT")
+        rowText:SetPoint("LEFT", row, "LEFT", 6, 0)
+        rowText:SetText(item.text)
+
+        row:SetScript("OnClick", function()
+            setter(item.value)
+            CloseDropdown()
+            RefreshDropdowns()
+        end)
+    end
+
+    button:SetScript("OnMouseDown", function()
+        if openList == list then
+            CloseDropdown()
+            return
+        end
+        CloseDropdown()
+        Refresh()
+        Catcher():Show()
+        list:Show()
+        openList = list
+    end)
+
+    parent:HookScript("OnHide", CloseDropdown)
+
+    dropdowns[#dropdowns + 1] = Refresh
+    Refresh()
+    return button
+end
+
+-- -- Unit-frame settings ------------------------------------------------------
+
+local function RefreshUnitFrames()
+    local unitFrames = ns:GetModule("UnitFrames")
+    if unitFrames and unitFrames.UpdateAll then unitFrames:UpdateAll() end
+end
+
+--- One setting, read from a group of units and written to all of them.  The
+-- units ship with different defaults (player/pet are lit, enemy frames follow
+-- the game's own colour) but a group is meant to move together.
+local function UnitSetting(units, key, default)
+    local function get()
+        local unitFrames = ns:DB().unitFrames or {}
+        for _, unit in ipairs(units) do
+            local stored = unitFrames[unit]
+            local value = stored and stored[key]
+            if value then return value end
+        end
+        return default
+    end
+
+    local function set(value)
+        local unitFrames = ns:DB().unitFrames
+        for _, unit in ipairs(units) do
+            unitFrames[unit] = unitFrames[unit] or {}
+            unitFrames[unit][key] = value
+        end
+        RefreshUnitFrames()
+    end
+
+    return get, set
+end
+
 -- -- Panel --------------------------------------------------------------------
 
 function SimpleConfig:Build()
     if panel then return panel end
 
-    panel = Widget:CreateFrame("MonetUIConfigFrame", UIParent, 400, 570)
+    panel = Widget:CreateFrame("MonetUIConfigFrame", UIParent, 400, 800)
     Widget:Theme(panel, { thickness = 2, bgAlpha = 0.96, borderAlpha = 1 })
     panel:SetPoint("CENTER")
     panel:SetFrameStrata("DIALOG")
@@ -171,6 +327,57 @@ function SimpleConfig:Build()
         end)
     y = y - 30
 
+    -- -- Bar colours ----------------------------------------------------------
+    local SELF  = { "player", "pet" }
+    local OTHER = { "target", "focus", "targettarget" }
+
+    local FILL_ITEMS = {
+        { value = "highlight", text = "高亮色（Monet）" },
+        { value = "class",     text = "职业 / 阵营色" },
+        { value = "health",    text = "生命绿" },
+    }
+    local LOST_ITEMS = {
+        { value = "danger", text = "高亮红" },
+        { value = "black",  text = "黑色（背景）" },
+    }
+    local POWER_ITEMS = {
+        { value = "type",  text = "按能量类型" },
+        { value = "theme", text = "统一主题色" },
+    }
+
+    MakeDropdown(panel, y, "玩家 / 宠物 血条",
+        FILL_ITEMS, UnitSetting(SELF, "fillColor", "highlight"))
+    y = y - 28
+    MakeDropdown(panel, y, "目标 / 焦点 血条",
+        FILL_ITEMS, UnitSetting(OTHER, "fillColor", "class"))
+    y = y - 28
+    MakeDropdown(panel, y, "目标 / 焦点 损失部分",
+        LOST_ITEMS, UnitSetting(OTHER, "lostColor", "danger"))
+    y = y - 28
+    MakeDropdown(panel, y, "能量条颜色", POWER_ITEMS,
+        function() return ns:DB().unitFrames.powerColor end,
+        function(value)
+            ns:DB().unitFrames.powerColor = value
+            RefreshUnitFrames()
+        end)
+    y = y - 28
+
+    MakeCheckbox(panel, "血量数字按百分比着色", y,
+        function() return ns:DB().unitFrames.textColorByPercent end,
+        function(value)
+            ns:DB().unitFrames.textColorByPercent = value
+            RefreshUnitFrames()
+        end)
+    y = y - 28
+
+    MakeCheckbox(panel, "血条数值平滑过渡", y,
+        function() return ns:DB().unitFrames.smoothBars end,
+        function(value)
+            ns:DB().unitFrames.smoothBars = value
+            RefreshUnitFrames()
+        end)
+    y = y - 30
+
     -- -- Action bar options ---------------------------------------------------
     MakeSeparator(panel, y, "动作条")
     y = y - 28
@@ -196,7 +403,7 @@ function SimpleConfig:Build()
     -- -- Footer --------------------------------------------------------------
     local hint = Widget:Font(panel, 11, "pixel", "neutral", "LEFT")
     hint:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, y)
-    hint:SetWidth(340)
+    hint:SetWidth(352)
     hint:SetText("提示：/mui status 查看模块状态，/mui reset 恢复默认设置。")
     hint:SetJustifyH("LEFT")
 
@@ -214,6 +421,7 @@ end
 function SimpleConfig:Toggle()
     local frame = self:Build()
     if frame:IsShown() then
+        CloseDropdown()
         frame:Hide()
     else
         if refreshStatus then refreshStatus() end
@@ -222,6 +430,7 @@ function SimpleConfig:Toggle()
                 checkbox:SetChecked(ns:IsModuleEnabled(name) and true or false)
             end
         end
+        RefreshDropdowns()
         frame:Show()
     end
 end

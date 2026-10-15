@@ -59,6 +59,21 @@ function Secrets.CanReadAuras()             return not Secrets.AurasSecret() end
 
 -- -- Value helpers ------------------------------------------------------------
 
+--- Enum.StatusBarInterpolation.ExponentialEaseOut when the client has it, else
+-- nil.  Handing this to StatusBar:SetValue makes the bar *ease* towards its new
+-- value instead of snapping; the easing is done inside the client, so it keeps
+-- working while the value itself is secret.  Looked up once, and guarded because
+-- the enumeration is not guaranteed to exist on every build.
+Secrets.SMOOTH = nil
+do
+    local ok, value = pcall(function()
+        local enum = _G.Enum
+        local interpolation = enum and enum.StatusBarInterpolation
+        return interpolation and interpolation.ExponentialEaseOut
+    end)
+    if ok and type(value) == "number" then Secrets.SMOOTH = value end
+end
+
 local function Add0(value) return value + 0 end
 
 --- Plain boolean test for whether a value is a secret.
@@ -99,14 +114,32 @@ function Secrets.Measure(fn, ...)
 end
 
 --- Feed a status bar without ever doing arithmetic on the values.
+-- @param interpolation optional Secrets.SMOOTH; when given, the client eases the
+--        bar towards the new value.  Both calls accept secret values, so the
+--        smooth path is used whenever the client takes it.
 -- Returns true when the widget accepted both calls.
-function Secrets.SetBar(bar, current, maximum)
+function Secrets.SetBar(bar, current, maximum, interpolation)
     if not bar then return false end
-    local okRange = pcall(bar.SetMinMaxValues, bar, 0, maximum)
+
+    local okRange
+    if interpolation then
+        okRange = pcall(bar.SetMinMaxValues, bar, 0, maximum, interpolation)
+    end
+    if not okRange then
+        okRange = pcall(bar.SetMinMaxValues, bar, 0, maximum)
+    end
     if not okRange then
         okRange = pcall(bar.SetMinMaxValues, bar, 0, 100)
     end
-    local okValue = pcall(bar.SetValue, bar, current)
+
+    local okValue
+    if interpolation then
+        okValue = pcall(bar.SetValue, bar, current, interpolation)
+    end
+    if not okValue then
+        okValue = pcall(bar.SetValue, bar, current)
+    end
+
     return okRange and okValue
 end
 
