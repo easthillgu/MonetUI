@@ -137,12 +137,22 @@ local function UpdatePower(frame)
     frame.power:SetShown(maximum == nil or maximum > 0)
 end
 
+--- Resolve the frame a stored position is anchored to.
+-- "UIParent" (or nil) means the screen; anything else names another unit frame
+-- built by this module, which lets target / focus / pet follow the player.
+local function ResolveRelative(stored)
+    local name = stored.relativeTo
+    if not name or name == "UIParent" then return UIParent end
+    return frames[name] or UIParent
+end
+
 local function PositionFrame(frame)
     local db = ns:DB()
     local stored = (db.unitFrames and db.unitFrames[frame.unit]) or frame.position or {}
-    local point = stored.point or "TOPLEFT"
+    local point = stored.point or "CENTER"
+    local relativePoint = stored.relativePoint or point
     frame:ClearAllPoints()
-    frame:SetPoint(point, UIParent, point, stored.x or 20, stored.y or -20)
+    frame:SetPoint(point, ResolveRelative(stored), relativePoint, stored.x or 0, stored.y or 0)
 end
 
 local function CreateUnitFrame(unit, position)
@@ -185,9 +195,23 @@ local function CreateUnitFrame(unit, position)
     frame:SetScript("OnDragStart", function(self) self:StartMoving() end)
     frame:SetScript("OnDragStop", function(self)
         self:StopMovingOrSizing()
-        local point, _, _, x, y = self:GetPoint()
+        local point, relativeTo, relativePoint, x, y = self:GetPoint()
         local db = ns:DB()
-        db.unitFrames[unit] = { point = point, x = Math:Round(x, 0), y = Math:Round(y, 0) }
+        db.unitFrames[unit] = {
+            point         = point,
+            relativeTo    = (relativeTo == UIParent) and "UIParent"
+                            or (relativeTo and relativeTo.unit) or "UIParent",
+            relativePoint = relativePoint,
+            x = Math:Round(x, 0),
+            y = Math:Round(y, 0),
+        }
+        -- Anything anchored to this frame has to follow it.
+        for _, other in pairs(frames) do
+            local stored = other ~= self and db.unitFrames[other.unit]
+            if stored and stored.relativeTo == unit then
+                PositionFrame(other)
+            end
+        end
     end)
 
     frame.position = position

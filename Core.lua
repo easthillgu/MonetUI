@@ -32,10 +32,15 @@ local DEFAULTS = {
     },
     unitFrames = {
         hideBlizzard = true,
-        player       = { point = "TOPLEFT", x = 20,  y = -20 },
-        target       = { point = "TOPLEFT", x = 300, y = -20 },
-        focus        = { point = "TOPLEFT", x = 20,  y = -80 },
-        pet          = { point = "TOPLEFT", x = 300, y = -80 },
+        -- Positions follow Andromeda's layout (see docs/mockup).  "relativeTo"
+        -- names either UIParent or another unit frame, so target / focus / pet
+        -- are anchored off the player frame.
+        player = { point = "CENTER", relativeTo = "UIParent", relativePoint = "CENTER", x = 0,    y = -180 },
+        target = { point = "LEFT",   relativeTo = "player",   relativePoint = "RIGHT",  x = 40,   y = 40 },
+        pet    = { point = "RIGHT",  relativeTo = "player",   relativePoint = "LEFT",   x = -6,   y = 0 },
+        -- Andromeda uses -100 here, but its focus frame is only 60 wide; ours is
+        -- 260 wide, so the offset is pushed out until it clears the pet frame.
+        focus  = { point = "RIGHT",  relativeTo = "player",   relativePoint = "LEFT",   x = -272, y = -40 },
     },
 }
 ns.DEFAULTS = DEFAULTS

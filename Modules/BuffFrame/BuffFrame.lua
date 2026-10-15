@@ -20,10 +20,10 @@ local ICON_GAP    = 4
 local PER_ROW     = 8
 local MAX_AURAS   = 32
 
--- The buttons grow left / down from the container's TOP-RIGHT corner, so the
--- container is sized to the rows it currently shows and always hugs the right
--- edge of the screen instead of running off it.
+-- The container is anchored top-left and the buttons grow right / down from its
+-- top-left corner, so the grid always hugs the top-left edge of the screen.
 local ROW_STRIDE  = ICON_SIZE + ICON_GAP
+local AURA_GAP    = 33   -- Andromeda's UI_GAP, used for the top-left inset
 
 --- Resize a container to exactly hug the icons it currently shows.
 local function FitContainer(container, count)
@@ -107,8 +107,8 @@ local function ShowAura(button, aura, index)
     local row = math.floor((index - 1) / PER_ROW)
 
     button:ClearAllPoints()
-    button:SetPoint("TOPRIGHT", button:GetParent(), "TOPRIGHT",
-        -column * ROW_STRIDE, -row * ROW_STRIDE)
+    button:SetPoint("TOPLEFT", button:GetParent(), "TOPLEFT",
+        column * ROW_STRIDE, -row * ROW_STRIDE)
 
     -- Show first: everything below must be allowed to fail without leaving the
     -- button stuck hidden.
@@ -224,11 +224,12 @@ end
 -- -- Lifecycle ----------------------------------------------------------------
 
 function M:Initialize()
+    -- Anchored top-left, matching Andromeda's BuffAnchor (its UI_GAP is 33).
     buffContainer = Widget:CreateFrame("MonetUIBuffFrame", UIParent, 1, 1)
-    buffContainer:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -20, -190)
+    buffContainer:SetPoint("TOPLEFT", UIParent, "TOPLEFT", AURA_GAP, -AURA_GAP)
 
     debuffContainer = Widget:CreateFrame("MonetUIDebuffFrame", UIParent, 1, 1)
-    debuffContainer:SetPoint("TOPRIGHT", buffContainer, "BOTTOMRIGHT", 0, -8)
+    debuffContainer:SetPoint("TOPLEFT", buffContainer, "BOTTOMLEFT", 0, -8)
 
     SuppressBlizzard()
 

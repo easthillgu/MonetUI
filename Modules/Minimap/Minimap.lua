@@ -1,10 +1,11 @@
 -- Modules/Minimap/Minimap.lua
 -- Minimap border / text beautification.
 --
--- The module does not replace the minimap, it frames it: the default border is
--- tinted with the Monet edge colour, the decorative compass is removed and a
--- themed panel is placed behind the cluster.  Coordinates and a small clock are
--- added underneath.
+-- The module does not replace the minimap, it frames it: the cluster is moved to
+-- the bottom-right corner (Andromeda's placement), the default border is tinted
+-- with the Monet edge colour, the decorative compass is removed and a themed
+-- panel is placed behind the cluster.  Coordinates and a small clock sit above
+-- it.
 
 local ADDON_NAME, ns = ...
 
@@ -53,6 +54,27 @@ end
 
 -- -- Skinning -----------------------------------------------------------------
 
+-- Andromeda parks the minimap in the bottom-right corner; its UI_GAP is 33.
+local MINIMAP_GAP = 33
+local minimapWarned = false
+
+--- Move Blizzard's minimap cluster to the bottom-right corner.
+-- Guarded: Edit Mode also anchors this frame, and a failure here (which would
+-- taint) must not stop the rest of the module.  Re-applied on every skin so a
+-- zone change or an Edit Mode layout cannot undo it.
+local function MoveCluster()
+    local cluster = _G.MinimapCluster
+    if not cluster then return end
+
+    pcall(cluster.ClearAllPoints, cluster)
+    local ok = pcall(cluster.SetPoint, cluster, "BOTTOMRIGHT", UIParent, "BOTTOMRIGHT",
+        -MINIMAP_GAP, MINIMAP_GAP)
+    if not ok and not minimapWarned then
+        minimapWarned = true
+        ns:Print("小地图定位失败，已保留暴雪默认位置。")
+    end
+end
+
 local function ApplyBorderTint()
     local er, eg, eb = Color:GetEdge()
     local border = _G.MinimapBorder
@@ -65,6 +87,7 @@ local function Skin()
     local minimap = _G.Minimap
     if not minimap then return false end
 
+    MoveCluster()
     ApplyBorderTint()
 
     local compass = _G.MinimapCompassTexture
@@ -90,16 +113,15 @@ local function Skin()
         Widget:Theme(panel, { thickness = 2, bgAlpha = 0.35 })
     end
 
-    -- coordinates + clock below the minimap
+    -- coordinates + clock above the minimap (it now sits in the bottom-right,
+    -- so there is no room below it)
     local textParent = _G.MinimapCluster or UIParent
     if not coordText then
         coordText = Widget:Font(textParent, 12, "pixel", "neutral", "CENTER")
-        coordText:SetPoint("TOP", minimap, "BOTTOM", 0, -6)
+        coordText:SetPoint("BOTTOM", minimap, "TOP", 0, 6)
     end
     if not clockText then
         clockText = Widget:Font(textParent, 12, "pixel", "edge", "CENTER")
-        -- Side by side with the coordinates: a second line would collide with the
-        -- buff grid, which is anchored just below this cluster.
         clockText:SetPoint("RIGHT", coordText, "LEFT", -12, 0)
     end
 
