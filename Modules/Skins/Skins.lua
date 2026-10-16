@@ -220,11 +220,14 @@ function M:Controls(list, fn)
     end
 end
 
---- Restyle a list of buttons.
+--- Restyle a list of buttons (check boxes get the check-button skin, with our
+-- own checkmark art, instead of the text-button plate).
 function M:Buttons(list, opts)
     self:Controls(list, function(button)
-        if type(button.GetObjectType) ~= "function" or button:GetObjectType() == "Button"
-            or button:GetObjectType() == "CheckButton" then
+        local kind = type(button.GetObjectType) == "function" and button:GetObjectType()
+        if kind == "CheckButton" then
+            Skin:CheckButton(button, opts)
+        elseif not kind or kind == "Button" then
             Skin:Button(button, opts)
         end
     end)
@@ -257,7 +260,9 @@ function M:SkinButtonsIn(frame, opts)
     for i = 1, #children do
         local child = children[i]
         local kind = type(child.GetObjectType) == "function" and child:GetObjectType()
-        if kind == "Button" and not LooksLikeItemButton(child) then
+        if kind == "CheckButton" then
+            Skin:CheckButton(child, opts)
+        elseif kind == "Button" and not LooksLikeItemButton(child) then
             Skin:Button(child, opts)
         end
     end

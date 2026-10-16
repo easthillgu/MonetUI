@@ -37,7 +37,7 @@ end
 
 function Widget:Bar(parent, width, height, textureKey)
     local bar = CreateFrame("StatusBar", nil, parent)
-    bar:SetStatusBarTexture(Media:Texture(textureKey or "statusbar"))
+    bar:SetStatusBarTexture(Media:Texture(textureKey or "barfill"))
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(1)
     if width then bar:SetSize(width, height or 18) end

@@ -59,8 +59,11 @@ end
 -- once and merely toggled.
 Skin.added = {}
 
+-- Only while recording: things built for a Blizzard window belong to the skin
+-- module and hide with it, while helpers called for the addon's own frames
+-- (the config panel) must not join that rollback list.
 function Skin:Track(frame)
-    if frame then
+    if frame and self.recording then
         self.added[#self.added + 1] = frame
     end
     return frame
@@ -125,6 +128,9 @@ end
 function Skin:Fade(region)
     if not region or type(region.SetAlpha) ~= "function" then return region end
     if region.__monetHidden then return region end
+    -- Our own art (Skin:SwapArt) is never faded: a later pass restyling the
+    -- same control must not hide the glyph we just put on it.
+    if region.__monetArt then return region end
     region.__monetHidden = true
 
     local old = region.GetAlpha and region:GetAlpha() or 1
@@ -450,17 +456,24 @@ function Skin:CheckButton(check, opts)
     self:ControlBg(check, { thickness = 1, bgAlpha = (opts and opts.bgAlpha) or 0.55 })
 
     local checked = check.GetCheckedTexture and check:GetCheckedTexture()
-    if checked and checked.SetVertexColor then
-        local r, g, b = Color:GetBorder()
-        pcall(checked.SetVertexColor, checked, r, g, b)
-        if not check.__monetCheckTint then
-            check.__monetCheckTint = true
-            self:OnTheme(function()
-                local nr, ng, nb = Color:GetBorder()
-                if checked.SetVertexColor then checked:SetVertexColor(nr, ng, nb) end
-            end)
+    if checked then
+        -- Our own checkmark art, tinted into the theme on top of it.
+        checked = self:SwapArt(checked, "monet-check") or checked
+        if checked.SetVertexColor then
+            local r, g, b = Color:GetBorder()
+            pcall(checked.SetVertexColor, checked, r, g, b)
+            if not check.__monetCheckTint then
+                check.__monetCheckTint = true
+                self:OnTheme(function()
+                    local nr, ng, nb = Color:GetBorder()
+                    if checked.SetVertexColor then checked:SetVertexColor(nr, ng, nb) end
+                end)
+            end
         end
     end
+
+    -- The stock highlight is gone, so hover feedback rides on the plate border.
+    self:HoverHighlight(check, { alpha = (opts and opts.borderAlpha) or 1 })
 
     local text = self:GetText(check) or check.Text
     if text then self:Font(text, (opts and opts.size) or 12, "pixel", nil, "neutral") end
@@ -485,18 +498,63 @@ function Skin:EditBox(editBox)
     return editBox
 end
 
---- Recolour a standard close button into the theme.
+--- Swap a texture's art for one of ours and remember how to put the original
+-- back: atlas name or file path, texcoords and alpha, all recorded for
+-- Skin:Rollback.  The texture is marked __monetArt so Skin:Fade leaves it
+-- alone.  Idempotent: a texture already carrying our art is returned as is.
+-- @return the same texture, or nil when it cannot be swapped
+function Skin:SwapArt(tex, key)
+    if not tex or type(tex.SetTexture) ~= "function" then return nil end
+    if tex.__monetArt then return tex end
+
+    local atlas = tex.GetAtlas and tex:GetAtlas() or nil
+    local path  = tex.GetTexture and tex:GetTexture() or nil
+    local u1, v1, u2, v2 = 0, 0, 1, 1
+    if tex.GetTexCoord then u1, v1, u2, v2 = tex:GetTexCoord() end
+    local alpha = tex.GetAlpha and tex:GetAlpha() or 1
+
+    self:Record(function()
+        if atlas and tex.SetAtlas then pcall(tex.SetAtlas, tex, atlas)
+        elseif tex.SetTexture then pcall(tex.SetTexture, tex, path or 0) end
+        if tex.SetTexCoord then pcall(tex.SetTexCoord, tex, u1, v1, u2, v2) end
+        if tex.SetAlpha then pcall(tex.SetAlpha, tex, alpha) end
+        tex.__monetArt = nil
+    end)
+
+    tex.__monetArt = true
+    pcall(tex.SetTexture, tex, Media:Texture(key))
+    if tex.SetTexCoord then pcall(tex.SetTexCoord, tex, 0, 1, 0, 1) end
+    if tex.SetAlpha then pcall(tex.SetAlpha, tex, 1) end
+    return tex
+end
+
+--- Restyle a standard close button into the theme, with our own art under it:
+-- normal = monet-close-normal, pushed = monet-close-push, highlight =
+-- monet-close-hover over the top (its blend mode is untouched, so hover only
+-- brightens the art).  The highlight is left white -- an additive tint would
+-- go invisible on the darker border colours.
 function Skin:CloseButton(button)
     if not button then return button end
-    local tex = button.GetNormalTexture and button:GetNormalTexture()
-    if tex and tex.SetVertexColor then
+
+    local normal = self:SwapArt(button.GetNormalTexture and button:GetNormalTexture(),
+        "monet-close-normal")
+    local pushed = self:SwapArt(button.GetPushedTexture and button:GetPushedTexture(),
+        "monet-close-push")
+    self:SwapArt(button.GetHighlightTexture and button.GetHighlightTexture(),
+        "monet-close-hover")
+
+    if normal and normal.SetVertexColor then
         local r, g, b = Color:GetBorder()
-        pcall(tex.SetVertexColor, tex, r, g, b)
+        pcall(normal.SetVertexColor, normal, r, g, b)
+        if pushed and pushed.SetVertexColor then
+            pcall(pushed.SetVertexColor, pushed, r, g, b)
+        end
         if not button.__monetCloseTint then
             button.__monetCloseTint = true
             self:OnTheme(function()
                 local nr, ng, nb = Color:GetBorder()
-                if tex.SetVertexColor then tex:SetVertexColor(nr, ng, nb) end
+                if normal.SetVertexColor then normal:SetVertexColor(nr, ng, nb) end
+                if pushed and pushed.SetVertexColor then pushed:SetVertexColor(nr, ng, nb) end
             end)
         end
     end

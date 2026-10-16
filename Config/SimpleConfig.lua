@@ -45,6 +45,9 @@ local function MakeCheckbox(parent, label, yOffset, getter, setter)
     cb:SetScript("OnClick", function(self)
         setter(self:GetChecked() and true or false)
     end)
+    -- Monet plate + our own checkmark (never tracked: this is our own panel,
+    -- it must not join the Skins module's rollback list).
+    if ns.Skin then ns.Skin:CheckButton(cb) end
 
     local text = Widget:Font(parent, 13, "pixel", "neutral", "LEFT")
     text:SetPoint("LEFT", cb, "RIGHT", 6, 0)
@@ -289,6 +292,7 @@ function SimpleConfig:Build()
 
     local close = Widget:CloseButton(panel)
     close:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -6, -6)
+    if ns.Skin then ns.Skin:CloseButton(close) end
 
     local y = -62
 

@@ -9,7 +9,7 @@ local M    = ns.Skins
 local Skin = ns.Skin
 
 local MAP_BUTTONS = {
-    "WorldMapFrameCloseButton", "WorldMapFrameMaximizeButton", "WorldMapFrameMinimizeButton",
+    "WorldMapFrameMaximizeButton", "WorldMapFrameMinimizeButton",
     "WorldMapFrameZoomInButton", "WorldMapFrameZoomOutButton",
 }
 
@@ -60,7 +60,7 @@ local function SkinWorldMap()
 
     -- Close / zoom / min-max.
     M:Buttons(MAP_BUTTONS)
-    M:Controls({ map.CloseButton, map.ZoomInButton, map.ZoomOutButton }, function(button)
+    M:Controls({ map.ZoomInButton, map.ZoomOutButton }, function(button)
         Skin:Button(button, { thickness = 1 })
     end)
     if map.MaximizeMinimizeFrame then
@@ -68,6 +68,8 @@ local function SkinWorldMap()
             Skin:Button(button, { thickness = 1 })
         end)
     end
+    -- The close button keeps its glyph: our own art, not the faded plate.
+    Skin:CloseButton(map.CloseButton or _G.WorldMapFrameCloseButton)
 
     SkinQuestMap()
 end

@@ -391,7 +391,7 @@ local function Layout(plate)
     plate:SetSize(width, height)
     plate.health:SetPoint("TOPLEFT", plate, "TOPLEFT", BORDER, -BORDER)
     plate.health:SetPoint("BOTTOMRIGHT", plate, "BOTTOMRIGHT", -BORDER, BORDER)
-    plate.health:SetStatusBarTexture(ns.Media:Texture("statusbar"))
+    plate.health:SetStatusBarTexture(ns.Media:Texture("barfill"))
 
     plate.name:SetShown(Setting("showName") ~= false)
     plate.level:SetShown(Setting("showLevel") ~= false)
@@ -401,7 +401,7 @@ local function Layout(plate)
     plate.percent:SetShown(Setting("showPercent") ~= false)
 
     plate.cast:SetSize(width, castHeight)
-    plate.cast.fill:SetStatusBarTexture(ns.Media:Texture("statusbar"))
+    plate.cast.fill:SetStatusBarTexture(ns.Media:Texture("barfill"))
     plate.cast.icon:SetSize(castHeight - BORDER * 2, castHeight - BORDER * 2)
     plate.cast:Hide()
 
