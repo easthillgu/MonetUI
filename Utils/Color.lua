@@ -142,6 +142,20 @@ function Color:WithAlpha(r, g, b, a, alpha)
     return r, g, b, (a or 1) * (alpha or 1)
 end
 
+--- Linear blend between two slots (t = 0 -> from, t = 1 -> to).  Lets a
+-- dynamic state ramp through the Monet palette -- the threat glow goes
+-- primary -> danger -> health -- instead of borrowing Blizzard's raw
+-- red / orange / yellow.
+function Color:Blend(from, to, t)
+    local a = self:GetTheme()[from] or self:GetTheme().edge
+    local b = self:GetTheme()[to] or self:GetTheme().edge
+    t = t or 0.5
+    return a.r + (b.r - a.r) * t,
+           a.g + (b.g - a.g) * t,
+           a.b + (b.b - a.b) * t,
+           a.a + (b.a - a.a) * t
+end
+
 function Color:Hex(r, g, b)
     return ns.Math:RGBToHex(r, g, b)
 end

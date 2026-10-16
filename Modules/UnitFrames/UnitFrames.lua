@@ -581,6 +581,62 @@ local function TextAbove(frame, side, size, key, colorKey, justify)
     return text
 end
 
+-- -- Edge glow states ---------------------------------------------------------
+-- The frame border doubles as a live signal (the Andromeda idea), but the
+-- colour runs through Widget:SetBorderState so the theme-refresh broadcast
+-- re-applies the *state* instead of stomping it.  Priority:
+-- threat > hover > themed border.
+
+--- The glow colour for a threat status, ramping through the Monet palette
+-- instead of borrowing Blizzard's raw red / orange / yellow:
+--   1 insecure  -> primary (warm ochre)
+--   2           -> primary/danger blend
+--   3 high      -> danger
+--   4 tanking   -> health (you hold it: this reads "safe")
+local function ThreatBorder(status)
+    if status == 4 then return Color:GetHealth() end
+    if status == 3 then return Color:GetDanger() end
+    if status == 2 then return Color:Blend("primary", "danger", 0.6) end
+    return Color:GetPrimary()
+end
+
+--- Re-evaluate the threat glow for one frame.  A *secret* status (this client
+-- hides threat state while restricted, see Secrets) must not raise and must
+-- not clear a glow that is still true: the last known state is kept, and the
+-- PLAYER_REGEN_ENABLED refresh re-evaluates it.
+local function UpdateThreat(frame)
+    if not Shared("threatGlow") then return end
+
+    -- nil means both "no threat API answer" and "value hidden by the client".
+    local status = Secrets.Number(UnitThreatSituation(frame.unit))
+    if status == nil then return end
+
+    frame.threatStatus = status
+    if status > 0 then
+        local r, g, b, a = ThreatBorder(status)
+        Widget:SetBorderState(frame, r, g, b, a)
+    elseif not (frame.IsMouseOver and frame:IsMouseOver()) then
+        -- Drop the glow; when the cursor is on the frame, the hover wash that
+        -- is already applied stays until OnLeave.
+        Widget:SetBorderState(frame, nil)
+    end
+end
+
+--- Hover: the border washes to the highlight slot.  A 1px wash matches the
+-- Monet language better than Andromeda's PetBattle glow art.  HookScript,
+-- because Widget:UnitTooltip already owns OnEnter / OnLeave.
+local function HoverBorder(frame, enter)
+    if not Shared("hoverGlow") then return end
+    if frame.threatStatus and frame.threatStatus > 0 then return end
+
+    if enter then
+        local r, g, b, a = Color:GetHighlight()
+        Widget:SetBorderState(frame, r, g, b, a)
+    else
+        Widget:SetBorderState(frame, nil)
+    end
+end
+
 local function CreateUnitFrame(unit, position)
     local border, split = FrameChrome()
     local width, healthHeight, powerHeight = UnitGeometry(unit)
@@ -647,6 +703,8 @@ local function CreateUnitFrame(unit, position)
 
     Widget:Theme(frame, { thickness = border, bgAlpha = 0.9 })
     Widget:UnitTooltip(frame, unit)
+    frame:HookScript("OnEnter", function(self) HoverBorder(self, true) end)
+    frame:HookScript("OnLeave", function(self) HoverBorder(self, false) end)
 
     frame:SetMovable(true)
     frame:SetClampedToScreen(true)
@@ -706,6 +764,7 @@ local function RefreshUnit(unit)
         UpdatePower(frame)
         UpdateClassPower(frame)
         UpdateName(frame)
+        UpdateThreat(frame)
     else
         frame:Hide()
     end
@@ -735,11 +794,22 @@ local function MakeUnitHandler(kind)
     end
 end
 
+local function MakeThreatHandler()
+    return function(_, changedUnit)
+        local frame = frames[changedUnit]
+        if frame and frame:IsShown() then UpdateThreat(frame) end
+    end
+end
+
 function M:RegisterEvents()
     for unit in pairs(frames) do
         for event, kind in pairs(UNIT_EVENTS) do
             EventBus:RegisterUnit(event, unit, MakeUnitHandler(kind))
         end
+        -- Threat glow.  This client carries the classic-era event name;
+        -- retail's UNIT_THREAT_SITUATION_CHANGED is not in its API manual and
+        -- would fail registration silently.
+        EventBus:RegisterUnit("UNIT_THREAT_SITUATION_UPDATE", unit, MakeThreatHandler())
     end
 
     EventBus:Register("PLAYER_TARGET_CHANGED", function()

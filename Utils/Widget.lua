@@ -179,10 +179,37 @@ function Widget:Refresh(frame, opts)
         local ar, ag, ab = Color:GetAmbient()
         frame:SetBackdropColor(ar * 0.35, ag * 0.35, ab * 0.35, opts.bgAlpha or 0.85)
 
-        local kr, kg, kb = BorderColor(opts)
-        local _, _, _, ka = Color:GetEdge()
-        frame:SetBackdropBorderColor(kr, kg, kb, opts.borderAlpha or ka or 1)
+        local state = opts.borderState
+        if state then
+            -- A live state (threat glow ...) outranks the themed colour, and
+            -- because it lives in this opts table the theme-refresh broadcast
+            -- re-applies *it* instead of stomping it.
+            frame:SetBackdropBorderColor(state.r, state.g, state.b, state.a or 1)
+        else
+            local kr, kg, kb = BorderColor(opts)
+            local _, _, _, ka = Color:GetEdge()
+            frame:SetBackdropBorderColor(kr, kg, kb, opts.borderAlpha or ka or 1)
+        end
     end
+end
+
+--- Give a themed frame a live border colour, or take it back with no colour.
+-- Dynamic states (threat glow, hover) write here instead of calling
+-- SetBackdropBorderColor directly: the override is kept in the widget's theme
+-- entry, so a MONETUI_THEME_CHANGED repaint applies the same override rather
+-- than resetting to the global border slot, and clearing it returns the frame
+-- to that slot.  Returns false for a frame that was never themed.
+function Widget:SetBorderState(frame, r, g, b, a)
+    local opts = frame and themed[frame]
+    if not opts then return false end
+
+    if r then
+        opts.borderState = { r = r, g = g, b = b, a = a }
+    else
+        opts.borderState = nil
+    end
+    Widget:Refresh(frame, opts)
+    return true
 end
 
 --- Re-tint every widget created through the factory.

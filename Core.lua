@@ -70,12 +70,25 @@ local DEFAULTS = {
     --   classPower        false turns the pips off
     --   classPowerHeight  how tall one pip is
     --   classPowerGap     gap between pips (also the breathing room under the frame)
+    --
+    -- Edge-glow states (the Andromeda-style dynamic frame border, re-tinted
+    -- through Widget:SetBorderState so theme refreshes cannot stomp them):
+    --   threatGlow  the border ramps primary -> danger while the unit's threat
+    --               status rises, and turns health green while the unit is
+    --               tanking.  Secret-safe: while the client hides threat state
+    --               the last known glow is kept and re-evaluated on
+    --               PLAYER_REGEN_ENABLED.  Applies to player and pet (the
+    --               units UnitThreatSituation answers for unaided).
+    --   hoverGlow   the border washes to the highlight slot while the cursor is
+    --               on the frame; a threat glow outranks it.
     unitFrames = {
         hideBlizzard = true,
         -- 1px Monet border, then the gap Andromeda keeps between its health and
         -- power bars (its C.MULT, ~1px at 1440p).
         border = 1,
         split  = 1,
+        threatGlow = true,
+        hoverGlow  = true,
         textColorByPercent = true,
         smoothBars = true,
         powerColor = "type",
