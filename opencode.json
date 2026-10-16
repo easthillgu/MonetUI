@@ -1,0 +1,42 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  "references": {
+    "andromeda": {
+      "path": "../Andromeda",
+      "description": "参考插件（只读）：unitframe 威胁/edge-glow、模块结构等成熟实现"
+    },
+    "ellesmere": {
+      "path": "../EllesmereUI-v9.4",
+      "description": "参考插件（只读）：WoW Forever 客户端实机皮肤代码（WindowPacks、*Forever 专属文件、WindowEngine）"
+    }
+  },
+
+  "tool_output": {
+    "max_lines": 800,
+    "max_bytes": 30720
+  },
+
+  "permissions": [
+    {
+      "action": "external_directory",
+      "resource": "$HOME/Documents/wowaddonsdev/*",
+      "effect": "allow"
+    },
+    {
+      "action": "edit",
+      "resource": "$HOME/Documents/wowaddonsdev/Andromeda/*",
+      "effect": "deny"
+    },
+    {
+      "action": "edit",
+      "resource": "$HOME/Documents/wowaddonsdev/EllesmereUI-v9.4/*",
+      "effect": "deny"
+    },
+    {
+      "action": "shell",
+      "resource": "git push *",
+      "effect": "ask"
+    }
+  ]
+}
