@@ -663,9 +663,11 @@ local function CreateLeaveVehicle()
     frame:SetSize(size + 2 * BORDER, size + 2 * BORDER)
     Widget:Theme(frame, { thickness = BORDER, bgAlpha = 0.55 })
 
-    local button = pcall(CreateFrame, "CheckButton", "MonetUILeaveVehicleButton", frame,
+    -- pcall returns (ok, result): capturing only one value would leave `button`
+    -- as a boolean, and button:SetPoint below would then index a boolean.
+    local okButton, button = pcall(CreateFrame, "CheckButton", "MonetUILeaveVehicleButton", frame,
         "SecureHandlerClickTemplate")
-    if not button then
+    if not okButton or not button then
         pcall(frame.Hide, frame)
         return nil
     end
