@@ -179,8 +179,8 @@
 
 <footer>
   重新生成：<code>powershell -ExecutionPolicy Bypass -File tools\make-ui-textures.ps1</code><br>
-  染色原理：白/奶油底材质 × <code>SetVertexColor</code> = 主题色（与 <code>Utils\Skin.lua</code> 的
-  <code>CloseButton</code>/<code>CheckButton</code> 着色一致）；Role 图标自带语义色，<b>不要</b>再染色。<br>
+  染色原理：白/奶油底材质 × <code>SetVertexColor</code> = 主题色（游戏内由 <code>Utils\Skin.lua</code> 的
+  <code>SwapArt</code> 给关闭钮三态 / 勾选框换图并按此着色，状态条默认 <code>barfill</code> 渐变）；Role 图标自带语义色，<b>不要</b>再染色。<br>
   游戏内路径前缀：<code class="mono" id="dir"></code>
 </footer>
 
