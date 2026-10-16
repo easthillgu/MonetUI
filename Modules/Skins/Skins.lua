@@ -50,6 +50,11 @@ function M:Panel(key, opts)
         group   = opts.group or "其它",
         apply   = opts.apply,
         default = opts.default ~= false,
+        -- Blizzard load-on-demand addons whose arrival this pack waits for,
+        -- e.g. { Blizzard_Collections = true }.  A declaring pack is applied
+        -- at login only once one of them is loaded, and re-applied the moment
+        -- one arrives -- instead of every pack re-skinning on every addon load.
+        addons  = opts.addons,
         -- Every Blizzard object this skin looks up, as dotted paths.  The names
         -- are our own recall of the retail UI (never lifted from a reference
         -- addon, which may target another build), so they are the one thing in
@@ -91,6 +96,27 @@ function M:IsEnabled(key)
     return value ~= false
 end
 
+--- Has a pack's load-on-demand addon (if it declared one) actually loaded?
+-- A name that does not exist on this client simply keeps the pack idle; the
+-- lookup is pcall'd, so this can never raise.
+local function AddonLoaded(name)
+    local api = _G.C_AddOns
+    if not (api and api.IsAddOnLoaded) then return false end
+    local ok, loaded = pcall(api.IsAddOnLoaded, name)
+    return ok and loaded and true or false
+end
+
+--- Can this pack be applied right now?  Packs that declared `addons` wait for
+-- one of them; everything else is always applicable.
+function M:IsApplicable(entry)
+    local addons = entry and entry.addons
+    if not addons then return true end
+    for name in pairs(addons) do
+        if AddonLoaded(name) then return true end
+    end
+    return false
+end
+
 --- Toggle a single panel.  Enabling applies it live; disabling needs a reload
 -- to put Blizzard's own art fully back, which the message says.
 function M:SetPanelEnabled(key, value)
@@ -113,6 +139,7 @@ end
 
 function M:Apply(entry)
     if not entry or type(entry.apply) ~= "function" then return end
+    if not self:IsApplicable(entry) then return end
     if not self:IsEnabled(entry.key) then return end
 
     local ok, err = pcall(entry.apply, entry)
@@ -124,6 +151,21 @@ end
 function M:ApplyAll()
     for i = 1, #self.registry do
         self:Apply(self.registry[i])
+    end
+end
+
+--- Collapse a burst of calls into a single pass on the next frame
+-- (C_Timer.After(0)).  Skins whose repaint hooks fire several times per frame
+-- wrap themselves in this so a burst costs one repaint, not dozens.
+function M:Debounce(fn)
+    local pending = false
+    return function()
+        if pending then return end
+        pending = true
+        C_Timer.After(0, function()
+            pending = false
+            if M.active then pcall(fn) end
+        end)
     end
 end
 
@@ -235,9 +277,13 @@ function M:SkinScrollsIn(frame)
 end
 
 --- Re-run a skin whenever a Blizzard frame is shown (Blizzard builds some
--- content lazily).  HookScript only.
+-- content lazily).  HookScript only, and idempotent: one OnShow handler per
+-- frame, ever.  Callers re-run this from refresh paths, and stacking a fresh
+-- handler each time would multiply a skin on every re-apply.
 function M:HookShow(frame, fn)
     if not frame or type(frame.HookScript) ~= "function" or type(fn) ~= "function" then return end
+    if frame.__monetShowHook then return end
+    frame.__monetShowHook = true
     frame:HookScript("OnShow", function()
         if M.active then pcall(fn) end
     end)
@@ -304,10 +350,30 @@ local function InstallHooks()
     if hooksInstalled then return end
     hooksInstalled = true
 
-    -- Blizzard windows are load-on-demand: skin a group when its addon arrives.
-    EventBus:Register("ADDON_LOADED", function()
+    -- Blizzard windows are load-on-demand.  Two paths keep up with them:
+    --   * a pack that declared its addon is re-applied the moment that exact
+    --     addon arrives (precise, no other pack pays for it);
+    --   * packs that declared nothing get ONE debounced pass per burst.  The
+    --     login ADDON_LOADED burst used to re-skin every window once per addon
+    --     that loaded; the debounce collapses it into a single pass.
+    local loosePass = M:Debounce(function()
+        for i = 1, #M.registry do
+            local entry = M.registry[i]
+            if not entry.addons then M:Apply(entry) end
+        end
+    end)
+
+    EventBus:Register("ADDON_LOADED", function(_, addonName)
         if not M.active then return end
-        M:ApplyAll()
+        if addonName then
+            for i = 1, #M.registry do
+                local entry = M.registry[i]
+                if entry.addons and entry.addons[addonName] then
+                    M:Apply(entry)
+                end
+            end
+        end
+        loosePass()
     end)
 
     -- Edit Mode / loading screens can rebuild chrome, so re-apply.

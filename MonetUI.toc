@@ -50,3 +50,4 @@ Modules\Skins\Collections.lua
 Modules\Skins\Social.lua
 Modules\Skins\Trade.lua
 Modules\Skins\System.lua
+Modules\Skins\Forever.lua

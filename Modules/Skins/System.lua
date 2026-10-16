@@ -22,6 +22,20 @@ local function SkinLoot()
         Skin:Strip(roll)
         Skin:Panel(roll, { bgAlpha = 0.96 })
     end)
+
+    -- The rolling history window builds its entry buttons lazily on open, so
+    -- the list gets re-skinned on every show (HookShow is one handler per
+    -- frame -- re-running it from refresh paths never stacks handlers).
+    local history = _G.GroupLootHistoryFrame
+    if history then
+        local function skinHistory()
+            M:SkinWindow(history, { panel = { bgAlpha = 0.96 } })
+            M:SkinScrollsIn(history)
+            M:SkinButtonsIn(history)
+        end
+        skinHistory()
+        M:HookShow(history, skinHistory)
+    end
 end
 
 -- -- Static pop-ups -----------------------------------------------------------
@@ -40,6 +54,51 @@ local function SkinPopups()
                 Skin:Button(button, { bgAlpha = 0.9 })
             end)
         end
+    end
+
+    -- 数量拆分框：顶部金色条是帧自己的美术，去掉；内容（加减号、输入框）
+    -- 保留。
+    local split = _G.StackSplitFrame
+    if split then
+        Skin:Strip(split)
+        Skin:Panel(split, { bgAlpha = 0.97 })
+        if split.SingleItemSplitBackground then Skin:Fade(split.SingleItemSplitBackground) end
+        if split.MultiItemSplitBackground then Skin:Fade(split.MultiItemSplitBackground) end
+        M:SkinButtonsIn(split)
+    end
+
+    -- 组队邀请弹窗：零售式与经典式两个模板都试，缺的那个自动跳过。
+    for _, name in ipairs({ "LFGListInviteDialog", "LFGInvitePopup" }) do
+        local dialog = _G[name]
+        if dialog then
+            Skin:Strip(dialog)
+            Skin:Panel(dialog, { bgAlpha = 0.97 })
+            M:SkinButtonsIn(dialog)
+        end
+    end
+
+    -- 就绪确认：主框（发确认者）与监听框（参与者）是两个独立窗口。
+    for _, name in ipairs({ "ReadyCheckFrame", "ReadyCheckListenerFrame" }) do
+        local frame = _G[name]
+        if frame then
+            Skin:Strip(frame)
+            Skin:Panel(frame, { bgAlpha = 0.97 })
+            M:SkinButtonsIn(frame)
+        end
+    end
+
+    -- 地下城队列状态气泡（小地图按钮弹出的那张列表）。
+    local queue = _G.QueueStatusFrame
+    if queue then
+        Skin:Strip(queue)
+        Skin:Panel(queue, { bgAlpha = 0.97 })
+    end
+
+    -- Battle.net 提示。
+    local toast = _G.BNToastFrame
+    if toast then
+        Skin:Strip(toast)
+        Skin:Panel(toast, { bgAlpha = 0.97 })
     end
 end
 
@@ -145,6 +204,7 @@ M:Panel("loot", { label = "拾取 / 掷骰", group = "系统", apply = SkinLoot,
         "LootFrame", "LootFrameCloseButton",
         "LootFramePrevPageButton", "LootFrameNextPageButton", "LootFrameScrollFrame",
         "GroupLootFrame1", "GroupLootFrame2", "GroupLootFrame3", "GroupLootFrame4",
+        "GroupLootHistoryFrame",
     } })
 
 M:Panel("popups", { label = "确认弹窗", group = "系统", apply = SkinPopups,
@@ -153,6 +213,10 @@ M:Panel("popups", { label = "确认弹窗", group = "系统", apply = SkinPopups
         "StaticPopup2", "StaticPopup2Button1",
         "StaticPopup3", "StaticPopup3Button1",
         "StaticPopup4", "StaticPopup4Button1",
+        "StackSplitFrame",
+        "LFGListInviteDialog", "LFGInvitePopup",
+        "ReadyCheckFrame", "ReadyCheckListenerFrame",
+        "QueueStatusFrame", "BNToastFrame",
     } })
 
 M:Panel("gamemenu", { label = "游戏菜单", group = "系统", apply = SkinGameMenu,
