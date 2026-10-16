@@ -58,9 +58,19 @@ function EventBus:Register(event, callback)
 
     if not registered[event] then
         registered[event] = true
-        -- Guarded: an unknown or restricted event must never abort module setup.
-        local ok, err = pcall(frame.RegisterEvent, EnsureFrame(), event)
-        if not ok then Report(event, err) end
+        -- Internal events are fired by the addon itself (see Fire): they are
+        -- not WoW events, so the shared frame must never be asked to listen
+        -- for them -- RegisterEvent would reject the name on every login.
+        if not string.find(event, "^MONETUI_") then
+            -- The frame must exist *before* pcall evaluates its arguments:
+            -- writing pcall(frame.RegisterEvent, EnsureFrame(), event) indexes
+            -- the still-nil `frame` outside the pcall, which used to raise at
+            -- the first registration and abort the whole boot chain in Core.
+            -- An unknown or restricted event must never abort module setup.
+            local f = EnsureFrame()
+            local ok, err = pcall(f.RegisterEvent, f, event)
+            if not ok then Report(event, err) end
+        end
     end
     return callback
 end
