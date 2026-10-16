@@ -1,7 +1,7 @@
 # MonetUI 开发计划
 
 > **创建日期**: 2026-10-13
-> **最后更新**: 2026-10-15（新增界面美化模块 Skins，v0.9.0；暴雪窗口统一走 Monet 材质 / 色彩）
+> **最后更新**: 2026-10-16（自绘 UI 材质 21 组生成并接入：关闭钮三态 / 勾选框 / 状态条；积压工作分 7 个提交入库）
 > **当前阶段**: Phase 1/2 — 八个模块已实现并通过 `wuxian check`，待游戏内 `load`/`try` 验证
 > **目标**: 为魔兽世界无限 (WoW Forever) 打造一套莫奈风格整合 UI 插件
 
@@ -47,13 +47,15 @@ MonetUI 是一套**整合 UI 插件**，以**莫奈印象派色彩**为核心设
 | InfoBar | 完成 | 信息栏：贴顶边（可切底边）的整幅细条 + 6 个数据块（金钱 / 耐久 / 货币 / 延迟帧率内存 / 专精 / 好友），默认悬停淡入、战斗呼吸闪烁、宠物对战自动隐藏；`/mui infobar diagnose` 自检 |
 | Forever 保密值适配 | 完成 | Utils/Secrets.lua，全部单位数值访问先查询 |
 | Lua 5.1 兼容性检查 | 完成 | 无 5.2+ 特性 |
-| wuxian check 语法验证 | 完成 | 30 个 Lua 文件，0 error / 1 warning（有意：覆写 `GetMinimapShape`）；参考插件来的 API 未入手册项与改名的全局均已消除 |
-| 安装到游戏 AddOns | 完成 | 含 Assets/Fonts 共 30.8 MB / 30 个文件已同步 |
+| wuxian check 语法验证 | 完成 | 31 个 Lua 文件，0 error / 2 warning（均为有意：覆写 `GetMinimapShape` ×2，矩形化小地图的设计使然）；参考插件来的 API 未入手册项与改名的全局均已消除 |
+| 自绘 UI 材质接入 | 完成 | 21 组材质（关闭钮三态 / 窗口控件 / 图标 / Role / 装饰 / 状态条）由 `tools/make-ui-textures.ps1` 生成（TGA+PNG 双格式、自校验）；关闭钮、勾选框、状态条填充已换自绘贴图（`Skin:SwapArt` / `barfill`），网页预览 `docs/texture-preview.html` |
+| 安装到游戏 AddOns | 完成 | 2026-10-16 重新同步 85 个文件（旧快照已备份 Temp）；新增文件需**完整重启客户端** |
 
 ### 待完成
 
 | 任务 | 优先级 | 说明 |
 |------|--------|------|
+| 自绘材质接线游戏内验收 | P0 | 关钮三态 / 勾选框 / 状态条已接线；完整重启后 `/verify` + 逐窗口目检。未接线（备用）：窗口最小化/最大化钮、翻页箭头、角饰 |
 | wuxian load 热加载验证 | P0 | 需游戏运行（当前离线） |
 | 信息栏游戏内验收 | P0 | 先 `/mui infobar diagnose` 读 PROBED 与耐久签名实测结果，再逐块 snap；验证悬停淡入 / 战斗呼吸 / 宠物对战隐藏 / 模块关掉即时还原 |
 | 游戏内视觉验收 | P0 | 三地图验证 + 暴雪框架接管是否产生 taint |
@@ -105,14 +107,16 @@ MonetUI/
 │   └── SimpleConfig.lua        # 轻量配置面板（无 Ace3）
 ├── Assets/
 │   ├── Textures/
-│   │   └── minimap-rect-mask.tga  # 小地图矩形遮罩（256×256，脚本生成）
+│   │   ├── minimap-rect-mask.tga  # 小地图矩形遮罩（256×256，脚本生成）
+│   │   └── monet-*.tga/png        # 自绘 UI 材质 21 组（关闭钮/窗口/图标/Role/装饰/状态条，双格式）
 │   └── Fonts/                  # 字体资源
 │       ├── Pingfangpixel.ttf   # 中文像素字体 — 所有中文文本
 │       ├── combat.ttf          # 战斗字体 — 仅数字（伤害/治疗数值）
 │       ├── super-effective.ttf # 冷却字体 — 冷却计时数字
 │       └── roadway.ttf         # 标题字体 — 标题/装饰
 ├── tools/
-│   └── make-minimap-mask.ps1   # 生成小地图矩形遮罩（自绘，不含第三方素材）
+│   ├── make-minimap-mask.ps1   # 生成小地图矩形遮罩（自绘，不含第三方素材）
+│   └── make-ui-textures.ps1    # 生成自绘 UI 材质（GDI+ 精确矢量双色，TGA+PNG，自校验 + 预览 manifest）
 └── Libs/
     ├── LibStub/                # LibStub 库
     ├── LibMonetColor-1.0/      # 色彩引擎库
@@ -752,6 +756,7 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | 信息栏（InfoBar）结构 | 参考 **Andromeda**（GPL-3.0）`modules/infobar/` 的**结构与取值**：一条贴边横条 + 按左右两侧累加偏移排布的数据块、默认高 14、悬停淡入的 0.25/0.5 与战斗闪烁。数据块的 API 选择、读取方式与全部实现代码为本项目独立编写（且该参考在本客户端本就不可用：`RegisterStateDriver`/`GetMoneyString`/`ToggleCharacter` 均不在本客户端手册内） |
 | 动作条架构 | 参考 Andromeda（GPL-3.0）`modules/actionbar/` 的**结构与取值**：header + `_onstate-page` + `RegisterStateDriver` 的分工、每页 12 槽的编号方式、`fullPage` 条件串与各条固定页号、"重定位暴雪框体"而非销毁。这些是接口用法与配置值，不含 Andromeda 的代码 |
 | 小地图矩形遮罩 | 起初拷贝了 Andromeda 的 `rectangle-mask.blp`；现已**改为自绘**（`tools/make-minimap-mask.ps1` 生成并自校验） |
+| 自绘 UI 材质（21 组 TGA/PNG） | 全部由 `tools/make-ui-textures.ps1` 程序化绘制（GDI+ 精确矢量 + 奶白芯/赭金侧影双色），`docs/texture-preview.html` 网页预览；不含任何第三方位图 |
 
 > Andromeda 以 **GPL-3.0** 发布，而 GPL 具有传染性：若 MonetUI 的分发中包含 Andromeda
 > 受版权保护的**代码**，MonetUI 亦须以 GPL-3.0 发布并附源码。因此 MonetUI 的 Lua 全部独立
@@ -906,6 +911,10 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | 2026-10-15 | 插件内存自己累加（`C_AddOns.GetNumAddOns` + `GetAddOnName` + `GetAddOnMemoryUsage`），没有合计接口就不假装有 | 没有"总内存"API。**更要紧的是计数与取名都在 `C_AddOns` 命名空间**：裸全局 `GetNumAddOns`/`GetAddOnName` 不是本客户端全局，是 `wuxian check` 的 `moved` 警告抓出来的 |
 | 2026-10-15 | **`api_get` 会静默模糊匹配，不能当"这个名字可用"的证据**；改名的全局以 `wuxian check` 的 `moved` 警告为准 | 查 `GetNumAddOns` 得到 `FOUND`，实际对应的是 `C_AddOns.GetNumAddOns` —— 两条工具链各覆盖一半，缺一就会把"换过名的全局"当成"没换名" |
 | 2026-10-15 | 信息栏默认贴顶边、默认**悬停淡入**；悬停判定用「进入/离开计数」而不是单次 `OnLeave` | 顶边避开底部动作条（Minimap 模块已把小地图移到右下角，顶边整条是空的）。条本体与数据块之间移动时父 `OnLeave` 会先于子 `OnEnter`，单次判定会把光标仍在条上的整条误淡出 |
+| 2026-10-16 | 自绘 UI 材质 21 组：GDI+ **精确矢量**（零抖动）+ 奶白芯/赭金侧影双色；TGA 给游戏、PNG 给预览页，同一生成器输出并 MD5 自校验 | 游戏不认 PNG；双色侧影让任何主题色乘上去都比芯暗一档，染到哪个色槽都和谐。大糊光晕已全部去除，辨识度靠剪影与侧影 |
+| 2026-10-16 | 关闭钮/勾选框接入自绘贴图走 `Skin:SwapArt`（记原 atlas/路径/texcoord/alpha 供回滚），`Skin:Fade` 跳过 `__monetArt`；世界地图与拾取窗的关闭钮从 `Skin:Button` 名单移除改走 `Skin:CloseButton` | 关钮此前被文字钮皮肤淡成空底板（无 ✕）；SwapArt 统一"换图 + 可回滚 + 幂等"，后续窗口控件接线复用同一条路 |
+| 2026-10-16 | 状态条填充默认改 `monet-barfill`（纵向白渐变：顶亮底沉），姓名板两处显式引用同步；旧 `statusbar` 键保留作后备 | 渐变是相对量，乘任何职业色/主题色都保留体积感；2px 细条与 12px 姓名板同样成立 |
+| 2026-10-16 | `Skin:Track` 只在 `recording` 期间登记 | 建给暴雪窗口的子板随皮肤模块隐藏/恢复；自家配置面板的不在回滚表里，模块关掉它也不塌 |
 
 ---
 
@@ -922,3 +931,4 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | ForeverUI 参考 | `wowaddonsdev\ForeverUI-0.4.24\` | 轻量实现参考 |
 | wuxian MCP | 已连接 | 游戏内调试工具 |
 | PortableGit | `wowaddonsdev\PortableGit\` | 版本管理 |
+| 自绘 UI 材质 | `Assets/Textures/monet-*.{tga,png}`（21 组） | `tools/make-ui-textures.ps1` 生成并自校验；`docs/texture-preview.html` 预览；接线处：`Skin:SwapArt`（关闭钮/勾选框）、`Widget:Bar` 默认 `barfill` |
