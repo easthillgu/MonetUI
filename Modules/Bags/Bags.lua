@@ -13,11 +13,9 @@ local EventBus = ns.EventBus
 local M = { name = "Bags" }
 
 -- BagIndex (manual): backpack + carried bags, reagent bag, then bank tabs.
-local BAG_BACKPACK = 0
 local BAGS_CARRIED = { 0, 1, 2, 3, 4 }   -- Backpack + Bag_1..Bag_4
 local BAG_REAGENT  = 5                    -- ReagentBag (present only if crafted)
 local BANK_TABS    = { 6, 7, 8, 9, 10, 11, 12, 13, 14 }    -- CharacterBankTab_1..9
-local ACCOUNT_TABS = { 15, 16, 17, 18, 19, 20, 21, 22, 23 } -- AccountBankTab_1..9
 
 -- ItemClass (manual).  Local table so a missing Enum global can never bite.
 local IC = {
@@ -143,18 +141,6 @@ local function Scan(bagIndexes)
     return groups
 end
 
-local pool = {}
-
-local function ReleaseButtons(list)
-    for i = #list, 1, -1 do
-        local btn = list[i]
-        btn:Hide()
-        btn:SetParent(nil)
-        pool[#pool + 1] = btn
-        list[i] = nil
-    end
-end
-
 -- Quest items take the amber ring regardless of quality; poor/common keep the plain edge (Andromeda likewise demotes common to black).
 -- Declared above AcquireButton: its hover closure uses QualityBorder as an upvalue.
 local QUALITY_COLOR = {
@@ -176,84 +162,81 @@ local function QualityBorder(rec)
 end
 
 local function AcquireButton(parent)
-    local btn = table.remove(pool)
-    if not btn then
-        btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-        btn.icon = Widget:Icon(btn, nil, "ARTWORK")
-        btn.icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 1, -1)
-        btn.icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
+    local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    btn.icon = Widget:Icon(btn, nil, "ARTWORK")
+    btn.icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 1, -1)
+    btn.icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
 
-        btn.count = Widget:Font(btn, 11, "pixel", { r = 1, g = 1, b = 1 }, "RIGHT")
-        btn.count:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 2)
+    btn.count = Widget:Font(btn, 11, "pixel", { r = 1, g = 1, b = 1 }, "RIGHT")
+    btn.count:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 2)
 
-        btn.quest = Widget:Font(btn, 14, "pixel", { r = 1, g = 0.82, b = 0 }, "CENTER")
-        btn.quest:SetPoint("CENTER", btn, "CENTER", 0, 0)
+    btn.quest = Widget:Font(btn, 14, "pixel", { r = 1, g = 0.82, b = 0 }, "CENTER")
+    btn.quest:SetPoint("CENTER", btn, "CENTER", 0, 0)
 
-        btn.cd = Widget:Cooldown(btn)
+    btn.cd = Widget:Cooldown(btn)
 
-        Widget:Theme(btn, { thickness = 1, bgAlpha = 0.8 })
-        Widget:ButtonMaterial(btn, { alpha = 0.18 })
+    Widget:Theme(btn, { thickness = 1, bgAlpha = 0.8 })
+    Widget:ButtonMaterial(btn, { alpha = 0.18 })
 
-        -- Hand-written instead of Widget:Highlight so the tooltip can ride along.
-        btn:SetScript("OnEnter", function(self)
-            if self.icon then self.icon:SetVertexColor(1.25, 1.25, 1.25) end
-            local rec = self.item
-            if not rec then return end
-            local qc = QualityBorder(rec)
-            if qc then
-                Widget:Pulse(self, qc.r, qc.g, qc.b, 1)
-            else
-                local r, g, b = Color:GetHighlight()
-                Widget:Pulse(self, r, g, b, 0.9)
-            end
-            local tip = _G.GameTooltip
-            if tip then
-                pcall(tip.SetOwner, tip, self, "ANCHOR_RIGHT")
-                pcall(tip.SetBagItem, tip, rec.bag, rec.slot)
-                pcall(tip.Show, tip)
-                -- Tint the tooltip backdrop if the client exposes one; remember its border first.
-                if qc and tip.SetBackdropBorderColor then
-                    local pr, pg, pb, pa
-                    if tip.GetBackdropBorderColor then
-                        pr, pg, pb, pa = tip:GetBackdropBorderColor()
-                    end
-                    self.tipPrev = { pr or 0, pg or 0, pb or 0, pa or 0 }
-                    pcall(tip.SetBackdropBorderColor, tip, qc.r, qc.g, qc.b, 0.6)
+    -- Hand-written instead of Widget:Highlight so the tooltip can ride along.
+    btn:SetScript("OnEnter", function(self)
+        if self.icon then self.icon:SetVertexColor(1.25, 1.25, 1.25) end
+        local rec = self.item
+        if not rec then return end
+        local qc = QualityBorder(rec)
+        if qc then
+            Widget:Pulse(self, qc.r, qc.g, qc.b, 1)
+        else
+            local r, g, b = Color:GetHighlight()
+            Widget:Pulse(self, r, g, b, 0.9)
+        end
+        local tip = _G.GameTooltip
+        if tip then
+            pcall(tip.SetOwner, tip, self, "ANCHOR_RIGHT")
+            pcall(tip.SetBagItem, tip, rec.bag, rec.slot)
+            pcall(tip.Show, tip)
+            -- Tint the tooltip backdrop if the client exposes one; remember its border first.
+            if qc and tip.SetBackdropBorderColor then
+                local pr, pg, pb, pa
+                if tip.GetBackdropBorderColor then
+                    pr, pg, pb, pa = tip:GetBackdropBorderColor()
                 end
+                self.tipPrev = { pr or 0, pg or 0, pb or 0, pa or 0 }
+                pcall(tip.SetBackdropBorderColor, tip, qc.r, qc.g, qc.b, 0.6)
             end
-        end)
-        btn:SetScript("OnLeave", function(self)
-            if self.icon then self.icon:SetVertexColor(1, 1, 1) end
-            Widget:UnPulse(self)
-            local tip = _G.GameTooltip
-            if tip then
-                if tip.SetBackdropBorderColor and self.tipPrev then
-                    local p = self.tipPrev
-                    pcall(tip.SetBackdropBorderColor, tip, p[1], p[2], p[3], p[4])
-                    self.tipPrev = nil
-                end
-                pcall(tip.Hide, tip)
+        end
+    end)
+    btn:SetScript("OnLeave", function(self)
+        if self.icon then self.icon:SetVertexColor(1, 1, 1) end
+        Widget:UnPulse(self)
+        local tip = _G.GameTooltip
+        if tip then
+            if tip.SetBackdropBorderColor and self.tipPrev then
+                local p = self.tipPrev
+                pcall(tip.SetBackdropBorderColor, tip, p[1], p[2], p[3], p[4])
+                self.tipPrev = nil
             end
-        end)
+            pcall(tip.Hide, tip)
+        end
+    end)
 
-        btn:SetScript("OnClick", function(self, mouseButton)
-            local rec = self.item
-            if not rec then return end
-            if mouseButton == "RightButton" and C_Container.UseContainerItem then
-                pcall(C_Container.UseContainerItem, rec.bag, rec.slot)
-            else
-                pcall(C_Container.PickupContainerItem, rec.bag, rec.slot)
-            end
-        end)
-        btn:SetScript("OnDragStart", function(self)
-            local rec = self.item
-            if rec then pcall(C_Container.PickupContainerItem, rec.bag, rec.slot) end
-        end)
-        btn:SetScript("OnReceiveDrag", function(self)
-            local rec = self.item
-            if rec then pcall(C_Container.PickupContainerItem, rec.bag, rec.slot) end
-        end)
-    end
+    btn:SetScript("OnClick", function(self, mouseButton)
+        local rec = self.item
+        if not rec then return end
+        if mouseButton == "RightButton" and C_Container.UseContainerItem then
+            pcall(C_Container.UseContainerItem, rec.bag, rec.slot)
+        else
+            pcall(C_Container.PickupContainerItem, rec.bag, rec.slot)
+        end
+    end)
+    btn:SetScript("OnDragStart", function(self)
+        local rec = self.item
+        if rec then pcall(C_Container.PickupContainerItem, rec.bag, rec.slot) end
+    end)
+    btn:SetScript("OnReceiveDrag", function(self)
+        local rec = self.item
+        if rec then pcall(C_Container.PickupContainerItem, rec.bag, rec.slot) end
+    end)
 
     btn:SetParent(parent)
     return btn

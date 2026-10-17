@@ -379,7 +379,6 @@ function Skin:ScrollBar(scrollbar)
             tint(1)
             self:OnTheme(function() tint(1) end)
             if type(thumb.HookScript) == "function" then
-                thumb.__monetThumbHover = true
                 thumb:HookScript("OnEnter", function() tint(1.35) end)
                 thumb:HookScript("OnLeave", function() tint(1) end)
             end
@@ -545,7 +544,7 @@ function Skin:CloseButton(button)
         "monet-close-normal")
     local pushed = self:SwapArt(button.GetPushedTexture and button:GetPushedTexture(),
         "monet-close-push")
-    self:SwapArt(button.GetHighlightTexture and button.GetHighlightTexture(),
+    self:SwapArt(button.GetHighlightTexture and button:GetHighlightTexture(),
         "monet-close-hover")
 
     if normal and normal.SetVertexColor then

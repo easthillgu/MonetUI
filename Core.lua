@@ -27,7 +27,6 @@ local DEFAULTS = {
     },
     theme = {
         useMonetColor  = true,
-        tintBlizzard   = true,
         -- Which engine slot borders are drawn from (see Color:GetBorderKey); one dropdown re-tints every border in the addon.
         borderKey      = "edge",
     },

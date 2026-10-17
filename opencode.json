@@ -23,6 +23,14 @@
         "environment": {
           "WUXIAN_LOG": "C:\\Users\\EastHillGu\\AppData\\Local\\WuxianWorkshop\\logs\\mcp.log"
         }
+      },
+      "hated-wow": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "hated-wow-mcp"
+        ]
       }
     }
   },

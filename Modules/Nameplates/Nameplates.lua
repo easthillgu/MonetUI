@@ -517,16 +517,22 @@ end
 local function UpdateHealth(plate)
     local unit = plate.unit
 
-    local interpolation = (Setting("smooth") ~= false) and Secrets.SMOOTH or nil
-    Secrets.SetBar(plate.health, UnitHealth(unit), UnitHealthMax(unit), interpolation)
+    -- A refused unit call skips the write entirely so the bar keeps its last state (Secrets contract).
+    local hp, hpMax = Query(UnitHealth, unit), Query(UnitHealthMax, unit)
+    if hp ~= nil and hpMax ~= nil then
+        local interpolation = (Setting("smooth") ~= false) and Secrets.SMOOTH or nil
+        Secrets.SetBar(plate.health, hp, hpMax, interpolation)
+    end
 
     local r, g, b = HealthColor(unit)
     plate.health:SetStatusBarColor(r, g, b)
 
     -- Dead / disconnected: the client greys the bar, and the "lost" overlay (no value of its
     -- own) is greyed by hand so a corpse reads as one (same rule as the unit frames).
-    local gone = Secrets.Bool(UnitIsDeadOrGhost(unit), false)
-        or not Secrets.Bool(UnitIsConnected(unit), true)
+    local connected = Query(UnitIsConnected, unit)
+    if connected == nil then connected = true end   -- refused query reads as connected
+    local gone = Secrets.Bool(Query(UnitIsDeadOrGhost, unit), false)
+        or not Secrets.Bool(connected, true)
     plate.health:SetStatusBarDesaturated(gone)
     if gone then
         local nr, ng, nb = Color:GetNeutral()
@@ -538,8 +544,8 @@ local function UpdateHealth(plate)
     -- Percentage text needs real numbers, so only when the client says health is readable (the
     -- bar always fills); Secrets.Number hands back a plain number or nil, making it safe.
     if Setting("showPercent") ~= false and Secrets.CanMeasureHealth(unit) then
-        local current = Secrets.Number(UnitHealth(unit))
-        local maximum = Secrets.Number(UnitHealthMax(unit))
+        local current = Secrets.Number(Query(UnitHealth, unit))
+        local maximum = Secrets.Number(Query(UnitHealthMax, unit))
         if current and maximum and maximum > 0 then
             local percent = current / maximum * 100
             plate.percent:SetText(string.format("%d%%", math.floor(percent + 0.5)))

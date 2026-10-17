@@ -35,6 +35,29 @@ local function RemoveFromList(list, value)
     end
 end
 
+-- Refcounts shrink on unregister: re-register the filter with the surviving
+-- units, and drop the engine registration entirely once nothing listens --
+-- otherwise dead units would sit in RegisterUnitEvent's filter forever.
+local function ResyncUnitFilter(event)
+    local sets = unitSets[event]
+    if sets then
+        local units = {}
+        for u in pairs(sets) do units[#units + 1] = u end
+        if #units > 0 then
+            pcall(frame.RegisterUnitEvent, frame, event, unpack(units))
+            return
+        end
+        unitSets[event] = nil
+    end
+    local list = callbacks[event]
+    if list and #list > 0 then return end
+    local listeners = unitListeners[event]
+    if listeners and #listeners > 0 then return end
+    unitListeners[event] = nil
+    if frame then pcall(frame.UnregisterEvent, frame, event) end
+    registered[event] = nil
+end
+
 --- Subscribe to a WoW (or internal) event.
 function EventBus:Register(event, callback)
     if type(event) ~= "string" then return end
@@ -100,17 +123,27 @@ function EventBus:Unregister(event, callback)
 
     local listeners = unitListeners[event]
     if listeners then
+        local changed = false
         for i = #listeners, 1, -1 do
             if listeners[i].cb == callback then
+                local unit = listeners[i].unit
                 table.remove(listeners, i)
+                local sets = unitSets[event]
+                local count = sets and sets[unit]
+                if count then
+                    if count > 1 then sets[unit] = count - 1 else sets[unit] = nil end
+                    changed = true
+                end
             end
         end
+        if changed then ResyncUnitFilter(event) end
     end
 end
 
 function EventBus:UnregisterAll(event)
     callbacks[event] = nil
     unitListeners[event] = nil
+    unitSets[event] = nil
 end
 
 function EventBus:Dispatch(event, ...)

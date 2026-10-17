@@ -16,7 +16,7 @@ local refreshStatus
 
 local MODULE_ORDER = {
     "UnitFrames", "Cooldown", "BuffFrame",
-    "Minimap", "BagFrame", "QuestTracker", "ActionBars", "Nameplates", "Skins",
+    "Minimap", "BagFrame", "Bags", "QuestTracker", "ActionBars", "Nameplates", "Skins",
     "InfoBar",
 }
 
@@ -26,6 +26,7 @@ local MODULE_LABEL = {
     BuffFrame    = "增益光环 (BuffFrame)",
     Minimap      = "小地图 (Minimap)",
     BagFrame     = "背包整合 (BagFrame)",
+    Bags         = "分类背包 (Bags)",
     QuestTracker = "任务追踪 (QuestTracker)",
     ActionBars   = "动作条 (ActionBars)",
     Nameplates   = "姓名板 (Nameplates)",
@@ -175,7 +176,10 @@ local function MakeDropdown(parent, y, caption, items, getter, setter)
         openList = list
     end)
 
-    parent:HookScript("OnHide", CloseDropdown)
+    if not parent.__monetHideHook then
+        parent.__monetHideHook = true
+        parent:HookScript("OnHide", CloseDropdown)
+    end
 
     dropdowns[#dropdowns + 1] = Refresh
     Refresh()
@@ -227,7 +231,7 @@ local function UnitSetting(units, key, default)
         for _, unit in ipairs(units) do
             local stored = unitFrames[unit]
             local value = stored and stored[key]
-            if value then return value end
+            if value ~= nil then return value end   -- a stored false is a real choice
         end
         return default
     end
