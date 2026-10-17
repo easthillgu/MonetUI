@@ -1,7 +1,5 @@
 -- Modules/Skins/Character.lua
--- The character sheet and the inspect sheet.  The window, its side tabs and the
--- sub panels (paper doll, reputation, currency, skills, PvP) are plated; item /
--- slot icons are never touched (SkinButtonsIn skips buttons that carry an icon).
+-- The character sheet and the inspect sheet: window, side tabs and sub panels (paper doll, reputation, currency, skills, PvP) are plated; item/slot icons are never touched (SkinButtonsIn skips buttons that carry an icon).
 
 local ADDON_NAME, ns = ...
 

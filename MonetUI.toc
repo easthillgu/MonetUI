@@ -10,6 +10,7 @@
 # Libraries
 Libs\LibStub\LibStub.lua
 Libs\LibMonetColor-1.0\LibMonetColor-1.0.lua
+Libs\MonetColorMapData-1.0\MonetColorMapData-1.0.lua
 Libs\LibActionButton-1.0\LibActionButton-1.0.lua
 
 # Utilities
@@ -33,6 +34,7 @@ Modules\Cooldown\Cooldown.lua
 Modules\BuffFrame\BuffFrame.lua
 Modules\Minimap\Minimap.lua
 Modules\BagFrame\BagFrame.lua
+Modules\Bags\Bags.lua
 Modules\QuestTracker\QuestTracker.lua
 Modules\ActionBars\ActionBars.lua
 Modules\Nameplates\Nameplates.lua

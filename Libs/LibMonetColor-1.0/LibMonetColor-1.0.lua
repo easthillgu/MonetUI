@@ -1,51 +1,91 @@
 -- LibMonetColor-1.0.lua
--- Monet Color Engine v1.0.0
+-- Monet Color Engine v1.0.1
 -- A WoW dynamic environment color computation engine based on Impressionist color rules.
 -- Provides adaptive "5+3" theme colors for UI plugins.
 --
 -- Dependencies: LibStub, CallbackHandler-1.0
--- License: MAJOR = "LibMonetColor-1.0", MINOR = 10000
+-- Optional data: MonetColorMapData-1.0 (mapID -> environment color table)
+-- License: MAJOR = "LibMonetColor-1.0", MINOR = 10001
 
-local MAJOR, MINOR = "LibMonetColor-1.0", 10000
-
--- Safety: don't load twice
-if _G[MAJOR] and _G[MAJOR].Version >= MINOR then return end
+local MAJOR, MINOR = "LibMonetColor-1.0", 10001
 
 local LibStub = _G.LibStub
 local CallbackHandler = LibStub and LibStub("CallbackHandler-1.0", true)
 
--- Forward declarations
+-- Obtain the library object the same way every other LibStub library does.
+-- When LibStub is present we MUST use the table it hands back, otherwise
+-- LibStub("LibMonetColor-1.0") would return an empty table and consumers
+-- would see none of our methods. NewLibrary returns nil when an equal or
+-- newer minor is already loaded — that is our double-load guard.
 local LMC
-LMC = {
-    Version = MINOR,
-    -- Event registry
-    events = nil,
-    -- Color cache: mapID -> {edge={r,g,b}, ambient={r,g,b,a}, highlight={r,g,b}, neutral={r,g,b}, envH, envS, envL}
-    colorCache = {},
-    -- Active profile name
-    activeProfile = "Monet",
-    -- Custom profiles registered by producers
-    customProfiles = {},
-    -- Warning cooldown tracking
-    lastWarnTime = 0,
-    warnCooldown = 30, -- seconds between duplicate warnings
-    -- Delta E threshold for event triggering
-    deltaEThreshold = 5.0,
-}
+if LibStub then
+    LMC = LibStub:NewLibrary(MAJOR, MINOR)
+    if not LMC then return end
+else
+    -- Not in WoW: run against a bare table (tests / tooling).
+    LMC = {}
+end
 
--- Use CallbackHandler or fallback to a simple registry
+-- State. `or` keeps existing values when LibStub hands back a table from a
+-- previously loaded (lower) minor.
+LMC.Version = MINOR
+-- Event registry (filled below)
+LMC.events = nil
+-- Color cache: mapID -> {edge={r,g,b,a}, ambient={r,g,b,a}, highlight={r,g,b}, neutral={r,g,b}, envH, envS, envL}
+LMC.colorCache = LMC.colorCache or {}
+-- Active profile name
+LMC.activeProfile = LMC.activeProfile or "Monet"
+-- Custom profiles registered by producers
+LMC.customProfiles = LMC.customProfiles or {}
+-- Normalized (defaults-filled) copy of each custom profile, cache
+LMC.resolvedProfiles = {}
+-- Warning cooldown tracking
+LMC.lastWarnTime = LMC.lastWarnTime or 0
+LMC.warnCooldown = 30 -- seconds between duplicate warnings
+-- Delta E threshold for event triggering
+LMC.deltaEThreshold = LMC.deltaEThreshold or 5.0
+-- Runtime env overrides for individual maps (RegisterMapEnv)
+LMC.overrideEnv = LMC.overrideEnv or {}
+-- Env used when a map has no data at all (SetFallbackEnv). The default is
+-- achromatic mid-grey so ComputeEdgeColor routes through its achromatic
+-- injection path: unknown zones get a calm, readable tint instead of
+-- pretending they all look like the same placeholder color.
+LMC.fallbackEnv = LMC.fallbackEnv or { h = 0, s = 0, l = 0.5 }
+
+-- Use CallbackHandler or fall back to a dependency-free registry that mirrors
+-- the CallbackHandler public shape: RegisterCallback(event, fn).
 if CallbackHandler then
     LMC.events = CallbackHandler:New(LMC, "RegisterCallback", "UnregisterCallback", "UnregisterAllCallbacks")
 else
-    -- Fallback event system (minimal, no dependencies)
-    LMC.events = { _callbacks = {} }
-    function LMC.events:RegisterCallback(target, cb) self._callbacks[target] = cb end
-    function LMC.events:UnregisterCallback(target) self._callbacks[target] = nil end
-    function LMC.events:UnregisterAllCallbacks() self._callbacks = {} end
-    function LMC.events:Fire(event, ...)
-        for _, cb in pairs(self._callbacks) do
+    local registry = {}
+
+    local function fallbackFire(_, event, ...)
+        local bucket = registry[event]
+        if not bucket then return end
+        for cb in pairs(bucket) do
             pcall(cb, event, ...)
         end
+    end
+
+    LMC.events = { Fire = fallbackFire }
+
+    LMC.RegisterCallback = function(_, event, fn)
+        if type(fn) ~= "function" then return end
+        local bucket = registry[event]
+        if not bucket then
+            bucket = {}
+            registry[event] = bucket
+        end
+        bucket[fn] = true
+    end
+
+    LMC.UnregisterCallback = function(_, event, fn)
+        local bucket = registry[event]
+        if bucket then bucket[fn] = nil end
+    end
+
+    LMC.UnregisterAllCallbacks = function(_)
+        registry = {}
     end
 end
 
@@ -217,12 +257,35 @@ local DEFAULT_MONET_RULES = {
     achromaticWarmHue = 300,  -- warm purple
     achromaticCoolHue = 210,  -- cool blue
     achromaticSat = 0.12,
+
+    -- Ambient Tint alpha response (R-01 decision, 2026-10-15).
+    -- alpha = alphaMin + (alphaMax - alphaMin) * (1 - envL) * (1 - saturationGuard * envS)
+    -- Darker environments get a stronger mood wash; highly saturated environments
+    -- get a subtler one so the UI is not double-saturated. Output stays within
+    -- [alphaMin, alphaMax] = [0.15, 0.30] as promised by the API contract.
+    ambient = {
+        alphaMin = 0.15,
+        alphaMax = 0.30,
+        saturationGuard = 0.20,
+    },
 }
+
+--- Fill missing top-level keys of a custom profile from the built-in defaults
+--- so the compute functions never dereference nil. Explicitly provided keys
+--- (including empty tables such as complementaryPairs = {}) are kept as-is.
+local function resolveRules(rules)
+    if not rules then return DEFAULT_MONET_RULES end
+    local out = {}
+    for k, v in pairs(DEFAULT_MONET_RULES) do out[k] = v end
+    for k, v in pairs(rules) do out[k] = v end
+    return out
+end
 
 --- Find the matching domain for a given hue.
 -- Handles multi-range domains like Red/Warm [0,30) U [330,360).
 local function findDomain(hue, rules)
-    for _, domain in ipairs(rules.domains) do
+    local domains = rules.domains or DEFAULT_MONET_RULES.domains
+    for _, domain in ipairs(domains) do
         local range = domain.range
         -- range is flat array of numbers: {start1, end1, start2, end2, ...}
         for i = 1, #range, 2 do
@@ -234,15 +297,16 @@ local function findDomain(hue, rules)
         end
     end
     -- Fallback: should not happen with full 360 coverage
-    return rules.domains[1]
+    return domains[1]
 end
 
 --- Check complementary pairs for exact hue match.
 local function findComplement(hue, rules)
     -- Allow small tolerance for "exact" match (within 2 degrees)
     local tolerance = 2
-    for _, pair in ipairs(rules.complementaryPairs) do
-        local diff = math.abs(((hue - pair.h) % 360 + 360) % 360)
+    for _, pair in ipairs(rules.complementaryPairs or {}) do
+        -- Shortest signed distance on the hue wheel, already in [0, 360)
+        local diff = ((hue - pair.h) % 360 + 360) % 360
         if diff <= tolerance or diff >= (360 - tolerance) then
             return pair.complement
         end
@@ -272,18 +336,17 @@ function LMC.ComputeEdgeColor(envH, envS, envL, rules)
     end
 
     -- Determine complementary hue
-    local complementHue
+    local domain = findDomain(envH, rules)
     local pairComplement = findComplement(envH, rules)
+    local complementHue
     if pairComplement then
         complementHue = pairComplement
     else
-        local domain = findDomain(envH, rules)
         complementHue = envH + domain.hueShift
     end
     complementHue = ((complementHue % 360) + 360) % 360
 
     -- Apply saturation multiplier from domain (or default)
-    local domain = findDomain(envH, rules)
     local satMult = domain and domain.satMult or 0.8
     local lBias = domain and domain.lBias or 0
 
@@ -330,8 +393,17 @@ function LMC.ComputeAmbientTint(envH, envS, envL, rules)
     local ambientS = envS * 0.25
     ambientS = math.max(0, math.min(1, ambientS))
 
-    -- Alpha based on environment lightness (R-01: fixed for now, TBD in Phase 2)
-    local alpha = 0.15 + (1 - envL) * 0.15  -- 0.15-0.30 range
+    -- R-01 decision: alpha adapts to environment lightness with a saturation guard.
+    --   alpha = alphaMin + (alphaMax - alphaMin) * (1 - envL) * (1 - saturationGuard * envS)
+    -- Darker env -> stronger mood wash; more saturated env -> subtler wash.
+    -- Result is clamped to the documented [alphaMin, alphaMax] band.
+    local ambientRules = rules.ambient or DEFAULT_MONET_RULES.ambient
+    local alphaMin = ambientRules.alphaMin or 0.15
+    local alphaMax = ambientRules.alphaMax or 0.30
+    local satGuard = ambientRules.saturationGuard or 0
+    if alphaMax < alphaMin then alphaMin, alphaMax = alphaMax, alphaMin end
+    local alpha = alphaMin + (alphaMax - alphaMin) * (1 - envL) * (1 - satGuard * envS)
+    alpha = math.max(alphaMin, math.min(alphaMax, alpha))
 
     local r, g, b = LMC.HSLToRGB(ambientHue, ambientS, envL)
     return r, g, b, alpha
@@ -385,38 +457,113 @@ local function warn(msg)
 end
 
 -- ============================================================================
--- SECTION 5: Cache & Debounce System
+-- SECTION 5: Environment Sampling & Cache System
 -- ============================================================================
 
 --- Get the current map ID (WoW API).
 local function getCurrentMapID()
     -- C_Map is available in modern WoW (8.0+)
     if C_Map and C_Map.GetBestMapForUnit then
-        local mapID = C_Map.GetBestMapForUnit("player")
-        if mapID then return mapID end
+        local localMapID = C_Map.GetBestMapForUnit("player")
+        if localMapID then return localMapID end
     end
     -- Fallback
     return 0
 end
 
---- Sample the current environment color.
--- In production this would sample the world's dominant color.
--- For Phase 1, we use a placeholder that can be replaced with actual sampling.
+-- Cached lookup of the MonetColorMapData-1.0 module. The data module may be
+-- loaded after us (or not at all), so the lookup is retried until it hits.
+local mapEnvData
+local function getMapEnvData()
+    if mapEnvData then return mapEnvData end
+    local stub = _G.LibStub
+    if type(stub) == "table" then
+        local ok, data = pcall(stub, "MonetColorMapData-1.0", true)
+        if ok and type(data) == "table" and type(data.MapEnv) == "table" then
+            mapEnvData = data.MapEnv
+            return mapEnvData
+        end
+    end
+    local globalData = _G.LibMonetColorMapData
+    if type(globalData) == "table" and type(globalData.MapEnv) == "table" then
+        mapEnvData = globalData.MapEnv
+        return mapEnvData
+    end
+    return nil
+end
+
+-- Walk the parent-map chain (WoW only) to find a known ancestor of a map.
+-- Lets subzone/dungeon maps inherit their parent zone's environment.
+-- @return parentMapID, source | nil
+local function findParentEnv(mapID, data)
+    if not (type(C_Map) == "table" and C_Map.GetMapInfo) then return nil end
+    local current = mapID
+    for _ = 1, 5 do  -- depth cap: no cycles, no deep chains
+        local ok, info = pcall(C_Map.GetMapInfo, current)
+        if not ok or type(info) ~= "table" then return nil end
+        local parent = tonumber(info.parentMapID)
+        if not parent or parent == 0 then return nil end
+        if LMC.overrideEnv[parent] then return parent, "override" end
+        if data and data[parent] then return parent, "data" end
+        current = parent
+    end
+    return nil
+end
+
+--- Resolve the environment color (h, s, l) for a map.
+-- Resolution order:
+--   1. Runtime override registered via RegisterMapEnv
+--   2. Exact hit in MonetColorMapData-1.0 (generated from game_palette)
+--   3. Nearest known ancestor via C_Map parent chain (in-game only)
+--   4. Fallback env (SetFallbackEnv; default achromatic mid-grey)
+-- Never throws; all inputs are sanitized.
+-- @param mapID number|nil WoW map ID
+-- @return h, s, l, name|nil, source ("override"|"data"|"parent:override"|"parent:data"|"fallback")
+function LMC:GetMapEnv(mapID)
+    mapID = tonumber(mapID)
+    local fb = LMC.fallbackEnv
+    if not mapID or mapID == 0 then
+        return fb.h, fb.s, fb.l, nil, "fallback"
+    end
+
+    local entry = LMC.overrideEnv[mapID]
+    if entry then
+        return entry.h, entry.s, entry.l, entry.name, "override"
+    end
+
+    local data = getMapEnvData()
+    entry = data and data[mapID]
+    if entry then
+        return entry.h, entry.s, entry.l, entry.name, "data"
+    end
+
+    local parentID, parentSource = findParentEnv(mapID, data)
+    if parentID then
+        entry = LMC.overrideEnv[parentID] or data[parentID]
+        return entry.h, entry.s, entry.l, entry.name, "parent:" .. parentSource
+    end
+
+    return fb.h, fb.s, fb.l, nil, "fallback"
+end
+
+-- The default environment sampler (T2.1): zone-data lookup keyed by mapID.
+-- Integrating addons can still replace it wholesale via SetEnvironmentSampler.
+-- The mapID argument is optional; nil resolves to the fallback env.
+-- @param mapID number|nil WoW map ID
 -- @return h, s, l
-local function sampleEnvironmentColor()
-    -- TODO: Phase 2 — replace with actual world color sampling
-    -- For now, return a neutral mid-tone that exercises the engine
-    -- This should be replaced with palette-based sampling from the current zone
-    return 120, 0.15, 0.5  -- default: muted green, medium lightness
+local function sampleEnvironmentColor(mapID)
+    local h, s, l = LMC:GetMapEnv(mapID)
+    return h, s, l
 end
 
 --- Compute all theme colors for a given map ID and cache them.
 local function computeAndCache(mapID)
     mapID = mapID or getCurrentMapID()
 
-    local envH, envS, envL = sampleEnvironmentColor()
+    local envH, envS, envL = sampleEnvironmentColor(mapID)
 
-    -- Check if we can use cached values (only skip if same map AND env hasn't changed)
+    -- Cheap pre-filter: skip recompute when the same map's environment is
+    -- effectively unchanged (keeps GetCurrent* O(1) between map switches).
     local cached = LMC.colorCache[mapID]
     if cached and cached.envH and cached.envS and cached.envL then
         local dH = math.abs(envH - cached.envH)
@@ -426,11 +573,13 @@ local function computeAndCache(mapID)
         end
     end
 
-    -- Compute fresh colors
-    local edgeR, edgeG, edgeB, edgeA = LMC.ComputeEdgeColor(envH, envS, envL)
-    local ambR, ambG, ambB, ambA = LMC.ComputeAmbientTint(envH, envS, envL)
-    local hlR, hlG, hlB = LMC.ComputeHighlightWash(envH, envS, envL)
-    local neuR, neuG, neuB = LMC.ComputeNeutral(envH, envS, envL)
+    -- Active profile rules drive every derived color.
+    local rules = LMC:GetRules()
+
+    local edgeR, edgeG, edgeB, edgeA = LMC.ComputeEdgeColor(envH, envS, envL, rules)
+    local ambR, ambG, ambB, ambA = LMC.ComputeAmbientTint(envH, envS, envL, rules)
+    local hlR, hlG, hlB = LMC.ComputeHighlightWash(envH, envS, envL, rules)
+    local neuR, neuG, neuB = LMC.ComputeNeutral(envH, envS, envL, rules)
 
     local entry = {
         mapID = mapID,
@@ -454,6 +603,18 @@ local function shouldFireEvent(oldEntry, newEntry)
         newEntry.edge.r, newEntry.edge.g, newEntry.edge.b
     )
     return de > LMC.deltaEThreshold
+end
+
+--- Force a recompute for a map and fire OnThemeColorsChanged when significant.
+-- Shared by Refresh() and the zone event handler.
+local function recomputeAndFire(mapID)
+    local oldEntry = LMC.colorCache[mapID]
+    LMC.colorCache[mapID] = nil  -- force recompute
+    local newEntry = computeAndCache(mapID)
+    if shouldFireEvent(oldEntry, newEntry) then
+        LMC.events:Fire("OnThemeColorsChanged", newEntry)
+    end
+    return newEntry
 end
 
 -- ============================================================================
@@ -525,13 +686,19 @@ function LMC:GetAllThemeColors()
 end
 
 --- Get edge color for a specific map ID (does not change active cache).
+-- Uses the cached entry when present, otherwise samples that map on the fly
+-- without touching the active cache.
 -- @param mapID WoW map ID
 -- @return r, g, b, a
 function LMC:GetEdgeColorForMap(mapID)
     mapID = tonumber(mapID) or getCurrentMapID()
     local ok, r, g, b, a = pcall(function()
-        local envH, envS, envL = sampleEnvironmentColor()
-        return LMC.ComputeEdgeColor(envH, envS, envL)
+        local entry = LMC.colorCache[mapID]
+        if entry then
+            return entry.edge.r, entry.edge.g, entry.edge.b, entry.edge.a
+        end
+        local envH, envS, envL = sampleEnvironmentColor(mapID)
+        return LMC.ComputeEdgeColor(envH, envS, envL, LMC:GetRules())
     end)
     if ok then return r, g, b, a end
     warn("GetEdgeColorForMap failed: " .. tostring(r))
@@ -541,13 +708,7 @@ end
 --- Force refresh the color cache for the current map.
 -- Call this when you know the environment has changed (e.g., zone transition).
 function LMC:Refresh()
-    local mapID = getCurrentMapID()
-    local oldEntry = LMC.colorCache[mapID]
-    LMC.colorCache[mapID] = nil  -- force recompute
-    local newEntry = computeAndCache(mapID)
-    if shouldFireEvent(oldEntry, newEntry) then
-        LMC.events:Fire("OnThemeColorsChanged", newEntry)
-    end
+    return recomputeAndFire(getCurrentMapID())
 end
 
 --- Set the Delta E threshold for event firing (default 5.0).
@@ -557,11 +718,71 @@ function LMC:SetDeltaEThreshold(threshold)
 end
 
 --- Set the environment color sampler (for Phase 2 integration).
--- @param sampler function returning h, s, l
+-- The sampler may accept an optional mapID argument; it is ignored by
+-- samplers that do not care about the map.
+-- @param sampler function(mapID) returning h, s, l
+-- @return boolean success
 function LMC:SetEnvironmentSampler(sampler)
-    if type(sampler) == "function" then
-        sampleEnvironmentColor = sampler
+    if type(sampler) ~= "function" then
+        warn("SetEnvironmentSampler: sampler must be a function")
+        return false
     end
+    sampleEnvironmentColor = sampler
+    LMC:ClearCache()
+    LMC:Refresh()
+    return true
+end
+
+--- Register or override the environment color for a single map at runtime.
+-- Runtime overrides take priority over the MonetColorMapData module, letting
+-- addons extend coverage zone-by-zone without forking the data module.
+-- @param mapID number WoW map ID (> 0)
+-- @param h number Hue [0, 360]
+-- @param s number Saturation [0, 1]
+-- @param l number Lightness [0, 1]
+-- @param name string|nil Optional zone name (for debugging /lmctest output)
+-- @return boolean success
+function LMC:RegisterMapEnv(mapID, h, s, l, name)
+    mapID = tonumber(mapID)
+    if not mapID or mapID <= 0 then
+        warn("RegisterMapEnv: mapID must be a positive number")
+        return false
+    end
+    h, s, l = tonumber(h), tonumber(s), tonumber(l)
+    if not h or not s or not l then
+        warn("RegisterMapEnv: h, s and l must be numbers")
+        return false
+    end
+    LMC.overrideEnv[mapID] = {
+        name = type(name) == "string" and name or nil,
+        h = ((h % 360) + 360) % 360,
+        s = math.max(0, math.min(1, s)),
+        l = math.max(0, math.min(1, l)),
+    }
+    LMC:ClearCache()
+    LMC:Refresh()
+    return true
+end
+
+--- Set the fallback environment color used for maps with no data.
+-- Default is achromatic mid-grey {h=0, s=0, l=0.5}, which the engine routes
+-- through its achromatic injection path (calm cool-blue edge glow).
+-- @param h, s, l numbers
+-- @return boolean success
+function LMC:SetFallbackEnv(h, s, l)
+    h, s, l = tonumber(h), tonumber(s), tonumber(l)
+    if not h or not s or not l then
+        warn("SetFallbackEnv: h, s and l must be numbers")
+        return false
+    end
+    LMC.fallbackEnv = {
+        h = ((h % 360) + 360) % 360,
+        s = math.max(0, math.min(1, s)),
+        l = math.max(0, math.min(1, l)),
+    }
+    LMC:ClearCache()
+    LMC:Refresh()
+    return true
 end
 
 -- ============================================================================
@@ -583,6 +804,7 @@ function LMC:RegisterProfile(name, rules)
     end
     -- Minimal validation (R-03: trust caller for now, Phase 1)
     LMC.customProfiles[name] = rules
+    LMC.resolvedProfiles[name] = nil  -- re-resolve against defaults on next use
     return true
 end
 
@@ -614,13 +836,20 @@ end
 -- SECTION 8: Utility API (exposed for advanced users / testing)
 -- ============================================================================
 
---- Access the raw rules table (for inspection/modification).
+--- Access the active rules table (defaults-filled for custom profiles).
 -- @return rules table (do not mutate directly — use RegisterProfile for custom rules)
 function LMC:GetRules()
     if LMC.activeProfile == "Monet" then
         return DEFAULT_MONET_RULES
     end
-    return LMC.customProfiles[LMC.activeProfile] or DEFAULT_MONET_RULES
+    local profile = LMC.customProfiles[LMC.activeProfile]
+    if not profile then return DEFAULT_MONET_RULES end
+    local resolved = LMC.resolvedProfiles[LMC.activeProfile]
+    if not resolved then
+        resolved = resolveRules(profile)
+        LMC.resolvedProfiles[LMC.activeProfile] = resolved
+    end
+    return resolved
 end
 
 --- Clear the color cache.
@@ -653,13 +882,7 @@ local function ensureEventFrame()
     eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     eventFrame:SetScript("OnEvent", function(_, event)
         local ok, err = pcall(function()
-            local mapID = getCurrentMapID()
-            local oldEntry = LMC.colorCache[mapID]
-            LMC.colorCache[mapID] = nil  -- force recompute
-            local newEntry = computeAndCache(mapID)
-            if shouldFireEvent(oldEntry, newEntry) then
-                LMC.events:Fire("OnThemeColorsChanged", newEntry)
-            end
+            recomputeAndFire(getCurrentMapID())
         end)
         if not ok then
             warn("Event handler error: " .. tostring(err))
@@ -668,21 +891,19 @@ local function ensureEventFrame()
 end
 
 -- ============================================================================
--- SECTION 10: LibStub Registration
+-- SECTION 10: Initialization
 -- ============================================================================
 
 -- Initialize
 ensureEventFrame()
 
--- Register with LibStub (or provide a mock if not in WoW)
-if _G.LibStub then
-    _G.LibStub:NewLibrary(MAJOR, MINOR)
-else
-    -- Mock LibStub for standalone usage / testing
+-- Standalone fallback: provide a minimal LibStub so tooling and tests can
+-- fetch the library exactly like addons do in WoW. When the real LibStub is
+-- present the library was already registered in the header (NewLibrary).
+if not _G.LibStub then
+    LMC.LibStubName = MAJOR
     _G.LibStub = function(name, silent)
-        if name == MAJOR then
-            return LMC
-        end
+        if name == MAJOR then return LMC end
         return nil
     end
 end

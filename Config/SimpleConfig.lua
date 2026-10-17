@@ -1,8 +1,5 @@
 -- Config/SimpleConfig.lua
--- Lightweight, themed configuration panel (no Ace3 dependency).
---
--- All widgets bind straight to MonetUIDB, so changes apply immediately and
--- survive a reload.
+-- Lightweight, themed configuration panel (no Ace3 dependency); all widgets bind straight to MonetUIDB, so changes apply immediately and survive a reload.
 
 local ADDON_NAME, ns = ...
 
@@ -36,8 +33,6 @@ local MODULE_LABEL = {
     InfoBar      = "信息栏 (InfoBar)",
 }
 
--- -- Widget helpers -----------------------------------------------------------
-
 local function MakeCheckbox(parent, label, yOffset, getter, setter)
     local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
     cb:SetPoint("TOPLEFT", parent, "TOPLEFT", 24, yOffset)
@@ -45,11 +40,10 @@ local function MakeCheckbox(parent, label, yOffset, getter, setter)
     cb:SetScript("OnClick", function(self)
         setter(self:GetChecked() and true or false)
     end)
-    -- Monet plate + our own checkmark (never tracked: this is our own panel,
-    -- it must not join the Skins module's rollback list).
+    -- Monet plate + our own checkmark (never tracked: this is our own panel, it must not join the Skins module's rollback list).
     if ns.Skin then ns.Skin:CheckButton(cb) end
 
-    local text = Widget:Font(parent, 13, "pixel", "neutral", "LEFT")
+    local text = Widget:Font(parent, 12, "pixel", "neutral", "LEFT")
     text:SetPoint("LEFT", cb, "RIGHT", 6, 0)
     text:SetText(label)
 
@@ -65,7 +59,7 @@ local function MakeSeparator(parent, yOffset, caption)
     line:SetColorTexture(r, g, b, 0.35)
 
     if caption then
-        local title = Widget:Font(parent, 12, "roadway", "edge", "LEFT")
+        local title = Widget:Font(parent, 12, "pixel", "edge", "LEFT")
         title:SetPoint("BOTTOMLEFT", line, "TOPLEFT", 0, 4)
         title:SetText(caption)
     end
@@ -73,11 +67,7 @@ local function MakeSeparator(parent, yOffset, caption)
     return line
 end
 
--- -- Dropdown ----------------------------------------------------------------
-
--- Blizzard's menu framework (UIDropDownMenu / MenuUtil) is not part of the
--- documented client API and differs between builds, so the panel paints its own
--- small themed list instead of depending on either.
+-- Blizzard's menu framework (UIDropDownMenu / MenuUtil) is not part of the documented client API and differs between builds, so the panel paints its own small themed list instead of depending on either.
 
 local dropdowns = {}   -- list of refreshers, run when the panel is shown
 local openList         -- the list currently on screen, if any
@@ -89,9 +79,7 @@ local function CloseDropdown()
     if catcher then catcher:Hide() end
 end
 
---- Covers the screen while a list is open and closes it on any click elsewhere.
--- Clicking the dropdown button itself also closes (the catcher is above it); a
--- second click re-opens it, which reads naturally enough.
+--- Covers the screen while a list is open and closes it on any click elsewhere (clicking the dropdown button itself closes, a second click re-opens it).
 local function Catcher()
     if catcher then return catcher end
     catcher = CreateFrame("Frame", nil, UIParent)
@@ -109,8 +97,7 @@ local function RefreshDropdowns()
     end
 end
 
---- A settings row: caption on the left, the current choice on the right, and a
--- floating list of the alternatives under it.
+--- A settings row: caption on the left, the current choice on the right, and a floating list of the alternatives under it.
 -- @param items { { value = <stored value>, text = <shown label> }, ... }
 local function MakeDropdown(parent, y, caption, items, getter, setter)
     local label = Widget:Font(parent, 12, "pixel", "neutral", "LEFT")
@@ -126,7 +113,7 @@ local function MakeDropdown(parent, y, caption, items, getter, setter)
     value:SetPoint("LEFT", button, "LEFT", 7, 0)
     value:SetPoint("RIGHT", button, "RIGHT", -16, 0)
 
-    local chevron = Widget:Font(button, 10, "pixel", "neutral", "RIGHT")
+    local chevron = Widget:Font(button, 12, "pixel", "neutral", "RIGHT")
     chevron:SetPoint("RIGHT", button, "RIGHT", -5, 0)
     chevron:SetText("v")
 
@@ -159,8 +146,7 @@ local function MakeDropdown(parent, y, caption, items, getter, setter)
 
         local hover = row:CreateTexture(nil, "HIGHLIGHT")
         hover:SetAllPoints()
-        -- The HIGHLIGHT texture is only shown on hover, so its colour is
-        -- sampled then and follows the theme wherever the player is.
+        -- The HIGHLIGHT texture is only shown on hover, so its colour is sampled then and follows the theme wherever the player is.
         row:SetScript("OnEnter", function()
             local hr, hg, hb = Color:GetHighlight()
             hover:SetColorTexture(hr, hg, hb, 0.3)
@@ -196,29 +182,24 @@ local function MakeDropdown(parent, y, caption, items, getter, setter)
     return button
 end
 
--- -- Unit-frame settings ------------------------------------------------------
-
 local function RefreshUnitFrames()
     local unitFrames = ns:GetModule("UnitFrames")
     if unitFrames and unitFrames.UpdateAll then unitFrames:UpdateAll() end
 end
 
---- Action-bar changes go through Apply: it re-parks Blizzard's chrome, rebuilds
--- the visibility drivers and re-lays the bars out.
+--- Action-bar changes go through Apply: it re-parks Blizzard's chrome, rebuilds the visibility drivers and re-lays the bars out.
 local function RefreshActionBars()
     local actionBars = ns:GetModule("ActionBars")
     if actionBars and actionBars.Apply then actionBars:Apply() end
 end
 
---- Nameplate settings live in MonetUIDB.nameplates; Apply re-pushes the CVars,
--- the hitbox size and repaints whatever is on screen.
+--- Nameplate settings live in MonetUIDB.nameplates; Apply re-pushes the CVars, the hitbox size and repaints whatever is on screen.
 local function RefreshNameplates()
     local nameplates = ns:GetModule("Nameplates")
     if nameplates and nameplates.Apply then nameplates:Apply() end
 end
 
---- Read a nameplate setting through the module (so it falls back to Core's
--- shipped defaults), then write it back and repaint.
+--- Read a nameplate setting through the module (so it falls back to Core's shipped defaults), then write it back and repaint.
 local function NameplateSetting(key)
     local nameplates = ns:GetModule("Nameplates")
     if nameplates and nameplates.Setting then return nameplates.Setting(key) end
@@ -239,9 +220,7 @@ local function NameplateCheckbox(key)
     return function() return NameplateSetting(key) ~= false end, NameplateSetter(key)
 end
 
---- One setting, read from a group of units and written to all of them.  The
--- units ship with different defaults (player/pet are lit, enemy frames follow
--- the game's own colour) but a group is meant to move together.
+--- One setting, read from a group of units and written to all of them: the units ship with different defaults but a group is meant to move together.
 local function UnitSetting(units, key, default)
     local function get()
         local unitFrames = ns:DB().unitFrames or {}
@@ -265,8 +244,6 @@ local function UnitSetting(units, key, default)
     return get, set
 end
 
--- -- Panel --------------------------------------------------------------------
-
 function SimpleConfig:Build()
     if panel then return panel end
 
@@ -282,11 +259,11 @@ function SimpleConfig:Build()
     panel:SetClampedToScreen(true)
     panel:Hide()
 
-    local title = Widget:Font(panel, 20, "roadway", "edge", "CENTER")
+    local title = Widget:Font(panel, 24, "pixel", "edge", "CENTER")
     title:SetPoint("TOP", panel, "TOP", 0, -16)
     title:SetText("MonetUI")
 
-    local subtitle = Widget:Font(panel, 11, "pixel", "neutral", "CENTER")
+    local subtitle = Widget:Font(panel, 12, "pixel", "neutral", "CENTER")
     subtitle:SetPoint("TOP", title, "BOTTOM", 0, -4)
     subtitle:SetText("v" .. ns.version .. " · 印象派自适应界面")
 
@@ -294,9 +271,12 @@ function SimpleConfig:Build()
     close:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -6, -6)
     if ns.Skin then ns.Skin:CloseButton(close) end
 
+    -- Chrome: a cool drop shadow plus brush corner ornaments; the top-right corner stays bare because the close button already owns it.
+    Widget:Shadow(panel, { size = 7, alpha = 0.5 })
+    Widget:Corners(panel, { omit = { "TOPRIGHT" } })
+
     local y = -62
 
-    -- -- Theme ---------------------------------------------------------------
     MakeSeparator(panel, y, "主题")
     y = y - 26
 
@@ -313,7 +293,7 @@ function SimpleConfig:Build()
         end)
     y = y - 28
 
-    local statusText = Widget:Font(panel, 11, "pixel", "neutral", "LEFT")
+    local statusText = Widget:Font(panel, 12, "pixel", "neutral", "LEFT")
     statusText:SetPoint("TOPLEFT", panel, "TOPLEFT", 46, y)
     statusText:SetWidth(330)
     statusText:SetJustifyH("LEFT")
@@ -331,9 +311,7 @@ function SimpleConfig:Build()
     end
     refreshStatus()
 
-    -- Border colour source: one row re-tints every border in the addon -- unit
-    -- frames, the minimap panel, action bars, buffs, bags, the tracker and this
-    -- panel -- because they all draw through Widget:Theme -> Color:GetBorder.
+    -- Border colour source: one row re-tints every border in the addon, because they all draw through Widget:Theme -> Color:GetBorder.
     local BORDER_ITEMS = {
         { value = "edge",      text = "边缘色（Monet 签名）" },
         { value = "ambient",   text = "环境色" },
@@ -348,7 +326,6 @@ function SimpleConfig:Build()
         end)
     y = y - 28
 
-    -- -- Modules -------------------------------------------------------------
     MakeSeparator(panel, y, "模块")
     y = y - 28
 
@@ -368,7 +345,61 @@ function SimpleConfig:Build()
         y = y - 28
     end
 
-    -- -- Frame options -------------------------------------------------------
+    y = y - 6
+    MakeSeparator(panel, y, "冷却计时")
+    y = y - 28
+
+    local function CooldownSaved()
+        local db = ns:DB()
+        if type(db.cooldown) ~= "table" then db.cooldown = {} end
+        return db.cooldown
+    end
+
+    --- Re-render every countdown right away (colour, size, unit switch).
+    local function CooldownRefresh()
+        local cooldowns = ns:GetModule("Cooldown")
+        if cooldowns and cooldowns.ApplyDisplay then cooldowns:ApplyDisplay() end
+    end
+
+    local function CooldownSetting(key)
+        return function()
+            local saved = ns:DB().cooldown
+            local value = saved and saved[key]
+            if value == nil then value = (ns.DEFAULTS.cooldown or {})[key] end
+            return value
+        end
+    end
+
+    MakeCheckbox(panel, "单位自动缩放（秒 → 分钟 → 小时 → 天）", y,
+        CooldownSetting("scale"),
+        function(value)
+            CooldownSaved().scale = value
+            CooldownRefresh()
+        end)
+    y = y - 28
+
+    MakeCheckbox(panel, "剩余时间紧张时变红 + 放大字体", y,
+        CooldownSetting("alert"),
+        function(value)
+            CooldownSaved().alert = value
+            CooldownRefresh()
+        end)
+    y = y - 28
+
+    local ALERT_ITEMS = {
+        { value = 3,  text = "3 秒" },
+        { value = 5,  text = "5 秒" },
+        { value = 8,  text = "8 秒" },
+        { value = 10, text = "10 秒" },
+    }
+    MakeDropdown(panel, y, "紧张阈值（秒）", ALERT_ITEMS,
+        CooldownSetting("alertSeconds"),
+        function(value)
+            CooldownSaved().alertSeconds = value
+            CooldownRefresh()
+        end)
+    y = y - 30
+
     y = y - 6
     MakeSeparator(panel, y, "单位框架")
     y = y - 28
@@ -388,7 +419,6 @@ function SimpleConfig:Build()
         end)
     y = y - 30
 
-    -- -- Bar colours ----------------------------------------------------------
     local SELF  = { "player", "pet" }
     local OTHER = { "target", "focus", "targettarget" }
 
@@ -462,7 +492,15 @@ function SimpleConfig:Build()
         end)
     y = y - 30
 
-    -- -- Action bar options ---------------------------------------------------
+    -- The borrowed list's on/off is decided when Blizzard's TargetFrame is first suppressed, so -- like "hideBlizzard" above -- this applies on the next load: a runtime switch cannot re-register what a full-kill removed.
+    MakeCheckbox(panel, "显示目标框光环（借用暴雪，需重载）", y,
+        function() return ns:DB().unitFrames.showTargetAuras end,
+        function(value)
+            ns:DB().unitFrames.showTargetAuras = value
+            RefreshUnitFrames()
+        end)
+    y = y - 30
+
     MakeSeparator(panel, y, "动作条")
     y = y - 28
 
@@ -553,7 +591,6 @@ function SimpleConfig:Build()
         end)
     y = y - 30
 
-    -- -- Nameplate options ----------------------------------------------------
     MakeSeparator(panel, y, "姓名板")
     y = y - 28
 
@@ -575,7 +612,6 @@ function SimpleConfig:Build()
     MakeCheckbox(panel, "过滤死亡单位", y, NameplateCheckbox("hideDead"))
     y = y - 30
 
-    -- What the plate draws.
     MakeCheckbox(panel, "显示名称", y, NameplateCheckbox("showName"))
     y = y - 28
     MakeCheckbox(panel, "显示等级 / 精英标记", y, NameplateCheckbox("showLevel"))
@@ -605,10 +641,6 @@ function SimpleConfig:Build()
     for _, h in ipairs({ 8, 10, 12, 14, 16 }) do
         NP_HEIGHT[#NP_HEIGHT + 1] = { value = h, text = h .. " px" }
     end
-    local NP_FONT = {}
-    for _, s in ipairs({ 9, 10, 11, 12, 13 }) do
-        NP_FONT[#NP_FONT + 1] = { value = s, text = s .. " px" }
-    end
     local NP_CAST = {}
     for _, h in ipairs({ 11, 12, 13, 14, 16 }) do
         NP_CAST[#NP_CAST + 1] = { value = h, text = h .. " px" }
@@ -628,9 +660,7 @@ function SimpleConfig:Build()
     MakeDropdown(panel, y, "姓名板高度", NP_HEIGHT,
         function() return NameplateSetting("height") end, NameplateSetter("height"))
     y = y - 28
-    MakeDropdown(panel, y, "字号", NP_FONT,
-        function() return NameplateSetting("nameSize") end, NameplateSetter("nameSize"))
-    y = y - 28
+    -- Name/level font size is fixed on the 12px pixel grid (Media:SnapSize), so there is no size picker any more -- every choice would render as 12.
     MakeDropdown(panel, y, "施法条高度", NP_CAST,
         function() return NameplateSetting("castHeight") end, NameplateSetter("castHeight"))
     y = y - 28
@@ -641,20 +671,18 @@ function SimpleConfig:Build()
         function() return NameplateSetting("viewDistance") end, NameplateSetter("viewDistance"))
     y = y - 30
 
-    -- -- Skins (Blizzard panel beautification) -------------------------------
     local skins = ns:GetModule("Skins")
     if skins then
         MakeSeparator(panel, y, "界面美化")
         y = y - 26
 
         local FONT_ITEMS = {
-            { value = "off",     text = "关闭（原生字体）" },
-            { value = "pixel",   text = "像素字体（正文）" },
-            { value = "roadway", text = "标题字体" },
-            { value = "number",  text = "数字字体" },
+            { value = "off",   text = "关闭（原生字体）" },
+            { value = "pixel", text = "像素字体（推荐）" },
         }
+        -- Legacy saved values ("roadway", "number", ...) normalize through GetFontKey, so the row always shows one of the two entries above.
         MakeDropdown(panel, y, "统一字体（全局）", FONT_ITEMS,
-            function() return ns:DB().skins.font end,
+            function() return skins:GetFontKey() or "off" end,
             function(value)
                 ns:DB().skins.font = value
                 if skins.active then
@@ -664,7 +692,7 @@ function SimpleConfig:Build()
             end)
         y = y - 24
 
-        local fontHint = Widget:Font(panel, 11, "pixel", "neutral", "LEFT")
+        local fontHint = Widget:Font(panel, 12, "pixel", "neutral", "LEFT")
         fontHint:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, y)
         fontHint:SetWidth(350)
         fontHint:SetJustifyH("LEFT")
@@ -681,7 +709,7 @@ function SimpleConfig:Build()
         end
 
         for _, group in ipairs(groups) do
-            local caption = Widget:Font(panel, 12, "roadway", "edge", "LEFT")
+            local caption = Widget:Font(panel, 12, "pixel", "edge", "LEFT")
             caption:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, y)
             caption:SetText("· " .. group)
             y = y - 20
@@ -699,14 +727,12 @@ function SimpleConfig:Build()
         y = y - 4
     end
 
-    -- -- InfoBar (screen-edge strip) ----------------------------------------
     local infobar = ns:GetModule("InfoBar")
     if infobar then
         MakeSeparator(panel, y, "信息栏")
         y = y - 26
 
-        -- Rebuild nothing on a settings change: the strip is re-anchored and
-        -- the blocks re-measured in place.
+        -- Rebuild nothing on a settings change: the strip is re-anchored and the blocks re-measured in place.
         local function ApplyBar()
             if infobar.Reapply then infobar.Reapply()
             else infobar:ApplyLayout() end
@@ -752,8 +778,7 @@ function SimpleConfig:Build()
             end)
         y = y - 26
 
-        -- One switch per block, in registration order (gold, durability,
-        -- currency | system, spec, friends).
+        -- One switch per block, in registration order.
         for _, block in ipairs(infobar.blocks) do
             MakeCheckbox(panel, block.label, y,
                 function() return infobar:BlockEnabled(block.key) end,
@@ -769,13 +794,10 @@ function SimpleConfig:Build()
         y = y - 4
     end
 
-    -- -- Footer --------------------------------------------------------------
-    -- The row stack keeps growing as features land, so the panel is sized to
-    -- whatever was just built rather than to a hard-coded number; the hint and
-    -- the reload button live in the strip below the last row.
+    -- The panel is sized to whatever was just built rather than to a hard-coded number; the hint and the reload button live in the strip below the last row.
     panel:SetHeight(math.abs(y) + 78)
 
-    local hint = Widget:Font(panel, 11, "pixel", "neutral", "LEFT")
+    local hint = Widget:Font(panel, 12, "pixel", "neutral", "LEFT")
     hint:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 24, 52)
     hint:SetWidth(352)
     hint:SetText("提示：/mui status 查看模块状态，/mui reset 恢复默认设置。")

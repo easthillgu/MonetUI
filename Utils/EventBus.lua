@@ -1,14 +1,7 @@
 -- Utils/EventBus.lua
 -- Event bus: decoupled pub/sub between Core and the modules.
---
--- Events are registered *lazily*: the shared frame only listens to the WoW
--- events some module actually asked for.  This matters on the Forever client
--- because registering a restricted / unknown event raises an error, so the bus
--- must never blindly register a fixed list (in particular it never touches
--- COMBAT_LOG_EVENT_UNFILTERED).
---
--- Callbacks always receive the event name first:
---     EventBus:Register("PLAYER_LOGIN", function(event) ... end)
+-- Events are registered *lazily*: the shared frame only listens to what a module actually asked for. On the Forever client a restricted / unknown event raises, so the bus never blindly registers a fixed list (and never touches COMBAT_LOG_EVENT_UNFILTERED).
+-- Callbacks always receive the event name first.
 
 local ADDON_NAME, ns = ...
 
@@ -42,8 +35,6 @@ local function RemoveFromList(list, value)
     end
 end
 
--- -- Registration -------------------------------------------------------------
-
 --- Subscribe to a WoW (or internal) event.
 function EventBus:Register(event, callback)
     if type(event) ~= "string" then return end
@@ -58,15 +49,9 @@ function EventBus:Register(event, callback)
 
     if not registered[event] then
         registered[event] = true
-        -- Internal events are fired by the addon itself (see Fire): they are
-        -- not WoW events, so the shared frame must never be asked to listen
-        -- for them -- RegisterEvent would reject the name on every login.
+        -- Internal MONETUI_* events are fired by Fire(): the shared frame must never RegisterEvent them.
         if not string.find(event, "^MONETUI_") then
-            -- The frame must exist *before* pcall evaluates its arguments:
-            -- writing pcall(frame.RegisterEvent, EnsureFrame(), event) indexes
-            -- the still-nil `frame` outside the pcall, which used to raise at
-            -- the first registration and abort the whole boot chain in Core.
-            -- An unknown or restricted event must never abort module setup.
+            -- The frame must exist *before* pcall evaluates its arguments: writing pcall(frame.RegisterEvent, EnsureFrame(), event) indexes the still-nil `frame` outside the pcall. An unknown or restricted event must never abort module setup.
             local f = EnsureFrame()
             local ok, err = pcall(f.RegisterEvent, f, event)
             if not ok then Report(event, err) end
@@ -127,8 +112,6 @@ function EventBus:UnregisterAll(event)
     callbacks[event] = nil
     unitListeners[event] = nil
 end
-
--- -- Dispatch -----------------------------------------------------------------
 
 function EventBus:Dispatch(event, ...)
     local list = callbacks[event]

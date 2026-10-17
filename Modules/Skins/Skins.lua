@@ -1,22 +1,6 @@
 -- Modules/Skins/Skins.lua
--- Blizzard panel beautification (界面美化): reskin the vanilla windows (quests,
--- world map, character sheet, collections, social, mail / merchants, system
--- dialogs) so the whole UI matches MonetUI's palette, material and fonts.
---
--- This file is the engine, not a skin.  Each panel file (Modules/Skins/*.lua)
--- registers its windows through Skins:Panel(key, { apply = fn, ... }) at load
--- time; the engine owns the lifecycle:
---   * apply at PLAYER_LOGIN, again when a Blizzard load-on-demand window
---     arrives (ADDON_LOADED) and after a loading screen;
---   * keep recording every mutation so the whole thing can be rolled back the
---     moment the module is switched off;
---   * expose the panel list + enable/disable to the config panel.
---
--- Every skin is built from Utils/Skin.lua, which only fades Blizzard art and
--- adds our own child frames.  Nothing here calls SetScript / SetParent /
--- SetShown / Hide on a Blizzard frame -- a skin recolours and re-plates, it
--- never takes a protected or Edit-Mode-owned frame hostage.  Hover feedback on
--- Blizzard controls uses HookScript.
+-- Blizzard panel beautification (界面美化) engine: panel files (Modules/Skins/*.lua) register windows through Skins:Panel(key, { apply = fn, ... }); the engine applies them at login / ADDON_LOADED / loading screen, records every mutation for rollback, and exposes the list to the config panel.
+-- Skins only fade Blizzard art and add our own child frames: no SetScript / SetParent / SetShown / Hide on a Blizzard frame; hover feedback uses HookScript.
 
 local ADDON_NAME, ns = ...
 
@@ -31,15 +15,8 @@ M.registry = {}   -- ordered list of panel entries
 M.byKey    = {}   -- key -> entry
 M.active   = false
 
--- -- Registry ----------------------------------------------------------------
-
 --- Register one window / group of windows for beautification.
--- @param opts {
---   label   = the config label,
---   group   = the config section it belongs to,
---   apply   = function(entry)  the skin (idempotent),
---   default = false to ship it off by default,
--- }
+-- @param opts { label, group, apply = function(entry) (idempotent), default = false to ship off, addons = { ... }, frames = { ... } }
 function M:Panel(key, opts)
     assert(type(key) == "string", "Skins:Panel needs a string key")
     opts = opts or {}
@@ -50,17 +27,9 @@ function M:Panel(key, opts)
         group   = opts.group or "其它",
         apply   = opts.apply,
         default = opts.default ~= false,
-        -- Blizzard load-on-demand addons whose arrival this pack waits for,
-        -- e.g. { Blizzard_Collections = true }.  A declaring pack is applied
-        -- at login only once one of them is loaded, and re-applied the moment
-        -- one arrives -- instead of every pack re-skinning on every addon load.
+        -- Blizzard load-on-demand addons this pack waits for, e.g. { Blizzard_Collections = true }; the pack is applied once one is loaded, and re-applied the moment one arrives.
         addons  = opts.addons,
-        -- Every Blizzard object this skin looks up, as dotted paths.  The names
-        -- are our own recall of the retail UI (never lifted from a reference
-        -- addon, which may target another build), so they are the one thing in
-        -- this module that cannot be verified without the client -- see
-        -- M:Diagnose().  A wrong name skips that control silently, it does not
-        -- error, which is exactly why they are recorded here for probing.
+        -- Every Blizzard object this skin looks up, as dotted paths; a wrong name skips that control silently rather than erroring, which is exactly why they are recorded here for `/mui skins diagnose` to probe.
         frames  = opts.frames,
     }
 
@@ -96,9 +65,7 @@ function M:IsEnabled(key)
     return value ~= false
 end
 
---- Has a pack's load-on-demand addon (if it declared one) actually loaded?
--- A name that does not exist on this client simply keeps the pack idle; the
--- lookup is pcall'd, so this can never raise.
+--- Has a pack's load-on-demand addon (if declared) actually loaded?  A missing addon keeps the pack idle; the lookup is pcall'd, so it can never raise.
 local function AddonLoaded(name)
     local api = _G.C_AddOns
     if not (api and api.IsAddOnLoaded) then return false end
@@ -106,8 +73,7 @@ local function AddonLoaded(name)
     return ok and loaded and true or false
 end
 
---- Can this pack be applied right now?  Packs that declared `addons` wait for
--- one of them; everything else is always applicable.
+--- Can this pack be applied right now?  Packs that declared `addons` wait for one of them; everything else is always applicable.
 function M:IsApplicable(entry)
     local addons = entry and entry.addons
     if not addons then return true end
@@ -117,8 +83,7 @@ function M:IsApplicable(entry)
     return false
 end
 
---- Toggle a single panel.  Enabling applies it live; disabling needs a reload
--- to put Blizzard's own art fully back, which the message says.
+--- Toggle a single panel.  Enabling applies live; disabling needs a /reload to put Blizzard's art fully back, which the message says.
 function M:SetPanelEnabled(key, value)
     local skins = self:Settings()
     skins.panels = skins.panels or {}
@@ -154,9 +119,7 @@ function M:ApplyAll()
     end
 end
 
---- Collapse a burst of calls into a single pass on the next frame
--- (C_Timer.After(0)).  Skins whose repaint hooks fire several times per frame
--- wrap themselves in this so a burst costs one repaint, not dozens.
+--- Collapse a burst of calls into a single pass on the next frame (C_Timer.After(0)); wrap repaint hooks in this so a burst costs one repaint, not dozens.
 function M:Debounce(fn)
     local pending = false
     return function()
@@ -169,19 +132,8 @@ function M:Debounce(fn)
     end
 end
 
--- -- Shared helpers for the panel files ---------------------------------------
-
---- The common window treatment: fade the frame's *own* chrome, hang a Monet
--- backplate under it, restyle the title and the close button.  Only the frame's
--- own regions are faded (not its children), so item / spell icons inside child
--- buttons stay intact.
--- @param opts {
---   layer   = panel's layer key, e.g. "BACKGROUND",
---   inset   = backplate inset,
---   panel   = Widget:Theme opts for the backplate,
---   titleSize =,
---   noTitle = true to skip the title, noClose = true to skip the close button,
--- }
+--- The common window treatment: fade the frame's *own* chrome (not its children, so icons stay intact), hang a Monet backplate under it, restyle title and close button.
+-- @param opts { layer, inset, panel = Widget:Theme opts, titleSize, noTitle = true, noClose = true }
 function M:SkinWindow(frame, opts)
     if not frame then return nil end
     opts = opts or {}
@@ -193,7 +145,7 @@ function M:SkinWindow(frame, opts)
         local title = (frame.TitleContainer and frame.TitleContainer.TitleText)
             or frame.TitleText or frame.Title
         if title then
-            Skin:Font(title, opts.titleSize or 14, "roadway", "OUTLINE", "edge")
+            Skin:Font(title, opts.titleSize or 12, "pixel", nil, "edge")
         end
     end
 
@@ -209,8 +161,7 @@ function M:SkinWindow(frame, opts)
     return frame
 end
 
---- Run `fn` over a list of named controls; each may be a string (looked up in
--- _G) or a table, and missing ones are skipped.
+--- Run `fn` over a list of named controls; each may be a string (looked up in _G) or a table, and missing ones are skipped.
 function M:Controls(list, fn)
     if not list then return end
     for i = 1, #list do
@@ -220,8 +171,7 @@ function M:Controls(list, fn)
     end
 end
 
---- Restyle a list of buttons (check boxes get the check-button skin, with our
--- own checkmark art, instead of the text-button plate).
+--- Restyle a list of buttons (check boxes get the check-button skin, with our own checkmark art, instead of the text-button plate).
 function M:Buttons(list, opts)
     self:Controls(list, function(button)
         local kind = type(button.GetObjectType) == "function" and button:GetObjectType()
@@ -247,13 +197,13 @@ function M:Scrolls(list)
     end)
 end
 
---- Restyle every direct child Button of a frame, skipping item buttons (the ones
--- that carry an icon, i.e. reward / slot icons we must not fade).
+--- Item buttons (the ones carrying an icon -- reward / slot icons we must not fade) are skipped.
 local function LooksLikeItemButton(button)
     return button.icon or button.Icon or button.iconTexture or button.IconTexture
         or button.itemButton or button.ItemButton
 end
 
+--- Restyle every direct child Button of a frame, skipping item buttons.
 function M:SkinButtonsIn(frame, opts)
     if not frame or type(frame.GetChildren) ~= "function" then return end
     local children = { frame:GetChildren() }
@@ -281,10 +231,20 @@ function M:SkinScrollsIn(frame)
     end
 end
 
---- Re-run a skin whenever a Blizzard frame is shown (Blizzard builds some
--- content lazily).  HookScript only, and idempotent: one OnShow handler per
--- frame, ever.  Callers re-run this from refresh paths, and stacking a fresh
--- handler each time would multiply a skin on every re-apply.
+--- Restyle every direct child Slider of a frame.
+function M:SkinSlidersIn(frame)
+    if not frame or type(frame.GetChildren) ~= "function" then return end
+    local children = { frame:GetChildren() }
+    for i = 1, #children do
+        local child = children[i]
+        local kind = type(child.GetObjectType) == "function" and child:GetObjectType()
+        if kind == "Slider" then
+            Skin:Slider(child)
+        end
+    end
+end
+
+--- Re-run a skin whenever a Blizzard frame is shown (some content is built lazily).  HookScript only, never SetScript, and idempotent: one OnShow handler per frame, ever, so refresh paths cannot stack duplicates.
 function M:HookShow(frame, fn)
     if not frame or type(frame.HookScript) ~= "function" or type(fn) ~= "function" then return end
     if frame.__monetShowHook then return end
@@ -301,11 +261,7 @@ function M:OnEvent(event, fn)
     end)
 end
 
--- -- Global font (optional) ---------------------------------------------------
-
--- Restyles Blizzard's shared font objects so static vanilla text matches the
--- MonetUI font.  Off by default: it touches every window at once, so it stays
--- the player's explicit choice.
+-- Restyles Blizzard's shared font objects so static vanilla text matches the MonetUI pixel font.  Off by default: it touches every window at once, so it stays the player's explicit choice.
 local FONT_OBJECTS = {
     "GameFontNormal", "GameFontNormalSmall", "GameFontNormalLarge", "GameFontNormalHuge",
     "GameFontHighlight", "GameFontHighlightSmall", "GameFontHighlightLarge",
@@ -342,12 +298,11 @@ function M:ApplyFont()
                 end
             end
             local _, size = fs:GetFont()
-            pcall(fs.SetFont, fs, path, size or 12, "")
+            -- Keep Blizzard's own size (their layouts are built around it); only the flags are ours, so the pixel font renders with hard edges.
+            pcall(fs.SetFont, fs, path, size or 12, Media.fontFlags)
         end
     end
 end
-
--- -- Lifecycle ---------------------------------------------------------------
 
 local hooksInstalled = false
 
@@ -355,12 +310,7 @@ local function InstallHooks()
     if hooksInstalled then return end
     hooksInstalled = true
 
-    -- Blizzard windows are load-on-demand.  Two paths keep up with them:
-    --   * a pack that declared its addon is re-applied the moment that exact
-    --     addon arrives (precise, no other pack pays for it);
-    --   * packs that declared nothing get ONE debounced pass per burst.  The
-    --     login ADDON_LOADED burst used to re-skin every window once per addon
-    --     that loaded; the debounce collapses it into a single pass.
+    -- Blizzard windows are load-on-demand: a pack that declared its addon is re-applied the moment that exact addon arrives; packs that declared nothing get ONE debounced pass per burst, so the login ADDON_LOADED burst collapses into a single re-skin.
     local loosePass = M:Debounce(function()
         for i = 1, #M.registry do
             local entry = M.registry[i]
@@ -416,16 +366,7 @@ function M:SetEnabled(enabled)
     end
 end
 
--- -- Verification -------------------------------------------------------------
-
--- Every frame name in this module is our own recall of the retail UI, never
--- taken from a reference addon (those may target a different build and their
--- object names are not reliable here).  Because each lookup is a guarded
--- `_G[name]`, a wrong name silently skips that control rather than raising --
--- which also means it fails *quietly*.  This turns that silence into a list:
--- `/mui skins diagnose` walks each entry's `frames` (dotted paths descend into
--- sub-frames) against the running client and reports exactly what is absent, so
--- the missing names can be corrected in one pass instead of guessed at.
+-- Frame names are our own recall of the retail UI (never lifted from a reference addon, which may target another build); a guarded `_G` lookup fails silently, so `/mui skins diagnose` turns that silence into an exact missing-name list.
 local ResolvePath = ns.ResolvePath
 
 function M:Diagnose()
@@ -457,10 +398,7 @@ function M:Diagnose()
         end
     end
 
-    -- Shared font objects belong to no window (the option is global, and off by
-    -- default), so they are checked separately -- and for the same reason: a
-    -- wrong name would be invisible until the player switches the option on and
-    -- nothing changes.
+    -- Shared font objects belong to no window, so they are checked separately; a wrong name would be invisible until the player switches the option on.
     local fontMissing = {}
     for i = 1, #FONT_OBJECTS do
         if not ResolvePath(FONT_OBJECTS[i]) then
@@ -482,8 +420,7 @@ function M:Diagnose()
     end
 end
 
---- `/mui Skins <sub>`.  Returns false when the sub-command is unknown, so the
--- slash handler can fall back to printing the usage line.
+--- `/mui Skins <sub>`.  Returns false when the sub-command is unknown, so the slash handler can fall back to printing the usage line.
 function M:HandleCommand(rest)
     local sub = string.lower(rest or "")
     if sub == "diagnose" or sub == "diag" or sub == "probe" then

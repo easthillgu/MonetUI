@@ -1,22 +1,7 @@
 -- Utils/Skin.lua
--- Blizzard-panel skinning primitives (the addon's private skin toolkit).
---
--- The Skins module builds every panel skin out of these helpers: fade the
--- original Blizzard art, hang a Monet backplate / border under the frame, and
--- restyle the controls (buttons, tabs, scroll bars, check boxes, drop-downs,
--- close buttons, text) so a vanilla window matches the rest of MonetUI.
---
--- Two rules run through everything here:
---   * Defensive.  A client that lacks a frame, a method or a template simply
---     skips that step; nothing raises.
---   * Reversible.  Every mutation of a Blizzard object is recorded, so
---     Skin:Rollback() puts the original back when the module is turned off.
---     Objects we add ourselves are merely hidden.
---
--- Nothing here ever calls SetScript / SetParent / SetShown / Hide on a Blizzard
--- frame.  A skin only fades art and adds its own child frames, which keeps the
--- addon taint-free on protected UI and leaves Edit Mode layouts intact.  All
--- hover handling on Blizzard buttons is done with HookScript.
+-- Blizzard-panel skinning primitives (the addon's private skin toolkit): fade the original art, hang a Monet backplate / border under the frame, restyle the controls so a vanilla window matches the rest of MonetUI.
+-- Two rules run through everything here: defensive (a client that lacks a frame, a method or a template simply skips that step; nothing raises) and reversible (every mutation of a Blizzard object is recorded, so Skin:Rollback() puts the original back; objects we add ourselves are merely hidden).
+-- Nothing here ever calls SetScript / SetParent / SetShown / Hide on a Blizzard frame -- a skin only fades art and adds its own child frames, which keeps the addon taint-free on protected UI and leaves Edit Mode layouts intact.  All hover handling uses HookScript.
 
 local ADDON_NAME, ns = ...
 
@@ -27,8 +12,6 @@ local EventBus = ns.EventBus
 
 local Skin = {}
 ns.Skin = Skin
-
--- -- Undo recording ------------------------------------------------------------
 
 Skin.undo      = {}    -- ordered list of restore closures
 Skin.recording = false
@@ -54,14 +37,10 @@ function Skin:Rollback()
     self.recording = false
 end
 
--- Frames/textures we created.  On rollback they are hidden, on re-apply shown
--- again -- the skin code caches them on the Blizzard frame, so they are built
--- once and merely toggled.
+-- Frames/textures we created: hidden on rollback, shown again on re-apply -- the skin code caches them on the Blizzard frame, so they are built once and merely toggled.
 Skin.added = {}
 
--- Only while recording: things built for a Blizzard window belong to the skin
--- module and hide with it, while helpers called for the addon's own frames
--- (the config panel) must not join that rollback list.
+-- Only while recording: things built for a Blizzard window belong to the skin and hide with it, while helpers called for the addon's own frames (the config panel) must not join that rollback list.
 function Skin:Track(frame)
     if frame and self.recording then
         self.added[#self.added + 1] = frame
@@ -83,11 +62,7 @@ function Skin:HideAdded()
     end
 end
 
--- -- Theme re-tinting ----------------------------------------------------------
-
--- Colour changes that the Widget theme registration cannot see (a Blizzard
--- texture we recoloured, a thumb we drew ourselves).  Panels push a refresh
--- closure; the Skins module runs them whenever the theme changes.
+-- Colour changes the Widget theme registration cannot see (a Blizzard texture we recoloured, a thumb we drew ourselves): panels push a refresh closure and the Skins module runs them whenever the theme changes.
 Skin.tinters = {}
 
 function Skin:OnTheme(fn)
@@ -107,8 +82,6 @@ EventBus:Register("MONETUI_THEME_CHANGED", function()
     Skin:RefreshThemes()
 end)
 
--- -- Small helpers -------------------------------------------------------------
-
 local function IsTexture(region)
     return region and type(region.IsObjectType) == "function" and region:IsObjectType("Texture")
 end
@@ -123,13 +96,11 @@ function Skin:GetText(button)
     return text
 end
 
---- Fade any region (texture) to invisible without moving it, remembering the
--- old alpha.  Hidden once per region.
+--- Fade any region (texture) to invisible without moving it, remembering the old alpha.  Hidden once per region.
 function Skin:Fade(region)
     if not region or type(region.SetAlpha) ~= "function" then return region end
     if region.__monetHidden then return region end
-    -- Our own art (Skin:SwapArt) is never faded: a later pass restyling the
-    -- same control must not hide the glyph we just put on it.
+    -- Our own art (Skin:SwapArt) is never faded: a later pass restyling the same control must not hide the glyph we just put on it.
     if region.__monetArt then return region end
     region.__monetHidden = true
 
@@ -143,8 +114,7 @@ function Skin:Fade(region)
     return region
 end
 
---- Fade a texture's four sprite edges / a whole button's art, whatever shape it
--- has.
+--- Fade a texture's four sprite edges / a whole button's art, whatever shape it has.
 function Skin:FadeButtonArt(button)
     if not button then return end
     local getters = { "GetNormalTexture", "GetPushedTexture", "GetDisabledTexture", "GetHighlightTexture" }
@@ -157,8 +127,6 @@ function Skin:FadeButtonArt(button)
     end
 end
 
--- -- Stripping ----------------------------------------------------------------
-
 -- Named background pieces Blizzard keeps on its panels.
 local BACKDROP_PIECES = {
     "NineSlice", "Bg", "Background", "Border", "BorderFrame", "Inset", "InsetFrame",
@@ -167,13 +135,7 @@ local BACKDROP_PIECES = {
 }
 
 --- Fade the original art of a frame.
--- @param opts table {
---   regions   = false to leave plain textures alone,
---   backdrops = false to leave the named background pieces alone,
---   keep      = function(region) -> true to skip a texture,
---   keepTexture = a texture to always keep (a status bar's fill),
---   art       = true to also fade button art,
--- }
+-- @param opts { regions=false, backdrops=false, keep=function(region), keepTexture=tex, art=true } -- false / absent leaves that layer alone.
 function Skin:Strip(frame, opts)
     if not frame then return frame end
     opts = opts or {}
@@ -207,10 +169,7 @@ function Skin:Strip(frame, opts)
     return frame
 end
 
--- -- Text ---------------------------------------------------------------------
-
---- Restyle a FontString with one of the addon fonts and (optionally) a theme
--- colour.  Records the old font so a rollback restores it.
+--- Restyle a FontString with one of the addon fonts and (optionally) a theme colour.  Records the old font so a rollback restores it.
 function Skin:Font(fs, size, key, flags, colorKey)
     if not fs or type(fs.SetFont) ~= "function" then return fs end
 
@@ -225,7 +184,8 @@ function Skin:Font(fs, size, key, flags, colorKey)
         end
     end
 
-    pcall(Widget.SetFont, Widget, fs, size or 12, key or "pixel", flags or "")
+    -- Default flags come from Media.fontFlags (MONOCHROME): never OUTLINE.
+    pcall(Widget.SetFont, Widget, fs, size or 12, key or "pixel", flags)
     if colorKey then
         self:ColorText(fs, colorKey)
     end
@@ -259,8 +219,6 @@ function Skin:ColorText(fs, colorKey)
     if fs.SetShadowColor then pcall(fs.SetShadowColor, fs, 0, 0, 0, 0) end
     return fs
 end
-
--- -- Backplates ---------------------------------------------------------------
 
 local function NewBackdropFrame(parent, levelOffset)
     local frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
@@ -296,8 +254,7 @@ function Skin:Panel(frame, opts)
     return bg
 end
 
---- A backplate for a control that already sits inside a panel, drawn *under* the
--- control (used for buttons / drop-downs / edit boxes).
+--- A backplate for a control that already sits inside a panel, drawn *under* the control (buttons / drop-downs / edit boxes).
 function Skin:ControlBg(frame, opts)
     if not frame then return nil end
     opts = opts or {}
@@ -320,9 +277,7 @@ function Skin:ControlBg(frame, opts)
     return bg
 end
 
---- Hover feedback on a Blizzard control: tint its Monet border to the highlight
--- colour.  HookScript (never SetScript) so existing scripts survive, and only
--- installed once.
+--- Hover feedback on a Blizzard control: tint its Monet border to the highlight colour.  HookScript (never SetScript) so existing scripts survive, installed once.
 function Skin:HoverHighlight(control, opts)
     if not control or type(control.HookScript) ~= "function" then return end
     if control.__monetHover then return end
@@ -346,14 +301,7 @@ function Skin:HoverHighlight(control, opts)
     end)
 end
 
--- -- Controls -----------------------------------------------------------------
-
--- The control helpers below are meant to be *re-appliable*: a skin may be
--- rolled back (module off) and applied again (module on) any number of times.
--- The fade calls are idempotent through `__monetHidden` (cleared by Rollback),
--- while objects we create (a backplate, a tab underline, a thumb fill) are
--- cached on the frame and only toggled, so no helper short-circuits the whole
--- visual pass.
+-- The control helpers below are *re-appliable*: fades are idempotent through `__monetHidden` (cleared by Rollback) and created objects (backplate, tab underline, thumb fill) are cached on the frame and only toggled, so no helper short-circuits the whole visual pass.
 
 --- Restyle a Blizzard button (flat Monet plate + themed border + font).
 function Skin:Button(button, opts)
@@ -417,14 +365,24 @@ function Skin:ScrollBar(scrollbar)
     if thumb then
         self:Strip(thumb, { regions = true })
         if not thumb.__monetThumbFill then
+            -- The handle gets the same barfill material as the action-bar buttons: a gradient in the theme hue, brightening under the cursor so the grip feels alive instead of a flat swatch.
             local fill = thumb:CreateTexture(nil, "ARTWORK")
             fill:SetAllPoints(thumb)
+            fill:SetTexture(Media.texture["monet-barfill"])
             thumb.__monetThumbFill = fill
             self:Track(fill)
-            self:OnTheme(function()
+
+            local function tint(k)
                 local r, g, b = Color:GetBorder()
-                fill:SetColorTexture(r, g, b, 0.85)
-            end)
+                fill:SetVertexColor(r * k, g * k, b * k, 0.95)
+            end
+            tint(1)
+            self:OnTheme(function() tint(1) end)
+            if type(thumb.HookScript) == "function" then
+                thumb.__monetThumbHover = true
+                thumb:HookScript("OnEnter", function() tint(1.35) end)
+                thumb:HookScript("OnLeave", function() tint(1) end)
+            end
         end
     end
     return scrollbar
@@ -441,13 +399,66 @@ function Skin:ScrollFrame(scrollFrame)
     return scrollFrame
 end
 
---- Restyle a check button: fade the box art, draw a Monet box, keep the check
--- glyph but tint it with the theme border colour.
+--- Restyle a slider: a Monet plate under the trough and the same barfill material on the thumb the scroll bars use.
+-- Only the documented Slider member is trusted (GetThumbTexture); child names differ across clients and this must never throw, so whatever is missing is simply skipped.
+function Skin:Slider(slider)
+    if not slider then return slider end
+
+    self:ControlBg(slider, { thickness = 1, bgAlpha = 0.7 })
+
+    -- Thumb: documented accessor first, then the common member names.
+    local thumb
+    if type(slider.GetThumbTexture) == "function" then
+        local ok, tex = pcall(slider.GetThumbTexture, slider)
+        if ok and tex then thumb = tex end
+    end
+    if not thumb then thumb = slider.Slider or slider.Thumb end
+
+    if thumb then
+        if type(thumb.CreateTexture) == "function" then
+            if not thumb.__monetThumbFill then
+                self:ControlBg(thumb, { thickness = 1, bgAlpha = 0.9 })
+                local fill = thumb:CreateTexture(nil, "ARTWORK")
+                fill:SetAllPoints(thumb)
+                fill:SetTexture(Media.texture["monet-barfill"])
+                thumb.__monetThumbFill = fill
+                self:Track(fill)
+                local function tint()
+                    local r, g, b = Color:GetBorder()
+                    fill:SetVertexColor(r, g, b, 0.95)
+                end
+                tint()
+                self:OnTheme(tint)
+            end
+        elseif thumb.SetTexture then
+            pcall(thumb.SetTexture, thumb, Media.texture["monet-barfill"])
+            local function tint()
+                local r, g, b = Color:GetBorder()
+                pcall(thumb.SetVertexColor, thumb, r, g, b, 0.95)
+            end
+            tint()
+            if not slider.__monetSliderTint then
+                slider.__monetSliderTint = true
+                self:OnTheme(tint)
+            end
+        end
+    end
+
+    -- Low / High / Value captions, when the template has them.
+    for _, fs in ipairs({ slider.Low, slider.High, slider.Text }) do
+        if type(fs) == "table" and fs.IsObjectType
+            and fs:IsObjectType("FontString") then
+            self:Font(fs, 12, "pixel", nil, "neutral")
+        end
+    end
+    return slider
+end
+
+--- Restyle a check button: fade the box art, draw a Monet box, keep the check glyph but tint it with the theme border colour.
 function Skin:CheckButton(check, opts)
     if not check then return check end
 
-    -- Fade the box (Normal) and the pressed / disabled glows, but keep the check
-    -- texture visible.
+    -- Fade the box (Normal) and the pressed / disabled glows, but keep the check texture visible.
     if check.GetNormalTexture   then self:Fade(check:GetNormalTexture()) end
     if check.GetPushedTexture   then self:Fade(check:GetPushedTexture()) end
     if check.GetDisabledTexture then self:Fade(check:GetDisabledTexture()) end
@@ -498,11 +509,8 @@ function Skin:EditBox(editBox)
     return editBox
 end
 
---- Swap a texture's art for one of ours and remember how to put the original
--- back: atlas name or file path, texcoords and alpha, all recorded for
--- Skin:Rollback.  The texture is marked __monetArt so Skin:Fade leaves it
--- alone.  Idempotent: a texture already carrying our art is returned as is.
--- @return the same texture, or nil when it cannot be swapped
+--- Swap a texture's art for one of ours and remember how to put the original back (atlas name or path, texcoords and alpha, all recorded for Skin:Rollback).
+-- The texture is marked __monetArt so Skin:Fade leaves it alone.  Idempotent: a texture already carrying our art is returned as is.  @return the same texture, or nil when it cannot be swapped
 function Skin:SwapArt(tex, key)
     if not tex or type(tex.SetTexture) ~= "function" then return nil end
     if tex.__monetArt then return tex end
@@ -528,11 +536,8 @@ function Skin:SwapArt(tex, key)
     return tex
 end
 
---- Restyle a standard close button into the theme, with our own art under it:
--- normal = monet-close-normal, pushed = monet-close-push, highlight =
--- monet-close-hover over the top (its blend mode is untouched, so hover only
--- brightens the art).  The highlight is left white -- an additive tint would
--- go invisible on the darker border colours.
+--- Restyle a standard close button into the theme, with our own art under it: normal = monet-close-normal, pushed = monet-close-push, highlight = monet-close-hover over the top (its blend mode is untouched, so hover only brightens the art).
+-- The highlight is left white -- an additive tint would go invisible on the darker border colours.
 function Skin:CloseButton(button)
     if not button then return button end
 
@@ -577,14 +582,12 @@ function Skin:Icon(icon, border)
     return icon
 end
 
--- -- Titles / header rows -----------------------------------------------------
-
 --- Style a panel title bar: hide Blizzard's art and recolour the title text.
 function Skin:TitleBar(frame, text, size)
     if not frame then return end
     local title = text or frame.TitleContainer and frame.TitleContainer.TitleText or frame.TitleText or frame.Title
     if title then
-        self:Font(title, size or 14, "roadway", "OUTLINE", "edge")
+        self:Font(title, size or 12, "pixel", nil, "edge")
     end
 end
 

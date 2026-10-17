@@ -1,21 +1,7 @@
 -- Modules/ActionBars/ActionBars.lua
--- MonetUI 的动作条：1 到 8 号动作条，外加接管的宠物条 / 姿态条。
---
--- 主流做法（Bartender4、Dominos、ElvUI、Andromeda 都是这样）：不去驱动暴雪自带的
--- 按钮，而是把默认动作条藏起来，自己在客户端的**安全模板**上新建按钮。
--- 暴雪的按钮绑死在编辑模式、固定几何和它自己的翻页逻辑上，外面一动就会被改回去；
--- 安全模板的按钮则由客户端自己施法，战斗中不失效，也不会被污染。
---
+-- MonetUI 的动作条：1 到 8 号动作条，外加接管的宠物条 / 姿态条；主流做法（Bartender4、Dominos、ElvUI、Andromeda）：藏起暴雪默认条，在客户端安全模板上自建按钮，施法由客户端完成、战斗中不失效；暴雪按钮只移入隐藏框体，按键绑定仍有效。
 -- 按钮本身来自 LibActionButton-1.0（随包放在 Libs/，BSD-3，见 Libs/NOTICE.md），
 -- 和 Bartender4 / ElvUI / Andromeda 用的是同一个库：
---
---   * 每个按钮都是真正的 SecureActionButtonTemplate 按钮，施法由客户端完成；
---   * 每条动作条有一个 SecureHandlerStateTemplate 头（header），翻页（载具 /
---     覆盖 / 变形 / 额外动作条）在客户端内部只换几个属性，Lua 完全不用插手；
---   * MonetUI 只负责外观（图标裁切、1 像素描边、字体）和摆放位置。
---
--- 暴雪默认动作条的按钮不会被删掉，只是被移到隐藏框体里：它们的按键绑定仍然有效，
--- 所以就算自绘动作条出问题，玩家也不会一下子失去所有技能。
 
 local ADDON_NAME, ns = ...
 
@@ -26,10 +12,7 @@ local EventBus = ns.EventBus
 
 local M = { name = "ActionBars" }
 
--- -- Client surface -----------------------------------------------------------
--- Everything the module touches that this build could be missing is looked up
--- once and used through a pcall wrapper, so a missing global degrades instead
--- of breaking the addon.
+-- Everything the module touches that this build could be missing is looked up once and used through a pcall wrapper, so a missing global degrades instead of breaking the addon.
 
 local LibStub = _G.LibStub
 local LAB     = LibStub and LibStub("LibActionButton-1.0-MonetUI", true)
@@ -61,13 +44,11 @@ local function Call(fn, ...)
     return a, b, c
 end
 
--- -- Geometry and settings ----------------------------------------------------
-
 local BORDER      = 1     -- 1px Monet edge, used as the icon inset everywhere
 local CROP        = 0.08  -- icon crop that hides Blizzard's own icon border
-local HOTKEY_SIZE = 10
-local COUNT_SIZE  = 11
-local MACRO_SIZE  = 10
+local HOTKEY_SIZE = 12
+local COUNT_SIZE  = 12
+local MACRO_SIZE  = 12
 
 local DEFAULT_SIZE    = 28
 local DEFAULT_SPACING = 2
@@ -76,8 +57,18 @@ local DEFAULT_BARS    = 5
 local BUTTONS_PER_BAR = 12
 local BAR_PAGES       = 18   -- pages the paging bar can be switched to
 
---- 每个按钮都有 0..18 号状态；状态 0 是"没有翻页驱动"时的兜底。
--- 客户端把第 n 页映射到 (n-1)*12+1 .. (n-1)*12+12 号技能槽，和暴雪自己的编号一致。
+--- 冷却数字交给 Cooldown 模块渲染（自动缩放 + 紧急变色放大）；模块缺席时退回原纯字体样式。
+local function StyleCooldownFrame(cd)
+    if not cd then return end
+    local cooldowns = ns:GetModule("Cooldown")
+    if cooldowns and cooldowns.StyleCooldown then
+        cooldowns:StyleCooldown(cd, COUNT_SIZE)
+    else
+        Widget:StyleCooldownText(cd, COUNT_SIZE, "cooldown")
+    end
+end
+
+--- 每个按钮有 0..18 号状态，状态 0 是"没有翻页驱动"时的兜底；第 n 页映射到 (n-1)*12+1 起的 12 个槽，和暴雪编号一致。
 local function PageSlot(page, index)
     return (page - 1) * BUTTONS_PER_BAR + index
 end
@@ -113,8 +104,7 @@ local function ClickOnDown()
 end
 
 --- 某个暴雪绑定名绑着的键，没有就返回 nil。
--- GetBindingKey 是经典全局函数；这个 build 上如果它没了，就用命名空间版本兜底
--- （后者要的是键、返回的是绑定名，所以结果要做一次排错）。
+-- GetBindingKey 缺席时用命名空间版本兜底（后者要键、返回绑定名，所以结果要排错）。
 local function BindingFor(action)
     if not action then return nil end
 
@@ -134,11 +124,8 @@ local function BindingFor(action)
     return nil
 end
 
--- -- Bar definitions ----------------------------------------------------------
--- `page` 是这条动作条显示的那一页（状态 0 的兜底值）；`bind` 是暴雪原本给这排
--- 按钮的绑定名前缀，玩家已有的按键设置因此原样生效。
---
--- 位置存在存档里（见 Core.lua），表里给的只是第一次运行的锚点。
+-- `page` 是这条动作条显示的那一页（状态 0 的兜底值）；`bind` 是暴雪原本给这排按钮的绑定名
+-- 前缀，玩家已有的按键设置因此原样生效。位置存在存档里（见 Core.lua），表里给的只是初次锚点。
 
 local BAR_DEFS = {
     { key = "Bar1", index = 1, page = 1,  paged = true,  bind = "ACTIONBUTTON",
@@ -167,14 +154,8 @@ local BAR_DEFS = {
       point = "BOTTOM", relativeTo = "Bar7",     relativePoint = "TOP",    x = 0,   y = 2 },
 }
 
--- 我们自己接管的那几条暴雪动作条：不重画，只搬家、缩放和裁图标。
---
--- 搬的是**最外层**那个框体（`containers` 里第一个存在的）：暴雪显隐宠物的做法
--- 可能是 Hide 外层容器、也可能是 Hide 里面的条，搬外层两种情况都还归它管。
--- 只搬内层的话，暴雪一 Hide 外层，我们的条就留在屏幕上了。
---
--- 位置：都在 3 号条上方那一行，宠物条右对齐、姿态条左对齐（两条通常不会同时
--- 出现；死骑的食尸鬼 + 灵气是例外，那时它们会重叠，改 positions 错开即可）。
+-- 接管的那几条暴雪动作条：不重画，只搬最外层容器（只搬内层的话，暴雪一 Hide 外层，我们的条就留在
+-- 屏幕上了）、缩放、裁图标。都在 3 号条上方一行，宠物右对齐、姿态左对齐；死骑食尸鬼 + 灵气时会重叠，改 positions 错开即可。
 local ADOPTED_DEFS = {
     { key = "BarPet",    containers = { "PetActionBarFrame", "PetActionBar" },
       pattern = "PetActionButton%d", count = 10, label = "宠物",
@@ -184,8 +165,7 @@ local ADOPTED_DEFS = {
       point = "BOTTOMLEFT", relativeTo = "Bar3", relativePoint = "TOPLEFT", x = 0, y = 2 },
 }
 
--- 暴雪自己的动作条，顺序和它们的按钮绑定一致：1 号条的按键是 ACTIONBUTTON<i>，
--- 2 号条是 MULTIACTIONBAR1BUTTON<i>，以此类推。
+-- 暴雪自己的动作条，顺序和按钮绑定一致：1 号条 ACTIONBUTTON<i>、2 号条 MULTIACTIONBAR1BUTTON<i>，以此类推。
 local ACTION_BAR_FRAMES = {
     "MainMenuBar", "MultiBarBottomLeft", "MultiBarBottomRight",
     "MultiBarLeft", "MultiBarRight", "MultiBar5", "MultiBar6", "MultiBar7",
@@ -197,10 +177,8 @@ local BAG_BAR_FRAMES = {
     "BagsBar", "MainMenuBarBackpackButton",
 }
 
--- -- Secure paging ------------------------------------------------------------
--- 1 号条会自己翻页（载具、覆盖、变形、额外动作条都用它），所以它挂一个状态驱动。
--- 驱动换页时这条片段在客户端内部跑：`newstate` 就是新页号，`self` 是头框体，
--- 按钮是它的"孩子"，ChildUpdate 会把新页号交给每个按钮的 secure 片段。
+-- 1 号条会自己翻页（载具、覆盖、变形、额外动作条都用它），所以挂一个状态驱动；换页片段跑在
+-- 客户端内部：`newstate` 是新页号，`self` 是头框体，ChildUpdate 把新页号交给每个按钮的 secure 片段。
 
 local ON_STATE_PAGE = [[
     self:SetAttribute("state", newstate)
@@ -218,8 +196,7 @@ local FULL_PAGE = "[bar:6]6;[bar:5]5;[bar:4]4;[bar:3]3;[bar:2]2;[possessbar]16;"
                   "[overridebar]18;[shapeshift]17;[vehicleui]16;[bonusbar:5]11;" ..
                   "[bonusbar:4]10;[bonusbar:3]9;[bonusbar:2]8;[bonusbar:1]7;1"
 
--- 载具 / 飞行点的"提前下马"按钮。片段跑在客户端内部，只有能下车（或正坐在
--- 飞行路线上）时才把框体放出来；UnitOnTaxi 万一不在受限环境里，前半句仍然可用。
+-- 载具 / 飞行点的"提前下马"按钮：片段跑在客户端内部，只有能下车（或在飞行路线上）才显示；UnitOnTaxi 万一不在受限环境里，前半句仍然可用。
 local EXIT_SNIPPET = [[
     if CanExitVehicle() or (UnitOnTaxi and UnitOnTaxi("player")) then
         self:Show()
@@ -235,8 +212,6 @@ local CONTAINER_TEMPLATES = {
     "BackdropTemplate",
     "Frame",
 }
-
--- -- State --------------------------------------------------------------------
 
 local bars    = {}   -- key -> { def, frame, buttons }
 local adopted = {}   -- key -> { def, frame }
@@ -257,9 +232,8 @@ local FAILURE_TEXT = {
     template = "自绘动作条创建失败，已保留暴雪默认动作条。",
 }
 
--- -- Blizzard chrome: park / restore -------------------------------------------
--- 把暴雪的框体塞进一个永远隐藏的框里，而不是销毁它：它的按键仍然能按、事件
--- 仍然能收，只是玩家看不见。任何情况下都能原样放回去。
+-- 把暴雪的框体塞进一个永远隐藏的框里，而不是销毁它：它的按键仍然能按、事件仍然能收，只是
+-- 玩家看不见，任何情况下都能原样放回去。
 
 local hidden
 
@@ -296,8 +270,6 @@ local function Restore(name)
     return true
 end
 
--- -- Position bookkeeping -----------------------------------------------------
-
 local function ResolveRelative(name)
     if not name or name == "UIParent" then return UIParent end
     local entry = adopted[name]
@@ -321,20 +293,13 @@ local function Anchor(frame, stored, def)
         stored.x or def.x or 0, stored.y or def.y or 0)
 end
 
--- -- The MonetUI button look ---------------------------------------------------
--- 库里把暴雪 ActionButtonTemplate 的一堆部件都留着（冷却、堆叠、宏名、射程、
--- 闪光、自动施法圈……）。这里把它们收敛成 MonetUI 的样子：图标内缩 1 像素，
--- 露出来的那圈就是描边；多余的美术全部关掉。
+-- 库里把暴雪 ActionButtonTemplate 的一堆部件都留着（冷却、堆叠、宏名、射程、闪光、自动施法圈……）。
+-- 这里收敛成 MonetUI 的样子：图标内缩 1 像素，露出来的那圈就是描边；多余的美术全部关掉。
 
 local RINGS = setmetatable({}, { __mode = "k" })
 
---- 描边颜色：装着装备的槽位用高亮色（和暴雪一样表达"这件装备在身"），
--- 其余用当前边框色（配置项「边框颜色」，见 Color:GetBorder）。
--- 库里用 Border 的显隐表示"已装备"，这里跟着它走。
---
--- 每个按钮两块底色：
---   ring 铺满整个按钮，只在图标外圈露出 1 像素，那就是描边；
---   well 只铺图标范围，空槽时它就是"空格子"的底色（有图标时被图标完全盖住）。
+--- 描边颜色：装着装备的槽位用高亮色（库里用 Border 的显隐表示"已装备"，跟着它走），其余用当前边框色。
+-- ring 铺满按钮、只在图标外露 1 像素即描边；well 只铺图标范围，空槽时就是"空格子"的底色（有图标时被完全盖住）。
 local function RefreshRing(button)
     local parts = RINGS[button]
     if not parts then return end
@@ -357,8 +322,7 @@ local function RefreshRings()
     end
 end
 
---- 堆叠数量库里只有写字、没有开关（它只对 FontString SetText，不控制显隐），
--- 所以显隐归我们管，而且随时可以改回来。
+--- 堆叠数量库里只有写字、没有开关，显隐归我们管，而且随时可以改回来。
 local function ApplyCountVisibility(button)
     local count = button and button.Count
     if not count then return end
@@ -369,9 +333,8 @@ local function ApplyCountVisibility(button)
     end
 end
 
---- 快捷键太长会顶出按钮（SHIFT-1、MOUSEWHEELUP…），缩成 s1 / MU 这类写法。
--- 库用 SetText 更新快捷键，这里挂在 SetText 之后，用 SetFormattedText 回写，
--- 所以不会自己套自己；射程指示点（RANGE_INDICATOR）原样留给孩子。
+--- 快捷键太长会顶出按钮（SHIFT-1、MOUSEWHEELUP…），缩成 s1 / MU 这类写法。库用 SetText 更新、
+-- 这里挂在它之后用 SetFormattedText 回写，所以不会自己套自己；射程指示点（RANGE_INDICATOR）原样留下。
 local function ShortenHotkey(fs)
     local ok, text = pcall(fs.GetText, fs)
     if not ok or type(text) ~= "string" or text == "" then return end
@@ -417,6 +380,9 @@ local function SkinButton(button)
         icon:SetTexCoord(CROP, 1 - CROP, CROP, 1 - CROP)
     end
 
+    -- 美化材质：和背包格子同源的顶亮底沉渐变（monet-barfill，ADD），叠在图标之上有体积感；纯增量，不动暴雪按钮本体。
+    Widget:ButtonMaterial(button, { alpha = 0.16 })
+
     -- 暴雪的原生美术：空槽的方框、装备绿光、闪光、新技能提示，统统不要。
     if button.NormalTexture then button.NormalTexture:SetAlpha(0) end
     if button.SlotBackground then button.SlotBackground:SetAlpha(0) end
@@ -424,8 +390,7 @@ local function SkinButton(button)
     if button.NewActionTexture then button.NewActionTexture:SetAlpha(0) end
     if button.IconMask then pcall(button.IconMask.Hide, button.IconMask) end
 
-    -- Border 这块贴图本身不画（暴雪的"已装备"边框），但它的显隐就是库表达
-    -- "这件装备在身"的地方，所以留给描边用。
+    -- Border 贴图本身不画，但它的显隐就是库表达"这件装备在身"的地方，留给描边用。
     if button.Border then
         pcall(button.Border.SetTexture, button.Border, nil)
         RefreshRing(button)
@@ -439,7 +404,7 @@ local function SkinButton(button)
     if cooldown then
         cooldown:ClearAllPoints()
         cooldown:SetAllPoints(anchor)
-        Widget:StyleCooldownText(cooldown, COUNT_SIZE, "cooldown")
+        StyleCooldownFrame(cooldown)
     end
 
     local pushed = button.PushedTexture
@@ -497,19 +462,19 @@ local function ButtonConfig()
         },
         text = {
             hotkey = {
-                font     = { font = Media:Font("pixel"), size = HOTKEY_SIZE, flags = "" },
+                font     = { font = Media:Font("pixel"), size = HOTKEY_SIZE, flags = Media.fontFlags },
                 position = { anchor = "TOPLEFT", relAnchor = "TOPLEFT", offsetX = 2, offsetY = -1 },
                 justifyH = "LEFT",
                 color    = { 1, 1, 1 },
             },
             count = {
-                font     = { font = Media:Font("pixel"), size = COUNT_SIZE, flags = "" },
+                font     = { font = Media:Font("pixel"), size = COUNT_SIZE, flags = Media.fontFlags },
                 position = { anchor = "BOTTOMRIGHT", relAnchor = "BOTTOMRIGHT", offsetX = -2, offsetY = 1 },
                 justifyH = "RIGHT",
                 color    = { 1, 1, 1 },
             },
             macro = {
-                font     = { font = Media:Font("pixel"), size = MACRO_SIZE, flags = "" },
+                font     = { font = Media:Font("pixel"), size = MACRO_SIZE, flags = Media.fontFlags },
                 position = { anchor = "BOTTOM", relAnchor = "BOTTOM", offsetX = 0, offsetY = 1 },
                 justifyH = "CENTER",
                 color    = { er, eg, eb },
@@ -517,8 +482,6 @@ local function ButtonConfig()
         },
     }
 end
-
--- -- Buttons ------------------------------------------------------------------
 
 local function CreateButton(bar, index)
     local def  = bar.def
@@ -530,8 +493,7 @@ local function CreateButton(bar, index)
     button.bindName = def.bind .. index
     button.bar      = bar
 
-    -- 状态 0 是兜底：翻页驱动万一没装上，1 号条就停在第一页，其余条本来就固定。
-    -- 1..18 号状态是驱动换页时客户端要查的表。
+    -- 状态 0 是兜底（翻页驱动没装上就停在第一页）；1..18 号状态是驱动换页时客户端要查的表。
     for state = 0, BAR_PAGES do
         local slot
         if def.paged then
@@ -552,8 +514,6 @@ local function CreateButton(bar, index)
 
     return button
 end
-
--- -- Bars ---------------------------------------------------------------------
 
 local function LayoutBar(bar)
     if Locked() then return end
@@ -644,9 +604,8 @@ local function SetBarShown(bar, shown)
     end
 end
 
--- -- The leave-vehicle button --------------------------------------------------
--- 暴雪的下车按钮长在主菜单条上，而那条已经被我们藏起来了，所以自己做一个。
--- 点击脚本参考同类插件：飞行途中请求提前落地，坐骑 / 载具里则直接下车。
+-- 暴雪的下车按钮长在主菜单条上，而那条已经被我们藏起来了，所以自己做一个：飞行途中请求提前
+-- 落地，坐骑 / 载具里则直接下车（点击脚本参考同类插件）。
 
 local function CreateLeaveVehicle()
     if leaveVehicle then return leaveVehicle end
@@ -663,8 +622,7 @@ local function CreateLeaveVehicle()
     frame:SetSize(size + 2 * BORDER, size + 2 * BORDER)
     Widget:Theme(frame, { thickness = BORDER, bgAlpha = 0.55 })
 
-    -- pcall returns (ok, result): capturing only one value would leave `button`
-    -- as a boolean, and button:SetPoint below would then index a boolean.
+    -- pcall returns (ok, result): capturing only one value would leave `button` a boolean, and button:SetPoint below would index it.
     local okButton, button = pcall(CreateFrame, "CheckButton", "MonetUILeaveVehicleButton", frame,
         "SecureHandlerClickTemplate")
     if not okButton or not button then
@@ -714,10 +672,8 @@ local function CreateLeaveVehicle()
     return leaveVehicle
 end
 
--- -- Adopting Blizzard's pet / stance bars --------------------------------------
--- 这两条条不重画：只把暴雪的动作条从被藏起来的父框体里搬出来、缩放到和自绘
--- 按钮一样大、放到存档里的位置。图标更新、自动施法光圈、当前形态环、冷却全
--- 都还是暴雪自己的代码在管，所以永远不会失同步。
+-- 这两条条不重画：只把暴雪的动作条从被藏起来的父框体里搬出来、缩放到和自绘按钮一样大、放到
+-- 存档里的位置；图标更新、自动施法光圈、当前形态环、冷却全都还是暴雪自己的代码在管，永远不会失同步。
 
 --- 取 def.containers 里第一个真正存在的框体（优先最外层）。
 local function ResolveContainer(def)
@@ -747,13 +703,12 @@ local function AdoptBar(def)
     entry.frame = bar
     entry.name  = name
 
-    -- 1. 从被藏起来的父框体里搬出来
+    -- 从被藏起来的父框体里搬出来
     if bar:GetParent() ~= UIParent then
         pcall(bar.SetParent, bar, UIParent)
     end
 
-    -- 2. 缩放到自绘按钮的尺寸；暴雪条内部的排布原样不动。
-    --    基准宽度只量一次（量的时候缩放还是 1），免得每次都乘一遍自己设的缩放。
+    -- 缩放到自绘按钮的尺寸，暴雪条内部的排布原样不动；基准宽度只量一次（量时缩放还是 1），免得每次乘一遍自己设的缩放。
     local first = _G[def.pattern:format(1)]
     if not entry.base and first then
         local base = first:GetWidth()
@@ -763,10 +718,8 @@ local function AdoptBar(def)
     local scale = entry.base and (size / entry.base) or 1
     pcall(bar.SetScale, bar, scale)
 
-    -- 3. 摆到设置里的位置
     Anchor(bar, StoredPosition(def, def.key), def)
 
-    -- 4. 图标裁切和字体
     for index = 1, def.count do
         local button = _G[def.pattern:format(index)]
         if not button then break end
@@ -791,18 +744,15 @@ local function AdoptAll()
     end
 end
 
---- 放开接管：交还给暴雪原来的大小。位置留给下一次暴雪的排版去纠正，
--- 因为插件不能替暴雪写它自己的布局。
+--- 放开接管：交还给暴雪原来的大小。位置留给下一次暴雪的排版去纠正，因为插件不能替暴雪写它自己的布局。
 local function ReleaseBar(entry)
     local bar = entry and entry.frame
     if not bar then return end
     pcall(bar.SetScale, bar, 1)
 end
 
--- -- Keybinds ------------------------------------------------------------------
--- 暴雪那排按钮还在（只是藏起来了），所以玩家的按键其实按的是它们。这里把同一
--- 批按键改成"点击我们自己的按钮"的覆盖绑定：覆盖绑定优先，按下去触发的是玩家
--- 看得见的那一排，而且目标页跟着我们的按钮走。
+-- 暴雪那排按钮还在（只是藏起来了），玩家的按键其实按的是它们。这里把同一批按键改成"点击我们
+-- 自己的按钮"的覆盖绑定：覆盖绑定优先，按下去触发的是玩家看得见的那一排，目标页跟着我们的按钮走。
 
 local function ReassignBindings()
     if Locked() then
@@ -834,10 +784,7 @@ local function ClearBindings()
     end
 end
 
--- -- Events -------------------------------------------------------------------
-
--- 这些事件之后暴雪可能重排 / 换过宠物条和姿态条，我们再把位置和缩放放回去。
--- 战斗中不能动受保护的框体，所以留到 PLAYER_REGEN_ENABLED。
+-- 这些事件之后暴雪可能重排 / 换过宠物条和姿态条，我们再把位置和缩放放回去；战斗中不能动受保护的框体，留到 PLAYER_REGEN_ENABLED。
 local ADOPT_EVENTS = {
     "UNIT_PET", "UNIT_FLAGS", "PET_UI_UPDATE", "PET_BAR_UPDATE",
     "PET_BAR_UPDATE_USABLE", "PET_BAR_UPDATE_COOLDOWN",
@@ -882,10 +829,7 @@ function M:RegisterEvents()
     EventBus:Register("MONETUI_RESTRICTION_CHANGED", function() M:UpdateAll() end)
 end
 
--- -- Updates ------------------------------------------------------------------
-
---- 刷新所有按钮的外观配置。库自己管冷却、数量、可用性、射程，所以这里只在
--- 主题或设置变化时跑，不需要轮询。
+--- 刷新所有按钮的外观配置；库自己管冷却、数量、可用性、射程，所以只在主题或设置变化时跑，不需要轮询。
 function M:UpdateAll()
     if Locked() then
         refreshDirty = true
@@ -897,7 +841,7 @@ function M:UpdateAll()
         for _, button in ipairs(bar.buttons) do
             pcall(button.UpdateConfig, button, config)
             ApplyCountVisibility(button)
-            Widget:StyleCooldownText(button.cooldown, COUNT_SIZE, "cooldown")
+            StyleCooldownFrame(button.cooldown)
         end
     end
 
@@ -922,8 +866,6 @@ function M:RefreshLayout()
     AdoptAll()
     self:UpdateAll()
 end
-
--- -- Build / apply -------------------------------------------------------------
 
 function M:ParkBlizzard()
     local box = HiddenFrame()
@@ -1040,8 +982,6 @@ function M:Apply()
     self:UpdateAll()
     applied = true
 end
-
--- -- Public -------------------------------------------------------------------
 
 function M:SetEnabled(enabled)
     if enabled then

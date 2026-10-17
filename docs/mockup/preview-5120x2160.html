@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>MonetUI 实机合成预览 5120x2160</title>
+<style>
+@font-face {
+  font-family: 'FusionPixel';
+  src: url('../../Assets/Fonts/fusion-pixel-12.ttf') format('truetype');
+  font-display: block;
+}
+/* Theme = LibMonetColor computed env for mapID 1429 (艾尔文森林):
+   edge rgba(201,193,222,.80)  ambient rgba(48,55,57,.26)
+   highlight rgb(113,123,110)  neutral rgb(106,107,103)
+   health / resource / danger are UI-managed constants. */
+:root{
+  --edge: 201,193,222;
+  --ambient: 48,55,57;
+  --neutral: 106,107,103;
+  --hl: 113,123,110;
+  --health: 51,204,51;
+  --resource: 51,128,230;
+  --danger: 230,51,51;
+  --panel: 21,23,32;
+}
+*{ box-sizing:border-box; }
+html,body{ margin:0; padding:0; width:5120px; height:2160px; overflow:hidden; background:#0d1420; }
+body{ font-family:'FusionPixel','Microsoft YaHei UI','Segoe UI',sans-serif; color:#e8e6e1;
+  -webkit-font-smoothing:antialiased; }
+.stage{ position:relative; width:5120px; height:2160px; overflow:hidden; }
+.bg{ position:absolute; inset:0; width:5120px; height:2160px; object-fit:cover; }
+
+/* ------------------------------------------------------------- info bar --- */
+.infobar{ position:absolute; left:0; top:0; width:5120px; height:28px;
+  background:rgba(10,12,18,.34); border-bottom:2px solid rgba(var(--edge),.45);
+  display:flex; align-items:center; font-size:22px; color:#cfcabf;
+  text-shadow:0 1px 2px #000; }
+.infobar .grp{ display:flex; gap:36px; padding:0 16px; }
+.infobar .grp.right{ margin-left:auto; }
+.infobar b{ color:rgb(var(--edge)); font-weight:normal; }
+
+/* --------------------------------------------------------- unit frames --- */
+/* height 12 = border2 + health4 + split2 + power2 + border2 */
+.uf{ position:absolute; border:2px solid rgba(var(--edge),.95);
+  box-shadow:0 2px 12px rgba(0,0,0,.6); }
+.uf.lost-black{ background:#050608; }
+.uf.lost-danger{ background:rgba(var(--danger),.95); }
+.uf .health{ position:absolute; left:0; top:2px; height:4px; }
+.uf .power{ position:absolute; left:0; top:8px; height:2px;
+  background:linear-gradient(90deg,rgba(96,164,244,.98),rgba(var(--resource),.98)); }
+.uf.f-self .health{ background:linear-gradient(180deg,rgb(143,153,140),rgb(var(--hl))); }
+.uf.f-mage  .health{ background:#3fc7eb; }
+.uf.f-priest .health{ background:#ffffff; }
+.uf.f-rogue .health{ background:#fff569; }
+
+.uftext{ position:absolute; height:30px; display:flex; align-items:flex-end;
+  font-size:24px; line-height:30px; white-space:nowrap; }
+.uftext .nm{ color:rgb(var(--edge)); text-shadow:0 2px 4px #000; }
+.uftext .lv{ color:rgb(var(--neutral)); font-size:22px; margin-left:10px; }
+.uftext .hp{ font-size:22px; text-shadow:0 2px 4px #000; }
+.uftext.right{ justify-content:flex-end; }
+.uftext.center{ justify-content:center; }
+.uftext.right .lv{ order:-1; margin-left:0; margin-right:10px; }
+
+/* --------------------------------------------------------------- auras --- */
+.aura{ position:absolute; width:68px; height:68px; border-radius:6px;
+  border:2px solid rgba(var(--edge),.9);
+  box-shadow:0 4px 16px rgba(0,0,0,.6), inset 0 0 20px rgba(0,0,0,.35); }
+.aura.debuff{ border-color:rgba(var(--danger),.92); }
+.aura .ic{ position:absolute; inset:2px; border-radius:4px; }
+.aura .t{ position:absolute; left:0; right:0; top:0; font-size:22px; text-align:center;
+  color:#ffe9a8; text-shadow:0 2px 4px #000; }
+.aura .c{ position:absolute; right:2px; bottom:0; font-size:22px; color:#fff; text-shadow:0 2px 4px #000; }
+.aura .swipe{ position:absolute; inset:2px; border-radius:4px;
+  background:conic-gradient(from 0deg, rgba(0,0,0,.62) 0deg 205deg, rgba(0,0,0,0) 205deg 360deg); }
+
+/* ------------------------------------------------ action bars (self-drawn) -- */
+.ab{ position:absolute; width:56px; height:56px; border-radius:4px;
+  border:2px solid rgba(var(--edge),.35); background:rgba(var(--panel),.62);
+  box-shadow:0 2px 6px rgba(0,0,0,.5); overflow:hidden; }
+.ab .ic{ position:absolute; inset:2px; border-radius:2px; }
+.ab .hk{ position:absolute; left:3px; top:0; font-size:20px; color:#e6e2d8; text-shadow:0 1px 2px #000; }
+.ab .ct{ position:absolute; right:3px; bottom:-2px; font-size:20px; color:#fff; text-shadow:0 1px 2px #000; }
+.ab .mn{ position:absolute; left:0; right:0; bottom:-2px; font-size:16px; text-align:center;
+  color:#ffd9a8; text-shadow:0 1px 2px #000; }
+.ab .cd{ position:absolute; inset:0; background:rgba(4,6,10,.66);
+  display:flex; align-items:center; justify-content:center; font-size:22px; color:#fff; }
+
+/* ------------------------------------------------------------- minimap --- */
+.mm-panel{ position:absolute; background:rgba(var(--panel),.55);
+  border:2px solid rgba(var(--edge),.55); }
+.mm{ position:absolute; overflow:hidden;
+  background:
+    radial-gradient(240px 160px at 34% 34%, rgba(150,190,140,.6), transparent 70%),
+    radial-gradient(360px 260px at 70% 66%, rgba(90,120,170,.55), transparent 72%),
+    linear-gradient(150deg,#2f4436,#22303f 60%,#1b2530); }
+.mm .nub{ position:absolute; left:50%; top:50%; width:16px; height:16px; margin:-8px 0 0 -8px;
+  border-radius:50%; background:#ffe9a8; box-shadow:0 0 12px #ffd97a; }
+.mm .road{ position:absolute; background:rgba(196,180,140,.35); border-radius:8px; }
+
+/* ----------------------------------------------------- quest / chat (dim) - */
+.quest{ position:absolute; width:840px; font-size:24px; line-height:1.5; color:#d8d3c6;
+  text-shadow:0 1px 3px #000; opacity:.92; }
+.quest h4{ margin:0 0 10px; font-size:28px; font-weight:normal; color:#f0e6cf; }
+.quest p{ margin:0 0 8px; }
+.quest .done{ color:#9fb084; }
+.quest .sub{ padding-left:36px; color:#b8b3a6; }
+.chat{ position:absolute; left:40px; top:1700px; width:860px; height:420px;
+  border:2px solid rgba(120,118,110,.5); background:rgba(10,12,18,.42);
+  opacity:.55; padding:8px 12px; font-size:22px; line-height:1.6; color:#cfcabf; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <img class="bg" src="http://127.0.0.1:8642/monetcolors/Gamepics/%E8%89%BE%E5%B0%94%E6%96%87%E6%A3%AE%E6%9E%97.jpg" alt="">
+
+  <!-- InfoBar: top edge strip, height 14 (x2), blocks visible -->
+  <div class="infobar">
+    <div class="grp">
+      <span><b>奥术</b> · 大法师</span>
+      <span>好友 12/34</span>
+      <span>延迟 43ms · 帧数 60 · 内存 214MB</span>
+    </div>
+    <div class="grp right">
+      <span>耐久 <b>87%</b></span>
+      <span><b>12,345</b>金 23银 41铜</span>
+      <span>奖章 ×34</span>
+    </div>
+  </div>
+
+  <!-- Buffs: TOPLEFT inset 33 (x2=66), icons 34 (x2=68), gap 4 (x2=8), 8 per row -->
+  <div class="aura" style="left:66px; top:66px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#f0b27a,#a85c33);"></div><div class="swipe"></div><div class="t">2m</div></div>
+  <div class="aura" style="left:142px; top:66px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#9ed0f5,#2f6ea8);"></div><div class="t">18s</div></div>
+  <div class="aura" style="left:218px; top:66px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#b8e6a0,#4a8f3f);"></div><div class="t">45s</div></div>
+  <div class="aura" style="left:294px; top:66px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#f2e08a,#a88b2f);"></div><div class="c">3</div></div>
+  <div class="aura" style="left:370px; top:66px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#d7b6f0,#6a3f9f);"></div><div class="swipe"></div><div class="t">8m</div></div>
+  <div class="aura" style="left:446px; top:66px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#a8ecdf,#2f8f80);"></div><div class="t">5s</div></div>
+  <div class="aura" style="left:522px; top:66px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#f0a8c8,#a83f6a);"></div><div class="t">1m</div></div>
+  <div class="aura" style="left:598px; top:66px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#c8e0a0,#5a7f3a);"></div><div class="t">25s</div></div>
+
+  <div class="aura" style="left:66px; top:142px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#f5d0a0,#a8783f);"></div><div class="t">3m</div></div>
+  <div class="aura" style="left:142px; top:142px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#a0c8f0,#3f6a9f);"></div><div class="t">40s</div></div>
+  <div class="aura" style="left:218px; top:142px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#e8b8d0,#8f3f6a);"></div><div class="t">12s</div></div>
+  <div class="aura" style="left:294px; top:142px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#c0e8c8,#3f8f5a);"></div><div class="c">2</div></div>
+  <div class="aura" style="left:370px; top:142px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#e0d0a0,#8f783f);"></div><div class="t">6m</div></div>
+  <div class="aura" style="left:446px; top:142px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#b0b8e8,#4a4f9f);"></div><div class="t">90s</div></div>
+  <div class="aura" style="left:522px; top:142px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#f0c8a0,#a85f3f);"></div><div class="t">20s</div></div>
+
+  <!-- Debuffs: below buff container +8 (x2=16) -->
+  <div class="aura debuff" style="left:66px; top:226px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#f0a0a0,#a83f3f);"></div><div class="swipe"></div><div class="t">12s</div></div>
+  <div class="aura debuff" style="left:142px; top:226px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#c0a0f0,#5a3fa8);"></div><div class="t">30s</div></div>
+  <div class="aura debuff" style="left:218px; top:226px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#f0cf9a,#a8782f);"></div><div class="c">5</div></div>
+  <div class="aura debuff" style="left:294px; top:226px;"><div class="ic" style="background:radial-gradient(circle at 35% 30%,#a8b8f0,#2f3fa8);"></div><div class="t">1m</div></div>
+
+  <!-- Unit frames: anchors x2 from the verified mockup (player CENTER (0,-180)) -->
+  <div class="uftext" style="left:2400px; top:1400px; width:320px;">
+    <span class="nm">Monet</span><span class="lv">Lv80</span>
+  </div>
+  <div class="uftext right" style="left:2400px; top:1400px; width:320px;">
+    <span class="hp" style="color:rgb(146,223,102)">84.2K / 96.4K</span>
+  </div>
+  <div class="uf lost-black f-self" style="left:2400px; top:1434px; width:320px; height:12px;">
+    <div class="health" style="width:87%"></div>
+    <div class="power" style="width:62%"></div>
+  </div>
+
+  <!-- target: LEFT = player RIGHT +(40,40) -->
+  <div class="uftext" style="left:2800px; top:1320px; width:320px;">
+    <span class="hp" style="color:rgb(201,221,96)">62.0K / 87.1K</span>
+  </div>
+  <div class="uftext right" style="left:2800px; top:1320px; width:320px;">
+    <span class="nm">Impressionist</span><span class="lv">Lv80</span>
+  </div>
+  <div class="uf lost-danger f-mage" style="left:2800px; top:1354px; width:320px; height:12px;">
+    <div class="health" style="width:71%"></div>
+    <div class="power" style="width:35%"></div>
+  </div>
+
+  <!-- focus: RIGHT = player LEFT +(-100,-40) -->
+  <div class="uftext center" style="left:2080px; top:1320px; width:120px;">
+    <span class="nm">Waterlily</span>
+  </div>
+  <div class="uf lost-danger f-priest" style="left:2080px; top:1354px; width:120px; height:12px;">
+    <div class="health" style="width:93%"></div>
+    <div class="power" style="width:78%"></div>
+  </div>
+
+  <!-- pet: RIGHT = player LEFT +(-6,0) -->
+  <div class="uf lost-black f-self" style="left:2268px; top:1434px; width:120px; height:12px;">
+    <div class="health" style="width:100%"></div>
+    <div class="power" style="width:44%"></div>
+  </div>
+
+  <!-- targettarget: LEFT = target RIGHT +(6,0) -->
+  <div class="uftext center" style="left:3132px; top:1320px; width:120px;">
+    <span class="nm">Shade</span>
+  </div>
+  <div class="uf lost-danger f-rogue" style="left:3132px; top:1354px; width:120px; height:12px;">
+    <div class="health" style="width:57%"></div>
+    <div class="power" style="width:22%"></div>
+  </div>
+
+  <!-- Quest tracker: right side (repositioned Blizzard tracker) -->
+  <div class="quest" style="left:4240px; top:600px;">
+    <h4>任务</h4>
+    <p class="done">☑ 收集月光草 (12/12)</p>
+    <p>☐ 击败湖畔的守护者 (0/1)</p>
+    <p>☐ 与村民交谈 (1/4)</p>
+    <p class="sub">与铁匠交谈 (1/1)</p>
+    <p class="sub">与农夫交谈 (0/1)</p>
+    <p class="sub">与长老交谈 (0/1)</p>
+  </div>
+
+  <!-- Minimap: BOTTOMRIGHT gap 33 (x2=66), canvas 256x190 (x2=512x380), panel +4 (x2=+8) -->
+  <div class="mm-panel" style="left:4534px; top:1706px; width:528px; height:396px;"></div>
+  <div class="mm" style="left:4542px; top:1714px; width:512px; height:380px;">
+    <div class="road" style="left:40px; top:210px; width:430px; height:26px; transform:rotate(-9deg);"></div>
+    <div class="road" style="left:250px; top:40px; width:24px; height:300px; transform:rotate(6deg);"></div>
+    <div class="nub"></div>
+  </div>
+
+  <!-- Chat: bottom-left, Blizzard default (dimmed context) -->
+  <div class="chat">
+    <div>[综合] 旅店老板: 欢迎来到艾尔文森林。</div>
+    <div>[队伍] Waterlily: 准备好就开怪。</div>
+    <div>[综合] Monet: 界面已经调好了。</div>
+    <div>[公会] Shade: 谁有多余的元素之土？</div>
+  </div>
+
+  <!-- Action bars: Bar1 BOTTOM (0,24) x2=(0,48); buttons 28 (x2=56), spacing 2 (x2=4), 12 per bar -->
+  <div id="bars"></div>
+</div>
+<script>
+(function(){
+  var W = 56, GAP = 4, PER = 12, BARS = 3;
+  var barW = PER * W + (PER - 1) * GAP;           // 716
+  var left = Math.round((5120 - barW) / 2);        // centred
+  var bottom0 = 2160 - 48;                         // Bar1 bottom edge
+  var grads = [
+    ['#f0b27a','#a85c33'],['#9ed0f5','#2f6ea8'],['#b8e6a0','#4a8f3f'],
+    ['#f2e08a','#a88b2f'],['#d7b6f0','#6a3f9f'],['#a8ecdf','#2f8f80'],
+    ['#f0a8c8','#a83f6a'],['#f0a0a0','#a83f3f'],['#c0a0f0','#5a3fa8'],
+    ['#a8b8f0','#2f3fa8'],['#f0cf9a','#a8782f'],['#c8e0a0','#5a7f3a']
+  ];
+  var hotkeys = ['1','2','3','4','5','6','7','8','9','0','-','='];
+  var out = '';
+  for (var b = 0; b < BARS; b++) {
+    var top = bottom0 - 56 - b * (56 + 4);         // stacked upward, gap 4
+    for (var i = 0; i < PER; i++) {
+      var x = left + i * (W + GAP);
+      var g = grads[(i + b * 5) % grads.length];
+      var empty = (b === 2 && i > 8);   // bar 3 has three unwired slots
+      out += '<div class="ab" style="left:' + x + 'px; top:' + top + 'px;">';
+      if (!empty) {
+        out += '<div class="ic" style="background:radial-gradient(circle at 35% 30%,' + g[0] + ',' + g[1] + ');"></div>';
+        if (b === 0) out += '<div class="hk">' + hotkeys[i] + '</div>';
+        if (b === 1 && i % 4 === 0) out += '<div class="ct">' + (3 + i) + '</div>';
+        if (b === 2 && i % 3 === 1) out += '<div class="mn">技能</div>';
+        if (b === 1 && i === 6) out += '<div class="cd">2:14</div>';
+        if (b === 2 && i === 9) out += '<div class="cd">0:47</div>';
+      }
+      out += '</div>';
+    }
+  }
+  document.getElementById('bars').innerHTML = out;
+})();
+</script>
+</body>
+</html>

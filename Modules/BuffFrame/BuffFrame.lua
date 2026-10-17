@@ -1,9 +1,6 @@
 -- Modules/BuffFrame/BuffFrame.lua
--- Player buff / debuff display.
---
--- Replaces the Blizzard aura frame with a compact, themed grid anchored under
--- the minimap.  Aura data comes from C_UnitAuras / AuraData; when the client
--- marks auras secret the module steps aside instead of erroring.
+-- Player buff / debuff display: a compact themed grid anchored under the minimap, replacing the Blizzard aura frame.
+-- Aura data comes from C_UnitAuras; when the client marks auras secret the module steps aside instead of erroring.
 
 local ADDON_NAME, ns = ...
 
@@ -15,37 +12,41 @@ local EventBus = ns.EventBus
 
 local M = { name = "BuffFrame" }
 
-local ICON_SIZE   = 34
 local ICON_GAP    = 4
-local PER_ROW     = 8
 local MAX_AURAS   = 32
 
--- The container is anchored top-left and the buttons grow right / down from its
--- top-left corner, so the grid always hugs the top-left edge of the screen.
-local ROW_STRIDE  = ICON_SIZE + ICON_GAP
+-- A full buff row (10*32-4) and debuff row (8*40-4) both land on 316px so their right edges line up; per-row counts derive from that budget, never hardcoded.
+local BUFF_SIZE   = 28
+local DEBUFF_SIZE = 36
+local ROW_WIDTH   = 316
+
 local AURA_GAP    = 33   -- Andromeda's UI_GAP, used for the top-left inset
 
+--- How many icons of this size fit in one full row.
+local function PerRow(size)
+    return math.max(1, math.floor((ROW_WIDTH + ICON_GAP) / (size + ICON_GAP)))
+end
+
 --- Resize a container to exactly hug the icons it currently shows.
-local function FitContainer(container, count)
+local function FitContainer(container, count, size)
     if count <= 0 then
         container:SetSize(0, 0)
         return
     end
-    local rows = math.ceil(count / PER_ROW)
-    local cols = math.min(count, PER_ROW)
+    local stride = size + ICON_GAP
+    local perRow = PerRow(size)
+    local rows = math.ceil(count / perRow)
+    local cols = math.min(count, perRow)
     container:SetSize(
-        cols * ROW_STRIDE - ICON_GAP,
-        rows * ROW_STRIDE - ICON_GAP)
+        cols * stride - ICON_GAP,
+        rows * stride - ICON_GAP)
 end
 
 local buffButtons, debuffButtons = {}, {}
 local buffContainer, debuffContainer
 local pending
 
--- -- Data ---------------------------------------------------------------------
-
---- Read + sort the auras of one unit.  Wrapped because a restricted client can
--- still hand back aura data we are not allowed to inspect.
+--- Read + sort the auras of one unit.  Wrapped because a restricted client can still hand back aura data we may not inspect.
 local function CollectAuras(unit, filter)
     local list = {}
     if not Secrets.CanReadAuras() then return list end
@@ -69,11 +70,10 @@ local function CollectAuras(unit, filter)
     return list
 end
 
--- -- Buttons ------------------------------------------------------------------
-
-local function CreateAuraButton(parent)
+local function CreateAuraButton(parent, size)
     local button = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    button:SetSize(ICON_SIZE, ICON_SIZE)
+    button:SetSize(size, size)
+    button.size = size
 
     button.icon = button:CreateTexture(nil, "ARTWORK")
     button.icon:SetAllPoints()
@@ -82,10 +82,10 @@ local function CreateAuraButton(parent)
     button.cooldown = Widget:Cooldown(button)
     button.cooldown:SetAllPoints()
 
-    button.count = Widget:Font(button, 13, "pixel", { r = 1, g = 1, b = 1 }, "RIGHT")
+    button.count = Widget:Font(button, 12, "pixel", { r = 1, g = 1, b = 1 }, "RIGHT")
     button.count:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -1, 1)
 
-    button.timer = Widget:Font(button, 11, "pixel", { r = 1, g = 0.95, b = 0.6 }, "CENTER")
+    button.timer = Widget:Font(button, 12, "pixel", { r = 1, g = 0.95, b = 0.6 }, "CENTER")
     button.timer:SetPoint("TOP", button, "TOP", 0, -2)
 
     Widget:Theme(button, { thickness = 1, bgAlpha = 0.6 })
@@ -93,9 +93,9 @@ local function CreateAuraButton(parent)
     return button
 end
 
-local function EnsureButtons(list, parent, needed)
+local function EnsureButtons(list, parent, needed, size)
     for i = #list + 1, needed do
-        list[i] = CreateAuraButton(parent)
+        list[i] = CreateAuraButton(parent, size)
     end
     for i = needed + 1, #list do
         list[i]:Hide()
@@ -103,15 +103,17 @@ local function EnsureButtons(list, parent, needed)
 end
 
 local function ShowAura(button, aura, index)
-    local column = (index - 1) % PER_ROW
-    local row = math.floor((index - 1) / PER_ROW)
+    local size = button.size
+    local perRow = PerRow(size)
+    local stride = size + ICON_GAP
+    local column = (index - 1) % perRow
+    local row = math.floor((index - 1) / perRow)
 
     button:ClearAllPoints()
     button:SetPoint("TOPLEFT", button:GetParent(), "TOPLEFT",
-        column * ROW_STRIDE, -row * ROW_STRIDE)
+        column * stride, -row * stride)
 
-    -- Show first: everything below must be allowed to fail without leaving the
-    -- button stuck hidden.
+    -- Show first: everything below must be allowed to fail without leaving the button stuck hidden.
     button:Show()
 
     button.icon:SetTexture(aura.icon or aura.spellId)
@@ -151,9 +153,9 @@ local function ShowAura(button, aura, index)
     button.auraInstanceID = aura.auraInstanceID
 end
 
-local function UpdateRow(list, parent, auras)
+local function UpdateRow(list, parent, auras, size)
     local needed = math.min(#auras, MAX_AURAS)
-    EnsureButtons(list, parent, needed)
+    EnsureButtons(list, parent, needed, size)
 
     for index = 1, needed do
         Secrets.Measure(ShowAura, list[index], auras[index], index)
@@ -177,10 +179,10 @@ function M:Update()
     local buffs = CollectAuras("player", "HELPFUL")
     local debuffs = CollectAuras("player", "HARMFUL")
 
-    UpdateRow(buffButtons, buffContainer, buffs)
-    FitContainer(buffContainer, #buffs)
-    UpdateRow(debuffButtons, debuffContainer, debuffs)
-    FitContainer(debuffContainer, #debuffs)
+    UpdateRow(buffButtons, buffContainer, buffs, BUFF_SIZE)
+    FitContainer(buffContainer, #buffs, BUFF_SIZE)
+    UpdateRow(debuffButtons, debuffContainer, debuffs, DEBUFF_SIZE)
+    FitContainer(debuffContainer, #debuffs, DEBUFF_SIZE)
 
     buffContainer:SetShown(#buffs > 0)
     debuffContainer:SetShown(#debuffs > 0)
@@ -201,8 +203,6 @@ local function QueueUpdate()
     end)
 end
 
--- -- Blizzard takeover --------------------------------------------------------
-
 local function SuppressBlizzard()
     local found = 0
     for _, name in ipairs({ "BuffFrame", "DebuffFrame", "TempEnchantFrame" }) do
@@ -220,8 +220,6 @@ local function SuppressBlizzard()
         ns:Print("未找到暴雪光环框架，若同时出现两套 Buff 显示请告知开发者。")
     end
 end
-
--- -- Lifecycle ----------------------------------------------------------------
 
 function M:Initialize()
     -- Anchored top-left, matching Andromeda's BuffAnchor (its UI_GAP is 33).

@@ -1,7 +1,5 @@
 -- Modules/Skins/WorldMap.lua
--- The world map: WorldMapFrame's own chrome (border, title, close, zoom, min /
--- max) and the quest panel that lives inside it (QuestMapFrame).  The map canvas
--- and its pins are left to the game.
+-- The world map: WorldMapFrame's own chrome (border, title, close, zoom, min/max) and the quest panel inside it (QuestMapFrame).  The map canvas and its pins are left to the game.
 
 local ADDON_NAME, ns = ...
 
@@ -20,7 +18,6 @@ local function SkinQuestMap()
     Skin:Strip(questMap)
     Skin:Panel(questMap, { bgAlpha = 0.95 })
 
-    -- The quest list panel and the quest detail panel sit inside the map.
     local details = questMap.DetailsFrame or _G.QuestMapFrameDetailsFrame
     local list = questMap.QuestLog or _G.QuestMapFrameQuestLog
 
@@ -42,11 +39,9 @@ local function SkinWorldMap()
     local map = _G.WorldMapFrame
     if not map then return end
 
-    -- Fade the map's own chrome and hang one backplate behind the whole window.
     Skin:Strip(map)
     Skin:Panel(map, { bgAlpha = 0.96 })
 
-    -- Title bar: plate the border strip and restyle the title.
     local border = map.BorderFrame
     if border then
         Skin:Strip(border)
@@ -54,11 +49,10 @@ local function SkinWorldMap()
 
         local title = border.TitleText or map.TitleText
         if title then
-            Skin:Font(title, 16, "roadway", "OUTLINE", "edge")
+            Skin:Font(title, 12, "pixel", nil, "edge")
         end
     end
 
-    -- Close / zoom / min-max.
     M:Buttons(MAP_BUTTONS)
     M:Controls({ map.ZoomInButton, map.ZoomOutButton }, function(button)
         Skin:Button(button, { thickness = 1 })

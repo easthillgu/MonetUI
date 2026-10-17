@@ -1,13 +1,7 @@
 -- Utils/Color.lua
 -- Colour access layer: LibMonetColor-1.0 integration with a graceful fallback.
---
--- "5 + 3" model (see MonetUI.md):
---   functional 5 : primary / health / resource / danger / neutral
---   signature  3 : edge glow / ambient tint / highlight wash
---
--- Only the signature colours (plus the Monet neutral) come from the engine.
--- Health / resource / danger stay UI-managed on purpose (they must never be
--- "Monetised").
+-- "5 + 3" model (see MonetUI.md): functional 5 (primary / health / resource / danger / neutral) + signature 3 (edge glow / ambient tint / highlight wash).
+-- Only the signature colours (plus the Monet neutral) come from the engine; health / resource / danger stay UI-managed on purpose (they must never be "Monetised").
 
 local ADDON_NAME, ns = ...
 
@@ -33,8 +27,6 @@ local FALLBACK = {
 local theme
 local useMonetColor = true
 
--- -- Source control -----------------------------------------------------------
-
 function Color:HasMonetColor()
     return LMC ~= nil
 end
@@ -51,7 +43,20 @@ function Color:GetSource()
     return "fallback"
 end
 
--- -- Refresh ------------------------------------------------------------------
+--- Current zone environment info, for /mui status diagnostics.
+-- Resolves the player's map through C_Map (pcall-guarded) and asks the engine for its environment colour; nil when the engine is absent, so the caller never has to know whether LibMonetColor shipped.  @return mapID|nil, zoneName|nil, source|nil, h, s, l
+function Color:GetZoneInfo()
+    if not LMC or type(LMC.GetMapEnv) ~= "function" then return nil end
+
+    local mapID
+    if type(_G.C_Map) == "table" and _G.C_Map.GetBestMapForUnit then
+        local ok, id = pcall(_G.C_Map.GetBestMapForUnit, "player")
+        if ok then mapID = id end
+    end
+
+    local h, s, l, name, source = LMC:GetMapEnv(mapID)
+    return mapID, name, source, h, s, l
+end
 
 --- Recompute the cached theme (called at login and on every zone change).
 function Color:Refresh()
@@ -92,8 +97,6 @@ function Color:GetTheme()
     return theme
 end
 
--- -- Getters ------------------------------------------------------------------
-
 local function unpackColor(c)
     return c.r, c.g, c.b, c.a
 end
@@ -113,17 +116,11 @@ function Color:Get(key)
     return unpackColor(entry)
 end
 
--- -- Border source -------------------------------------------------------------
-
--- The slots a border may be drawn from.  Only the three signature colours (plus
--- the Monet neutral) are offered: health / resource / danger keep their own UI
--- meaning and must not be "spent" on chrome.
+-- Only the three signature colours plus the Monet neutral may be spent on chrome: health / resource / danger keep their own UI meaning.
 local BORDER_KEYS = { edge = true, ambient = true, highlight = true, neutral = true }
 
---- Which slot the borders come from.  This is a single user setting, so one
--- dropdown re-tints every frame at once; a module may still override it per
--- widget with Widget:Theme(..., { borderKey = ... }).  "edge" -- the signature
--- glowing edge -- is the default, and the fallback for an unknown value.
+--- Which slot the borders come from: one user setting re-tints every frame at once, a module may still override it per widget with Widget:Theme(..., { borderKey = ... }).
+-- "edge" -- the signature glowing edge -- is the default and the fallback for an unknown value.
 function Color:GetBorderKey()
     local db = ns.DB and ns:DB()
     local key = db and db.theme and db.theme.borderKey
@@ -131,8 +128,7 @@ function Color:GetBorderKey()
     return "edge"
 end
 
---- The border colour for the current key.  RGB only: every call site picks its
--- own opacity (panels are solid, hand-drawn rings use 0.9).
+--- The border colour for the current key.  RGB only: every call site picks its own opacity.
 function Color:GetBorder()
     local r, g, b = self:Get(self:GetBorderKey())
     return r, g, b
@@ -142,10 +138,7 @@ function Color:WithAlpha(r, g, b, a, alpha)
     return r, g, b, (a or 1) * (alpha or 1)
 end
 
---- Linear blend between two slots (t = 0 -> from, t = 1 -> to).  Lets a
--- dynamic state ramp through the Monet palette -- the threat glow goes
--- primary -> danger -> health -- instead of borrowing Blizzard's raw
--- red / orange / yellow.
+--- Linear blend between two slots (t = 0 -> from, t = 1 -> to), so a dynamic state can ramp through the Monet palette -- the threat glow goes primary -> danger -> health.
 function Color:Blend(from, to, t)
     local a = self:GetTheme()[from] or self:GetTheme().edge
     local b = self:GetTheme()[to] or self:GetTheme().edge
@@ -159,8 +152,6 @@ end
 function Color:Hex(r, g, b)
     return ns.Math:RGBToHex(r, g, b)
 end
-
--- -- Class colours ------------------------------------------------------------
 
 --- Class colour for a class file name ("MAGE", ...); nil when unknown.
 function Color:ClassColor(classFile)

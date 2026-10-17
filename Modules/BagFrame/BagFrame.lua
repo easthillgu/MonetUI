@@ -1,6 +1,5 @@
 -- Modules/BagFrame/BagFrame.lua
--- Bag integration: tidies the default containers into one row and frames them
--- with the Monet border.  The item grid itself is left to Blizzard.
+-- Bag integration: tidies the default containers into one row and frames them with the Monet border; the item grid stays Blizzard's.
 
 local ADDON_NAME, ns = ...
 
@@ -13,8 +12,6 @@ local MAX_CONTAINERS = 13
 local GAP            = 6
 local skinned        = {}
 local borders        = {}
-
--- -- Layout -------------------------------------------------------------------
 
 --- Reposition every visible container into a single bottom row.
 function M:ArrangeBags()
@@ -37,8 +34,7 @@ local function SkinContainer(frame)
     if not frame or skinned[frame] then return end
     skinned[frame] = true
 
-    -- The themed border is a child frame sitting one level *below* the bag so
-    -- the item buttons still draw on top of it.
+    -- Border sits one frame level *below* the bag so the item buttons still draw on top of it.
     local border = Widget:CreateFrame(nil, frame)
     border:SetFrameLevel(math.max(0, frame:GetFrameLevel() - 1))
     border:SetPoint("TOPLEFT", frame, "TOPLEFT", -5, 5)
@@ -52,10 +48,9 @@ local function SkinContainer(frame)
         frame.NineSlice:SetAlpha(0)
     end
 
-    -- title font
     local title = frame.TitleContainer and frame.TitleContainer.TitleText
     if title and title.SetFont then
-        pcall(Widget.SetFont, Widget, title, 13, "roadway", "OUTLINE")
+        pcall(Widget.SetFont, Widget, title, 12, "pixel")
     end
 
     if frame.HookScript then
@@ -63,14 +58,12 @@ local function SkinContainer(frame)
     end
 end
 
--- -- Lifecycle ----------------------------------------------------------------
-
 function M:Initialize()
     for index = 1, MAX_CONTAINERS do
         SkinContainer(_G["ContainerFrame" .. index])
     end
 
-    -- Containers can be created on demand (bank / reagent tabs).
+    -- Containers can be created on demand (bank / reagent tabs), so re-skin on bag updates.
     EventBus:Register("BAG_UPDATE", function()
         for index = 1, MAX_CONTAINERS do
             SkinContainer(_G["ContainerFrame" .. index])

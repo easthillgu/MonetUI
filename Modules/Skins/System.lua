@@ -1,21 +1,16 @@
 -- Modules/Skins/System.lua
--- System windows: the loot window and group-loot rolls, static pop-ups, the
--- game menu, the settings panel, the add-on list, and -- opt-in -- the drop-down
--- menus and the tooltip.  Item buttons keep their icons.
+-- System windows: the loot window and group-loot rolls, static pop-ups, the game menu, the settings panel, the add-on list, and -- opt-in -- the drop-down menus and the tooltip.  Item buttons keep their icons.
 
 local ADDON_NAME, ns = ...
 
 local M    = ns.Skins
 local Skin = ns.Skin
 
--- -- Loot ---------------------------------------------------------------------
-
 local function SkinLoot()
     local frame = _G.LootFrame
     if frame then
         M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-        -- The close button is handled by SkinWindow (Skin:CloseButton); only the
-        -- pager arrows go through the text-button skin.
+        -- The close button is handled by SkinWindow; only the pager arrows go through the text-button skin.
         M:Buttons({ "LootFramePrevPageButton", "LootFrameNextPageButton" })
         Skin:ScrollFrame(frame.LootFrameScrollFrame)
     end
@@ -25,9 +20,7 @@ local function SkinLoot()
         Skin:Panel(roll, { bgAlpha = 0.96 })
     end)
 
-    -- The rolling history window builds its entry buttons lazily on open, so
-    -- the list gets re-skinned on every show (HookShow is one handler per
-    -- frame -- re-running it from refresh paths never stacks handlers).
+    -- The rolling history window builds its entry buttons lazily on open, so the list gets re-skinned on every show (HookShow is one handler per frame).
     local history = _G.GroupLootHistoryFrame
     if history then
         local function skinHistory()
@@ -39,8 +32,6 @@ local function SkinLoot()
         M:HookShow(history, skinHistory)
     end
 end
-
--- -- Static pop-ups -----------------------------------------------------------
 
 local function SkinPopups()
     for index = 1, 4 do
@@ -58,8 +49,7 @@ local function SkinPopups()
         end
     end
 
-    -- 数量拆分框：顶部金色条是帧自己的美术，去掉；内容（加减号、输入框）
-    -- 保留。
+    -- 数量拆分框：顶部金色条是帧自己的美术，去掉；内容（加减号、输入框）保留。
     local split = _G.StackSplitFrame
     if split then
         Skin:Strip(split)
@@ -104,8 +94,6 @@ local function SkinPopups()
     end
 end
 
--- -- Game menu / settings / add-on list ---------------------------------------
-
 local function SkinGameMenu()
     local frame = _G.GameMenuFrame
     if not frame then return end
@@ -136,11 +124,7 @@ local function SkinAddonList()
     end)
 end
 
--- -- Menus / tooltip backdrop tinting (opt-in) ---------------------------------
-
---- Recolour a frame's existing backdrop.  Menus and the tooltip already own a
--- backdrop, so no backplate child is added; the originals are recorded so the
--- rollback can put them back.
+--- Recolour a frame's existing backdrop.  Menus and the tooltip already own a backdrop, so no backplate child is added; originals are recorded for rollback.
 local function TintBackdrop(frame)
     if not frame or type(frame.SetBackdropBorderColor) ~= "function" then return end
 
@@ -193,13 +177,9 @@ local function SkinMenus()
     end)
 end
 
--- -- Tooltip (opt-in) ---------------------------------------------------------
-
 local function SkinTooltip()
     TintBackdrop(_G.GameTooltip)
 end
-
--- -- Registration -------------------------------------------------------------
 
 M:Panel("loot", { label = "拾取 / 掷骰", group = "系统", apply = SkinLoot,
     frames = {

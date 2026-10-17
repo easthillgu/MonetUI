@@ -12,6 +12,21 @@
     }
   },
 
+  "mcp": {
+    "servers": {
+      "wuxian": {
+        "type": "local",
+        "command": [
+          "C:\\Users\\EastHillGu\\AppData\\Local\\WuxianWorkshop.App\\current\\wuxian.exe",
+          "mcp"
+        ],
+        "environment": {
+          "WUXIAN_LOG": "C:\\Users\\EastHillGu\\AppData\\Local\\WuxianWorkshop\\logs\\mcp.log"
+        }
+      }
+    }
+  },
+
   "tool_output": {
     "max_lines": 800,
     "max_bytes": 30720

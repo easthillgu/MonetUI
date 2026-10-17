@@ -7,8 +7,6 @@ local ADDON_NAME, ns = ...
 local Math = {}
 ns.Math = Math
 
--- -- Basic scalar helpers -----------------------------------------------------
-
 function Math:Lerp(a, b, t)
     return a + (b - a) * t
 end
@@ -34,8 +32,6 @@ function Math:SafeDiv(a, b, fallback)
     if not b or b == 0 then return fallback or 0 end
     return a / b
 end
-
--- -- Colour helpers -----------------------------------------------------------
 
 function Math:LerpColor(c1, c2, t)
     return {
@@ -109,8 +105,6 @@ function Math:RGBToHex(r, g, b)
     b = math.floor(self:Clamp01(b) * 255 + 0.5)
     return string.format("%02x%02x%02x", r, g, b)
 end
-
--- -- Number / time formatting -------------------------------------------------
 
 --- 1234 -> "1.2K", 1500000 -> "1.5M", 42 -> "42".
 function Math:ShortNumber(value, decimals)

@@ -1,8 +1,5 @@
 -- Modules/Skins/Collections.lua
--- Collections (mounts / pets / toys / heirlooms / appearances), the achievement
--- window and the adventure guide.  Journal rows are item buttons, so they are
--- skipped by SkinButtonsIn; only chrome (filters, search boxes, tabs, scroll
--- bars) is restyled.
+-- Collections (mounts / pets / toys / heirlooms / appearances), the achievement window and the adventure guide.  Journal rows are item buttons, so they are skipped by SkinButtonsIn; only chrome (filters, search boxes, tabs, scroll bars) is restyled.
 
 local ADDON_NAME, ns = ...
 

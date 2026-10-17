@@ -1,16 +1,10 @@
 -- Modules/Skins/Quest.lua
--- Questing windows: the quest log (the standalone QuestLogFrame on clients that
--- still have one) and the NPC quest / gossip dialog windows.  Each window gets
--- the Monet plate + themed border, and its own action buttons / tabs / scroll
--- bars are restyled.  The quest *content* (objective text, reward item icons)
--- is deliberately left alone -- only the frame's own chrome is faded, so icons
--- and item buttons keep working.
+-- Questing windows: the quest log (standalone QuestLogFrame on clients that still have one) and the NPC quest / gossip dialog windows.
+-- Quest *content* (objective text, reward icons) is deliberately left alone -- only the frame's own chrome is faded, so item buttons keep working.
 
 local ADDON_NAME, ns = ...
 
 local M = ns.Skins
-
--- -- Quest log ----------------------------------------------------------------
 
 local QUESTLOG_BUTTONS = {
     "QuestLogFrameAbandonButton", "QuestLogFrameTrackButton", "QuestLogFrameShareButton",
@@ -43,8 +37,6 @@ local function SkinQuestLog()
     end
 end
 
--- -- Quest / gossip dialogs ---------------------------------------------------
-
 local QUESTFRAME_BUTTONS = {
     "QuestFrameAcceptButton", "QuestFrameDeclineButton", "QuestFrameCompleteButton",
     "QuestFrameCompleteQuestButton", "QuestFrameGoodbyeButton", "QuestFramePushQuestButton",
@@ -61,8 +53,7 @@ local function SkinQuestFrame()
         M:Buttons(QUESTFRAME_BUTTONS)
         M:Scrolls(QUESTFRAME_SCROLLS)
 
-        -- The greeting / progress / reward / detail sub-panels each carry their
-        -- own backdrop art; plate them so the dialog reads as one surface.
+        -- The greeting / progress / reward / detail sub-panels each carry their own backdrop art; plate them so the dialog reads as one surface.
         M:Controls({
             "QuestFrameGreetingPanel", "QuestFrameProgressPanel",
             "QuestFrameRewardPanel", "QuestFrameDetailPanel",
@@ -89,8 +80,6 @@ local function SkinQuestFrame()
         end)
     end
 end
-
--- -- Registration -------------------------------------------------------------
 
 M:Panel("questlog", {
     label = "任务日志",

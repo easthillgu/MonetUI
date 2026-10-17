@@ -1,16 +1,7 @@
 -- Utils/Secrets.lua
 -- Secret-value guard (保密值处理层) for the "Forever" client (Interface 16001).
---
--- The client may hand addons *secret* values for unit health, power, identity,
--- auras and cooldowns while a restriction is active (combat, PvP, boss
--- encounters, chat lockdown ...).  A secret value may be passed to most widgets
--- untouched (e.g. StatusBar:SetValue), but the moment tainted addon code does
--- arithmetic, comparison, formatting or concatenation with it the client raises
---
---     attempt to perform arithmetic on a secret number value
---
--- Every module must therefore ask this layer first and only fall back to plain
--- computation when the client reports the value is NOT secret.
+-- Under a restriction (combat, PvP, boss encounters, chat lockdown ...) the client hands addons *secret* values for health, power, identity, auras and cooldowns: a secret may pass to widgets untouched (e.g. StatusBar:SetValue), but arithmetic / comparison / formatting / concatenation raises "attempt to perform arithmetic on a secret number value".
+-- Every module must therefore ask this layer first and only compute plainly when the client reports the value is NOT secret.
 
 local ADDON_NAME, ns = ...
 
@@ -29,8 +20,7 @@ function Secrets.Enabled()
     return (ok and restricted) and true or false
 end
 
--- Generic "should this be secret?" wrapper.  A missing client API is treated as
--- *secret* so that a query we do not understand can never cause an error.
+-- Generic "should this be secret?" wrapper.  A missing client API is treated as *secret* so that a query we do not understand can never cause an error.
 local function Ask(query, ...)
     if not Secrets.Enabled() then return false end
     local api = API()
@@ -40,8 +30,6 @@ local function Ask(query, ...)
     if not ok then return true end
     return isSecret and true or false
 end
-
--- -- Unit queries -------------------------------------------------------------
 
 function Secrets.HealthSecret(unit)     return Ask("ShouldUnitHealthMaxBeSecret", unit) end
 function Secrets.PowerSecret(unit, pt)  return Ask("ShouldUnitPowerBeSecret", unit, pt) end
@@ -57,13 +45,8 @@ function Secrets.CanMeasurePower(unit, pt)  return not Secrets.PowerSecret(unit,
 function Secrets.CanReadIdentity(unit)      return not Secrets.IdentitySecret(unit) end
 function Secrets.CanReadAuras()             return not Secrets.AurasSecret() end
 
--- -- Value helpers ------------------------------------------------------------
-
---- Enum.StatusBarInterpolation.ExponentialEaseOut when the client has it, else
--- nil.  Handing this to StatusBar:SetValue makes the bar *ease* towards its new
--- value instead of snapping; the easing is done inside the client, so it keeps
--- working while the value itself is secret.  Looked up once, and guarded because
--- the enumeration is not guaranteed to exist on every build.
+--- Enum.StatusBarInterpolation.ExponentialEaseOut when the client has it, else nil.
+-- Handed to StatusBar:SetValue the bar eases inside the client, so it keeps working while the value itself is secret; guarded because the enum is not on every build.
 Secrets.SMOOTH = nil
 do
     local ok, value = pcall(function()
@@ -113,11 +96,8 @@ function Secrets.Measure(fn, ...)
     return pcall(fn, ...)
 end
 
---- Feed a status bar without ever doing arithmetic on the values.
--- @param interpolation optional Secrets.SMOOTH; when given, the client eases the
---        bar towards the new value.  Both calls accept secret values, so the
---        smooth path is used whenever the client takes it.
--- Returns true when the widget accepted both calls.
+--- Feed a status bar without ever doing arithmetic on the values; returns true when the widget accepted both calls.
+-- @param interpolation optional Secrets.SMOOTH; both calls take secret values, so the smooth path is used whenever the client takes it.
 function Secrets.SetBar(bar, current, maximum, interpolation)
     if not bar then return false end
 

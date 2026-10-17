@@ -1,10 +1,6 @@
 -- MonetUI Core.lua
 -- Entry point: saved settings, module registry & lifecycle, theme plumbing.
---
--- Every file in this addon shares the private namespace table `ns` (the second
--- value of `...`).  The Utils files hang themselves off it (ns.Color, ns.Widget,
--- ns.Secrets, ...) so modules never need a global lookup.  Core adds the module
--- registry on top of it and exposes it as the global `MonetUI` for convenience.
+-- Every file shares the private namespace table `ns` (the second value of `...`); the Utils files hang off it, Core adds the module registry and exposes it as the global `MonetUI`.
 
 local ADDON_NAME, ns = ...
 
@@ -14,8 +10,6 @@ local LMC = LibStub and LibStub("LibMonetColor-1.0", true)
 ns.name = ADDON_NAME
 ns.version = "0.10.0"
 
--- -- Defaults ----------------------------------------------------------------
-
 local DEFAULTS = {
     enabled = true,
     modules = {
@@ -24,6 +18,7 @@ local DEFAULTS = {
         BuffFrame    = true,
         Minimap      = true,
         BagFrame     = true,
+        Bags         = true,
         QuestTracker = true,
         ActionBars   = true,
         Nameplates   = true,
@@ -33,58 +28,32 @@ local DEFAULTS = {
     theme = {
         useMonetColor  = true,
         tintBlizzard   = true,
-        -- Which engine slot borders are drawn from: "edge" | "ambient" |
-        -- "highlight" | "neutral" (see Color:GetBorderKey).  Unit frames, the
-        -- minimap panel, action bars, buffs, bags, the quest tracker and the
-        -- config panel all follow it, so one dropdown re-tints every border.
+        -- Which engine slot borders are drawn from (see Color:GetBorderKey); one dropdown re-tints every border in the addon.
         borderKey      = "edge",
     },
-    -- Thin bars in Andromeda's layout (see docs/mockup).  Sizes and positions are
-    -- both stored per unit so they can be tuned without touching the code; the
-    -- "relativeTo" field names either UIParent or another unit frame, which lets
-    -- target / focus / pet follow the player frame.
-    --
-    -- Health is 2px: half of Andromeda's configured 4.  Andromeda also rescales
-    -- UIParent (~0.53 at 1440p) while MonetUI draws 1:1, so copying its number
-    -- straight over would come out about twice as thick here.
-    --
-    -- Health colouring, per unit:
-    --   fillColor = "highlight"  the Monet signature wash (player, pet)
-    --             = "class"      the colour the game itself draws the unit in:
-    --                            class colour for players, reaction colour for
-    --                            NPCs (target, focus, targettarget)
-    --             = "health"     the flat UI health green
-    --   lostColor = "black"      the missing part reads as background (player, pet)
-    --             = "danger"     the missing part reads as damage taken (target)
-    --   powerColor = "type"      the power bar is coloured by UnitPowerType
-    --              = "theme"     the power bar keeps the flat theme resource colour
-    -- textColorByPercent ramps the health number green -> red as health drops.
-    -- smoothBars eases every bar towards its new value (the client does the
-    -- easing, so it still works while the values are hidden).
-    --
-    -- classPower draws the player's combo points (rogue / feral druid) as one
-    -- slim pip per point under the player frame.  Blizzard keeps that display
-    -- inside PlayerFrame, which this addon hides, so without it a rogue would see
-    -- its energy bar and no combo points at all
-    -- (see CLASS_POWER in Modules/UnitFrames/UnitFrames.lua).
-    --   classPower        false turns the pips off
-    --   classPowerHeight  how tall one pip is
-    --   classPowerGap     gap between pips (also the breathing room under the frame)
-    --
-    -- Edge-glow states (the Andromeda-style dynamic frame border, re-tinted
-    -- through Widget:SetBorderState so theme refreshes cannot stomp them):
-    --   threatGlow  the border ramps primary -> danger while the unit's threat
-    --               status rises, and turns health green while the unit is
-    --               tanking.  Secret-safe: while the client hides threat state
-    --               the last known glow is kept and re-evaluated on
-    --               PLAYER_REGEN_ENABLED.  Applies to player and pet (the
-    --               units UnitThreatSituation answers for unaided).
-    --   hoverGlow   the border washes to the highlight slot while the cursor is
-    --               on the frame; a threat glow outranks it.
+    -- Categorized bags & bank (Modules/Bags/Bags.lua): every slot is scanned once and claimed by the first matching category (垃圾 / 装备 / 消耗品 / 材料 / 任务 / 收藏 / 其他); each category gets its own framed, movable window tiled from `anchor`.  Reads only this client's C_Container / C_Bank APIs.
+    bags = {
+        iconSize       = 34,
+        gap            = 4,
+        columns        = 10,
+        windowsPerRow  = 2,
+        showReagentBag = true,
+        showBank       = true,
+        anchor         = { frame = "UIParent", x = -33, y = -120 },
+        positions      = {},   -- per-category window spots the user dragged to
+    },
+    -- Cooldown countdown text (Modules/Cooldown): the renderer scales the unit itself (60s -> minutes, 1h -> hours, 24h -> days, via Math:DurationText) and treats the last alertSeconds as "tight".  false for scale hands the numbers back to Blizzard; false for alert keeps one colour and one size.
+    cooldown = {
+        scale        = true,
+        alert        = true,
+        alertSeconds = 5,
+    },
+    -- Unit frames in Andromeda's layout (see docs/mockup), sized per unit so target / focus / pet can follow the player frame.  Health is 2px -- half of Andromeda's configured 4, because Andromeda rescales UIParent while MonetUI draws 1:1.
+    -- fillColor/lostColor/powerColor pick the bar colours (class = the colour the game itself draws the unit in; black = missing part reads as background; type = coloured by UnitPowerType); smoothBars eases every bar from the client side so it still works while values are hidden.
+    -- classPower draws the player's combo points as slim pips under the player frame (Blizzard keeps them inside the PlayerFrame this addon hides); threatGlow / hoverGlow are Andromeda-style edge glows re-tinted through Widget:SetBorderState so theme refreshes cannot stomp them.
     unitFrames = {
         hideBlizzard = true,
-        -- 1px Monet border, then the gap Andromeda keeps between its health and
-        -- power bars (its C.MULT, ~1px at 1440p).
+        -- 1px Monet border, then the gap Andromeda keeps between its health and power bars (its C.MULT, ~1px at 1440p).
         border = 1,
         split  = 1,
         threatGlow = true,
@@ -95,6 +64,9 @@ local DEFAULTS = {
         classPower       = true,
         classPowerHeight = 3,
         classPowerGap    = 3,
+        -- Target auras: reparent Blizzard's own TargetFrame aura list onto our target frame (Andromeda's layout, growing up) and anchor it above.  Only the position is borrowed, never the data -- C_UnitAuras is hidden mid-fight, so this is the same ForeverUI trick the Nameplates module uses.
+        showTargetAuras = true,
+        targetAuraGap   = 22,
         player = { width = 160, health = 2, power = 1, fillColor = "highlight", lostColor = "black",
                    point = "CENTER", relativeTo = "UIParent", relativePoint = "CENTER", x = 0,    y = -180 },
         target = { width = 160, health = 2, power = 1, fillColor = "class", lostColor = "danger",
@@ -106,18 +78,8 @@ local DEFAULTS = {
         focus  = { width = 60,  health = 2, power = 1, fillColor = "class", lostColor = "danger",
                    point = "RIGHT",  relativeTo = "player",   relativePoint = "LEFT",   x = -100, y = -40 },
     },
-    -- Blizzard's default bottom chrome is taken off screen; the buttons keep
-    -- working for keybinds because they are re-parented, not destroyed.
-    --
-    -- ownBars: MonetUI draws its own 1..8 keyed on LibActionButton-1.0 (see
-    -- Modules/ActionBars/ActionBars.lua) and parks Blizzard's bars.  With it off
-    -- the Blizzard bars are kept, and only "hideBlizzard" can still hide them.
-    -- barCount / buttonSize / spacing describe the look; positions holds an
-    -- optional per-bar override of the first-run anchors in BAR_DEFS.
-    --
-    -- First-run layout (see BAR_DEFS): 1/2/3 stacked bottom-centre, the pet bar
-    -- right-aligned and the stance bar left-aligned on the row above 3, and
-    -- 4..8 stacked on upward but hidden until barCount is raised.
+    -- Blizzard's bottom chrome is re-parented off screen, not destroyed, so the buttons keep working for keybinds.
+    -- ownBars: MonetUI draws its own 1..8 bars on LibActionButton-1.0 (Modules/ActionBars) and parks Blizzard's bars; with it off only hideBlizzard can still hide them.  First-run layout lives in BAR_DEFS, positions holds a per-bar override.
     actionBars = {
         ownBars      = true,
         hideBlizzard = true,
@@ -130,19 +92,8 @@ local DEFAULTS = {
         showMacro    = true,
         positions    = {},
     },
-    -- Nameplates (姓名板) sit on top of Blizzard's own plate bases (see
-    -- Modules/Nameplates/Nameplates.lua): the base owns targeting/clicks, the
-    -- module draws a Monet slim bar on it and hides Blizzard's UnitFrame child.
-    --
-    -- Which units the *game* gives a plate to is a CVar, so the show* switches
-    -- below are pushed into nameplateShowFriends/Enemies/... on Apply, and put
-    -- back when the module is turned off.  hideCritters/hideDead are an extra
-    -- addon-side filter on top of that.
-    --
-    -- width/height are the health box; nameSize is the name/level row above it
-    -- and castHeight the cast bar below.  forcePlateSize matches Blizzard's
-    -- clickable hitbox to the drawn box (much smaller than its default), so a
-    -- click lands on the plate you actually see.
+    -- Nameplates (姓名板, Modules/Nameplates) sit on Blizzard's own plate bases: the base owns targeting/clicks, the module draws a Monet slim bar on it and hides Blizzard's UnitFrame child.  Which units get a plate at all is a CVar, so the show* switches are pushed into nameplateShowFriends/Enemies/... on Apply and put back when the module is off; hideCritters/hideDead filter on top of that.
+    -- width/height are the health box, nameSize the name/level row, castHeight the cast bar; forcePlateSize matches Blizzard's clickable hitbox to the drawn box so a click lands on the plate you actually see.
     nameplates = {
         showFriendly = false,   -- friendly players (Blizzard default: off)
         showEnemy    = true,    -- hostile players and npcs
@@ -156,7 +107,7 @@ local DEFAULTS = {
 
         width        = 120,
         height       = 12,
-        nameSize     = 11,
+        nameSize     = 12,
         showName     = true,
         showLevel    = true,
         showPercent  = true,
@@ -174,28 +125,12 @@ local DEFAULTS = {
         forcePlateSize  = true,
         auraGap         = 4,
     },
-    -- Blizzard panel beautification (see Modules/Skins/Skins.lua): the vanilla
-    -- windows (quests, world map, character sheet, collections, social, mail /
-    -- merchants, system dialogs) are re-plated in the Monet palette so the whole
-    -- UI reads as one style.  Each window is a switch under `panels` (whose
-    -- shipped defaults live with each skin); `font` is an optional global font
-    -- override: "off" | "pixel" | "roadway" | "number".
+    -- Blizzard panel beautification (Modules/Skins): each window is a switch under `panels`.  `font` is an optional global override: "off" (Blizzard faces) or "pixel" (Fusion Pixel everywhere -- Media:SnapSize keeps text on the 12px grid, MONOCHROME keeps the edges hard).
     skins = {
-        font   = "off",
+        font   = "pixel",
         panels = {},
     },
-    -- Info bar (信息栏, see Modules/InfoBar/InfoBar.lua): one full-width strip
-    -- along an edge of the screen carrying small data blocks.
-    --   anchorTop   true = pinned to the top edge (the default, so it clears the
-    --               action bars at the bottom); false = bottom edge.
-    --   height      strip height in pixels.  14 matches Andromeda's default and
-    --               fits an 11px font with a little air.
-    --   mouseover   blocks stay invisible and only the faint backdrop shows
-    --               until the cursor is on the strip (Andromeda ships this on).
-    --   combatPulse the edge breathes red while in combat, and turns yellow
-    --               while the calendar has pending invites.
-    --   blocks      one switch per data block; a block whose data source turns
-    --               out to be missing on this client hides itself as well.
+    -- Info bar (信息栏, Modules/InfoBar): one full-width strip along a screen edge carrying small data blocks.  anchorTop pins it to the top edge (so it clears the bottom action bars), height is the strip height (14 fits a 12px font), mouseover keeps the blocks invisible until hovered, combatPulse breathes red in combat / yellow with pending invites; blocks are one switch per data block.
     infobar = {
         anchorTop   = true,
         height      = 14,
@@ -213,8 +148,6 @@ local DEFAULTS = {
 }
 ns.DEFAULTS = DEFAULTS
 
--- -- Small helpers ------------------------------------------------------------
-
 local modules = {}
 local moduleOrder = {}
 local started = false
@@ -231,19 +164,14 @@ local function MergeDefaults(dst, src)
     return dst
 end
 
---- Database schema.  Bumping this re-applies the settings that changed their
--- meaning in the shipped defaults (see Migrate).
+--- Database schema.  Bumping this re-applies the settings that changed their meaning in the shipped defaults (see Migrate).
 local SCHEMA = 2
 
---- One-off adjustments to a database written by an older MonetUI.
--- MergeDefaults only fills in *missing* keys, so a value whose number changed
--- has to be pushed explicitly.  Stored positions are the player's and are never
--- touched here.
+--- One-off adjustments to a database written by an older MonetUI: MergeDefaults only fills in *missing* keys, so a value whose number changed has to be pushed explicitly.  Stored positions are the player's and are never touched here.
 local function Migrate(db)
     if (db.schema or 1) >= SCHEMA then return end
 
-    -- v2: health bars halved to Andromeda's real thickness, plus health colour
-    -- rules (fillColor / lostColor) for the new bar styling.
+    -- v2: health bars halved to Andromeda's real thickness, plus the fillColor / lostColor colour rules.
     for unit, defaults in pairs(DEFAULTS.unitFrames) do
         if type(defaults) == "table" then
             local stored = db.unitFrames[unit]
@@ -278,15 +206,8 @@ function ns:DB()
     return _G.MonetUIDB
 end
 
---- Walk a dotted path through the global table ("WorldMapFrame.BorderFrame") and
--- return the value, or false if any segment is missing.  Intermediate nodes must
--- be tables, so indexing can never raise.
---
--- Modules use this to *probe* the objects they assume exist on this client.
--- Reference addons target other builds, so a name observed in them (or recalled
--- from another version) cannot be trusted here -- and because every real lookup
--- is a guarded `_G[name]`, a wrong name fails silently rather than erroring.
--- This makes that silence queryable: `/mui skins diagnose`.
+--- Walk a dotted path through the global table ("WorldMapFrame.BorderFrame") and report whether it resolves (true / false).  Intermediate nodes must be tables, so indexing can never raise.
+-- Modules use this to *probe* the objects they assume exist on this client: a wrong name fails silently (every real lookup is a guarded `_G[name]`), and this makes that silence queryable via `/mui skins diagnose`.
 function ns.ResolvePath(path)
     if type(path) ~= "string" or path == "" then return false end
     local node = _G
@@ -296,8 +217,6 @@ function ns.ResolvePath(path)
     end
     return node ~= nil
 end
-
--- -- Module registry ----------------------------------------------------------
 
 function ns:Register(name, module)
     assert(type(name) == "string", "Module name must be a string")
@@ -321,8 +240,6 @@ end
 function ns:HasMonetColor()
     return LMC ~= nil
 end
-
--- -- Module lifecycle ---------------------------------------------------------
 
 function ns:IsModuleEnabled(name)
     local value = self:DB().modules[name]
@@ -389,30 +306,14 @@ function ns:StartModules()
     self:Print(string.format("已加载 %d/%d 个模块。", count, #moduleOrder))
 end
 
--- -- Theme --------------------------------------------------------------------
-
 local function RefreshTheme(reason)
     ns.Color:Refresh()
     ns.EventBus:Fire("MONETUI_THEME_CHANGED", reason)
 end
 ns.RefreshTheme = RefreshTheme
 
--- -- MonetColor callback reservation -------------------------------------------
-
---- Opt into the engine's own "colours changed" notification, so a profile switch
--- or an engine-side refresh re-tints every border / bar straight away instead of
--- waiting for the next zone change.
---
--- LibMonetColor ships with or without CallbackHandler-1.0 and the two expose the
--- registration differently:
---   * CallbackHandler present : LMC:RegisterCallback("OnThemeColorsChanged", fn)
---   * built-in fallback       : LMC.events:RegisterCallback("MonetUI", fn)
--- so the shape is detected rather than assumed and both are pcall'd.  Either way
--- the handler is handed the event name first, which is why it ignores its
--- arguments.  No engine, or no notification, simply leaves the zone handlers
--- below as the baseline -- this is the reservation every border colour (unit
--- frames, minimap panel, action bars, buffs) hangs off through
--- Widget:Theme -> Color:GetEdge.
+--- Opt into the engine's own "colours changed" notification, so a profile switch or an engine-side refresh re-tints every border / bar straight away instead of waiting for the next zone change.
+-- LibMonetColor ships with or without CallbackHandler-1.0 and the two expose the registration differently, so the shape is detected rather than assumed and both are pcall'd.  Either way the handler is handed the event name first, which is why it ignores its arguments.  No engine, or no notification, leaves the zone handlers below as the baseline.
 local function ReserveMonetColorCallback()
     if not LMC then return false end
 
@@ -425,8 +326,7 @@ local function ReserveMonetColorCallback()
         end
     end
 
-    -- Built-in fallback registry: the method lives on LMC.events and keys on an
-    -- arbitrary consumer id.
+    -- Built-in fallback registry: the method lives on LMC.events and keys on an arbitrary consumer id.
     local events = LMC.events
     if events and type(events.RegisterCallback) == "function" then
         if pcall(events.RegisterCallback, events, ADDON_NAME, handler) then
@@ -439,8 +339,6 @@ end
 
 --- True when the engine itself will tell us about colour changes.
 ns.hasMonetColorCallback = ReserveMonetColorCallback()
-
--- -- Slash commands -----------------------------------------------------------
 
 local function PrintStatus()
     local source, profile = ns.Color:GetSource()
@@ -467,6 +365,13 @@ local function PrintStatus()
     local er, eg, eb = ns.Color:GetEdge()
     ns:Print(string.format("边缘色 |cff%s|r (%.2f, %.2f, %.2f)   %s",
         ns.Math:RGBToHex(er, eg, eb), er, eg, eb, ns.Secrets:Describe()))
+
+    -- Zone sampling: which environment colour drives the theme here.
+    local mapID, zoneName, envSource, h, s, l = ns.Color:GetZoneInfo()
+    if mapID then
+        ns:Print(string.format("区域取色 %s | 地图 %d | HSL %.1f / %.2f / %.2f | 来源: %s",
+            zoneName or "未知", mapID, h, s, l, envSource or "?"))
+    end
 end
 
 local function PrintHelp()
@@ -536,9 +441,7 @@ local function HandleSlash(message)
                 ns:SetModuleEnabled(moduleName, false)
                 ns:Print("模块 " .. moduleName .. " 已关闭。")
             else
-                -- Modules may expose their own sub-commands (e.g. `/mui skins
-                -- diagnose`).  A handler returns true when it consumed the rest
-                -- of the line; otherwise fall through to the usage line.
+                -- Modules may expose their own sub-commands (e.g. `/mui skins diagnose`): a handler returns true when it consumed the rest of the line, otherwise fall through to the usage line.
                 local handled = false
                 if type(module.HandleCommand) == "function" then
                     local ok, result = pcall(module.HandleCommand, module, rest)
@@ -563,9 +466,7 @@ SLASH_MONETUI1 = "/monetui"
 SLASH_MONETUI2 = "/mui"
 SlashCmdList["MONETUI"] = HandleSlash
 
--- -- Boot ---------------------------------------------------------------------
--- EventBus owns the only frame; every listener below is registered on it.
-
+-- Boot: EventBus owns the only frame; every listener below is registered on it.
 ns.EventBus:Register("ADDON_LOADED", function(_, addonName)
     if addonName ~= ADDON_NAME then return end
     LoadDatabase()
@@ -581,8 +482,7 @@ ns.EventBus:Register("PLAYER_LOGIN", function()
         ns:HasMonetColor() and "|cff00ff00已接入|r" or "|cffff6b6b未找到（使用内置调色板）|r"))
 end)
 
--- The engine recomputes on zone changes; we only need to pick the new colours up
--- and tell the modules about it.
+-- The engine recomputes on zone changes; we only pick the new colours up and tell the modules about it.
 ns.EventBus:Register("ZONE_CHANGED",       function() RefreshTheme("zone") end)
 ns.EventBus:Register("ZONE_CHANGED_INDOORS", function() RefreshTheme("zone") end)
 ns.EventBus:Register("ZONE_CHANGED_NEW_AREA", function() RefreshTheme("zone") end)
@@ -592,8 +492,7 @@ ns.EventBus:Register("PLAYER_ENTERING_WORLD", function(_, isInitialLogin, isRelo
     end
 end)
 
--- Restricted states (combat / PvP) may hide values again, so let modules refresh
--- their text once the restriction lifts.
+-- Restricted states (combat / PvP) may hide values again, so let modules refresh their text once the restriction lifts.
 ns.EventBus:Register("ADDON_RESTRICTION_STATE_CHANGED", function()
     ns.EventBus:Fire("MONETUI_RESTRICTION_CHANGED")
 end)

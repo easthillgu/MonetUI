@@ -1,0 +1,530 @@
+-- Modules/Bags/Bags.lua
+-- Monet-style categorized bags & bank, drawn from scratch with Monet widgets and this client's C_Container / C_Bank APIs.
+-- Ideas borrowed from common bag addons; code original (cargBags is GPL, so it is never used).
+-- Client constants below were verified via wuxian api_get against the official manual, not from memory.
+
+local ADDON_NAME, ns = ...
+
+local Widget   = ns.Widget
+local Math     = ns.Math
+local Color    = ns.Color
+local EventBus = ns.EventBus
+
+local M = { name = "Bags" }
+
+-- BagIndex (manual): backpack + carried bags, reagent bag, then bank tabs.
+local BAG_BACKPACK = 0
+local BAGS_CARRIED = { 0, 1, 2, 3, 4 }   -- Backpack + Bag_1..Bag_4
+local BAG_REAGENT  = 5                    -- ReagentBag (present only if crafted)
+local BANK_TABS    = { 6, 7, 8, 9, 10, 11, 12, 13, 14 }    -- CharacterBankTab_1..9
+local ACCOUNT_TABS = { 15, 16, 17, 18, 19, 20, 21, 22, 23 } -- AccountBankTab_1..9
+
+-- ItemClass (manual).  Local table so a missing Enum global can never bite.
+local IC = {
+    Consumable      = 0,
+    Container       = 1,
+    Weapon          = 2,
+    Gem             = 3,
+    Armor           = 4,
+    Reagent         = 5,
+    Projectile      = 6,
+    Tradegoods      = 7,
+    ItemEnhancement = 8,
+    Recipe          = 9,
+    Questitem       = 12,
+    Key             = 13,
+    Miscellaneous   = 15,
+    Battlepet       = 17,
+}
+
+local Q_POOR = 0
+
+local function Setting(key)
+    local stored = (ns:DB().bags or {})[key]
+    if stored ~= nil then return stored end
+    return (ns.DEFAULTS.bags or {})[key]
+end
+
+-- Ordered: the FIRST category whose match() accepts an item claims it, so the list runs specific -> general and "other" is the fallback.
+
+local CATEGORIES = {
+    { key = "junk",  label = "垃圾",
+      match = function(it) return it.quality == Q_POOR and (it.sellPrice or 0) > 0 end },
+    { key = "gear",  label = "装备",
+      match = function(it)
+          return (it.classID == IC.Armor or it.classID == IC.Weapon)
+             and it.equipLoc and it.equipLoc ~= "" and it.equipLoc ~= "INVTYPE_NON_EQUIP"
+      end },
+    { key = "use",   label = "消耗品",
+      match = function(it) return it.classID == IC.Consumable or it.classID == IC.ItemEnhancement end },
+    { key = "goods", label = "材料",
+      match = function(it) return it.classID == IC.Tradegoods or it.classID == IC.Reagent end },
+    { key = "quest", label = "任务",
+      match = function(it) return it.isQuest or it.classID == IC.Questitem end },
+    { key = "pets",  label = "收藏",
+      match = function(it)
+          return it.classID == IC.Battlepet
+              or (it.classID == IC.Miscellaneous and (it.subClassID == 2 or it.subClassID == 5))
+      end },
+    { key = "other", label = "其他",
+      match = function() return true end },
+}
+
+local CATEGORY_BY_KEY = {}
+for _, cat in ipairs(CATEGORIES) do CATEGORY_BY_KEY[cat.key] = cat end
+
+--- One plain record for a filled (bag, slot).  GetItemInfo may return nil for uncached items, so its fields are optional and container info stays the fallback.
+local function BuildItem(bag, slot, info)
+    local it = {
+        bag     = bag,
+        slot    = slot,
+        itemID  = info.itemID,
+        link    = info.hyperlink,
+        count   = info.stackCount,
+        quality = info.quality or 0,
+        locked  = info.isLocked,
+        name    = info.itemName,
+    }
+
+    it.texture = info.iconFileID
+
+    if info.hyperlink and C_Item and C_Item.GetItemInfo then
+        local ok, name, link, quality, ilvl, _, _, _, equipLoc, tex, sellPrice,
+              classID, subClassID = pcall(C_Item.GetItemInfo, info.hyperlink)
+        if ok then
+            it.name      = name or it.name
+            it.quality   = quality or it.quality
+            it.texture   = tex or it.texture
+            it.ilvl      = ilvl
+            it.equipLoc  = equipLoc
+            it.sellPrice = sellPrice
+            it.classID   = classID
+            it.subClassID= subClassID
+        end
+    end
+
+    -- Quest detection guarded: not every build carries this namespace call.
+    if C_Container and C_Container.GetContainerItemQuestInfo then
+        local ok, q = pcall(C_Container.GetContainerItemQuestInfo, bag, slot)
+        if ok and q then
+            it.isQuest = (q.questID and q.questID > 0) or q.isQuestItem or false
+        end
+    end
+
+    return it
+end
+
+local function AssignCategory(it)
+    for _, cat in ipairs(CATEGORIES) do
+        if cat.match(it) then return cat.key end
+    end
+    return "other"
+end
+
+--- Scan a set of bag indexes into { categoryKey = { item, ... } }.
+local function Scan(bagIndexes)
+    local groups = {}
+    for _, cat in ipairs(CATEGORIES) do groups[cat.key] = {} end
+
+    for _, bag in ipairs(bagIndexes) do
+        local num = C_Container.GetContainerNumSlots(bag)
+        if num and num > 0 then
+            for slot = 1, num do
+                local info = C_Container.GetContainerItemInfo(bag, slot)
+                if info and info.itemID then
+                    local it = BuildItem(bag, slot, info)
+                    local key = AssignCategory(it)
+                    groups[key][#groups[key] + 1] = it
+                end
+            end
+        end
+    end
+
+    return groups
+end
+
+local pool = {}
+
+local function ReleaseButtons(list)
+    for i = #list, 1, -1 do
+        local btn = list[i]
+        btn:Hide()
+        btn:SetParent(nil)
+        pool[#pool + 1] = btn
+        list[i] = nil
+    end
+end
+
+-- Quest items take the amber ring regardless of quality; poor/common keep the plain edge (Andromeda likewise demotes common to black).
+-- Declared above AcquireButton: its hover closure uses QualityBorder as an upvalue.
+local QUALITY_COLOR = {
+    -- [0] poor and [1] common: intentionally absent -- plain edge
+    [2] = { r = 0.20, g = 0.80, b = 0.20 },  -- Uncommon green
+    [3] = { r = 0.20, g = 0.55, b = 1.00 },  -- Rare    blue
+    [4] = { r = 0.65, g = 0.30, b = 0.95 },  -- Epic    purple
+    [5] = { r = 1.00, g = 0.55, b = 0.00 },  -- Legendary orange
+    [6] = { r = 0.90, g = 0.80, b = 0.40 },  -- Artifact
+    [7] = { r = 0.90, g = 0.80, b = 0.40 },  -- Heirloom
+}
+local QUEST_COLOR = { r = 0.80, g = 0.80, b = 0.00 }   -- task amber
+
+--- Border for an item: quest amber first, then quality hue, else nil (plain edge).
+local function QualityBorder(rec)
+    if not rec then return nil end
+    if rec.isQuest then return QUEST_COLOR end
+    return QUALITY_COLOR[rec.quality or 0]
+end
+
+local function AcquireButton(parent)
+    local btn = table.remove(pool)
+    if not btn then
+        btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+        btn.icon = Widget:Icon(btn, nil, "ARTWORK")
+        btn.icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 1, -1)
+        btn.icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
+
+        btn.count = Widget:Font(btn, 11, "pixel", { r = 1, g = 1, b = 1 }, "RIGHT")
+        btn.count:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 2)
+
+        btn.quest = Widget:Font(btn, 14, "pixel", { r = 1, g = 0.82, b = 0 }, "CENTER")
+        btn.quest:SetPoint("CENTER", btn, "CENTER", 0, 0)
+
+        btn.cd = Widget:Cooldown(btn)
+
+        Widget:Theme(btn, { thickness = 1, bgAlpha = 0.8 })
+        Widget:ButtonMaterial(btn, { alpha = 0.18 })
+
+        -- Hand-written instead of Widget:Highlight so the tooltip can ride along.
+        btn:SetScript("OnEnter", function(self)
+            if self.icon then self.icon:SetVertexColor(1.25, 1.25, 1.25) end
+            local rec = self.item
+            if not rec then return end
+            local qc = QualityBorder(rec)
+            if qc then
+                Widget:Pulse(self, qc.r, qc.g, qc.b, 1)
+            else
+                local r, g, b = Color:GetHighlight()
+                Widget:Pulse(self, r, g, b, 0.9)
+            end
+            local tip = _G.GameTooltip
+            if tip then
+                pcall(tip.SetOwner, tip, self, "ANCHOR_RIGHT")
+                pcall(tip.SetBagItem, tip, rec.bag, rec.slot)
+                pcall(tip.Show, tip)
+                -- Tint the tooltip backdrop if the client exposes one; remember its border first.
+                if qc and tip.SetBackdropBorderColor then
+                    local pr, pg, pb, pa
+                    if tip.GetBackdropBorderColor then
+                        pr, pg, pb, pa = tip:GetBackdropBorderColor()
+                    end
+                    self.tipPrev = { pr or 0, pg or 0, pb or 0, pa or 0 }
+                    pcall(tip.SetBackdropBorderColor, tip, qc.r, qc.g, qc.b, 0.6)
+                end
+            end
+        end)
+        btn:SetScript("OnLeave", function(self)
+            if self.icon then self.icon:SetVertexColor(1, 1, 1) end
+            Widget:UnPulse(self)
+            local tip = _G.GameTooltip
+            if tip then
+                if tip.SetBackdropBorderColor and self.tipPrev then
+                    local p = self.tipPrev
+                    pcall(tip.SetBackdropBorderColor, tip, p[1], p[2], p[3], p[4])
+                    self.tipPrev = nil
+                end
+                pcall(tip.Hide, tip)
+            end
+        end)
+
+        btn:SetScript("OnClick", function(self, mouseButton)
+            local rec = self.item
+            if not rec then return end
+            if mouseButton == "RightButton" and C_Container.UseContainerItem then
+                pcall(C_Container.UseContainerItem, rec.bag, rec.slot)
+            else
+                pcall(C_Container.PickupContainerItem, rec.bag, rec.slot)
+            end
+        end)
+        btn:SetScript("OnDragStart", function(self)
+            local rec = self.item
+            if rec then pcall(C_Container.PickupContainerItem, rec.bag, rec.slot) end
+        end)
+        btn:SetScript("OnReceiveDrag", function(self)
+            local rec = self.item
+            if rec then pcall(C_Container.PickupContainerItem, rec.bag, rec.slot) end
+        end)
+    end
+
+    btn:SetParent(parent)
+    return btn
+end
+
+local function UpdateButton(btn, rec)
+    btn.item = rec
+
+    if not rec then
+        btn.icon:SetTexture(nil)
+        btn.count:SetText("")
+        btn.quest:SetText("")
+        btn.cd:Hide()
+        Widget:SetBorderState(btn, nil)
+        btn:Hide()
+        return
+    end
+
+    btn.icon:SetTexture(rec.texture)
+    btn:SetAlpha(rec.locked and 0.4 or 1)
+
+    btn.count:SetText(rec.count and rec.count > 1 and rec.count or "")
+    btn.quest:SetText(rec.isQuest and "!" or "")
+
+    local qc = QualityBorder(rec)
+    if qc then Widget:SetBorderState(btn, qc.r, qc.g, qc.b, 1)
+    else Widget:SetBorderState(btn, nil) end
+
+    -- GetItemCooldown returns plain numbers, safe to hand straight to the Cooldown widget.
+    if rec.itemID and C_Container.GetItemCooldown then
+        local ok, start, duration, enable = pcall(C_Container.GetItemCooldown, rec.itemID)
+        if ok and start and duration and duration > 0 and enable ~= 0 then
+            btn.cd:Show()
+            btn.cd:SetCooldown(start, duration)
+        else
+            btn.cd:Hide()
+        end
+    end
+
+    btn:Show()
+end
+
+-- Each category with items gets its own framed, movable window holding a grid; windows the user dragged keep their spot, the rest tile from the saved anchor.
+
+local windows = {}   -- key -> window frame
+
+local function WindowPosition(key)
+    return (ns:DB().bags and ns:DB().bags.positions or {})[key]
+end
+
+local function SaveWindowPosition(win)
+    local db = ns:DB()
+    db.bags = db.bags or {}
+    db.bags.positions = db.bags.positions or {}
+    local point, _, relativePoint, x, y = win:GetPoint()
+    db.bags.positions[win.catKey] = {
+        point = point, relativePoint = relativePoint,
+        x = Math:Round(x, 0), y = Math:Round(y, 0),
+    }
+end
+
+local function EnsureWindow(key)
+    local win = windows[key]
+    if win then return win end
+
+    local cat = CATEGORY_BY_KEY[key]
+    local name = "MonetUIBagWindow_" .. key
+    win = Widget:CreateFrame(name, UIParent, 120, 60)
+    win.catKey = key
+    Widget:Theme(win, { thickness = 2, bgAlpha = 0.92 })
+
+    win.title = Widget:Font(win, 12, "pixel", "edge", "LEFT")
+    win.title:SetPoint("TOPLEFT", win, "TOPLEFT", 18, -5)  -- clear of the TL ornament
+    win.title:SetText(cat and cat.label or key)
+
+    Widget:Shadow(win, { size = 6, alpha = 0.5 })
+    Widget:Corners(win)
+    Widget:Rule(win, win.title)
+
+    win.buttons = {}
+    win:SetMovable(true)
+    win:SetClampedToScreen(true)
+    win:RegisterForDrag("LeftButton")
+    win:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    win:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        SaveWindowPosition(self)
+    end)
+
+    windows[key] = win
+    return win
+end
+
+-- TITLE_H covers the label + brush underline; PAD keeps the first item row clear of the stroke.
+local TITLE_H = 30
+local PAD     = 5
+
+local function FillWindow(win, items)
+    local size     = Setting("iconSize")
+    local gap      = Setting("gap")
+    local columns  = Setting("columns")
+
+    for i, rec in ipairs(items) do
+        local btn = win.buttons[i]
+        if not btn then
+            btn = AcquireButton(win)
+            win.buttons[i] = btn
+        end
+        local col = (i - 1) % columns
+        local row = math.floor((i - 1) / columns)
+        btn:ClearAllPoints()
+        btn:SetSize(size, size)
+        btn:SetPoint("TOPLEFT", win, "TOPLEFT",
+            PAD + col * (size + gap),
+            -(TITLE_H + row * (size + gap)))
+        UpdateButton(btn, rec)
+    end
+    for i = #items + 1, #win.buttons do
+        UpdateButton(win.buttons[i], nil)
+    end
+
+    local rows = math.max(1, math.ceil(#items / columns))
+    local w = PAD * 2 + columns * size + (columns - 1) * gap
+    local h = TITLE_H + rows * size + (rows - 1) * gap + PAD
+    win:SetSize(w, h)
+    win:SetShown(#items > 0)
+end
+
+--- Tile the visible, not-yet-dragged windows in category order from the anchor.
+local function LayoutWindows()
+    local anchor = Setting("anchor") or {}
+    local perRow = Setting("windowsPerRow") or 2
+    local spacing = 14
+
+    local base = _G[anchor.frame] or UIParent
+    local originX = anchor.x or -33
+    local originY = anchor.y or -120
+
+    local col, x, rowH = 0, 0, 0
+    for _, cat in ipairs(CATEGORIES) do
+        local win = windows[cat.key]
+        if win and win:IsShown() and not WindowPosition(cat.key) then
+            local w, h = win:GetWidth(), win:GetHeight()
+            if col >= perRow then
+                x = x + rowH + spacing   -- step right by the widest of the row
+                col, rowH = 0, 0
+            end
+            win:ClearAllPoints()
+            win:SetPoint("TOPLEFT", base, "TOPLEFT", originX - x, originY - col * (h + spacing))
+
+            col = col + 1
+            rowH = math.max(rowH, w)
+        end
+    end
+end
+
+--- Place windows the user has dragged back where they left them.
+local function RestoreDragged()
+    for key, win in pairs(windows) do
+        local pos = WindowPosition(key)
+        if pos and win:IsShown() then
+            win:ClearAllPoints()
+            win:SetPoint(pos.point or "TOPLEFT", UIParent, pos.relativePoint or "TOPLEFT",
+                pos.x or 0, pos.y or 0)
+        end
+    end
+end
+
+local function Rebuild(bagType)
+    local indexes = (bagType == "bank") and BANK_TABS or BAGS_CARRIED
+    if bagType == "bags" and Setting("showReagentBag") then
+        indexes = { 0, 1, 2, 3, 4, BAG_REAGENT }
+    end
+
+    local groups = Scan(indexes)
+    for key, items in pairs(groups) do
+        if #items > 0 then
+            local win = EnsureWindow(key)
+            FillWindow(win, items)
+        elseif windows[key] then
+            FillWindow(windows[key], {})
+        end
+    end
+
+    LayoutWindows()
+    RestoreDragged()
+end
+
+local blizzardHidden = {}
+
+local function HideBlizzardBags(enable)
+    for index = 1, 13 do
+        local frame = _G["ContainerFrame" .. index]
+        if frame then
+            if enable then
+                if frame:IsShown() then
+                    blizzardHidden[frame] = true
+                    frame:Hide()
+                end
+            elseif blizzardHidden[frame] then
+                blizzardHidden[frame] = nil
+            end
+        end
+    end
+end
+
+local shown = false
+
+function M:Toggle()
+    shown = not shown
+    if shown then
+        HideBlizzardBags(true)
+        Rebuild("bags")
+    else
+        for _, win in pairs(windows) do win:Hide() end
+        HideBlizzardBags(false)
+    end
+end
+
+function M:Initialize()
+    if not ns:DB().bags then ns:DB().bags = {} end
+
+    -- BAG_UPDATE fires often and for every bag: the handler only marks a rebuild, coalesced to one frame by the flag.
+    local pending = false
+    local driver = CreateFrame("Frame")
+    driver:SetScript("OnUpdate", function(self)
+        if not pending then self:Hide() return end
+        pending = false
+        if shown then Rebuild("bags") end
+    end)
+
+    local function Mark()
+        if not shown then return end
+        pending = true
+        driver:Show()
+    end
+
+    EventBus:Register("BAG_UPDATE", Mark)
+    EventBus:Register("BAG_UPDATE_DELAYED", Mark)
+    EventBus:Register("ITEM_LOCK_CHANGED", Mark)
+
+    -- Bank: only while the bank is open.
+    EventBus:Register("BANKFRAME_OPENED", function()
+        if Setting("showBank") then
+            shown = true
+            HideBlizzardBags(true)
+            Rebuild("bank")
+        end
+    end)
+    EventBus:Register("BANKFRAME_CLOSED", function()
+        for _, win in pairs(windows) do win:Hide() end
+        shown = false
+        HideBlizzardBags(false)
+    end)
+end
+
+function M:HandleCommand(rest)
+    if rest == "bank" then
+        Rebuild("bank")
+        return true
+    end
+    self:Toggle()
+    return true
+end
+
+function M:SetEnabled(enabled)
+    if not enabled then
+        for _, win in pairs(windows) do win:Hide() end
+        shown = false
+        HideBlizzardBags(false)
+    end
+end
+
+ns:Register("Bags", M)

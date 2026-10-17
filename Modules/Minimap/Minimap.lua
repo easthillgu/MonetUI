@@ -1,15 +1,6 @@
 -- Modules/Minimap/Minimap.lua
--- Minimap reshape.
---
--- The module does not replace the minimap, it reworks it: the cluster is moved
--- to the bottom-right corner and the circular map becomes a 256x190 rectangle
--- (Andromeda's shape), a themed panel is placed behind it and the default
--- circular art is removed.
---
--- Shape first: reshaping and being able to undo it (SetEnabled) are the
--- module's contract.  Deferred backlog, owner-confirmed lower priority:
--- tracking button on the map, right-click main menu, a UiConfig button that
--- opens the MonetUI settings panel.
+-- Minimap reshape: move the cluster to the bottom-right corner, turn the circular
+-- map into a 256x190 rectangle, add a themed panel, drop the default circular art.
 
 local ADDON_NAME, ns = ...
 
@@ -20,10 +11,7 @@ local M = { name = "Minimap" }
 
 local panel = nil
 
--- -- Skinning -----------------------------------------------------------------
-
--- Andromeda parks the minimap in the bottom-right corner and stretches it into a
--- 256x190 rectangle; its UI_GAP is 33.
+-- Andromeda's shape: parks the cluster bottom-right, stretches it into a 256x190 rectangle.
 local MINIMAP_GAP    = 33
 local MINIMAP_CANVAS = 256          -- the (square) minimap canvas
 local MINIMAP_CROP   = 33           -- (256 - 190) / 2, hidden above and below
@@ -32,27 +20,21 @@ local minimapWarned  = false
 local restoreWarned  = false
 local shapeOverridden = false
 
--- The state captured before the first skin, cleared by Restore().  A module
--- that cannot undo itself is worse than no module: "disabled" must mean the
--- default minimap is back, not just that the themed panel is gone.
+-- State captured before the first skin, cleared by Restore(): "disabled" must mean the default is back.
 local original = nil
 
--- Runtime switch state; Skin and the theme callback obey it so a zone change
--- cannot re-skin a module the user has turned off.
+-- Runtime switch state; a zone change must not re-skin a module the user turned off.
 local active = false
 
--- The mask Blizzard's own Minimap frame spec declares.  There is no getter to
--- read the current mask back with (the API manual only has Texture's, not
--- MinimapFrame's), so the restore target is this XML-declared default path.
+-- XML-declared default mask: there is no MinimapFrame:GetMaskTexture getter (only Texture's),
+-- so this path is the restore target.
 local DEFAULT_MASK = "Interface\\Minimap\\MiniMap-CompassMask"
 
 local ART_NAMES = { "MinimapBorder", "MinimapBorderTop", "MinimapCompassTexture",
                     "MinimapBackdrop", "MinimapNorthTag" }
 
---- Move Blizzard's minimap cluster to the bottom-right corner.
--- Guarded: Edit Mode also anchors this frame, and a failure here (which would
--- taint) must not stop the rest of the module.  Re-applied on every skin so a
--- zone change or an Edit Mode layout cannot undo it.
+--- Move the minimap cluster to the bottom-right corner.  Edit Mode also anchors this
+--- frame, so the SetPoint is guarded; re-applied on every skin.
 local function MoveCluster()
     local cluster = _G.MinimapCluster
     if not cluster then return end
@@ -66,9 +48,8 @@ local function MoveCluster()
     end
 end
 
---- Turn the circular minimap into a 256x190 rectangle the way Andromeda does:
--- the canvas stays 256x256 and a mask texture blanks the top and bottom bands,
--- while the hit rectangle is shrunk to match what is actually visible.
+--- Turn the circular minimap into a 256x190 rectangle Andromeda-style: the canvas stays
+--- 256x256, a mask blanks the top and bottom bands, the hit rect shrinks to match.
 local function ReshapeMinimap(minimap)
     pcall(minimap.SetMaskTexture, minimap, ns.Media:Texture("minimapRect"))
     pcall(minimap.SetSize, minimap, MINIMAP_CANVAS, MINIMAP_CANVAS)
@@ -76,18 +57,16 @@ local function ReshapeMinimap(minimap)
     pcall(minimap.SetClampRectInsets, minimap, 0, 0, 0, 0)
     pcall(minimap.SetClampedToScreen, minimap, true)
 
-    -- Third-party minimap buttons ask this to place themselves; telling them the
-    -- map is square keeps them inside the rectangle (this is what Andromeda
-    -- does).  Overriding a Blizzard global is deliberate here, hence the write.
+-- Third-party buttons ask GetMinimapShape to place themselves; the square answer keeps
+-- them inside the rectangle.  Overriding the global is deliberate.
     if not shapeOverridden then
         shapeOverridden = true
         _G.GetMinimapShape = function() return "SQUARE" end
     end
 end
 
---- Remove the default circular art: it no longer fits the rectangular map (the
--- themed panel behind the cluster is the frame now).  Remember() snapshots the
--- shown/alpha state of every name here before this runs.
+--- Remove the default circular art; the themed panel is the frame now.  Remember()
+--- snapshots every name below before this runs.
 local function ClearDefaultArt()
     for _, name in ipairs(ART_NAMES) do
         local region = _G[name]
@@ -96,16 +75,11 @@ local function ClearDefaultArt()
     end
 end
 
---- Snapshot everything the skin is about to change, exactly once, so Restore()
--- can undo it.  All reads are guarded: a missing getter must not stop the
--- capture (and a skipped field simply stays as the skin left it).
+--- Snapshot everything the skin changes, exactly once, so Restore() can undo it.
 local function Remember(minimap)
     if original then return end
 
     local state = {
-        -- No MinimapFrame:GetMaskTexture exists in this client's API manual (only
-        -- Texture's), so the restore target is the mask Blizzard's own frame spec
-        -- declares rather than a value read back at runtime.
         mask = DEFAULT_MASK,
         art  = {},
     }
@@ -135,10 +109,8 @@ local function Remember(minimap)
     original = state
 end
 
---- Put the default minimap back: cluster anchor, mask, size, hit / clamp
--- insets, art state and the GetMinimapShape global.  Protected methods are
--- pcall'd; a failure (typically combat lockdown) is reported once so the user
--- knows a /reload is the fallback.
+--- Put the default minimap back: anchor, mask, size, insets, art, GetMinimapShape.
+--- Protected methods are pcall'd; a failure (combat lockdown) is reported once.
 local function Restore()
     local state = original
     original = nil
@@ -182,8 +154,7 @@ local function Restore()
         end
     end
 
-    -- Deliberate global write, restoring the deliberate global write: nil
-    -- clears the override outright when this client never had the function.
+    -- Restoring the deliberate global write: nil clears the override outright.
     _G.GetMinimapShape = state.shape
     shapeOverridden = false
 
@@ -218,11 +189,8 @@ local function Skin()
     return true
 end
 
--- -- Lifecycle ----------------------------------------------------------------
-
 function M:Initialize()
-    -- Blizzard re-anchors the cluster when the area changes, so the skin is
-    -- re-applied rather than done once.
+    -- Blizzard re-anchors the cluster when the area changes; the skin is re-applied.
     EventBus:Register("PLAYER_ENTERING_WORLD", function() Skin() end)
     EventBus:Register("ZONE_CHANGED_NEW_AREA", function() Skin() end)
     EventBus:Register("MONETUI_THEME_CHANGED", function()
@@ -234,8 +202,7 @@ function M:Initialize()
 end
 
 --- Runtime switch (config panel / `/mui minimap on|off`).  Disabling restores
--- everything the skin changed, not just the panel: a rectangular, art-less
--- minimap left behind by a "disabled" module would be worse than the default.
+--- everything the skin changed, not just the panel.
 function M:SetEnabled(enabled)
     active = enabled and true or false
     if active then

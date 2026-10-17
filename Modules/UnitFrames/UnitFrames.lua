@@ -1,9 +1,7 @@
 -- Modules/UnitFrames/UnitFrames.lua
 -- Player / target / focus / pet unit frames in Andromeda's slim-bar style.
---
--- The client can hide unit values from addons (see Utils/Secrets.lua).  Bars are
--- therefore fed the raw values through Secrets.SetBar, while numeric text is only
--- produced once the client confirms the values are readable.
+-- Bars are fed raw values via Secrets.SetBar; numeric text only once the client
+-- confirms the values are readable (see Utils/Secrets.lua).
 
 local ADDON_NAME, ns = ...
 
@@ -25,20 +23,11 @@ local UNIT_LABEL = {
     pet          = "宠物",
 }
 
--- Units we build a frame for (and therefore take over from Blizzard).
--- The order matters: every frame anchors to one earlier in the list
--- (targettarget hangs off target, which hangs off player).
+-- Build order matters: every frame anchors to one earlier in the list.
 local UNITS = { "player", "target", "targettarget", "focus", "pet" }
 
--- Where each unit's text sits, following Andromeda's tag anchors: everything is
--- drawn just above the bar, clear of the frame's top edge.
---   name       "LEFT" (above-left) | "RIGHT" (above-right) | "CENTER" (above)
---   level      true when the level is drawn beside the name
---   healthText "LEFT" | "RIGHT"
--- Andromeda gives the player health/power above its bar, the target health left
--- and name right, the focus a centred name and the target-of-target a centred
--- name; its pet frames carry no text at all (60px is too narrow for a name),
--- which MonetUI keeps.
+-- Text sits above the bar (Andromeda's tag anchors): name "LEFT"|"RIGHT"|"CENTER",
+-- level true = drawn beside the name, healthText "LEFT"|"RIGHT". Pet frames carry no text.
 local TEXT_LAYOUT = {
     player       = { name = "LEFT",   level = true,  healthText = "RIGHT" },
     target       = { name = "RIGHT",  level = true,  healthText = "LEFT"  },
@@ -49,11 +38,9 @@ local TEXT_LAYOUT = {
 
 local TEXT_GAP   = 3   -- Andromeda's offset from the frame's top edge
 local NAME_SIZE  = 12
-local SMALL_SIZE = 11
+local SMALL_SIZE = 12
 
--- Blizzard frames we optionally take over.  Note the capitalisation: the frame
--- globals are PlayerFrame / TargetFrame / FocusFrame / PetFrame, not
--- unit .. "Frame", so they must be looked up explicitly.
+-- Frame globals are PlayerFrame / TargetFrame / ... not unit.."Frame"; look them up explicitly.
 local BLIZZARD_FRAMES = {
     player       = "PlayerFrame",
     target       = "TargetFrame",
@@ -62,30 +49,46 @@ local BLIZZARD_FRAMES = {
     pet          = "PetFrame",
 }
 
--- -- Blizzard takeover --------------------------------------------------------
-
---- Suppress the default Blizzard unit frames (the pattern used by oUF).
+--- Suppress the default Blizzard unit frames (the oUF pattern).  In borrow mode
+--- TargetFrame is hidden visually only, or the borrowed aura list would freeze.
 function M:SuppressBlizzard(enable)
     for _, globalName in pairs(BLIZZARD_FRAMES) do
         local blizzard = _G[globalName]
         if blizzard then
             if enable and not blizzard.__monetSuppressed then
                 blizzard.__monetSuppressed = true
-                pcall(blizzard.UnregisterAllEvents, blizzard)
-                if blizzard.SetScript then
-                    pcall(blizzard.SetScript, blizzard, "OnShow", blizzard.Hide)
+                -- Read from the DB: Shared() is a local defined further down, out of scope here.
+                local units = ns:DB().unitFrames or {}
+                local borrow = globalName == "TargetFrame" and units.showTargetAuras ~= false
+                if borrow then
+                    if type(blizzard.EnableMouse) == "function" then
+                        pcall(blizzard.EnableMouse, blizzard, false)
+                    end
+                    if type(blizzard.SetAlpha) == "function" then
+                        pcall(blizzard.SetAlpha, blizzard, 0)
+                    end
+                    -- Deliberately not hidden or unregistered: events must keep firing for the borrowed list.
+                else
+                    pcall(blizzard.UnregisterAllEvents, blizzard)
+                    if blizzard.SetScript then
+                        pcall(blizzard.SetScript, blizzard, "OnShow", blizzard.Hide)
+                    end
+                    blizzard:Hide()
                 end
-                blizzard:Hide()
             elseif not enable and blizzard.__monetSuppressed then
                 blizzard.__monetSuppressed = nil
                 pcall(blizzard.SetScript, blizzard, "OnShow", nil)
+                if type(blizzard.EnableMouse) == "function" then
+                    pcall(blizzard.EnableMouse, blizzard, true)
+                end
+                if type(blizzard.SetAlpha) == "function" then
+                    pcall(blizzard.SetAlpha, blizzard, 1)
+                end
                 blizzard:Show()
             end
         end
     end
 end
-
--- -- Settings ----------------------------------------------------------------
 
 local function Shared(key)
     local stored = (ns:DB().unitFrames or {})[key]
@@ -93,10 +96,7 @@ local function Shared(key)
     return (ns.DEFAULTS.unitFrames or {})[key]
 end
 
---- One setting for one unit: the stored value wins, then the shipped per-unit
--- default, then the shared option block (border / split / textColorByPercent).
--- Everything is read from MonetUIDB so the numbers stay tweakable without a
--- code change.
+--- One setting for one unit: stored value, then per-unit default, then the shared block.
 local function Setting(unit, key)
     local stored = (ns:DB().unitFrames or {})[unit]
     local value = stored and stored[key]
@@ -117,15 +117,8 @@ local function FrameChrome()
     return Shared("border") or 1, Shared("split") or 1
 end
 
--- -- Health colours ------------------------------------------------------------
-
---- The "current" part of a health bar.
---   "highlight" : the Monet signature wash            (player, pet)
---   "class"     : the colour the game itself draws the unit in (target, focus)
---   "health"    : the flat UI health green
--- UnitSelectionColor gives class colours for players and reaction colours for
--- NPCs in a single call, and -- unlike UnitClass -- it is never secret, so no
--- identity guard is needed even in combat.
+--- The "current" part of a health bar: "highlight" (player, pet), "class" (target,
+--- focus) or "health".  UnitSelectionColor is never secret, so no identity guard.
 local function FillColor(unit)
     local style = Setting(unit, "fillColor")
     if style == "class" then
@@ -138,8 +131,7 @@ local function FillColor(unit)
     return r, g, b, 1
 end
 
---- The *missing* part of a health bar.  It is pure background, so it needs no
--- unit value at all and stays correct while the client hides health.
+--- The *missing* part of a health bar: pure background, needs no unit value.
 local function LostColor(unit)
     if Setting(unit, "lostColor") == "danger" then
         return Color:GetDanger()
@@ -157,27 +149,21 @@ local function UpdateHealthColor(frame)
     end
 end
 
--- -- Dead / offline -----------------------------------------------------------
-
---- Is this unit dead, a ghost or disconnected?  Both calls return plain
--- booleans and are safe in combat; Secrets.Bool only guards against a build that
--- starts hiding them.
+--- Dead, ghost or disconnected?  Plain booleans; Secrets.Bool guards a hiding build.
 local function IsUnavailable(unit)
     if not UnitExists(unit) then return false end
     if Secrets.Bool(UnitIsDeadOrGhost(unit), false) then return true end
     return not Secrets.Bool(UnitIsConnected(unit), true)
 end
 
---- Grey the bars out rather than recolouring them by hand: the client performs
--- the desaturation, so it keeps working while the bar values are hidden.
+--- Grey the bars via the client's desaturation: it keeps working while values are hidden.
 local function UpdateDesaturation(frame)
     local grey = IsUnavailable(frame.unit)
 
     if frame.health then frame.health:SetStatusBarDesaturated(grey) end
     if frame.power  then frame.power:SetStatusBarDesaturated(grey)  end
 
-    -- The class-resource pips empty out on death anyway, but greying them keeps
-    -- the whole player frame reading the same way.
+    -- Pips empty out on death anyway; greying keeps the player frame consistent.
     local pips = frame.classPower and frame.classPower.pips
     if pips then
         for i = 1, #pips do
@@ -185,9 +171,8 @@ local function UpdateDesaturation(frame)
         end
     end
 
-    -- A dead unit has no health left, so the bar shows its *missing* overlay end
-    -- to end -- and that overlay is a plain texture the client will not
-    -- desaturate for us.  Grey it by hand so a corpse still reads as a corpse.
+    -- A dead unit shows the *missing* overlay end to end; the client won't desaturate a
+    -- plain texture, so grey it by hand.
     local lost = frame.healthLost
     if lost then
         if grey then
@@ -205,13 +190,8 @@ local function UpdateBarLook(frame)
     UpdateDesaturation(frame)
 end
 
--- -- Power colour -------------------------------------------------------------
-
--- A unit can change power type at runtime (shapeshifts, stances, vehicles,
--- encounter mechanics), so this is re-read on every UNIT_DISPLAYPOWER rather
--- than decided once.  UnitPowerType returns both the token and the client's own
--- colour for it; the table below only overrides the ones worth tuning, and
--- anything unknown falls through to the client colour and then to the theme.
+-- Power type can change at runtime (shapeshift/vehicle); re-read on UNIT_DISPLAYPOWER,
+-- unknown tokens fall through to the client colour, then the theme.
 local POWER_COLOR = {
     MANA           = { 0.20, 0.50, 0.90 },
     RAGE           = { 0.85, 0.20, 0.20 },
@@ -243,8 +223,7 @@ local function UpdatePowerColor(frame)
         return
     end
 
-    -- The token is a plain string; the extra guard keeps a client that starts
-    -- hiding it from ever handing us a secret table key.
+    -- Guard so a client that hides the token never hands us a secret table key.
     local _, token, r, g, b = UnitPowerType(unit)
     local tuned = (type(token) == "string" and not Secrets.IsSecret(token))
                   and POWER_COLOR[token] or nil
@@ -262,34 +241,14 @@ local function UpdatePowerColor(frame)
     frame.power:SetStatusBarColor(Color:GetResource())
 end
 
--- -- Class resource (combo points) ----------------------------------------------
-
--- Blizzard draws the player's class resource -- a rogue's or a feral druid's
--- combo points -- inside PlayerFrame.classPowerBar, and its alternate power bar
--- in PlayerFrame.powerBarAlt.  Both are *children* of PlayerFrame, so hiding
--- PlayerFrame (see SuppressBlizzard) takes them off screen with it: a rogue
--- would keep the energy bar drawn above and lose the combo points entirely.
--- This block is the replacement -- one slim pip per combo point, under the frame.
---
--- Only the classes the Forever client actually has a combo point resource for are
--- listed.  Holy power / chi / soul shards / arcane charges / essence do not exist
--- on this build, so they are not drawn.
---
--- Nothing here ever does maths on a unit value: every pip is a StatusBar whose
--- range is (i - 1, i), so handing it the raw point count lets the *client* clamp
--- and decide which pips are lit, exactly like the health/power bars
--- (see Utils/Secrets.lua).
+-- Replacement for PlayerFrame.classPowerBar / powerBarAlt (children of the frame we hide): one
+-- slim pip per combo point, a StatusBar fed the raw count so the client clamps and lights it.
 local POWER = (_G.Enum and _G.Enum.PowerType) or {}
 local COMBO_POINTS = POWER.ComboPoints or 4
 local ENERGY       = POWER.Energy      or 3
 
--- Per class: the power the resource lives in, its `POWER_COLOR` token, how many
--- pips to draw before the client tells us the real maximum, and an optional gate
--- on the unit's *primary* power type (a druid only has combo points as a cat).
---
--- Death knight runes are deliberately absent too: six runes are cooldown-driven
--- rather than points, and UnitPower(Runes) is not what the client animates for
--- them (the reference implementations read GetRuneCooldown instead).
+-- Per class: power, POWER_COLOR token, default pip count, optional gate on the primary power
+-- (a druid only has combo points as a cat). DK runes are cooldown-driven, not points, so absent.
 local CLASS_POWER = {
     ROGUE = { power = COMBO_POINTS, token = "COMBO_POINTS", max = 5 },
     DRUID = { power = COMBO_POINTS, token = "COMBO_POINTS", max = 5,
@@ -299,9 +258,8 @@ local CLASS_POWER = {
 -- Defensive ceiling: a garbage maximum must not build a hundred bars.
 local MAX_PIPS = 10
 
---- The player's class file name ("ROGUE", ...), read once and cached.
--- UnitClassBase is preferred (it never hands back a localised name); both calls
--- are pcall'd because identity can be hidden from addons in restricted states.
+--- The player's class file name ("ROGUE", ...), cached.  UnitClassBase preferred;
+--- both calls pcall'd because identity can be hidden in restricted states.
 local playerClass
 local function PlayerClass()
     if playerClass then return playerClass end
@@ -320,11 +278,8 @@ local function PlayerClass()
     return playerClass
 end
 
---- Does this power event concern the frame's class resource?
--- UNIT_POWER_UPDATE hands over the power type *token* ("ENERGY",
--- "COMBO_POINTS", ...) and energy ticks several times a second, so anything
--- that is not the resource itself is skipped.  A missing or non-string token
--- (UNIT_MAXPOWER, a full refresh) always refreshes.
+--- Does this power event concern the frame's class resource?  A missing or
+--- non-string token (UNIT_MAXPOWER, a full refresh) always refreshes.
 local function ClassPowerIn(frame, powerType)
     if not frame.classPower then return false end
     if type(powerType) ~= "string" then return true end
@@ -391,9 +346,8 @@ local function UpdateClassPower(frame)
 
     local unit = frame.unit
 
-    -- Shapeshifters only have the resource in one form (a druid's combo points
-    -- exist while it is a cat).  UnitPowerType reports the *primary* power and is
-    -- never secret, so it is a safe gate; UNIT_DISPLAYPOWER drives it.
+    -- Shapeshifters only have the resource in one form; UnitPowerType reports the
+    -- primary power and is never secret, so it is a safe gate.
     if def.requirePower and UnitPowerType(unit) ~= def.requirePower then
         holder:Hide()
         return
@@ -405,8 +359,8 @@ local function UpdateClassPower(frame)
         return
     end
 
-    -- A hidden maximum must not re-layout the row: keep the last count we could
-    -- read, or the class default before the first readable one.
+    -- A hidden maximum must not re-layout: keep the last readable count, else the
+    -- class default.
     local count = maximum or holder.count or def.max
     if count > MAX_PIPS then count = MAX_PIPS end
     if count ~= holder.count then
@@ -418,8 +372,7 @@ local function UpdateClassPower(frame)
     local tuned = POWER_COLOR[def.token]
     if tuned then r, g, b = tuned[1], tuned[2], tuned[3] end
 
-    -- "Full" is the one state worth shouting about (the reference UIs tint it
-    -- too); it needs both numbers readable, so a secret pair keeps the colour.
+    -- "Full" tint needs both numbers readable; a secret pair keeps the colour.
     local cur = Secrets.Number(current)
     if cur and maximum and cur >= maximum then
         r, g, b = Color:GetDanger()
@@ -435,16 +388,14 @@ local function UpdateClassPower(frame)
     holder:Show()
 end
 
---- The interpolation to hand to the client: nil means "snap straight to it".
--- Easing is a user-facing preference, so it is read from the saved settings.
+--- The interpolation to hand to the client: nil means "snap straight to it" (a saved preference).
 local function Smoothing()
     if Shared("smoothBars") == false then return nil end
     return Secrets.SMOOTH
 end
 
---- Health-percentage ramp for the numeric text.  Explicit stops are interpolated
--- rather than lerping red straight to green, which would pass through a muddy
--- brown in the middle (and stay hard to read for colour-blind players).
+--- Health-percentage ramp with explicit stops; a red-to-green lerp passes through
+--- muddy brown.
 local HEALTH_RAMP = {
     { at = 1.00, r = 0.40, g = 0.88, b = 0.42 },
     { at = 0.60, r = 0.94, g = 0.86, b = 0.36 },
@@ -468,14 +419,11 @@ local function PercentColor(pct)
     return last.r, last.g, last.b
 end
 
--- -- Text ---------------------------------------------------------------------
-
 local function UpdateName(frame)
     local unit = frame.unit
     if not UnitExists(unit) then return end
 
-    -- Colouring follows identity, so it is refreshed here -- the pet frame has
-    -- no name text but still needs its bar coloured.
+    -- Colouring follows identity, so it is refreshed here: the pet frame still needs its bar coloured.
     UpdateBarLook(frame)
 
     local nameText = frame.name
@@ -548,11 +496,120 @@ local function UpdatePower(frame)
     frame.power:SetShown(maximum == nil or maximum > 0)
 end
 
--- -- Construction -------------------------------------------------------------
+-- Borrow Blizzard's target aura list: aura reads are restricted, but TargetFrame keeps drawing
+-- its own, so its aura children are reparented above our bar (the ForeverUI trick).  Position only.
 
---- Resolve the frame a stored position is anchored to.
--- "UIParent" (or nil) means the screen; anything else names another unit frame
--- built by this module, which lets target / focus / pet follow the player.
+-- Candidate aura children on Blizzard's TargetFrame; whichever are found stack above the frame.
+local TARGET_AURA_CHILDREN = { "DebuffFrame", "AurasFrame", "BuffFrame" }
+
+--- One aura child by candidate name: a raw field first, then a guarded lookup.
+local function AuraChild(blizzard, name)
+    if not blizzard then return nil end
+    local child = rawget(blizzard, name)
+    if not child then
+        local ok, value = pcall(function() return blizzard[name] end)
+        if ok then child = value end
+    end
+    if type(child) == "table" and type(child.SetParent) == "function" then
+        return child
+    end
+    return nil
+end
+
+--- Anchor one borrowed list `gap` px above `below` (Andromeda's layout: BOTTOMLEFT, growing up).
+local function AnchorAuraList(list, below, gap)
+    pcall(list.ClearAllPoints, list)
+    pcall(list.SetPoint, list, "BOTTOMLEFT", below, "TOPLEFT", 0, gap)
+end
+
+-- Defined below; forward-declared for the option-off path.
+local RestoreTargetAuras
+
+--- (Re)stack the borrowed lists above the frame; also pulls them back after
+--- Blizzard re-anchors them to its own hidden frame.
+local function StackTargetAuras(frame)
+    local lists = frame.blizzardAuras
+    if not lists then return end
+
+    local gap = Shared("targetAuraGap") or 22
+    for i, list in ipairs(lists) do
+        -- Blizzard may have reparented it back to itself; claim it again.
+        if list:GetParent() ~= frame then
+            pcall(list.SetParent, list, frame)
+        end
+        pcall(list.SetAlpha, list, 1)
+        local below = (i == 1) and frame or lists[i - 1]
+        AnchorAuraList(list, below, i == 1 and gap or 2)
+    end
+end
+
+--- Lift Blizzard's aura children onto our target frame; runs on every target change.
+local function BorrowTargetAuras(frame)
+    if not Shared("showTargetAuras") then
+        RestoreTargetAuras(frame)
+        return
+    end
+
+    local blizzard = _G.TargetFrame
+    if not blizzard then return end
+
+    local lists = {}
+    for _, name in ipairs(TARGET_AURA_CHILDREN) do
+        local child = AuraChild(blizzard, name)
+        if child then lists[#lists + 1] = child end
+    end
+
+    if #lists == 0 then
+        if not frame.__monetAuraWarned then
+            frame.__monetAuraWarned = true
+            print("|cffce3e2fMonetUI|r: 未在 TargetFrame 上找到光环子帧，目标框光环已跳过（帧名待实机核对）")
+        end
+        return
+    end
+
+    frame.__monetAuraWarned = nil
+    frame.blizzardAuras = lists
+    StackTargetAuras(frame)
+end
+
+--- Hand the list back to Blizzard (module off, or the option turned off).
+function RestoreTargetAuras(frame)
+    local lists = frame.blizzardAuras
+    if not lists then return end
+
+    local blizzard = _G.TargetFrame
+    for _, list in ipairs(lists) do
+        if blizzard and type(list.SetParent) == "function" then
+            pcall(list.SetParent, list, blizzard)
+        end
+    end
+    -- Let the game re-anchor its own list now that it owns it again.
+    if blizzard and type(_G.TargetFrame_Update) == "function" then
+        pcall(_G.TargetFrame_Update, blizzard)
+    end
+
+    frame.blizzardAuras = nil
+end
+
+-- Blizzard re-anchors the list to its own hidden frame on every target / aura
+-- update; the hook re-stacks it (the same guard pattern as Nameplates).
+local function HookAuraRelayout()
+    if M.__auraHooked then return end
+    M.__auraHooked = true
+
+    local function restack()
+        local frame = frames.target
+        if frame and frame.blizzardAuras then StackTargetAuras(frame) end
+    end
+
+    for _, name in ipairs({ "TargetFrame_Update", "TargetFrame_UpdateAuras", "TargetFrame_SetUnit" }) do
+        if type(_G[name]) == "function" and type(hooksecurefunc) == "function" then
+            pcall(hooksecurefunc, name, restack)
+        end
+    end
+end
+
+--- Resolve the frame a stored position is anchored to; "UIParent"/nil means the screen.
 local function ResolveRelative(stored)
     local name = stored.relativeTo
     if not name or name == "UIParent" then return UIParent end
@@ -581,18 +638,11 @@ local function TextAbove(frame, side, size, key, colorKey, justify)
     return text
 end
 
--- -- Edge glow states ---------------------------------------------------------
--- The frame border doubles as a live signal (the Andromeda idea), but the
--- colour runs through Widget:SetBorderState so the theme-refresh broadcast
--- re-applies the *state* instead of stomping it.  Priority:
--- threat > hover > themed border.
+-- The border doubles as a live signal (the Andromeda idea); the colour runs
+-- through Widget:SetBorderState so a theme refresh re-applies the state.
 
---- The glow colour for a threat status, ramping through the Monet palette
--- instead of borrowing Blizzard's raw red / orange / yellow:
---   1 insecure  -> primary (warm ochre)
---   2           -> primary/danger blend
---   3 high      -> danger
---   4 tanking   -> health (you hold it: this reads "safe")
+--- Threat glow colours via the Monet palette: 1 primary, 2 blend, 3 danger,
+--- 4 tanking -> health ("safe" because you hold it).
 local function ThreatBorder(status)
     if status == 4 then return Color:GetHealth() end
     if status == 3 then return Color:GetDanger() end
@@ -600,10 +650,8 @@ local function ThreatBorder(status)
     return Color:GetPrimary()
 end
 
---- Re-evaluate the threat glow for one frame.  A *secret* status (this client
--- hides threat state while restricted, see Secrets) must not raise and must
--- not clear a glow that is still true: the last known state is kept, and the
--- PLAYER_REGEN_ENABLED refresh re-evaluates it.
+--- Re-evaluate the threat glow.  A secret status must not raise nor clear a glow
+--- that is still true: the last state is kept until PLAYER_REGEN_ENABLED.
 local function UpdateThreat(frame)
     if not Shared("threatGlow") then return end
 
@@ -616,15 +664,13 @@ local function UpdateThreat(frame)
         local r, g, b, a = ThreatBorder(status)
         Widget:SetBorderState(frame, r, g, b, a)
     elseif not (frame.IsMouseOver and frame:IsMouseOver()) then
-        -- Drop the glow; when the cursor is on the frame, the hover wash that
-        -- is already applied stays until OnLeave.
+        -- Drop the glow; on the frame the hover wash stays until OnLeave.
         Widget:SetBorderState(frame, nil)
     end
 end
 
---- Hover: the border washes to the highlight slot.  A 1px wash matches the
--- Monet language better than Andromeda's PetBattle glow art.  HookScript,
--- because Widget:UnitTooltip already owns OnEnter / OnLeave.
+--- Hover: the border washes to the highlight slot (a 1px wash, not Andromeda's
+--- PetBattle glow art).  HookScript, because Widget:UnitTooltip owns OnEnter / OnLeave.
 local function HoverBorder(frame, enter)
     if not Shared("hoverGlow") then return end
     if frame.threatStatus and frame.threatStatus > 0 then return end
@@ -647,15 +693,11 @@ local function CreateUnitFrame(unit, position)
     frame.unit = unit
     frame.label = UNIT_LABEL[unit] or unit
 
-    -- Slim bars: health hugs the top inset, power the bottom one.
     local health = Widget:Bar(frame, width - border * 2, healthHeight)
     health:SetPoint("TOPLEFT", frame, "TOPLEFT", border, -border)
     health:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -border, -border)
 
-    -- The *missing* part of the bar: a plain texture behind the fill.  A
-    -- StatusBar only covers the health that is left, so this shows through
-    -- exactly where the unit has taken damage -- and, unlike sizing an overlay,
-    -- it never has to look at a unit value.  UpdateHealthColor tints it.
+    -- The *missing* part: a plain texture behind the fill, tinted by UpdateHealthColor.
     local lost = health:CreateTexture(nil, "BACKGROUND")
     lost:SetAllPoints(health)
     lost:SetColorTexture(1, 1, 1, 1)
@@ -670,8 +712,7 @@ local function CreateUnitFrame(unit, position)
     frame.healthLost = lost
     frame.power = power
 
-    -- The class resource (combo points ...) hangs under the player frame only:
-    -- it is the unit that owns Blizzard's class power display.
+    -- The class resource hangs under the player frame only; it owns Blizzard's class power.
     if unit == "player" then
         CreateClassPower(frame)
     end
@@ -722,9 +763,7 @@ local function CreateUnitFrame(unit, position)
         stored.x = Math:Round(x, 0)
         stored.y = Math:Round(y, 0)
 
-        -- Re-anchor in dependency order so anything hanging off this frame
-        -- (directly or through a chain, e.g. player -> target -> targettarget)
-        -- follows it.
+        -- Re-anchor in dependency order so chained frames (player -> target -> targettarget) follow.
         for _, name in ipairs(UNITS) do
             if frames[name] then PositionFrame(frames[name]) end
         end
@@ -735,8 +774,6 @@ local function CreateUnitFrame(unit, position)
     return frame
 end
 
--- -- Public -------------------------------------------------------------------
-
 function M:UpdateUnit(unit, kind, powerType)
     local frame = frames[unit]
     if not frame or not frame:IsShown() then return end
@@ -744,8 +781,7 @@ function M:UpdateUnit(unit, kind, powerType)
         UpdateHealth(frame)
     elseif kind == "power" then
         UpdatePower(frame)
-        -- The resource shares the power events, but only the resource's own
-        -- power type is worth a refresh (energy ticks all the time).
+        -- Only the resource's own power type is worth a refresh (energy ticks all the time).
         if ClassPowerIn(frame, powerType) then
             UpdateClassPower(frame)
         end
@@ -765,7 +801,10 @@ local function RefreshUnit(unit)
         UpdateClassPower(frame)
         UpdateName(frame)
         UpdateThreat(frame)
+        -- A fresh target means a fresh aura list; lift (or re-stack) it above our bar.
+        if unit == "target" then BorrowTargetAuras(frame) end
     else
+        if unit == "target" then RestoreTargetAuras(frame) end
         frame:Hide()
     end
 end
@@ -786,8 +825,7 @@ local UNIT_EVENTS = {
     UNIT_CONNECTION    = "name",
 }
 
--- Build the handler through a factory: the loop variable must not be captured
--- directly (its identity across iterations is not something to rely on).
+-- Factory: the loop variable must not be captured directly.
 local function MakeUnitHandler(kind)
     return function(_, changedUnit, ...)
         M:UpdateUnit(changedUnit, kind, ...)
@@ -802,22 +840,30 @@ local function MakeThreatHandler()
 end
 
 function M:RegisterEvents()
+    HookAuraRelayout()
+
     for unit in pairs(frames) do
         for event, kind in pairs(UNIT_EVENTS) do
             EventBus:RegisterUnit(event, unit, MakeUnitHandler(kind))
         end
-        -- Threat glow.  This client carries the classic-era event name;
-        -- retail's UNIT_THREAT_SITUATION_CHANGED is not in its API manual and
-        -- would fail registration silently.
+        -- This client carries the classic-era event name; retail's
+        -- UNIT_THREAT_SITUATION_CHANGED would fail registration.
         EventBus:RegisterUnit("UNIT_THREAT_SITUATION_UPDATE", unit, MakeThreatHandler())
     end
+
+    -- Re-stack the borrowed aura list; positioning only (SetPoint), safe while restricted.
+    EventBus:RegisterUnit("UNIT_AURA", "target", function()
+        local frame = frames.target
+        if frame and frame:IsShown() and frame.blizzardAuras then
+            StackTargetAuras(frame)
+        end
+    end)
 
     EventBus:Register("PLAYER_TARGET_CHANGED", function()
         RefreshUnit("target")
         RefreshUnit("targettarget")
     end)
 
-    -- A new target means a new target-of-target.
     EventBus:Register("UNIT_TARGET", function(_, unit)
         if unit == "target" then RefreshUnit("targettarget") end
     end)
@@ -849,9 +895,19 @@ function M:Initialize()
 end
 
 function M:SetEnabled(enabled)
+    -- Hand the borrowed aura list back before the target frame goes away.
+    if not enabled then
+        RestoreTargetAuras(frames.target)
+    end
+
     for _, frame in pairs(frames) do
         local show = enabled and UnitExists(frame.unit)
         frame:SetShown(show and true or false)
+    end
+
+    -- Re-borrow when turned back on.
+    if enabled then
+        self:UpdateAll()
     end
 end
 

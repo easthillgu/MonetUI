@@ -12,6 +12,12 @@ MonetUI本身完全自写，只有下面这些文件来自他人，按各自许�
 
 - 自家仓库 `monetcolors` 的产物，非第三方。
 
+## MonetColorMapData-1.0 (`Libs/MonetColorMapData-1.0/`)
+
+- 同为自家仓库 `monetcolors` 的产物，非第三方。
+- 区域环境取色数据（mapID -> HSL），由 `gen_map_env.ps1` 从游戏截图取色管线
+  自动生成，勿手改；供 LibMonetColor 的默认环境采样器惰性查找。
+
 ## LibActionButton-1.0 (`Libs/LibActionButton-1.0/`)
 
 - 原作者：Hendrik "nevcairiel" Leppkes <h.leppkes@gmail.com>

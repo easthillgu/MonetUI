@@ -1,21 +1,13 @@
 -- Modules/Skins/Forever.lua
--- WoW Forever 专属窗口：复古查找组（LFGParentFrame）、传承进度
---（LegacySystemFrame）、微菜单（MicroMenu）。
---
--- 这三个窗口不在零售 UI 里，普通皮肤包够不到。帧名取自本客户端的实机
--- 皮肤代码（EllesmereUI 的 *Forever 文件——其在 IS_FOREVER 门禁下只为
--- 本客户端生效），并全部登记进各面板的 frames 名单，可用
--- `/mui skins diagnose` 在实机逐个复核。
+-- WoW Forever 专属窗口：复古查找组（LFGParentFrame）、传承进度（LegacySystemFrame）、微菜单（MicroMenu）——零售 UI 没有，普通皮肤包够不到。
+-- 帧名取自本客户端的实机皮肤代码（EllesmereUI 的 *Forever 文件），并全部登记进各面板的 frames 名单，可用 `/mui skins diagnose` 复核。
 
 local ADDON_NAME, ns = ...
 
 local M    = ns.Skins
 local Skin = ns.Skin
 
--- -- Shared --------------------------------------------------------------------
-
--- The two Forever windows carry gold "side tabs" (LFG 的列表/浏览/谁在找,
--- 传承进度的三个页签): the ornate gold frame and glow go, the icon stays.
+-- The two Forever windows carry gold "side tabs" (LFG 的列表/浏览/谁在找, 传承进度的三个页签): the ornate gold frame and glow go, the icon stays.
 local function SideTab(tab)
     if not tab then return end
     if tab.Background then Skin:Fade(tab.Background) end
@@ -29,8 +21,6 @@ local function SideTabs(frame, names)
         SideTab(frame[names[i]])
     end
 end
-
--- -- Looking For Group (LFGParentFrame) ----------------------------------------
 
 local LFG_VIEWS = {
     "LFGBrowseFrame", "LFGListingFrame", "LFGWhoListFrame",
@@ -49,17 +39,14 @@ local function SkinLFG()
 
     M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
 
-    -- The animated eye in the portrait slot is a button of its own: alpha it
-    -- away AND take the mouse, so the idle 64px region cannot swallow clicks
-    -- over the window's corner.
+    -- The animated eye in the portrait slot is a button of its own: alpha it away AND take the mouse, so the idle 64px region cannot swallow clicks.
     local eye = _G.LFGParentFramePortrait
     if eye then
         Skin:Fade(eye)
         if eye.EnableMouse then eye:EnableMouse(false) end
     end
 
-    -- The three views repaint themselves when swapped in, so each carries its
-    -- own fill / border art: strip every view, not just the parent.
+    -- The three views repaint themselves when swapped in, so each carries its own fill/border art: strip every view, not just the parent.
     M:Controls(LFG_VIEWS, function(view)
         Skin:Strip(view)
         M:SkinButtonsIn(view)
@@ -72,8 +59,7 @@ M:Panel("lfg", {
     label = "查找组（复古）",
     group = "窗口",
     apply = SkinLFG,
-    -- LoD: the vanilla-style group finder addon.  Declaring it means this
-    -- pack waits for that addon instead of re-skinning on every addon load.
+    -- LoD gate: this pack waits for the vanilla-style group finder addon instead of re-skinning on every addon load.
     addons = { Blizzard_GroupFinder_VanillaStyle = true },
     frames = {
         "LFGParentFrame", "LFGParentFrameCloseButton", "LFGParentFramePortrait",
@@ -84,8 +70,6 @@ M:Panel("lfg", {
         "LFGBrowseFrameCategoryDropdown", "LFGBrowseFrameActivityDropdown",
     },
 })
-
--- -- Progress Legacy (LegacySystemFrame) ---------------------------------------
 
 local LEGACY_SIDE_TABS = { "LegacyRewardTrackTab", "LegacyChallengeTab", "LegacyTreeTab" }
 local LEGACY_PAGES     = { "RewardTrackPage", "ChallengesPage" }
@@ -116,11 +100,7 @@ M:Panel("legacy", {
     },
 })
 
--- -- Micro menu (MicroMenu) ----------------------------------------------------
-
--- Retail folded several of these away; Forever keeps the classic row, so the
--- full list is declared and each missing button is skipped by the guarded
--- lookup.
+-- Retail folded several of these away; Forever keeps the classic row, so the full list is declared and each missing button is skipped by the guarded lookup.
 local MICRO_BUTTONS = {
     "CharacterMicroButton", "ProfessionMicroButton", "PlayerSpellsMicroButton",
     "AchievementMicroButton", "QuestLogMicroButton", "GuildMicroButton",
@@ -144,8 +124,7 @@ local function SkinMicroMenuCore()
         SkinOneMicroButton(MICRO_BUTTONS[i])
     end
 
-    -- Forever's MicroMenu keeps a Blizzard container strip; fade it by alpha
-    -- only -- the container is Edit-Mode-owned and must never be hidden.
+    -- Forever's MicroMenu keeps a Blizzard container strip; fade it by alpha only -- the container is Edit-Mode-owned and must never be hidden.
     local menu = _G.MicroMenu
     if menu then
         if menu.BackgroundArt then Skin:Fade(menu.BackgroundArt) end
@@ -156,8 +135,7 @@ end
 local microHooked = false
 
 local function SkinMicroMenu()
-    -- Micro buttons are secure: never touch them in combat.  Defer the whole
-    -- pass to the moment the restriction lifts instead of failing silently.
+    -- Micro buttons are secure: never touch them in combat; defer to PLAYER_REGEN_ENABLED instead of failing silently.
     if InCombatLockdown() then
         local ref
         ref = ns.EventBus:Register("PLAYER_REGEN_ENABLED", function()
@@ -169,8 +147,7 @@ local function SkinMicroMenu()
 
     SkinMicroMenuCore()
 
-    -- UpdateMicroButtons can fire several times per frame on routine events;
-    -- one debounced repaint absorbs each burst.
+    -- UpdateMicroButtons can fire several times per frame; one debounced repaint absorbs each burst.
     if not microHooked and _G.UpdateMicroButtons then
         microHooked = true
         local repaint = M:Debounce(function()

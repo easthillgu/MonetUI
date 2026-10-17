@@ -749,6 +749,64 @@ Add-Asset 'monet-corner' 'deco' '边角饰纹' 64 64 $true '面板四角点缀�
     }
 })
 
+Add-Asset 'monet-canvas-weave' 'deco' '画布织纹（平铺）' 64 64 $true `
+    '按钮/背包格子底纹：无缝平铺，叠在图标之下，按主题色 SetVertexColor' `
+    '无缝细经纬网格：横竖细线连续交织、交叉点微亮，缝隙透明（画布底），非填充方格' -fullBleed $true ({
+    param($c, $k, $pal, $rng)
+    $g = $c.G
+    $pitch  = 8      # thread pitch, final px
+    $tw     = 3      # thread thickness, final px -> thin lines, 5px transparent gap
+    $cells  = 8      # 64 / 8 -> seamless (8 even, so both axes wrap clean)
+
+    # Threads are drawn as CONTINUOUS thin lines in both directions.  The old
+    # version filled every other 6px cell, which read as a black/white
+    # checkerboard; a real weave reads as a fine grid of crossing threads with
+    # transparent gaps, so keep the lines thin and let the holes breathe.
+    # SourceOver makes each crossing stack to ~0.64 alpha -> the knots land a
+    # shade brighter than the threads, which is exactly where cloth catches light.
+
+    # weft (horizontal), one continuous line per row
+    $brush = New-Brush $pal.white 0.42
+    try {
+        for ($row = 0; $row -lt $cells; $row++) {
+            $y = $row * $pitch
+            $g.FillRectangle($brush, 0, [float]($y * $k), [float]$c.W, [float]($tw * $k))
+        }
+    } finally { $brush.Dispose() }
+
+    # warp (vertical), one continuous line per column, crossing the weft
+    $brush = New-Brush $pal.white 0.42
+    try {
+        for ($col = 0; $col -lt $cells; $col++) {
+            $x = $col * $pitch
+            $g.FillRectangle($brush, [float]($x * $k), 0, [float]($tw * $k), [float]$c.H)
+        }
+    } finally { $brush.Dispose() }
+})
+
+Add-Asset 'monet-diagonal-weave' 'deco' '交叉斜纹（平铺）' 64 64 $true `
+    '按钮/背包格子底纹（斜纹版）：无缝平铺，叠在图标之下，按主题色 SetVertexColor' `
+    '无缝 45° 交叉斜纹（/ 与 \ 双向），线距16、线宽3、缝隙透明，作材质底层' -fullBleed $true ({
+    param($c, $k, $pal, $rng)
+    $g = $c.G
+    $pitch = 16     # period along (x+y) / (x-y); 64 % 16 == 0 -> seamless, and
+                    # larger period = fewer lines = the lower density requested
+
+    # Two sets of exact-45° lines crossing, giving a crosshatch.  Lines are kept
+    # thin with transparent gaps so it reads as woven diagonal gauze (the
+    # Andromeda "stripes" flavour), not filled cells.
+    #   "/"  x + y = c  -> from (c,0) to (c-64,64)
+    #   "\"  x - y = c  -> from (c,0) to (c+64,64)
+    # Every c is a multiple of the pitch, so the phase wraps exactly at the tile
+    # edge (64 is a multiple of 8) and the pattern tiles with no seam.
+
+    $strokes = New-Object 'System.Collections.Generic.List[object]'
+    for ($c0 = 0; $c0 -le 128; $c0 += $pitch)      { $strokes.Add((Get-Line $c0 0 ($c0 - 64) 64)) }
+    for ($c0 = -64; $c0 -le 64; $c0 += $pitch)     { $strokes.Add((Get-Line $c0 0 ($c0 + 64) 64)) }
+
+    Draw-Strokes -g $c -strokes $strokes.ToArray() -k $k -width 3.0 -rgb $pal.white -alpha 0.42
+})
+
 # -- Status bars ----------------------------------------------------------------
 
 Add-Asset 'monet-barfill' 'bar' '状态条填充' 16 16 $true `

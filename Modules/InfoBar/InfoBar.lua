@@ -1,17 +1,6 @@
 -- Modules/InfoBar/InfoBar.lua
--- Info bar (信息栏): a full-width strip pinned to the top (or bottom) edge of
--- the screen, carrying small data blocks -- money, latency, durability, spec,
--- currencies, friends.
---
--- The *shape* is the one Andromeda uses: a container plus blocks whose widths
--- are accumulated alternately from the left and the right edge.  Nothing else
--- is carried over -- no object name, function signature or default below came
--- from a reference addon, because this client disagrees with them in several
--- places (`RegisterStateDriver`, `GetMoneyString`, `ToggleCharacter` and
--- `ToggleFriends` are not in its API manual, and `C_FriendList.GetFriendInfo`
--- takes a *name* where retail takes an index).  So every call here is
--- feature-detected, a failed call degrades to *one hidden block* rather than an
--- error, and the assumptions are listed for `/mui infobar diagnose`.
+-- Info bar (信息栏): a full-width strip pinned to the top (or bottom) edge of the screen, carrying small data blocks -- money, latency, durability, spec, currencies, friends.
+-- The *shape* is the one Andromeda uses (container plus blocks accumulated alternately from each edge); nothing else is carried over -- this client's API differs from retail in several places, so every call is feature-detected and a failed one degrades to one hidden block (see `/mui infobar diagnose`).
 
 local ADDON_NAME, ns = ...
 
@@ -30,8 +19,7 @@ local MIN_WIDTH = 40    -- a block never shrinks below this
 local FADE      = 4     -- backdrop / block alpha per second while fading
 local PULSE     = 1.6   -- combat pulse cycles per second
 
--- Live animation state.  Everything the bar draws is derived from these four
--- numbers so a single OnUpdate can drive the fade and the pulse together.
+-- Live animation state: one OnUpdate drives fade and pulse together from these numbers.
 local bar
 local blockAlpha, targetBlockAlpha = 0, 0
 local barAlpha,   targetBarAlpha   = 0, 0
@@ -40,13 +28,9 @@ local pulsePhase = 0
 local hoverDepth = 0
 local hiddenForPetBattle = false
 
--- -- Settings -----------------------------------------------------------------
-
 function M:Settings()
     local db = ns:DB()
-    -- Always hand back the *saved* table.  Falling back to the shipped defaults
-    -- would let the config panel write into DEFAULTS and silently change what a
-    -- later `reset` restores.
+    -- Always hand back the *saved* table; falling back to DEFAULTS would let the config panel silently change what `reset` restores.
     if type(db.infobar) ~= "table" then db.infobar = {} end
     return db.infobar
 end
@@ -65,18 +49,13 @@ function M:BlockEnabled(key)
     return value and true or false
 end
 
--- -- Drawing ------------------------------------------------------------------
-
---- Push the current animation state onto the bar.  This is the only place that
--- touches the bar's colours or the blocks' alpha, so the values cannot drift
--- apart from what the tick believes.
+--- Push the current animation state onto the bar; the only place colours/alpha are written, so values cannot drift from what the tick believes.
 local function ApplyColors()
     if not bar then return end
 
     if bar.SetBackdropColor then
         local ar, ag, ab = Color:GetAmbient()
-        -- Same shape Widget:Refresh uses for a themed frame, but with the
-        -- *animated* opacity: 0.25 resting / 0.5 hovered / 0.65 always-on.
+        -- Same shape Widget:Refresh uses, but with the *animated* opacity: 0.25 resting / 0.5 hovered / 0.65 always-on.
         bar:SetBackdropColor(ar * 0.35, ag * 0.35, ab * 0.35, barAlpha)
     end
 
@@ -84,8 +63,7 @@ local function ApplyColors()
         local br, bg, bb, ba = Color:GetEdge()
         if pulseColor then
             br, bg, bb = pulseColor[1], pulseColor[2], pulseColor[3]
-            -- Sine keeps the edge in the light rather than fading it out
-            -- completely, which reads as a slow breath instead of a blink.
+            -- Sine keeps the edge in the light: a slow breath, not a blink.
             ba = 0.35 + 0.65 * math.abs(math.sin(pulsePhase * math.pi))
         end
         bar:SetBackdropBorderColor(br, bg, bb, ba or 1)
@@ -153,9 +131,7 @@ local function SetFadeTargets(hovering)
     end
 end
 
--- Hover depth is counted rather than inferred from a single OnLeave: moving the
--- mouse from the bar onto a block fires the bar's OnLeave first, and a naive
--- handler would fade the whole strip out while the cursor is still on it.
+-- Hover depth is counted, not inferred: moving from bar onto a block fires the bar's OnLeave first, which would fade the strip while the cursor is still on it.
 local function OnEnter()
     hoverDepth = hoverDepth + 1
     SetFadeTargets(true)
@@ -185,10 +161,7 @@ local function HideTooltip()
     if tip then pcall(tip.Hide, tip) end
 end
 
---- Run a Blizzard panel opener by *name*.  These are FrameXML globals that the
--- API manual does not cover on this client, so they are looked up defensively
--- (and listed by `/mui infobar diagnose` so a wrong name shows up as missing
--- rather than as a dead click).
+--- Run a Blizzard panel opener by *name*.  These FrameXML globals are not in this client's API manual, so look them up defensively (a wrong name shows via `/mui infobar diagnose`).
 function M:OpenPanel(globalName, ...)
     local fn = _G[globalName]
     if type(fn) ~= "function" then return false end
@@ -199,11 +172,7 @@ function M:OpenPanel(globalName, ...)
     return ok
 end
 
--- -- Layout -------------------------------------------------------------------
-
---- Fit a block to its text.  An empty block is hidden instead of left as a
--- hollow gap: when an API turns out to be missing we lose one number, not a
--- stripe of the bar.
+--- Fit a block to its text; an empty block is hidden instead of left as a hollow gap, so a missing API costs one number, not a stripe of the bar.
 function M:SetText(block, text)
     if not block or not block.frame then return end
 
@@ -219,9 +188,7 @@ function M:SetText(block, text)
     self:Relayout()
 end
 
---- Redistribute the visible blocks: left-anchored ones grow rightwards from the
--- left edge, right-anchored ones leftwards from the right edge, in the order
--- the blocks registered themselves.
+--- Redistribute visible blocks: left-anchored grow rightwards, right-anchored leftwards, in registration order.
 function M:Relayout()
     if not bar then return end
 
@@ -250,10 +217,7 @@ local function UpdateShown(block)
     M:Relayout()
 end
 
--- -- Block registration -------------------------------------------------------
-
---- Record a block's spec.  Frames are built later, in `M:Build`, because the
--- blocks register while their file loads and the bar only exists at login.
+--- Record a block's spec; frames are built later in `M:Build` because blocks register at file load while the bar only exists at login.
 -- @param spec { key, label, position="LEFT"|"RIGHT", update, tooltip, onClick, onUpdate }
 function M:RegisterBlock(spec)
     if type(spec) ~= "table" or type(spec.key) ~= "string" then return nil end
@@ -279,8 +243,7 @@ local function BuildBlockFrame(block)
     local frame = CreateFrame("Button", nil, bar, "BackdropTemplate")
     frame:SetHeight(bar:GetHeight())
     frame:EnableMouse(true)
-    -- Borderless: the strip reads as one surface, each block only tints on
-    -- hover.  Theme still registers it so a border-colour change follows.
+    -- Borderless so the strip reads as one surface; Theme still registers it so a border-colour change follows.
     Widget:Theme(frame, { thickness = 1, bgAlpha = 0, borderAlpha = 0 })
 
     frame:SetScript("OnEnter", function(self)
@@ -316,8 +279,7 @@ local function BuildBlockFrame(block)
         end)
     end
 
-    local text = Widget:Font(frame, 11, "pixel", "highlight", "CENTER")
-    Widget:SetFont(text, 11, "pixel", "OUTLINE")
+    local text = Widget:Font(frame, 12, "pixel", "highlight", "CENTER")
     text:SetPoint("CENTER", frame, "CENTER", 0, 0)
     frame.text = text
 
@@ -325,8 +287,6 @@ local function BuildBlockFrame(block)
     block.text = text
     M:Relayout()
 end
-
--- -- The bar ------------------------------------------------------------------
 
 local function AnchorBar()
     if not bar then return end
@@ -347,11 +307,7 @@ end
 local function CreateBar()
     if bar then return end
 
-    -- NOTE: named so Edit Mode / bug reports can address it, and created
-    -- entirely by us -- nothing here attaches to a Blizzard frame.  Strata stays
-    -- at BACKGROUND (the default for this addon's own panels) so the strip can
-    -- never paint over gameplay UI; MonetUI moves the minimap cluster to the
-    -- bottom-right, so the top edge it defaults to is clear.
+    -- Named so Edit Mode / bug reports can address it; entirely our own frame, nothing attaches to a Blizzard frame.  Strata stays BACKGROUND so it can never paint over gameplay UI (the minimap cluster moved to the bottom-right keeps the default top edge clear).
     bar = Widget:CreateFrame("MonetUIInfoBar", _G.UIParent)
     bar:SetFrameStrata("BACKGROUND")
     Widget:Theme(bar, { thickness = 1, bgAlpha = 0.25 })
@@ -362,13 +318,10 @@ local function CreateBar()
     AnchorBar()
 end
 
--- -- Block data plumbing ------------------------------------------------------
-
 local function UpdateBlock(block)
     if not block or not block.frame then return end
 
-    -- Disabled blocks still need their visibility flipped off -- returning
-    -- early without UpdateShown would leave a switched-off block on screen.
+    -- Disabled blocks still need UpdateShown: returning early would leave a switched-off block on screen.
     if not M:BlockEnabled(block.key) then
         UpdateShown(block)
         return
@@ -378,10 +331,9 @@ local function UpdateBlock(block)
         return
     end
 
-    -- A bad value must never take the whole bar down with it.
+    -- A bad value must never take the whole bar down; report once so the same updater doesn't fail on every event.
     local ok, err = pcall(block.update, block)
     if not ok then
-        -- Report once: the same updater would otherwise fail on every event.
         if not block.reported then
             block.reported = true
             ns:Print("信息栏 [" .. tostring(block.key) .. "] 更新失败，该块暂不显示：" .. tostring(err))
@@ -395,8 +347,6 @@ end
 function M:RefreshBlock(key)
     UpdateBlock(self:GetBlock(key))
 end
-
--- -- Lifecycle ----------------------------------------------------------------
 
 function M:Initialize()
     self.active = true
@@ -431,8 +381,7 @@ function M:Initialize()
         if bar and M.active then bar:SetShown(true) end
     end)
 
-    -- Combat: the edge breathes red while a guard is up, yellow while the
-    -- calendar has pending invites (checked on both edges of combat).
+    -- Combat: the edge breathes red while a guard is up, yellow while the calendar has pending invites (checked on both edges of combat).
     local function RefreshPulse()
         if Setting("combatPulse") ~= true then
             pulseColor = nil
@@ -457,9 +406,7 @@ function M:Initialize()
             function() if M.active then RefreshPulse() end end)
     end
 
-    -- The theme engine re-tints registered widgets before this handler runs
-    -- (it registered at file load, this one at login), so re-applying the
-    -- animated opacities here puts them back after the blanket refresh.
+    -- The theme engine already re-tinted registered widgets (it registered at file load, this at login), so re-apply the animated opacities after its blanket refresh.
     EventBus:Register("MONETUI_THEME_CHANGED", function()
         if M.active then ApplyColors() end
     end)
@@ -478,8 +425,7 @@ function M:Initialize()
 
     EventBus:Register("PLAYER_ENTERING_WORLD", function() if M.active then Reapply() end end)
 
-    -- Resting state: with the fade off the strip starts fully lit; with it on
-    -- the blocks are invisible and only the faint backdrop shows.
+    -- Resting state: with the fade off the strip starts fully lit; with it on the blocks are invisible and only the faint backdrop shows.
     SetFadeTargets(false)
     blockAlpha, barAlpha = targetBlockAlpha, targetBarAlpha
 
@@ -497,14 +443,11 @@ end
 
 function M:SetEnabled(enabled)
     self.active = enabled and true or false
-    -- Core initializes a module *before* enabling it, so `bar` exists whenever
-    -- this arrives with `enabled` true; there is nothing to build here.
+    -- Core initializes a module *before* enabling it, so `bar` exists whenever this arrives with `enabled` true; nothing to build here.
     if not bar then return end
 
     if not self.active then
-        -- Hiding the bar suppresses its OnLeave, so a hover counted while it
-        -- was visible would never be released and the strip would come back
-        -- faded-in-but-not-hovered next time it is switched on.
+        -- Hiding the bar suppresses its OnLeave, so reset the hover count or the strip would come back faded-in-but-not-hovered.
         hoverDepth = 0
         SetFadeTargets(false)
     end
@@ -519,12 +462,7 @@ function M:SetEnabled(enabled)
     end
 end
 
--- -- Verification -------------------------------------------------------------
-
--- Every function this module calls, plus the two FrameXML globals it hopes are
--- there.  Functions absent from the API manual are expected -- this client's
--- manual omits plenty that the game has -- so this is a *report*, not an error:
--- missing names simply mean the matching block stays empty.
+-- Every function this module calls; absent names are a report, not an error -- missing APIs simply mean the matching block stays empty.
 local PROBED = {
     "GetMoney", "GetFramerate", "GetNetStats",
     "C_AddOns.GetNumAddOns", "C_AddOns.GetAddOnName",

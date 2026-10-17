@@ -1,7 +1,5 @@
 -- Modules/Skins/Social.lua
--- Friends / who, communities, guild and the calendar.  List rows are left
--- alone; only the windows, tabs, close buttons and the main scroll bars are
--- dressed.
+-- Friends / who, communities, guild and the calendar.  List rows are left alone; only the windows, tabs, close buttons and the main scroll bars are dressed.
 
 local ADDON_NAME, ns = ...
 

@@ -1,13 +1,6 @@
 -- Modules/InfoBar/Blocks.lua
--- The six data blocks the strip can carry.
---
--- Every value is read defensively: the client may hand out *secret* numbers
--- while a restriction is active, so each one goes through Utils/Secrets.lua
--- first, and a call that does not exist or does not fit simply leaves its block
--- empty (the bar shrinks instead of showing a wrong number).  Nothing here is
--- copied from a reference addon -- `GetMoneyString` does not exist on this
--- client, so the money formatter is ours; `GetInventoryItemDurability` is
--- documented with a signature retail does not use, so it is probed at runtime.
+-- The six data blocks the strip can carry (money, durability, currency, system, spec, friends).
+-- Every value is read defensively: secret numbers go through Utils/Secrets.lua first, and a missing or unfit call simply leaves its block empty. Money formatting and the durability probe are ours, not copied from any reference addon.
 
 local ADDON_NAME, ns = ...
 local M = ns.InfoBar
@@ -19,10 +12,7 @@ local function Tip()
     return _G.GameTooltip
 end
 
--- -- Money (金币) -------------------------------------------------------------
-
--- `GetMoneyString` is not in this client's API manual and not in its near-name
--- search either, so the formatting is done here rather than assumed.
+-- `GetMoneyString` is not in this client's API manual, so the formatting is done here rather than assumed.
 local function FormatMoney(copper)
     copper = Secrets.Number(copper)
     if not copper then return nil end
@@ -89,15 +79,10 @@ M:RegisterBlock({
     end,
 })
 
--- -- Durability (耐久) --------------------------------------------------------
-
 local DUR_SLOTS = { 1, 3, 5, 6, 7, 8, 9, 10, 15, 16 }
 -- 头 / 肩 / 胸 / 腿 / 脚 / 手腕 / 手 / 腰 / 主手 / 副手
 
--- This client documents `GetInventoryItemDurability(slot)` where retail has
--- `(unit, slot)`.  Since a wrong arity raises rather than returning nil, the
--- first successful call settles the question for the session and the result is
--- printed by `/mui infobar diagnose`.
+-- This client documents `GetInventoryItemDurability(slot)` where retail has `(unit, slot)`; a wrong arity raises, so the first successful call settles it for the session (shown by `/mui infobar diagnose`).
 local function DurabilityForSlot(slot)
     if M.durabilityMode == nil then
         local fn = _G.GetInventoryItemDurability
@@ -161,11 +146,7 @@ M:RegisterBlock({
     end,
 })
 
--- -- Currency (货币) ----------------------------------------------------------
-
--- Retail marks a currency as "watched"; this build has no such flag, but it
--- does have `isShowInBackpack` in CurrencyInfo -- the currency shown beside
--- the gold in the bag bar.  That is the equivalent used here.
+-- Retail's "watched" flag has no equivalent here; `isShowInBackpack` (the currency shown beside the gold in the bag bar) is the closest and is used instead.
 local function WatchedCurrencies()
     local api = _G.C_CurrencyInfo
     if not api then return nil end
@@ -234,12 +215,9 @@ M:RegisterBlock({
     tooltip  = CurrencyTooltip,
 })
 
--- -- System (延迟 / 帧率 / 内存) ----------------------------------------------
-
 local function Latency()
     if type(_G.GetNetStats) ~= "function" then return nil end
-    -- The third return is typed `number` in this client's manual (not a table),
-    -- so it can be used directly -- but it still goes through Secrets.
+    -- The third return is typed `number` in this client's manual (not a table), so it can be used directly -- but it still goes through Secrets.
     local ok, _, _, ms = pcall(_G.GetNetStats)
     if not ok then return nil end
     ms = Secrets.Number(ms)
@@ -254,11 +232,7 @@ local function Framerate()
     return value and math.floor(value + 0.5) or nil
 end
 
--- No "total addon memory" call exists in the manual: the total has to be summed
--- from `GetAddOnMemoryUsage(name)`.  Note the *count* and *name* calls live in
--- `C_AddOns` -- the bare globals `GetNumAddOns` / `GetAddOnName` are not globals
--- of this client (wuxian's `moved` warning caught that; api_get had quietly
--- fuzzy-matched them to the namespaced ones).
+-- No "total addon memory" call exists: the total is summed from `GetAddOnMemoryUsage(name)`, and the count/name calls live in `C_AddOns` -- the bare globals of that name do not exist on this client.
 local function MemoryUsage()
     local api = _G.C_AddOns
     if not api then return nil end
@@ -302,8 +276,7 @@ local function SystemUpdate(block)
     local fps = Framerate()
     if fps then parts[#parts + 1] = string.format("%d FPS", fps) end
 
-    -- Summing every addon takes a real pass, so it is cached and only redone
-    -- every fifth tick (see SystemOnUpdate).
+    -- Summing every addon takes a real pass, so it is cached and only redone every fifth tick (see SystemOnUpdate).
     if block.memory then
         parts[#parts + 1] = string.format("%.1fM", block.memory / 1024)
     end
@@ -349,8 +322,6 @@ M:RegisterBlock({
     onUpdate = SystemOnUpdate,
 })
 
--- -- Specialization (专精) ----------------------------------------------------
-
 local function CurrentSpecIndex()
     local api = _G.C_SpecializationInfo
     if not api or type(api.GetSpecialization) ~= "function" then return nil end
@@ -363,8 +334,7 @@ local function CurrentSpecIndex()
 end
 
 local function ClassID()
-    -- Identity is one of the values the client may hide; without it the spec
-    -- list cannot be enumerated, so the block degrades to just the current name.
+    -- Identity is one of the values the client may hide; without it the spec list cannot be enumerated, so the block degrades to just the current name.
     if not Secrets.CanReadIdentity("player") then return nil end
     if type(_G.UnitClass) ~= "function" then return nil end
 
@@ -442,8 +412,6 @@ M:RegisterBlock({
     end,
 })
 
--- -- Friends (好友) -----------------------------------------------------------
-
 local function FriendsUpdate(block)
     local api = _G.C_FriendList
     if not api then M:SetText(block, "") return end
@@ -458,9 +426,7 @@ local function FriendsUpdate(block)
         if ok then online = Secrets.Number(value) end
     end
 
-    -- Both are marked "RequiresFriendList": until Blizzard loads the list they
-    -- read as zero, which is truthful enough to show but not worth a block of
-    -- its own, so an entirely unavailable pair hides the block instead.
+    -- Both are marked "RequiresFriendList": before Blizzard loads the list they read as zero; an entirely unavailable pair hides the block instead.
     if total == nil and online == nil then M:SetText(block, "") return end
     M:SetText(block, string.format("%d / %d", online or 0, total or 0))
 end
@@ -470,9 +436,7 @@ local function FriendsTooltip()
     if not tip then return end
     pcall(tip.AddLine, tip, "好友", 0.6, 0.8, 1)
     pcall(tip.AddLine, tip, "在线 / 总数", 1, 1, 1)
-    -- The individual names are deliberately not listed: this build documents
-    -- C_FriendList.GetFriendInfo as taking a *name*, where retail takes an
-    -- index, and guessing which would mean guessing at someone else's data.
+    -- Names deliberately not listed: this build's C_FriendList.GetFriendInfo takes a *name* where retail takes an index, and guessing would mean guessing at someone else's data.
 end
 
 M:RegisterBlock({

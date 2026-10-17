@@ -1,6 +1,5 @@
 -- Modules/Skins/Trade.lua
--- Mail, merchant, trainer, auction house, professions and the bank.  Item rows
--- keep their icons: only chrome buttons, tabs and scroll bars are restyled.
+-- Mail, merchant, trainer, auction house, professions and the bank.  Item rows keep their icons: only chrome buttons, tabs and scroll bars are restyled.
 
 local ADDON_NAME, ns = ...
 
@@ -49,7 +48,6 @@ local function SkinAuction()
     M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
     M:Tabs({ "AuctionFrameTab1", "AuctionFrameTab2", "AuctionFrameTab3" })
 
-    -- Sub panels (browse / auction / bids) and their scroll bars.
     M:Controls({ "AuctionFrameBrowse", "AuctionFrameAuctions", "AuctionFrameBid" }, function(panel)
         Skin:Strip(panel)
         Skin:Panel(panel, { bgAlpha = 0.96 })

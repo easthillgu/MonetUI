@@ -1,30 +1,7 @@
 -- Modules/Nameplates/Nameplates.lua
--- Nameplates (姓名板) in the Monet slim-bar style.
---
--- Built *on top of* Blizzard's nameplates rather than from scratch: for every
--- unit in the world the client already hands out one "base" frame
--- (C_NamePlate.GetNamePlateForUnit), the box that flies over the unit's head and
--- owns targeting/clicks.  This module hangs its own bar on that base, hides
--- Blizzard's UnitFrame child and keeps drawing everything itself -- the same
--- approach Andromeda / ElvUI / Plater take (they use oUF for the frame part),
--- without pulling oUF in.
---
--- Two "Forever" client rules shape the code (see Utils/Secrets.lua):
---
---   * Health, cast and threat values may arrive as <secret>.  A secret value can
---     be handed straight to a widget (StatusBar/FontString accept them), but the
---     moment *our* code does arithmetic, comparison, formatting or a length on
---     one the client raises.  So the bars are fed the raw values and only text
---     that needs a number (health %, level, cast timer) is produced after asking
---     the client whether the value is plain.
---   * Auras cannot be read at all while restricted -- and that is exactly when
---     they matter.  The module therefore never reads an aura: Blizzard's own
---     per-plate aura frame is reparented onto our plate and the *game* keeps
---     drawing the debuffs (the trick ForeverUI documents).
---
--- Not done in this version: name-only plates, plate stacking/spacing CVars,
--- class power on the target plate, and drag support for the plates (they follow
--- Blizzard's plate position, which the game itself keeps above the unit).
+-- Nameplates (姓名板) in the Monet slim-bar style: our own bar hung on Blizzard's base plate
+-- with their UnitFrame child hidden (the Andromeda / ElvUI / Plater approach, no oUF).  The game
+-- keeps drawing the auras on a reparented frame; bars are fed raw (possibly secret) values.
 
 local ADDON_NAME, ns = ...
 
@@ -38,13 +15,9 @@ local M = { name = "Nameplates" }
 local plates = {}   -- unit token ("nameplate3") -> our plate frame
 local driverHooked = false
 
--- -- Geometry constants -------------------------------------------------------
-
 local BORDER   = 1
 local TEXT_GAP = 3     -- the gap the unit frames keep above their bars
 local CAST_GAP = 4
-
--- -- Settings ----------------------------------------------------------------
 
 local function DB()
     local db = ns:DB()
@@ -61,12 +34,8 @@ end
 
 M.Setting = Setting
 
--- -- Client CVars ------------------------------------------------------------
-
--- Which units the *game* gives a plate to is a CVar, not something an addon can
--- decide after the fact, so the module steers these.  Every call goes through a
--- pcall: a client that has never heard of a CVar raises rather than shrugging,
--- and half of them come and go between builds.
+-- Which units the game gives a plate to is a CVar, not an addon decision, so the module
+-- steers these; every call is pcall'd (unknown CVars raise, and they come and go per build).
 local CVARS = {
     "nameplateShowFriends", "nameplateShowEnemies", "nameplateShowFriendlyNpcs",
     "nameplateShowEnemyMinus", "nameplateShowEnemyTotems", "nameplateShowFriendlyTotems",
@@ -94,8 +63,8 @@ end
 --- Push the "who gets a plate" settings into the client.
 function M:ApplyCVars()
     if not savedCVars then
-        -- Remembered once, so turning the module off can hand the client back
-        -- exactly as it was found for whatever nameplate addon runs next.
+        -- Saved once, so turning the module off hands the client back exactly as it was
+        -- found (for whatever nameplate addon runs next).
         savedCVars = {}
         for _, cvar in ipairs(CVARS) do
             savedCVars[cvar] = ReadCVar(cvar)
@@ -120,14 +89,8 @@ function M:RestoreCVars()
     savedCVars = nil
 end
 
--- -- Hitbox size -------------------------------------------------------------
-
--- The clickable area of a nameplate is Blizzard's, not ours.  Matching it to the
--- box we draw keeps clicks precise: Blizzard's default box is far larger than a
--- slim Monet bar and overlaps its neighbours, so clicking the plate you see can
--- otherwise target the one behind it.  Three generations of the API exist and
--- only one of them is on any given build, so each is feature-detected and the
--- shared fallback is used when the per-side setters are missing.
+-- Blizzard owns the clickable area; matching it to our box keeps clicks precise (its default
+-- is far larger and can target the plate behind).  Three API generations exist; feature-detected.
 local savedPlateSize
 
 local function VisualSize()
@@ -136,7 +99,7 @@ local function VisualSize()
 
     local textRow = 0
     if Setting("showName") ~= false or Setting("showLevel") ~= false then
-        textRow = (Setting("nameSize") or 11) + TEXT_GAP
+        textRow = ns.Media:SnapSize(Setting("nameSize")) + TEXT_GAP
     end
 
     local castRow = 0
@@ -166,14 +129,8 @@ function M:ApplyPlateSize()
 
     if not C_NamePlate then return end
 
-    -- Only the documented setter is used.  Reference addons reach for
-    -- `C_NamePlate.SetNamePlateEnemySize` / `SetNamePlateFriendlySize`, but the
-    -- API manual's `siblings` for this namespace lists `GetNamePlateForUnit`,
-    -- `GetNamePlateSize` and `GetNamePlates` -- there are no per-faction
-    -- setters -- and we never wanted different dimensions per faction anyway
-    -- (one box for every plate).  Borrowing an object from another addon instead
-    -- of the manual is precisely how an addon ends up silently failing on the
-    -- build it actually runs on.
+    -- Only the documented setter is used: the API manual lists no per-faction setters, so `SetNamePlateEnemySize` / `FriendlySize` are never borrowed --
+    -- borrowing an object from another addon instead of the manual is how one silently fails on the build it runs on.
     if type(C_NamePlate.SetNamePlateSize) == "function" then
         pcall(C_NamePlate.SetNamePlateSize, width, height)
     end
@@ -187,9 +144,8 @@ function M:RestorePlateSize()
     savedPlateSize = nil
 end
 
--- Blizzard's own driver recomputes plate sizes when CVars/settings change and
--- would put its default back; re-apply ours afterwards (the pattern Andromeda
--- uses).  Optional everywhere: the frame may not exist on every build.
+-- Blizzard's own driver recomputes plate sizes on CVar/settings change and would put its
+-- default back; re-apply ours afterwards (the pattern Andromeda uses).  Optional everywhere.
 function M:HookDriver()
     if driverHooked then return end
     local driver = _G.NamePlateDriverFrame
@@ -203,8 +159,6 @@ function M:HookDriver()
     driverHooked = true
 end
 
--- -- Filters ----------------------------------------------------------------
-
 -- Every query is pcall'd: on this client a unit call can be refused outright in
 -- a restricted state, and a filter must never take the whole plate down.
 local function Query(fn, ...)
@@ -214,10 +168,8 @@ local function Query(fn, ...)
     return nil
 end
 
--- A unit is one of four things: a friendly player, an enemy (player or npc), a
--- friendly npc, or a critter.  Friendly npcs are their own switch because the
--- client has its own CVar for them; everything hostile lands under the enemy
--- switch so an addon's enemy toggle really does mean "all enemies".
+-- A unit is a friendly player, a friendly npc, or an enemy (player or npc); friendly npcs get
+-- their own CVar, so everything hostile lands under the enemy switch ("all enemies").
 local function Category(unit)
     local friend = Secrets.Bool(Query(UnitIsFriend, "player", unit), false)
     local player = Secrets.Bool(Query(UnitIsPlayer, unit), false)
@@ -246,8 +198,7 @@ function M:ShouldShow(unit)
     end
 
     if Setting("hideCritters") ~= false then
-        -- Both of these can come back secret (identity restriction), so the
-        -- string comparisons are guarded: type() is legal on a secret, == is not.
+        -- Both can come back secret; type() is legal on a secret, == is not, so == is guarded.
         local classification = Query(UnitClassification, unit)
         if type(classification) == "string" and not Secrets.IsSecret(classification)
             and classification == "minus" then
@@ -264,12 +215,8 @@ function M:ShouldShow(unit)
     return RuleFor(Category(unit)) ~= false
 end
 
--- -- Colours -----------------------------------------------------------------
-
---- The bar colour: the game's own answer for class / reaction, with a tapped
--- unit going grey.  UnitSelectionColor gives class colours for players and
--- reaction colours for NPCs in one call and never returns a secret, so the
--- colour survives combat where the health number does not.
+--- The bar colour: the game's own class / reaction answer, tapped units grey.  UnitSelectionColor
+--- covers players and NPCs in one call and never returns a secret, so it survives combat.
 local function HealthColor(unit)
     if not Secrets.Bool(Query(UnitIsPlayer, unit), false)
         and Secrets.Bool(Query(UnitIsTapDenied, unit), false) then
@@ -301,15 +248,10 @@ local CLASSIFICATION_MARK = {
     elite = "+", rareelite = "R+", rare = "R", worldboss = "B",
 }
 
--- -- Geometry helpers --------------------------------------------------------
-
 local function PlateWidth()  return Setting("width")  or 120 end
 local function PlateHeight() return Setting("height") or 12  end
 
--- -- The plate itself --------------------------------------------------------
-
---- One plate: the health box, the name/level row above it and the cast bar under
---- it -- three pieces that all hang off the base frame Blizzard hands us.
+--- One plate: health box, name/level row above, cast bar under -- all off Blizzard's base frame.
 local function Build(base)
     local width, height = PlateWidth(), PlateHeight()
 
@@ -330,7 +272,7 @@ local function Build(base)
     plate.health = health
     plate.healthLost = lost
 
-    local nameSize = Setting("nameSize") or 11
+    local nameSize = ns.Media:SnapSize(Setting("nameSize"))
 
     plate.name = Widget:Font(plate, nameSize, "pixel", { r = 1, g = 1, b = 1 }, "LEFT")
     plate.name:SetPoint("BOTTOMLEFT", plate, "TOPLEFT", 0, TEXT_GAP)
@@ -339,11 +281,10 @@ local function Build(base)
     plate.level = Widget:Font(plate, nameSize, "pixel", "neutral", "RIGHT")
     plate.level:SetPoint("BOTTOMRIGHT", plate, "TOPRIGHT", 0, TEXT_GAP)
 
-    plate.percent = Widget:Font(health, math.max(8, nameSize - 1), "pixel",
+    plate.percent = Widget:Font(health, nameSize, "pixel",
         { r = 1, g = 1, b = 1 }, "RIGHT")
     plate.percent:SetPoint("RIGHT", health, "RIGHT", -3, 0)
 
-    -- Cast bar, hanging under the plate.
     local castHeight = Setting("castHeight") or 13
     local cast = Widget:CreateFrame(nil, plate, width, castHeight)
     Widget:Theme(cast, { thickness = BORDER, bgAlpha = 0.92 })
@@ -358,10 +299,10 @@ local function Build(base)
     icon:SetPoint("TOPLEFT", cast, "TOPLEFT", BORDER, -BORDER)
     icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
-    local timer = Widget:Font(cast, math.max(8, nameSize - 1), "pixel", "neutral", "RIGHT")
+    local timer = Widget:Font(cast, nameSize, "pixel", "neutral", "RIGHT")
     timer:SetPoint("RIGHT", cast, "RIGHT", -3, 0)
 
-    local text = Widget:Font(cast, math.max(8, nameSize - 1), "pixel",
+    local text = Widget:Font(cast, nameSize, "pixel",
         { r = 1, g = 1, b = 1 }, "LEFT")
     text:SetPoint("LEFT", icon, "RIGHT", 3, 0)
     text:SetPoint("RIGHT", timer, "LEFT", -3, 0)
@@ -380,12 +321,11 @@ local function Build(base)
     return plate
 end
 
---- Re-apply geometry and fonts (settings can change at any moment).  Kept off
--- the per-event path: a plate only lays itself out when it was just built or
--- the player changed a setting (see UpdatePlate's layoutDirty check).
+--- Re-apply geometry and fonts (settings can change at any moment), off the per-event path:
+--- a plate lays out only when just built or the player changed a setting (layoutDirty).
 local function Layout(plate)
     local width, height = PlateWidth(), PlateHeight()
-    local nameSize = Setting("nameSize") or 11
+    local nameSize = ns.Media:SnapSize(Setting("nameSize"))
     local castHeight = Setting("castHeight") or 13
 
     plate:SetSize(width, height)
@@ -395,9 +335,9 @@ local function Layout(plate)
 
     plate.name:SetShown(Setting("showName") ~= false)
     plate.level:SetShown(Setting("showLevel") ~= false)
-    plate.name:SetFont(ns.Media:Font("pixel"), nameSize, "")
-    plate.level:SetFont(ns.Media:Font("pixel"), nameSize, "")
-    plate.percent:SetFont(ns.Media:Font("pixel"), math.max(8, nameSize - 1), "")
+    plate.name:SetFont(ns.Media:Font("pixel"), nameSize, ns.Media.fontFlags)
+    plate.level:SetFont(ns.Media:Font("pixel"), nameSize, ns.Media.fontFlags)
+    plate.percent:SetFont(ns.Media:Font("pixel"), nameSize, ns.Media.fontFlags)
     plate.percent:SetShown(Setting("showPercent") ~= false)
 
     plate.cast:SetSize(width, castHeight)
@@ -413,13 +353,8 @@ local function Layout(plate)
     plate.name:SetPoint("RIGHT", plate.level, "LEFT", -4, 0)
 end
 
--- -- Blizzard's plate, and the auras we borrow -------------------------------
-
---- Your debuffs: an addon cannot read auras while restricted, but Blizzard's
--- plate still can -- its AurasFrame goes on listing your Moonfire and Faerie
--- Fire on its own frames.  That child is moved onto our plate (the game keeps
--- drawing it, we only say where) and hung above the name row.  Plates are
--- pooled and reused, so this is redone for every plate that appears.
+--- Your debuffs without reading any aura: Blizzard's AurasFrame is moved onto our plate (the
+--- game keeps drawing it, we only say where), hung above the name row; redone per pooled plate.
 local function AnchorDebuffs(auras, plate)
     local list = auras and rawget(auras, "DebuffListFrame")
     if not list or type(list.SetPoint) ~= "function" then return end
@@ -427,7 +362,7 @@ local function AnchorDebuffs(auras, plate)
     local gap = Setting("auraGap") or 4
     local textRow = 0
     if Setting("showName") ~= false or Setting("showLevel") ~= false then
-        textRow = (Setting("nameSize") or 11) + TEXT_GAP
+        textRow = ns.Media:SnapSize(Setting("nameSize")) + TEXT_GAP
     end
 
     pcall(list.ClearAllPoints, list)
@@ -438,9 +373,8 @@ local function BlizzardUnitFrame(base)
     return base and rawget(base, "UnitFrame") or nil
 end
 
---- Take the plate over: hide Blizzard's own box (kept around, not destroyed) and
--- borrow its aura list.  The frame is only hidden, so a later Restore gives the
--- unit back exactly what the game drew for it.
+--- Take the plate over: hide Blizzard's box (kept, not destroyed) and borrow its aura list;
+--- only hidden, so a later Restore gives back exactly what the game drew.
 local function HideBlizzardPlate(base, plate)
     local uf = BlizzardUnitFrame(base)
     if not uf then return false end
@@ -457,8 +391,8 @@ local function HideBlizzardPlate(base, plate)
         AnchorDebuffs(auras, plate)
     end
 
-    -- Blizzard re-runs this when it relayouts its own plate; follow it or our
-    -- borrowed aura list would be put back under the hidden frame.
+    -- Blizzard re-runs this on its own relayout; follow it or the borrowed aura list goes back
+    -- under the hidden frame.
     if type(hooksecurefunc) == "function" and type(uf.ApplyFrameOptions) == "function"
         and not uf.__monetAuraHook then
         uf.__monetAuraHook = true
@@ -473,8 +407,7 @@ local function HideBlizzardPlate(base, plate)
     return true
 end
 
---- Hand the plate back the way it was found (module off, or the unit filtered
--- out): Blizzard's box shown again, the aura list returned to it.
+--- Hand the plate back as found (module off or unit filtered out): box shown, aura list returned.
 local function RestoreBlizzardPlate(base, plate)
     local uf = BlizzardUnitFrame(base)
     if uf then
@@ -496,13 +429,8 @@ local function RestoreBlizzardPlate(base, plate)
     return uf ~= nil
 end
 
--- -- Cast bar ---------------------------------------------------------------
-
--- The bar's *fill* is driven by an OnUpdate that only ever computes with
--- GetTime() (our own plain number) and hands it to SetValue: the client clamps
--- it against the (possibly secret) start/end it was given, so the fill animates
--- correctly even while the cast times are hidden.  The *timer text* needs real
--- arithmetic, so it is only produced when the end time came back plain.
+-- The fill computes only with GetTime() (our own plain number) and hands SetValue a value the
+-- client clamps against the secret start/end; the timer text needs math, only when end came plain.
 local function CastTick(plate)
     local cast = plate.cast
     if not cast or not plate.castEndMS then return end
@@ -531,11 +459,8 @@ local function HideCast(plate)
     cast:Hide()
 end
 
---- Read the cast tuple without ever letting a restricted call break the plate.
--- type() is legal on a secret and reports the underlying type, so
--- `type(name) == "nil"` is the safe way to ask "is anything being cast".
--- Both queries start `name, displayName, texture, start, end, tradeskill` but
--- then diverge: a channel puts notInterruptible 7th, a cast 8th (castID is 7th).
+--- Read the cast tuple without letting a restricted call break the plate; `type(name) == "nil"`
+--- is the safe "is anything being cast"; slots differ: channel puts notInterruptible 7th, cast 8th.
 local function CastInfo(channel, unit)
     local fn = channel and UnitChannelInfo or UnitCastingInfo
     if type(fn) ~= "function" then return nil end
@@ -560,8 +485,7 @@ local function UpdateCast(plate)
     end
     if type(name) == "nil" then return HideCast(plate) end
 
-    -- Name and texture go straight to the widgets: FontString:SetText and
-    -- Texture:SetTexture accept a secret.
+    -- Name and texture go straight to the widgets: SetText / SetTexture accept a secret.
     plate.cast.text:SetText(name)
     if type(texture) ~= "nil" then
         plate.cast.icon:SetTexture(texture)
@@ -574,8 +498,7 @@ local function UpdateCast(plate)
     pcall(plate.cast.fill.SetMinMaxValues, plate.cast.fill, startMS or 0, endMS or 1)
     plate.castEndMS = endMS
 
-    -- Plain end => a real countdown; hidden end => the bar still moves but the
-    -- number is left blank (see 4.6 in MonetUI.md).
+    -- Plain end => a real countdown; hidden end => bar moves, number blank (see 4.6 in MonetUI.md).
     local endClock = Secrets.Number(endMS)
     plate.castEndClock = endClock and (endClock / 1000) or nil
 
@@ -591,8 +514,6 @@ local function UpdateCast(plate)
     plate:SetScript("OnUpdate", CastTick)
 end
 
--- -- Updating one plate ------------------------------------------------------
-
 local function UpdateHealth(plate)
     local unit = plate.unit
 
@@ -602,10 +523,8 @@ local function UpdateHealth(plate)
     local r, g, b = HealthColor(unit)
     plate.health:SetStatusBarColor(r, g, b)
 
-    -- Dead / disconnected: the client greys the bar for us, and the "lost"
-    -- overlay -- which has no player-visible value of its own -- is greyed by
-    -- hand so a corpse still reads as a corpse (the same rule as the unit
-    -- frames; see UpdateDesaturation there).
+    -- Dead / disconnected: the client greys the bar, and the "lost" overlay (no value of its
+    -- own) is greyed by hand so a corpse reads as one (same rule as the unit frames).
     local gone = Secrets.Bool(UnitIsDeadOrGhost(unit), false)
         or not Secrets.Bool(UnitIsConnected(unit), true)
     plate.health:SetStatusBarDesaturated(gone)
@@ -616,9 +535,8 @@ local function UpdateHealth(plate)
         plate.healthLost:SetVertexColor(0, 0, 0, 1)
     end
 
-    -- Percentage text needs real numbers, so it is only produced when the client
-    -- says health is readable; the bar itself always fills.  Secrets.Number is
-    -- what makes the division below safe: it hands back a plain number or nil.
+    -- Percentage text needs real numbers, so only when the client says health is readable (the
+    -- bar always fills); Secrets.Number hands back a plain number or nil, making it safe.
     if Setting("showPercent") ~= false and Secrets.CanMeasureHealth(unit) then
         local current = Secrets.Number(UnitHealth(unit))
         local maximum = Secrets.Number(UnitHealthMax(unit))
@@ -638,8 +556,7 @@ local function UpdateText(plate)
 
     local name = Query(UnitName, unit)
     if type(name) == "string" then
-        -- Truncating needs a length, which a secret refuses -- so a hidden name
-        -- is drawn whole and only a plain one is shortened.
+        -- Truncating needs a length, which a secret refuses -- a hidden name is drawn whole.
         if not Secrets.IsSecret(name) and Setting("truncate") ~= false then
             local limit = Setting("nameLength") or 16
             if #name > limit then name = name:sub(1, limit) .. "..." end
@@ -667,9 +584,8 @@ local function UpdateText(plate)
     plate.level:SetText(table.concat(parts, " "))
 end
 
---- The border says what the unit is doing to you: threat first, then your
---- target.  UnitThreatSituation can be secret, so it goes through the guard and
---- simply keeps the theme colour when it cannot be read.
+--- The border says what the unit is doing to you: threat first, then your target.
+--- UnitThreatSituation can be secret, so it keeps the theme colour when it cannot be read.
 local function UpdateBorder(plate)
     local unit = plate.unit
     local r, g, b = Color:GetBorder()
@@ -696,8 +612,7 @@ local function UpdateBorder(plate)
     end
 end
 
---- Blizzard can show its own UnitFrame again on any update; keep it hidden while
---- this plate is ours.
+--- Blizzard can show its own UnitFrame again on any update; keep it hidden while ours.
 local function KeepBlizzardHidden(plate)
     local uf = plate.blizzardUF
     if not uf then return end
@@ -715,8 +630,8 @@ local function UpdatePlate(plate)
     end
 
     if not M:ShouldShow(unit) then
-        -- Filtered out: give the unit the plate the game would have drawn
-        -- (widgets, soft-target icon, Blizzard's own look) and stand down.
+        -- Filtered out: give the unit the plate the game would have drawn (widgets,
+        -- soft-target icon, Blizzard's own look) and stand down.
         if plate.blizzardHidden then RestoreBlizzardPlate(plate.base, plate) end
         plate:Hide()
         HideCast(plate)
@@ -750,10 +665,8 @@ function M:UpdateAll()
     end
 end
 
--- -- Plate lifecycle ---------------------------------------------------------
-
--- One handler on the plate itself: the unit events are registered per plate with
--- RegisterUnitEvent, so only the plates on screen cost anything.
+-- One handler on the plate; unit events register per plate with RegisterUnitEvent, so only
+-- on-screen plates cost anything.
 local PLATE_EVENTS = {
     UNIT_HEALTH = true, UNIT_MAXHEALTH = true,
     UNIT_NAME_UPDATE = true, UNIT_LEVEL = true,
@@ -789,8 +702,8 @@ local function OnPlateEvent(plate, event)
     if CAST_EVENTS[event] then
         if event == "UNIT_SPELLCAST_STOP" or event == "UNIT_SPELLCAST_CHANNEL_STOP"
             or event == "UNIT_SPELLCAST_FAILED" or event == "UNIT_SPELLCAST_INTERRUPTED" then
-            -- The cast that just ended can still read back stale, so the end is
-            -- taken from the event, not from a fresh query.
+            -- The cast that just ended can still read back stale, so the end comes from the
+            -- event, not a fresh query.
             HideCast(plate)
         else
             UpdateCast(plate)
@@ -849,14 +762,12 @@ local function Removed(unit)
     plate.castEndClock = nil
     plate:Hide()
     plate.cast:Hide()
-    -- The Blizzard unit frame is left hidden: whoever gets this pooled base next
-    -- (us, on the next NAME_PLATE_UNIT_ADDED) will settle it again.
+    -- The Blizzard unit frame is left hidden: whoever gets this pooled base next (us, on the
+    -- next NAME_PLATE_UNIT_ADDED) settles it again.
     return true
 end
 
 M.Removed = Removed
-
--- -- Events ------------------------------------------------------------------
 
 function M:RegisterEvents()
     if self.eventsRegistered then return end
@@ -898,18 +809,16 @@ function M:RegisterEvents()
         M:UpdateAll()
     end)
 
-    -- The theme listener in Utils/Widget.lua runs first (it is registered when
-    -- Widget.lua loads), so the borders are re-tinted here after it, in the
-    -- same tick.
+    -- The theme listener in Utils/Widget.lua runs first (registered at load), so borders are
+    -- re-tinted here after it, in the same tick.
     EventBus:Register("MONETUI_THEME_CHANGED", function()
         if not M.active then return end
         M:UpdateAll()
     end)
 end
 
---- Pick up plates that were already up when the module (re)loaded: Blizzard
--- hands out nameplate tokens in a fixed range, so asking for each of them and
--- attaching to whatever exists is enough.
+--- Pick up plates already up when the module (re)loaded: nameplate tokens run in a fixed
+--- range, so asking for each and attaching to whatever exists is enough.
 function M:AbsorbExisting()
     for i = 1, 40 do
         local unit = "nameplate" .. i
@@ -919,11 +828,8 @@ function M:AbsorbExisting()
     end
 end
 
--- -- Public ------------------------------------------------------------------
-
---- Re-apply every setting: CVars, hitbox, then repaint the plates on screen.
--- The borrowed aura list is handed back first so a showDebuffs change is picked
--- up by the re-hide below (UpdateAll).
+--- Re-apply every setting: CVars, hitbox, then repaint the plates on screen.  The borrowed
+--- aura list is handed back first so a showDebuffs change is picked up by the re-hide below.
 function M:Apply()
     if not ns:IsModuleEnabled("Nameplates") then return end
 
@@ -949,9 +855,8 @@ function M:Initialize()
     self:AbsorbExisting()
 end
 
---- Turning the module off is a real handover: each plate is given back to
--- Blizzard, every CVar the module steered is put back, and the plate size
--- returns to whatever it was.
+--- Turning the module off is a real handover: plates go back to Blizzard, and every CVar and
+--- the plate size the module steered are restored.
 function M:SetEnabled(enabled)
     enabled = enabled and true or false
 
@@ -981,13 +886,8 @@ function M:SetEnabled(enabled)
     self:RestorePlateSize()
 end
 
--- -- Verification -------------------------------------------------------------
-
--- Which objects this module assumes exist on *this* client.  Functions can be
--- checked against the API manual, but frames (`NamePlateDriverFrame`) are not
--- part of it at all -- so for them the only verification is asking the running
--- client, which is what this probe does (compare `/mui skins diagnose`).  A
--- missing name costs a feature, never an error: everything here is type-guarded.
+-- Which objects this module assumes exist on *this* client: functions check against the API
+-- manual, frames do not -- so the probe asks the running client (compare `/mui skins diagnose`).
 local PROBED = {
     "C_NamePlate",
     "C_NamePlate.GetNamePlateForUnit",
