@@ -14,8 +14,21 @@ local unitSets      = {}   -- event -> { unit -> refcount }
 local registered    = {}   -- event -> true (plain RegisterEvent already done)
 local frame
 
+-- Report a handler failure, but only the FIRST time per event.  Without this a handler that throws on
+-- a high-frequency event (UPDATE_*, PLAYER_ENTERING_WORLD, ...) prints the same line on every single
+-- fire, which floods the chat log -- exactly what the project rule "失败一次性 print 警告，不刷屏" forbids.
+-- The count is kept so the final message says how many times it was swallowed after the burst.
+local reported = {}
+
 local function Report(event, err)
-    print("|cffff6b6b[MonetUI]|r EventBus '" .. tostring(event) .. "': " .. tostring(err))
+    local key = tostring(event)
+    local n = (reported[key] or 0) + 1
+    reported[key] = n
+    -- First failure prints in full; after that stay silent.  A handler that throws on a
+    -- high-frequency event would otherwise print once per fire and flood the chat log.
+    if n == 1 then
+        print("|cffff6b6b[MonetUI]|r EventBus '" .. key .. "': " .. tostring(err))
+    end
 end
 
 local function EnsureFrame()

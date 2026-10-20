@@ -220,6 +220,7 @@ local applied = false
 local bindingsDirty = false
 local adoptedDirty  = false
 local refreshDirty  = false
+local layoutDirty   = false   -- 战斗中改不动受保护的按钮，脱战补做
 local announced     = false
 local announcedFailure = false
 local buildFailure  -- "lab" | "header" | "button" | "template"
@@ -380,7 +381,7 @@ local function SkinButton(button)
         icon:SetTexCoord(CROP, 1 - CROP, CROP, 1 - CROP)
     end
 
-    -- 美化材质：和背包格子同源的顶亮底沉渐变（monet-barfill，ADD），叠在图标之上有体积感；纯增量，不动暴雪按钮本体。
+    -- 美化材质：和背包格子同源的顶亮底沉渐变（monet_barfill，ADD），叠在图标之上有体积感；纯增量，不动暴雪按钮本体。
     Widget:ButtonMaterial(button, { alpha = 0.16 })
 
     -- 暴雪的原生美术：空槽的方框、装备绿光、闪光、新技能提示，统统不要。
@@ -805,6 +806,10 @@ function M:RegisterEvents()
             refreshDirty = false
             M:UpdateAll()
         end
+        if layoutDirty then
+            layoutDirty = false
+            M:RefreshLayout()
+        end
         if not applied then M:Apply() end
     end)
 
@@ -858,7 +863,12 @@ end
 
 --- 布局或尺寸改过之后重新摆一遍。
 function M:RefreshLayout()
-    if Locked() then return end
+    if Locked() then
+        -- 按钮本体是受保护的安全模板：战斗中挪不动（LibActionButton 的 SecureHandlerStateTemplate），
+        -- 硬来会被客户端拒绝。这次改动记下来，脱战补做。
+        layoutDirty = true
+        return
+    end
     for _, bar in pairs(bars) do
         LayoutBar(bar)
         PositionBar(bar)

@@ -63,6 +63,62 @@ local function SkinCalendar()
     end)
 end
 
+-- Chat: the window chrome, its scroll bars, the toggle / channel buttons and the input box.  The chat
+-- area gets a low-alpha plate rather than a full window one -- it sits over the world, so it has to
+-- stay readable-through rather than opaque.  ChatFrameN's Background texture is in BACKDROP_PIECES, so
+-- Strip already fades Blizzard's blue; the plate replaces it.
+local CHAT_FRAMES = { "ChatFrame1", "ChatFrame2", "ChatFrame3", "ChatFrame4" }
+
+local function SkinChat()
+    M:Controls(CHAT_FRAMES, function(chat)
+        ns.Skin:Strip(chat)
+        ns.Skin:Panel(chat, { thickness = 1, bgAlpha = 0.35 })
+    end)
+
+    M:Controls({
+        "ChatFrame1ScrollFrame", "ChatFrame2ScrollFrame",
+        "ChatFrame3ScrollFrame", "ChatFrame4ScrollFrame",
+    }, function(scroll)
+        ns.Skin:ScrollFrame(scroll)
+    end)
+
+    M:Controls({
+        "ChatFrameToggleButton", "ChatFrameChannelButton",
+        "ChatFrame1EditBox", "ChatFrame2EditBox", "ChatFrame3EditBox", "ChatFrame4EditBox",
+    }, function(control)
+        if not control then return end
+        local kind = type(control.GetObjectType) == "function" and control:GetObjectType()
+        if kind == "EditBox" then
+            ns.Skin:EditBox(control)
+        else
+            ns.Skin:Button(control)
+        end
+    end)
+
+    -- Channel management: the popup list, and the two create/edit dialogs it opens.
+    M:Controls({ "ChatChannelManagerPopup", "CreateChannelPopup", "EditChannelPopup" }, function(popup)
+        if popup then M:SkinWindow(popup, { panel = { bgAlpha = 0.97 } }) end
+    end)
+    M:Controls({
+        "ChatChannelManagerPopupAcceptButton", "ChatChannelManagerPopupCancelButton",
+        "ChatChannelManagerPopupDeleteButton",
+    }, function(button)
+        if button then ns.Skin:Button(button) end
+    end)
+end
+
+M:Panel("chat", { label = "聊天", group = "社交", apply = SkinChat,
+    frames = {
+        "ChatFrame1", "ChatFrame2", "ChatFrame3", "ChatFrame4",
+        "ChatFrame1ScrollFrame", "ChatFrame2ScrollFrame",
+        "ChatFrame3ScrollFrame", "ChatFrame4ScrollFrame",
+        "ChatFrameToggleButton", "ChatFrameChannelButton",
+        "ChatFrame1EditBox", "ChatFrame2EditBox", "ChatFrame3EditBox", "ChatFrame4EditBox",
+        "ChatChannelManagerPopup", "CreateChannelPopup", "EditChannelPopup",
+        "ChatChannelManagerPopupAcceptButton", "ChatChannelManagerPopupCancelButton",
+        "ChatChannelManagerPopupDeleteButton",
+    } })
+
 M:Panel("friends", {
     label = "好友 / 查询",
     group = "社交",

@@ -75,12 +75,17 @@ local function CreateAuraButton(parent, size)
     button:SetSize(size, size)
     button.size = size
 
+    -- Dig the icon in by exactly the theme border: it is painted inside the frame's rect
+    -- (`thickness * Media:Mult()` UI units wide), so an icon at SetAllPoints() would bury it.
+    local px = ns.Media:Mult()
     button.icon = button:CreateTexture(nil, "ARTWORK")
-    button.icon:SetAllPoints()
+    button.icon:SetPoint("TOPLEFT", button, "TOPLEFT", px, -px)
+    button.icon:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -px, px)
     button.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
+    -- The swipe follows the icon rather than the button, so it never tints the border band.
     button.cooldown = Widget:Cooldown(button)
-    button.cooldown:SetAllPoints()
+    button.cooldown:SetAllPoints(button.icon)
 
     button.count = Widget:Font(button, 12, "pixel", { r = 1, g = 1, b = 1 }, "RIGHT")
     button.count:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -1, 1)

@@ -34,8 +34,25 @@ local BASE_SIZE     = 12    -- pixel grid step, see Media:SnapSize
 local ALERT_RATIO   = 1.5   -- tight cooldowns render 12 -> 18
 local ALERT_WIDTH   = 0.6   -- ... but never wider than 60% of the cooldown
 local POLL_INTERVAL = 0.5   -- unreadable-state probe (adoption / restriction)
-local SLOW_INTERVAL = 0.5   -- normal refresh cadence
-local FAST_INTERVAL = 0.05   -- last second: keep it smooth
+local SLOW_INTERVAL = 0.5   -- cap on the sleep between two text changes
+local FAST_INTERVAL = 0.05   -- last half second: keep it smooth
+
+-- Text follows the button size: 12px at the default
+-- 28px button, hidden entirely below half of that.
+local REF_ICON      = 28
+local MIN_SCALE     = 0.5
+
+-- FormattedTimer palette: seconds red/yellow, minutes blue,
+-- hours green, days grey; the unit suffix is dimmed.
+local CD_COLOR = {
+    seconds = "|cfffd3612",   -- red when < 10s, yellow otherwise (see ColorCountdown)
+    minutes = "|cff21c8de",   -- blue
+    hours   = "|cff4fcd35",   -- green
+    days    = "|cffbebfb3",   -- grey
+}
+local CD_YELLOW = "|cffffe700"
+local CD_SUFFIX = "|cffa28d7b"
+local CD_RESET  = "|r"
 
 -- cd frame -> state.  Weak keys, so destroyed frames drop out on their own.
 local attached = setmetatable({}, { __mode = "k" })
@@ -54,14 +71,59 @@ local function Options()
     if alert == nil then alert = defaults.alert end
     local alertSeconds = tonumber(saved.alertSeconds)
         or tonumber(defaults.alertSeconds) or 5
+    -- TenthTH / MmssTH: below tenthsTH show 0.1s; at/above mmssTH use mm:ss.
+    local tenthsTH = tonumber(saved.tenthsTH)
+        or tonumber(defaults.tenthsTH) or 10
+    local mmssTH = tonumber(saved.mmssTH)
+        or tonumber(defaults.mmssTH) or 60
 
-    return scale ~= false, alert ~= false, alertSeconds
+    return scale ~= false, alert ~= false, alertSeconds, tenthsTH, mmssTH
 end
 
 local function SetNumbers(cd, hidden)
     selfWrite = true
     pcall(cd.SetHideCountdownNumbers, cd, hidden and true or false)
     selfWrite = false
+end
+
+--- FormattedTimer colours: seconds red (<10s) or yellow, minutes
+--- blue, hours green, days grey, with the unit suffix dimmed.
+local function ColorCountdown(value, suffix, bucket)
+    if not value or value == "" then return "" end
+    local color
+    if bucket == "seconds" then
+        local n = tonumber(value)
+        color = (n and n < 10) and CD_COLOR.seconds or CD_YELLOW
+    else
+        color = CD_COLOR[bucket] or ""
+    end
+    local text = color .. value .. CD_RESET
+    if suffix and suffix ~= "" then
+        text = text .. CD_SUFFIX .. suffix .. CD_RESET
+    end
+    return text
+end
+
+--- Recompute the font size from the cooldown's own size (it is anchored to the
+--- button, so this follows the action bar's buttonSize).  Below MIN_SCALE the
+--- text is hidden entirely (minScale = 0.5).
+local function UpdateScale(cd, state)
+    local w, h = 0, 0
+    if cd.GetWidth then
+        local ok, v = pcall(cd.GetWidth, cd)
+        if ok and type(v) == "number" then w = v end
+    end
+    if cd.GetHeight then
+        local ok, v = pcall(cd.GetHeight, cd)
+        if ok and type(v) == "number" then h = v end
+    end
+
+    local avg = (w + h) / 2
+    local scale = avg > 0 and (avg / REF_ICON) or 1
+    state.scale = scale
+    state.hiddenBySize = scale < MIN_SCALE
+    state.fontPx = Media:SnapSize((state.size or BASE_SIZE) * scale)
+    return scale
 end
 
 local function EnsureText(cd, state)
@@ -76,7 +138,8 @@ local function EnsureText(cd, state)
     fs:SetAllPoints()
     fs:SetJustifyH("CENTER")
     fs:SetJustifyV("MIDDLE")
-    pcall(fs.SetFont, fs, Media:Font("cooldown"), Media:SnapSize(state.size), Media.fontFlags)
+    pcall(fs.SetFont, fs, Media:Font("cooldown"),
+        state.fontPx or Media:SnapSize(state.size), Media.fontFlags)
     fs:SetTextColor(1, 1, 1, 1)
     fs:Hide()
 
@@ -114,18 +177,19 @@ local function ApplyLook(cd, state, tight)
     local fs = state.text
     if not fs then return end
 
+    local base = state.fontPx or Media:SnapSize(state.size)
     if tight then
-        local size = state.size * ALERT_RATIO
+        local size = base * ALERT_RATIO
         local width = cd:GetWidth()
         if width and width > 0 then
             -- Small bars would rather keep the readable size than overflow.
-            size = math.min(size, math.max(state.size, math.floor(width * ALERT_WIDTH)))
+            size = math.min(size, math.max(base, math.floor(width * ALERT_WIDTH)))
         end
         pcall(fs.SetFont, fs, Media:Font("cooldown"), size, Media.fontFlags)
         local r, g, b = Color:GetDanger()
         fs:SetTextColor(r, g, b, 1)
     else
-        pcall(fs.SetFont, fs, Media:Font("cooldown"), Media:SnapSize(state.size), Media.fontFlags)
+        pcall(fs.SetFont, fs, Media:Font("cooldown"), base, Media.fontFlags)
         fs:SetTextColor(1, 1, 1, 1)
     end
 end
@@ -141,9 +205,24 @@ local function Tick(cd, elapsed)
     if state.accum < (state.next or 0) then return end
     state.accum = 0
 
-    local scale, alert, alertSeconds = Options()
+    local scale, alert, alertSeconds, tenthsTH, mmssTH = Options()
     if not scale or not ns:IsModuleEnabled("Cooldown") then
         HandBack(cd, state)
+        state.next = POLL_INTERVAL
+        return
+    end
+
+    -- Too small to read (minScale): keep the text hidden until the
+    -- button grows again.  We still own the frame so HandBack can restore it.
+    if state.hiddenBySize then
+        state.own = true
+        if state.text then
+            state.text:SetText("")
+            state.text:Hide()
+        end
+        state.shownText = nil
+        state.look = nil
+        SetNumbers(cd, true)
         state.next = POLL_INTERVAL
         return
     end
@@ -174,7 +253,17 @@ local function Tick(cd, elapsed)
         return
     end
 
-    TakeOver(cd, state)
+    if not state.own then
+        TakeOver(cd, state)
+    else
+        -- Coming back from hiddenBySize: the frame is already ours, so just
+        -- re-show the text (TakeOver would return early).
+        local fs = EnsureText(cd, state)
+        if not fs:IsShown() then
+            state.look = nil
+            fs:Show()
+        end
+    end
 
     -- Outside code may have re-enabled Blizzard's numbers (every action bar update does); take the display back rather than trusting one write.
     local ok, hidden = pcall(cd.GetHideCountdownNumbers, cd)
@@ -184,29 +273,62 @@ local function Tick(cd, elapsed)
         and math.floor(remain + 0.5) <= alertSeconds
     ApplyLook(cd, state, tight and true or false)
 
-    local text = remain >= 0.5 and Math:DurationText(remain) or ""
+    -- Math:Countdown also returns when the text next changes, so we do not wake
+    -- up on a fixed cadence any more.  The
+    -- 0.5s cap keeps the per-tick re-hide check and the alert colour responsive.
+    local value, suffix, nextUpdate, bucket
+    if remain >= 0.5 then
+        value, suffix, nextUpdate, bucket = Math:Countdown(remain, tenthsTH, mmssTH)
+    else
+        value, suffix, bucket = "", "", nil
+        nextUpdate = FAST_INTERVAL
+    end
+    local text = ColorCountdown(value, suffix, bucket)
     if state.shownText ~= text then
         state.text:SetText(text)
         state.shownText = text
     end
 
-    state.next = remain >= 1 and SLOW_INTERVAL or FAST_INTERVAL
+    if not nextUpdate or nextUpdate > SLOW_INTERVAL then nextUpdate = SLOW_INTERVAL end
+    if nextUpdate < 0.02 then nextUpdate = 0.02 end
+    state.next = nextUpdate
 end
 
-local function OnCooldownStart(cd, start, duration)
+local function OnCooldownStart(cd, start, duration, modRate)
     local state = cd and attached[cd]
     if not state then return end
 
     local plainStart = Secrets.Number(start)
     local plainDuration = Secrets.Number(duration)
+    local plainModRate = Secrets.Number(modRate) or 1
+    if plainModRate <= 0 then plainModRate = 1 end
+
     if plainStart and plainDuration and plainDuration > 0 then
-        state.expiry = plainStart + plainDuration
+        -- modRate > 1 recovers faster, so the wall-clock duration is duration / modRate
+        -- (Andromeda's TimerOnUpdate uses the same division).
+        state.expiry = plainStart + plainDuration / plainModRate
     else
         -- A secret or empty start: Blizzard's own numbers show until we can read one again.
         state.expiry = nil
         HandBack(cd, state)
     end
     state.next = 0
+
+    -- Charge-based abilities: when the main cooldown starts, stop a separate
+    -- charge timer on the same button so two numbers never run at once
+    -- (Andromeda's parent.chargeCooldown reconciliation).  If that frame is
+    -- ours, hand it back to Blizzard, which keeps its own numbers hidden.
+    local parent = cd.GetParent and cd:GetParent()
+    local charge = parent and parent.chargeCooldown
+    if charge and charge ~= cd then
+        local chargeState = attached[charge]
+        if chargeState then
+            chargeState.expiry = nil
+            chargeState.shownText = nil
+            chargeState.next = 0
+            HandBack(charge, chargeState)
+        end
+    end
 end
 
 local function OnSetHideCountdownNumbers(cd, hidden)
@@ -253,10 +375,9 @@ function M:Attach(cd, size)
 
     local state = attached[cd]
     if state then
-        if state.size ~= size then
-            state.size = size
-            state.look = nil          -- force the font/colour to be re-applied
-        end
+        state.size = size
+        UpdateScale(cd, state)        -- the bar may have been resized
+        state.look = nil              -- force the font/colour to be re-applied
         state.next = 0                -- render on the next frame
         return state
     end
@@ -268,10 +389,22 @@ function M:Attach(cd, size)
         next         = 0,
         accum        = 0,
     }
+    UpdateScale(cd, state)
     attached[cd] = state
 
     -- Blizzard's own numbers stay styled for the fallback path.
-    Widget:StyleCooldownText(cd, size, "cooldown")
+    Widget:StyleCooldownText(cd, Media:SnapSize(size), "cooldown")
+
+    -- Follow a live resize of the action bar (buttonSize setting).
+    if cd.HookScript then
+        cd:HookScript("OnSizeChanged", function(self)
+            local st = attached[self]
+            if not st then return end
+            UpdateScale(self, st)
+            st.look = nil
+            st.next = 0
+        end)
+    end
 
     EnsureHooks()
     cd:SetScript("OnUpdate", Tick)
@@ -293,6 +426,7 @@ function M:ApplyDisplay()
     for cd in pairs(attached) do
         local state = attached[cd]
         if state then
+            UpdateScale(cd, state)   -- buttonSize may have changed
             state.look = nil
             state.next = 0
         end

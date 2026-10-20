@@ -109,7 +109,14 @@ function M:Apply(entry)
 
     local ok, err = pcall(entry.apply, entry)
     if not ok then
-        ns:Print("界面美化「" .. tostring(entry.key) .. "」应用失败: " .. tostring(err))
+        -- Report a given panel once, not once per pass.  A pack that throws on this client is re-applied
+        -- by every ApplyAll, every ADDON_LOADED burst, every PLAYER_ENTERING_WORLD and its own
+        -- QUEST_LOG_UPDATE / WORLD_MAP_UPDATE hook, so an unguarded print turns one broken frame name
+        -- into dozens of identical lines per session.
+        if not entry.__applyFailed then
+            entry.__applyFailed = true
+            ns:Print("界面美化「" .. tostring(entry.key) .. "」应用失败: " .. tostring(err))
+        end
     end
 end
 
@@ -175,7 +182,12 @@ end
 function M:Buttons(list, opts)
     self:Controls(list, function(button)
         local kind = type(button.GetObjectType) == "function" and button:GetObjectType()
-        if kind == "CheckButton" then
+        -- RadioButton is a CheckButton subclass, so without this branch every radio button in the
+        -- skinned windows falls into Skin:CheckButton and gets a CHECK glyph.  monet_radio is drawn
+        -- and registered for exactly this and had no call site until now.
+        if kind == "RadioButton" then
+            Skin:RadioButton(button, opts)
+        elseif kind == "CheckButton" then
             Skin:CheckButton(button, opts)
         elseif not kind or kind == "Button" then
             Skin:Button(button, opts)
@@ -210,7 +222,9 @@ function M:SkinButtonsIn(frame, opts)
     for i = 1, #children do
         local child = children[i]
         local kind = type(child.GetObjectType) == "function" and child:GetObjectType()
-        if kind == "CheckButton" then
+        if kind == "RadioButton" then
+            Skin:RadioButton(child, opts)
+        elseif kind == "CheckButton" then
             Skin:CheckButton(child, opts)
         elseif kind == "Button" and not LooksLikeItemButton(child) then
             Skin:Button(child, opts)
@@ -332,10 +346,39 @@ local function InstallHooks()
     end)
 
     -- Edit Mode / loading screens can rebuild chrome, so re-apply.
-    EventBus:Register("PLAYER_ENTERING_WORLD", function()
+    -- Debounced for the same reason as the ADDON_LOADED burst above: PLAYER_ENTERING_WORLD fires on
+    -- every loading screen and relog, and a full ApplyAll walks every panel's Strip.
+    EventBus:Register("PLAYER_ENTERING_WORLD", M:Debounce(function()
         if not M.active then return end
         M:ApplyAll()
+    end))
+
+    -- The UI scale slider is the one input that invalidates the pixel model itself.  Media:Mult() reads
+    -- the uiScale CVar, and every border edgeSize / inset and every SnapUnit length is derived from it,
+    -- so without this the borders keep their old physical width while new widgets get the new one --
+    -- two different border widths on screen at once.  This is the only place that reacts to it.
+    -- Login catch-up.  The client frequently applies the UI scale AFTER the first frames are built,
+    -- and our UI_SCALE_CHANGED listener may not be installed yet when that happens -- so the event
+    -- never reaches us and the borders keep a grid computed from a stale CVar.  AishCore's PixelSnap
+    -- documents the same race and re-snaps at 1s and 4s; these two passes close that window.
+    -- Guarded to run once per session, not once per zone.
+    local loginRescaled = false
+    EventBus:Register("PLAYER_ENTERING_WORLD", function()
+        if loginRescaled then return end
+        loginRescaled = true
+        if type(C_Timer) ~= "table" or type(C_Timer.After) ~= "function" then return end
+        local function pass()
+            if M.active then Widget:RefreshThemes(true) end
+        end
+        C_Timer.After(1, pass)
+        C_Timer.After(4, pass)
     end)
+
+    EventBus:Register("UI_SCALE_CHANGED", M:Debounce(function()
+        if not M.active then return end
+        Widget:RefreshThemes(true)   -- re-derive edgeSize / insets, then re-tint
+        M:ApplyAll()                  -- skin-layer plates are Widget:Theme'd, so this picks them up too
+    end))
 end
 
 function M:Initialize()

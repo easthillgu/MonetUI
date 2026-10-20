@@ -332,6 +332,9 @@ local function Layout(plate)
     plate.health:SetPoint("TOPLEFT", plate, "TOPLEFT", BORDER, -BORDER)
     plate.health:SetPoint("BOTTOMRIGHT", plate, "BOTTOMRIGHT", -BORDER, BORDER)
     plate.health:SetStatusBarTexture(ns.Media:Texture("barfill"))
+    -- SetStatusBarTexture builds a NEW texture object, so the fill gradient has to be re-derived here or
+    -- the bar comes back unshaded after every relayout.
+    Widget:BarGradient(plate.health)
 
     plate.name:SetShown(Setting("showName") ~= false)
     plate.level:SetShown(Setting("showLevel") ~= false)
@@ -342,6 +345,7 @@ local function Layout(plate)
 
     plate.cast:SetSize(width, castHeight)
     plate.cast.fill:SetStatusBarTexture(ns.Media:Texture("barfill"))
+    Widget:BarGradient(plate.cast.fill)
     plate.cast.icon:SetSize(castHeight - BORDER * 2, castHeight - BORDER * 2)
     plate.cast:Hide()
 
@@ -351,6 +355,159 @@ local function Layout(plate)
     plate.name:SetPoint("BOTTOMLEFT", plate, "TOPLEFT", 0, TEXT_GAP)
     plate.level:SetPoint("BOTTOMRIGHT", plate, "TOPRIGHT", 0, TEXT_GAP)
     plate.name:SetPoint("RIGHT", plate.level, "LEFT", -4, 0)
+end
+
+-- 已修饰的 debuff 按钮数：`/mui nameplates diagnose` 会打印，用来判断 B1 到底有没有找到东西。
+local dressedDebuffs = 0
+-- 边框颜色的来源统计：`dispel` = 读到了暴雪的驱散色，`theme` = 退回主题色。
+-- 实机上如果 theme 一直涨，说明这个客户端把驱散色烘在贴图里，顶点色读不出来。
+local dispelBorders, themeBorders = 0, 0
+
+local DEBUFF_ICON_CROP = 0.08          -- 和 Widget:Icon / 施法图标同一个裁边比例
+local DEBUFF_TEXT_MIN, DEBUFF_TEXT_MAX = 8, 14
+
+--- 按名字取一张贴图（只要有 SetTexCoord 就当候选）。
+local function TextureOf(button, ...)
+    for i = 1, select("#", ...) do
+        local tex = rawget(button, (select(i, ...)))
+        if type(tex) == "table" and type(tex.SetTexCoord) == "function" then return tex end
+    end
+end
+
+--- 给一个借来的 debuff 按钮补上 Monet 外观（reskin，不换数据、不做过滤）。
+-- 暴雪的 AurasFrame 继续负责「画什么」，这里只负责「长什么样」：
+--   1. 图标裁边（和施法图标同一比例）；
+--   2. 淡掉暴雪的厚边框，用 1px 重画 —— 颜色优先取它的顶点色（驱散类型编码），
+--      读不到就退回主题边框色；
+--   3. 层数 / 剩余时间换 pixel 数字字体。
+-- 冷却扫圈保留（关掉描边，扫圈继续走）。
+-- 全部不依赖暴雪内部成员名：名字优先、几何判据兜底，任何一步失败静默跳过。
+local function DressDebuffButton(button)
+    if not button or type(button) ~= "table" then return end
+
+    local d = button.__monetDebuff
+    if not d then
+        d = { fonts = {} }
+        button.__monetDebuff = d
+        dressedDebuffs = dressedDebuffs + 1
+
+        local okW, bw = pcall(button.GetWidth, button)
+        local okH, bh = pcall(button.GetHeight, button)
+        if not (okW and type(bw) == "number" and bw > 0) then bw = nil end
+        if not (okH and type(bh) == "number" and bh > 0) then bh = nil end
+
+        local okR, regions = pcall(function() return { button:GetRegions() } end)
+        if not okR or not regions then regions = {} end
+
+        -- 1) 暴雪的边框：名字优先，再退到「比按钮本身还宽」（图标不会超出按钮）。
+        local stock = TextureOf(button, "Border", "DebuffBorder", "border", "IconBorder")
+        if not stock and bw then
+            for i = 1, #regions do
+                local r = regions[i]
+                local okRW, rw = pcall(r.GetWidth, r)
+                if okRW and type(rw) == "number" and rw > bw + 0.5 then stock = r; break end
+            end
+        end
+
+        -- 2) 图标：名字优先，再取「不是边框、且至少和按钮一样宽」的那张。
+        local icon = TextureOf(button, "Icon", "icon")
+        if not icon and bw then
+            for i = 1, #regions do
+                local r = regions[i]
+                if r ~= stock and type(r.SetTexCoord) == "function" then
+                    local okRW, rw = pcall(r.GetWidth, r)
+                    if okRW and type(rw) == "number" and rw >= bw - 0.5 then icon = r; break end
+                end
+            end
+        end
+        if icon then
+            pcall(icon.SetTexCoord, icon, DEBUFF_ICON_CROP, 1 - DEBUFF_ICON_CROP,
+                DEBUFF_ICON_CROP, 1 - DEBUFF_ICON_CROP)
+        end
+
+        -- 3) 边框：一律淡掉暴雪的厚边框，用 1px 重画。
+        -- 颜色优先取暴雪那个边框的顶点色 —— 那是驱散类型的颜色编码，能保住就保住；
+        -- 读不到（或读出纯白 = 颜色烘在贴图里）就退回主题边框色。
+        -- 2026-10-19 的决定：宁可丢掉个别客户端的驱散色，也不要一排厚薄不一。
+        local sr, sg, sb
+        if stock and type(stock.GetVertexColor) == "function" then
+            local okC, r, g, b = pcall(stock.GetVertexColor, stock)
+            if okC and type(r) == "number" and type(g) == "number" and type(b) == "number"
+                and not (r > 0.95 and g > 0.95 and b > 0.95) then
+                sr, sg, sb = r, g, b
+                d.borderSource = "dispel"
+                dispelBorders = dispelBorders + 1
+            end
+        end
+        if not sr then
+            sr, sg, sb = Color:GetBorder()
+            d.borderSource = "theme"
+            themeBorders = themeBorders + 1
+        end
+
+        if stock then
+            pcall(stock.SetAlpha, stock, 0)
+            d.stockBorder = stock
+        end
+
+        local bd = button:CreateTexture(nil, "OVERLAY")
+        bd:SetPoint("TOPLEFT", button, "TOPLEFT", -1, 1)
+        bd:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 1, -1)
+        pcall(bd.SetColorTexture, bd, sr, sg, sb, 1)
+        d.border = bd
+
+        -- 4) 冷却：关描边，保留扫圈。
+        local okC2, children = pcall(function() return { button:GetChildren() } end)
+        if okC2 and children then
+            for i = 1, #children do
+                local c = children[i]
+                if c and type(c.GetObjectType) == "function"
+                    and c:GetObjectType() == "Cooldown" then
+                    pcall(c.SetDrawEdge, c, false)
+                    pcall(c.SetDrawSwipe, c, true)
+                    break
+                end
+            end
+        end
+
+        -- 5) 文字
+        for i = 1, #regions do
+            local r = regions[i]
+            if r and type(r.GetObjectType) == "function"
+                and r:GetObjectType() == "FontString" then
+                d.fonts[#d.fonts + 1] = r
+                pcall(r.SetJustifyH, r, "RIGHT")
+            end
+        end
+
+        -- 字号跟着图标走：26px 的图标配 11 号数字。
+        d.size = math.max(DEBUFF_TEXT_MIN, math.min(DEBUFF_TEXT_MAX,
+            bh and math.floor(bh * 0.42 + 0.5) or 10))
+    end
+
+    -- 字体每次重设：暴雪回收按钮时会把字体写回去。
+    for i = 1, #d.fonts do
+        pcall(Widget.SetFont, Widget, d.fonts[i], d.size, "cooldown")
+    end
+end
+
+--- 遍历一整个 debuff 列表，把还没打扮过的按钮补上。
+-- 池化按钮第一次显示时可能还没进 GetChildren()，所以每个按钮额外挂一次 OnShow：
+-- 回收复用后再次显示时把字体重新压一遍（边框只建一次，靠 __monetDebuffFonts 记住）。
+local function DressDebuffList(list)
+    if not list or type(list.GetChildren) ~= "function" then return end
+    local ok, children = pcall(function() return { list:GetChildren() } end)
+    if not ok or not children then return end
+    for i = 1, #children do
+        local child = children[i]
+        DressDebuffButton(child)
+        if child and type(child.HookScript) == "function" and not child.__monetDebuffHook then
+            child.__monetDebuffHook = true
+            pcall(child.HookScript, child, "OnShow", function(self)
+                DressDebuffButton(self)
+            end)
+        end
+    end
 end
 
 --- Your debuffs without reading any aura: Blizzard's AurasFrame is moved onto our plate (the
@@ -367,6 +524,9 @@ local function AnchorDebuffs(auras, plate)
 
     pcall(list.ClearAllPoints, list)
     pcall(list.SetPoint, list, "BOTTOMLEFT", plate, "TOPLEFT", 0, textRow + gap)
+
+    -- B1：借来之后补外观。列表被暴雪重排时会再走一遍，字体重新压一次。
+    DressDebuffList(list)
 end
 
 local function BlizzardUnitFrame(base)
@@ -908,6 +1068,9 @@ function M:HandleCommand(rest)
     if sub ~= "diagnose" and sub ~= "diag" and sub ~= "probe" then return false end
 
     ns:Print("姓名板对象自检（本客户端实测）：")
+    ns:Print(("已修饰的 debuff 按钮：%d 个（0 表示 DebuffListFrame 没有子帧或还没显示过）"):format(dressedDebuffs))
+    ns:Print(("边框颜色：驱散色 %d 个 / 主题色 %d 个（全是主题色 = 这个客户端把驱散色烘在贴图里）")
+        :format(dispelBorders, themeBorders))
     local missing = 0
     for i = 1, #PROBED do
         if ns.ResolvePath(PROBED[i]) then

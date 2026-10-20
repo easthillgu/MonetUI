@@ -81,6 +81,39 @@ local function SkinQuestFrame()
     end
 end
 
+-- The quest objective tracker that sits under the minimap.  It has no tabs and no chrome of its own --
+-- just a header, a scroll and a list of tracker blocks, so the header font and the scroll carry it.
+local function SkinObjectiveTracker()
+    local tracker = _G.ObjectiveTrackerFrame
+    if not tracker then return end
+
+    -- Only the header: the blocks below it are content and must stay legible.
+    M:Controls({
+        "ObjectiveTrackerHeader", "QuestLogObjectiveHeader",
+    }, function(header)
+        if not header then return end
+        local text = header.Text or (type(header.GetName) == "function"
+            and header:GetName() and _G[header:GetName() .. "Text"])
+        if text then ns.Skin:Font(text, 12, "pixel", nil, "edge") end
+    end)
+
+    -- The tracker rows are created lazily and reused, so restyle them on every show.  Header keeps its
+    -- own level; we only walk the containers below it.
+    M:HookShow(tracker, function()
+        M:SkinScrollsIn(tracker)
+        ns.Skin:Strip(tracker, { regions = false, backdrops = true })
+    end)
+end
+
+M:Panel("objectivetracker", {
+    label = "目标追踪",
+    group = "任务",
+    apply = SkinObjectiveTracker,
+    frames = {
+        "ObjectiveTrackerFrame", "ObjectiveTrackerHeader", "QuestLogObjectiveHeader",
+    },
+})
+
 M:Panel("questlog", {
     label = "任务日志",
     group = "任务",

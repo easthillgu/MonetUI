@@ -14,6 +14,12 @@ local panel
 local moduleCheckboxes = {}
 local refreshStatus
 
+-- The rows live in a scrollable content frame: the panel itself stays a fixed size on
+-- screen (it is clamped to the screen, so an unbounded height would push the last
+-- sections out of reach), and the content is what moves.
+local content, view, scrollThumb, scrollTrack
+local scrollOffset = 0
+
 local MODULE_ORDER = {
     "UnitFrames", "Cooldown", "BuffFrame",
     "Minimap", "BagFrame", "Bags", "QuestTracker", "ActionBars", "Nameplates", "Skins",
@@ -279,12 +285,54 @@ function SimpleConfig:Build()
     Widget:Shadow(panel, { size = 7, alpha = 0.5 })
     Widget:Corners(panel, { omit = { "TOPRIGHT" } })
 
-    local y = -62
+    -- Scrollable body: the rows are parented to `content`, which sits inside a clipping
+    -- `view`.  The view starts below the subtitle, so a scrolled row never slides over
+    -- the title.
+    view = CreateFrame("Frame", nil, panel)
+    view:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -50)
+    view:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -24, 58)
+    view:SetClipsChildren(true)
 
-    MakeSeparator(panel, y, "主题")
+    content = CreateFrame("Frame", nil, view)
+    content:SetPoint("TOPLEFT", view, "TOPLEFT", 0, 0)
+    content:SetPoint("TOPRIGHT", view, "TOPRIGHT", 0, 0)
+    content:SetHeight(100)
+
+    -- Slim scrollbar on the right: a track plus a draggable thumb, both drawn here
+    -- (the client's own scrollbar art is not part of the Monet look).
+    scrollTrack = panel:CreateTexture(nil, "ARTWORK")
+    scrollTrack:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -14, -50)
+    scrollTrack:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -14, 58)
+    scrollTrack:SetWidth(4)
+    local nr, ng, nb = Color:GetNeutral()
+    scrollTrack:SetColorTexture(nr, ng, nb, 0.25)
+
+    scrollThumb = CreateFrame("Button", nil, panel)
+    scrollThumb:SetPoint("TOPLEFT", scrollTrack, "TOPLEFT", 0, 0)
+    scrollThumb:SetWidth(4)
+    scrollThumb:SetHeight(40)
+    scrollThumb:EnableMouse(true)
+    local thumbTex = scrollThumb:CreateTexture(nil, "BACKGROUND")
+    thumbTex:SetAllPoints()
+    local er, eg, eb = Color:GetEdge()
+    thumbTex:SetColorTexture(er, eg, eb, 0.8)
+
+    -- The scrollbar is drawn by hand, so it does not follow Widget's theme registry;
+    -- repaint it when the theme changes.
+    ns.EventBus:Register("MONETUI_THEME_CHANGED", function()
+        if not panel then return end
+        local nr, ng, nb = Color:GetNeutral()
+        local er, eg, eb = Color:GetEdge()
+        scrollTrack:SetColorTexture(nr, ng, nb, 0.25)
+        thumbTex:SetColorTexture(er, eg, eb, 0.8)
+    end)
+
+    local y = -12
+
+    MakeSeparator(content, y, "主题")
     y = y - 26
 
-    MakeCheckbox(panel, "使用 MonetColor 动态主题", y,
+    MakeCheckbox(content, "使用 MonetColor 动态主题", y,
         function()
             local db = ns:DB()
             return db.theme.useMonetColor
@@ -297,8 +345,8 @@ function SimpleConfig:Build()
         end)
     y = y - 28
 
-    local statusText = Widget:Font(panel, 12, "pixel", "neutral", "LEFT")
-    statusText:SetPoint("TOPLEFT", panel, "TOPLEFT", 46, y)
+    local statusText = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
+    statusText:SetPoint("TOPLEFT", content, "TOPLEFT", 46, y)
     statusText:SetWidth(330)
     statusText:SetJustifyH("LEFT")
     y = y - 20
@@ -322,7 +370,7 @@ function SimpleConfig:Build()
         { value = "highlight", text = "高亮色" },
         { value = "neutral",   text = "中性灰" },
     }
-    MakeDropdown(panel, y, "边框颜色", BORDER_ITEMS,
+    MakeDropdown(content, y, "边框颜色", BORDER_ITEMS,
         function() return Color:GetBorderKey() end,
         function(value)
             ns:DB().theme.borderKey = value
@@ -330,7 +378,25 @@ function SimpleConfig:Build()
         end)
     y = y - 28
 
-    MakeSeparator(panel, y, "模块")
+    -- UI scale: the addon's sizes are authored in UI units, so the scale decides whether
+    -- they land on whole physical pixels.  "auto" pins it per resolution (see
+    -- Utils/Media.lua scalePresets); "game" leaves it to the client's own setting.
+    local SCALE_ITEMS = {
+        { value = "auto", text = "自动（按分辨率固定，像素完美）" },
+        { value = "game", text = "跟随游戏设置" },
+    }
+    MakeDropdown(content, y, "UI 缩放", SCALE_ITEMS,
+        function() return (ns:DB().theme or {}).uiScaleMode or "auto" end,
+        function(value)
+            ns:DB().theme.uiScaleMode = value
+            if value == "auto" then
+                ns:DB().theme.uiScaleApplied = nil
+            end
+            ns:Print("UI 缩放模式：" .. (value == "auto" and "自动（下次 /reload 生效）" or "跟随游戏设置") .. "。")
+        end)
+    y = y - 28
+
+    MakeSeparator(content, y, "模块")
     y = y - 28
 
     local function moduleGetter(name)
@@ -344,13 +410,13 @@ function SimpleConfig:Build()
     end
 
     for _, name in ipairs(MODULE_ORDER) do
-        moduleCheckboxes[name] = MakeCheckbox(panel, MODULE_LABEL[name] or name, y,
+        moduleCheckboxes[name] = MakeCheckbox(content, MODULE_LABEL[name] or name, y,
             moduleGetter(name), moduleSetter(name))
         y = y - 28
     end
 
     y = y - 6
-    MakeSeparator(panel, y, "冷却计时")
+    MakeSeparator(content, y, "冷却计时")
     y = y - 28
 
     local function CooldownSaved()
@@ -374,7 +440,7 @@ function SimpleConfig:Build()
         end
     end
 
-    MakeCheckbox(panel, "单位自动缩放（秒 → 分钟 → 小时 → 天）", y,
+    MakeCheckbox(content, "单位自动缩放（秒 → 分钟 → 小时 → 天）", y,
         CooldownSetting("scale"),
         function(value)
             CooldownSaved().scale = value
@@ -382,7 +448,7 @@ function SimpleConfig:Build()
         end)
     y = y - 28
 
-    MakeCheckbox(panel, "剩余时间紧张时变红 + 放大字体", y,
+    MakeCheckbox(content, "剩余时间紧张时变红 + 放大字体", y,
         CooldownSetting("alert"),
         function(value)
             CooldownSaved().alert = value
@@ -396,7 +462,7 @@ function SimpleConfig:Build()
         { value = 8,  text = "8 秒" },
         { value = 10, text = "10 秒" },
     }
-    MakeDropdown(panel, y, "紧张阈值（秒）", ALERT_ITEMS,
+    MakeDropdown(content, y, "紧张阈值（秒）", ALERT_ITEMS,
         CooldownSetting("alertSeconds"),
         function(value)
             CooldownSaved().alertSeconds = value
@@ -404,11 +470,141 @@ function SimpleConfig:Build()
         end)
     y = y - 30
 
+    -- TenthTH: below this many seconds show one decimal ("4.3").
+    local TENTH_ITEMS = {
+        { value = 0,  text = "关闭" },
+        { value = 3,  text = "3 秒" },
+        { value = 5,  text = "5 秒" },
+        { value = 10, text = "10 秒" },
+        { value = 20, text = "20 秒" },
+    }
+    MakeDropdown(content, y, "小数秒阈值（低于则显示 0.1s）", TENTH_ITEMS,
+        CooldownSetting("tenthsTH"),
+        function(value)
+            CooldownSaved().tenthsTH = value
+            CooldownRefresh()
+        end)
+    y = y - 30
+
+    -- MmssTH: at/above this many seconds use mm:ss ("1:05").
+    local MMSS_ITEMS = {
+        { value = 0,   text = "关闭（用 1m / 1h）" },
+        { value = 30,  text = "30 秒" },
+        { value = 60,  text = "60 秒" },
+        { value = 120, text = "120 秒" },
+    }
+    MakeDropdown(content, y, "m:ss 阈值（达到则显示 1:05）", MMSS_ITEMS,
+        CooldownSetting("mmssTH"),
+        function(value)
+            CooldownSaved().mmssTH = value
+            CooldownRefresh()
+        end)
+    y = y - 30
+
     y = y - 6
-    MakeSeparator(panel, y, "单位框架")
+    local minimap = ns:GetModule("Minimap")
+    if minimap then
+        MakeSeparator(content, y, "小地图")
+        y = y - 28
+
+        local function MapSetting(key)
+            return function() return minimap:GetSettings()[key] end
+        end
+        local function MapSetter(key)
+            return function(value)
+                minimap:GetSettings()[key] = value
+                if minimap.Apply then minimap:Apply() end
+            end
+        end
+
+        MakeCheckbox(content, "悬停小地图时显示区域名", y,
+            MapSetting("zoneText"), MapSetter("zoneText"))
+        y = y - 26
+
+        MakeCheckbox(content, "战区时区域名染成危险色", y,
+            MapSetting("zonePvPColor"), MapSetter("zonePvPColor"))
+        y = y - 26
+
+        MakeCheckbox(content, "滚轮缩放（方形地图四角也够得到）", y,
+            MapSetting("scrollZoom"), MapSetter("scrollZoom"))
+        y = y - 26
+
+        MakeCheckbox(content, "右键小地图弹出微型游戏菜单", y,
+            MapSetting("microMenu"), MapSetter("microMenu"))
+        y = y - 28
+
+        -- 形状方案：默认让引擎按 256×190 的视口重绘（没有被裁掉的带子，追踪点不会漏到
+        -- 地图外面）；遮罩裁剪是老方案，留作回退。
+        MakeDropdown(content, y, "地图形状", {
+            { value = "resize", text = "引擎重绘（256×190，无裁剪）" },
+            { value = "mask",   text = "遮罩裁剪（回退：正方画布 + 裁掉上下）" },
+        }, MapSetting("shape"), MapSetter("shape"))
+        y = y - 28
+
+        -- 地图内的三个独立按钮（3:4 矩形图标）
+        local mapCaption = Widget:Font(content, 12, "pixel", "edge", "LEFT")
+        mapCaption:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
+        mapCaption:SetText("· 地图内的按钮")
+        y = y - 22
+
+        MakeCheckbox(content, "追踪（左下）", y,
+            MapSetting("mapTracking"), MapSetter("mapTracking"))
+        y = y - 26
+
+        MakeCheckbox(content, "难度（左上）", y,
+            MapSetting("mapDifficulty"), MapSetter("mapDifficulty"))
+        y = y - 26
+
+        MakeCheckbox(content, "插件收纳（右上）", y,
+            MapSetting("mapCompartment"), MapSetter("mapCompartment"))
+        y = y - 24
+
+        local mapHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
+        mapHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
+        mapHint:SetWidth(352)
+        mapHint:SetJustifyH("LEFT")
+        mapHint:SetText("追踪 / 插件收纳开着时，暴雪原来那一个被搬进地图，不再单独隐藏。")
+        y = y - 30
+
+        MakeDropdown(content, y, "边框粗细", {
+            { value = 1, text = "1 px" },
+            { value = 2, text = "2 px（默认）" },
+            { value = 3, text = "3 px" },
+        }, MapSetting("border"), MapSetter("border"))
+        y = y - 30
+
+        MakeDropdown(content, y, "右下角间距", {
+            { value = 0,  text = "0 px（贴边）" },
+            { value = 16, text = "16 px" },
+            { value = 33, text = "33 px（默认）" },
+            { value = 50, text = "50 px" },
+            { value = 66, text = "66 px" },
+        }, MapSetting("gap"), MapSetter("gap"))
+        y = y - 30
+
+        -- 暴雪的集群按钮：勾选＝藏起来（方形面板和暴雪原样按钮混在一起最难看），
+        -- 取消勾选＝把暴雪那个按钮原样放回来。
+        local caption = Widget:Font(content, 12, "pixel", "edge", "LEFT")
+        caption:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
+        caption:SetText("· 暴雪集群按钮（勾选＝藏起来）")
+        y = y - 22
+
+        for _, entry in ipairs(minimap:ButtonList()) do
+            -- 追踪 / 插件收纳由"地图内的按钮"那一组管，这里不重复列
+            if not entry.skipKey then
+                MakeCheckbox(content, entry.label, y, MapSetting(entry.key), MapSetter(entry.key))
+                y = y - 26
+            end
+        end
+
+        y = y - 4
+    end
+
+    y = y - 6
+    MakeSeparator(content, y, "单位框架")
     y = y - 28
 
-    MakeCheckbox(panel, "隐藏暴雪默认的玩家/目标框架（需重载恢复）", y,
+    MakeCheckbox(content, "隐藏暴雪默认的玩家/目标框架（需重载恢复）", y,
         function() return ns:DB().unitFrames.hideBlizzard end,
         function(value)
             ns:DB().unitFrames.hideBlizzard = value
@@ -440,16 +636,16 @@ function SimpleConfig:Build()
         { value = "theme", text = "统一主题色" },
     }
 
-    MakeDropdown(panel, y, "玩家 / 宠物 血条",
+    MakeDropdown(content, y, "玩家 / 宠物 血条",
         FILL_ITEMS, UnitSetting(SELF, "fillColor", "highlight"))
     y = y - 28
-    MakeDropdown(panel, y, "目标 / 焦点 血条",
+    MakeDropdown(content, y, "目标 / 焦点 血条",
         FILL_ITEMS, UnitSetting(OTHER, "fillColor", "class"))
     y = y - 28
-    MakeDropdown(panel, y, "目标 / 焦点 损失部分",
+    MakeDropdown(content, y, "目标 / 焦点 损失部分",
         LOST_ITEMS, UnitSetting(OTHER, "lostColor", "danger"))
     y = y - 28
-    MakeDropdown(panel, y, "能量条颜色", POWER_ITEMS,
+    MakeDropdown(content, y, "能量条颜色", POWER_ITEMS,
         function() return ns:DB().unitFrames.powerColor end,
         function(value)
             ns:DB().unitFrames.powerColor = value
@@ -466,7 +662,7 @@ function SimpleConfig:Build()
         { value = 5, text = "5 px" },
     }
 
-    MakeDropdown(panel, y, "连击点（盗贼 / 德鲁伊）", CLASS_ITEMS,
+    MakeDropdown(content, y, "连击点（盗贼 / 德鲁伊）", CLASS_ITEMS,
         function()
             local db = ns:DB().unitFrames
             if db.classPower == false then return 0 end
@@ -480,7 +676,7 @@ function SimpleConfig:Build()
         end)
     y = y - 28
 
-    MakeCheckbox(panel, "血量数字按百分比着色", y,
+    MakeCheckbox(content, "血量数字按百分比着色", y,
         function() return ns:DB().unitFrames.textColorByPercent end,
         function(value)
             ns:DB().unitFrames.textColorByPercent = value
@@ -488,16 +684,28 @@ function SimpleConfig:Build()
         end)
     y = y - 28
 
-    MakeCheckbox(panel, "血条数值平滑过渡", y,
+    MakeCheckbox(content, "血条数值平滑过渡", y,
         function() return ns:DB().unitFrames.smoothBars end,
         function(value)
             ns:DB().unitFrames.smoothBars = value
             RefreshUnitFrames()
         end)
+    y = y - 28
+
+    local NUMBER_ITEMS = {
+        { value = "auto", text = "自动 (K / M / B)" },
+        { value = "cn",   text = "中文 (万 / 亿)" },
+    }
+    MakeDropdown(content, y, "大数字格式", NUMBER_ITEMS,
+        function() return ns:DB().numberFormat end,
+        function(value)
+            ns:DB().numberFormat = value
+            RefreshUnitFrames()
+        end)
     y = y - 30
 
     -- The borrowed list's on/off is decided when Blizzard's TargetFrame is first suppressed, so -- like "hideBlizzard" above -- this applies on the next load: a runtime switch cannot re-register what a full-kill removed.
-    MakeCheckbox(panel, "显示目标框光环（借用暴雪，需重载）", y,
+    MakeCheckbox(content, "显示目标框光环（借用暴雪，需重载）", y,
         function() return ns:DB().unitFrames.showTargetAuras end,
         function(value)
             ns:DB().unitFrames.showTargetAuras = value
@@ -505,10 +713,10 @@ function SimpleConfig:Build()
         end)
     y = y - 30
 
-    MakeSeparator(panel, y, "动作条")
+    MakeSeparator(content, y, "动作条")
     y = y - 28
 
-    MakeCheckbox(panel, "自绘动作条（LibActionButton）", y,
+    MakeCheckbox(content, "自绘动作条（LibActionButton）", y,
         function() return ns:DB().actionBars.ownBars end,
         function(value)
             ns:DB().actionBars.ownBars = value
@@ -516,7 +724,7 @@ function SimpleConfig:Build()
         end)
     y = y - 28
 
-    MakeCheckbox(panel, "隐藏暴雪默认动作条", y,
+    MakeCheckbox(content, "隐藏暴雪默认动作条", y,
         function() return ns:DB().actionBars.hideBlizzard end,
         function(value)
             ns:DB().actionBars.hideBlizzard = value
@@ -524,7 +732,7 @@ function SimpleConfig:Build()
         end)
     y = y - 28
 
-    MakeCheckbox(panel, "隐藏暴雪默认背包条", y,
+    MakeCheckbox(content, "隐藏暴雪默认背包条", y,
         function() return ns:DB().actionBars.hideBagBar end,
         function(value)
             ns:DB().actionBars.hideBagBar = value
@@ -547,7 +755,7 @@ function SimpleConfig:Build()
         COUNT_ITEMS[#COUNT_ITEMS + 1] = { value = count, text = count .. " 组" }
     end
 
-    MakeDropdown(panel, y, "按钮尺寸", SIZE_ITEMS,
+    MakeDropdown(content, y, "按钮尺寸", SIZE_ITEMS,
         function() return ns:DB().actionBars.buttonSize end,
         function(value)
             ns:DB().actionBars.buttonSize = value
@@ -555,7 +763,7 @@ function SimpleConfig:Build()
         end)
     y = y - 28
 
-    MakeDropdown(panel, y, "按钮间距", SPACING_ITEMS,
+    MakeDropdown(content, y, "按钮间距", SPACING_ITEMS,
         function() return ns:DB().actionBars.spacing end,
         function(value)
             ns:DB().actionBars.spacing = value
@@ -563,7 +771,7 @@ function SimpleConfig:Build()
         end)
     y = y - 28
 
-    MakeDropdown(panel, y, "显示动作条数量", COUNT_ITEMS,
+    MakeDropdown(content, y, "显示动作条数量", COUNT_ITEMS,
         function() return ns:DB().actionBars.barCount end,
         function(value)
             ns:DB().actionBars.barCount = value
@@ -571,7 +779,7 @@ function SimpleConfig:Build()
         end)
     y = y - 28
 
-    MakeCheckbox(panel, "显示快捷键", y,
+    MakeCheckbox(content, "显示快捷键", y,
         function() return ns:DB().actionBars.showHotkey end,
         function(value)
             ns:DB().actionBars.showHotkey = value
@@ -579,7 +787,7 @@ function SimpleConfig:Build()
         end)
     y = y - 28
 
-    MakeCheckbox(panel, "显示堆叠数量", y,
+    MakeCheckbox(content, "显示堆叠数量", y,
         function() return ns:DB().actionBars.showCount end,
         function(value)
             ns:DB().actionBars.showCount = value
@@ -587,7 +795,7 @@ function SimpleConfig:Build()
         end)
     y = y - 28
 
-    MakeCheckbox(panel, "显示宏名", y,
+    MakeCheckbox(content, "显示宏名", y,
         function() return ns:DB().actionBars.showMacro end,
         function(value)
             ns:DB().actionBars.showMacro = value
@@ -595,46 +803,46 @@ function SimpleConfig:Build()
         end)
     y = y - 30
 
-    MakeSeparator(panel, y, "姓名板")
+    MakeSeparator(content, y, "姓名板")
     y = y - 28
 
     -- Which units get a plate at all (CVars; see Modules/Nameplates).
-    MakeCheckbox(panel, "显示敌方姓名板", y, NameplateCheckbox("showEnemy"))
+    MakeCheckbox(content, "显示敌方姓名板", y, NameplateCheckbox("showEnemy"))
     y = y - 28
-    MakeCheckbox(panel, "显示友方玩家姓名板", y, NameplateCheckbox("showFriendly"))
+    MakeCheckbox(content, "显示友方玩家姓名板", y, NameplateCheckbox("showFriendly"))
     y = y - 28
-    MakeCheckbox(panel, "显示友方 NPC 姓名板", y, NameplateCheckbox("showNPC"))
+    MakeCheckbox(content, "显示友方 NPC 姓名板", y, NameplateCheckbox("showNPC"))
     y = y - 28
-    MakeCheckbox(panel, "显示低等级（minus）敌人", y, NameplateCheckbox("showMinor"))
+    MakeCheckbox(content, "显示低等级（minus）敌人", y, NameplateCheckbox("showMinor"))
     y = y - 28
-    MakeCheckbox(panel, "显示图腾", y, NameplateCheckbox("showTotems"))
+    MakeCheckbox(content, "显示图腾", y, NameplateCheckbox("showTotems"))
     y = y - 28
-    MakeCheckbox(panel, "显示自己的姓名板", y, NameplateCheckbox("showSelf"))
+    MakeCheckbox(content, "显示自己的姓名板", y, NameplateCheckbox("showSelf"))
     y = y - 28
-    MakeCheckbox(panel, "过滤小动物", y, NameplateCheckbox("hideCritters"))
+    MakeCheckbox(content, "过滤小动物", y, NameplateCheckbox("hideCritters"))
     y = y - 28
-    MakeCheckbox(panel, "过滤死亡单位", y, NameplateCheckbox("hideDead"))
+    MakeCheckbox(content, "过滤死亡单位", y, NameplateCheckbox("hideDead"))
     y = y - 30
 
-    MakeCheckbox(panel, "显示名称", y, NameplateCheckbox("showName"))
+    MakeCheckbox(content, "显示名称", y, NameplateCheckbox("showName"))
     y = y - 28
-    MakeCheckbox(panel, "显示等级 / 精英标记", y, NameplateCheckbox("showLevel"))
+    MakeCheckbox(content, "显示等级 / 精英标记", y, NameplateCheckbox("showLevel"))
     y = y - 28
-    MakeCheckbox(panel, "显示血量百分比", y, NameplateCheckbox("showPercent"))
+    MakeCheckbox(content, "显示血量百分比", y, NameplateCheckbox("showPercent"))
     y = y - 28
-    MakeCheckbox(panel, "显示施法条", y, NameplateCheckbox("showCast"))
+    MakeCheckbox(content, "显示施法条", y, NameplateCheckbox("showCast"))
     y = y - 28
-    MakeCheckbox(panel, "显示减益光环（借用暴雪）", y, NameplateCheckbox("showDebuffs"))
+    MakeCheckbox(content, "显示减益光环（借用暴雪）", y, NameplateCheckbox("showDebuffs"))
     y = y - 28
-    MakeCheckbox(panel, "职业 / 阵营着色", y, NameplateCheckbox("classColor"))
+    MakeCheckbox(content, "职业 / 阵营着色", y, NameplateCheckbox("classColor"))
     y = y - 28
-    MakeCheckbox(panel, "仇恨描边", y, NameplateCheckbox("showThreat"))
+    MakeCheckbox(content, "仇恨描边", y, NameplateCheckbox("showThreat"))
     y = y - 28
-    MakeCheckbox(panel, "当前目标描边高亮", y, NameplateCheckbox("highlightTarget"))
+    MakeCheckbox(content, "当前目标描边高亮", y, NameplateCheckbox("highlightTarget"))
     y = y - 28
-    MakeCheckbox(panel, "数值平滑过渡", y, NameplateCheckbox("smooth"))
+    MakeCheckbox(content, "数值平滑过渡", y, NameplateCheckbox("smooth"))
     y = y - 28
-    MakeCheckbox(panel, "同步暴雪点击区域", y, NameplateCheckbox("forcePlateSize"))
+    MakeCheckbox(content, "同步暴雪点击区域", y, NameplateCheckbox("forcePlateSize"))
     y = y - 30
 
     local NP_WIDTH = {}
@@ -658,26 +866,26 @@ function SimpleConfig:Build()
         NP_DISTANCE[#NP_DISTANCE + 1] = { value = d, text = d .. " 码" }
     end
 
-    MakeDropdown(panel, y, "姓名板宽度", NP_WIDTH,
+    MakeDropdown(content, y, "姓名板宽度", NP_WIDTH,
         function() return NameplateSetting("width") end, NameplateSetter("width"))
     y = y - 28
-    MakeDropdown(panel, y, "姓名板高度", NP_HEIGHT,
+    MakeDropdown(content, y, "姓名板高度", NP_HEIGHT,
         function() return NameplateSetting("height") end, NameplateSetter("height"))
     y = y - 28
     -- Name/level font size is fixed on the 12px pixel grid (Media:SnapSize), so there is no size picker any more -- every choice would render as 12.
-    MakeDropdown(panel, y, "施法条高度", NP_CAST,
+    MakeDropdown(content, y, "施法条高度", NP_CAST,
         function() return NameplateSetting("castHeight") end, NameplateSetter("castHeight"))
     y = y - 28
-    MakeDropdown(panel, y, "名称截断长度", NP_LENGTH,
+    MakeDropdown(content, y, "名称截断长度", NP_LENGTH,
         function() return NameplateSetting("nameLength") end, NameplateSetter("nameLength"))
     y = y - 28
-    MakeDropdown(panel, y, "显示距离", NP_DISTANCE,
+    MakeDropdown(content, y, "显示距离", NP_DISTANCE,
         function() return NameplateSetting("viewDistance") end, NameplateSetter("viewDistance"))
     y = y - 30
 
     local skins = ns:GetModule("Skins")
     if skins then
-        MakeSeparator(panel, y, "界面美化")
+        MakeSeparator(content, y, "界面美化")
         y = y - 26
 
         local FONT_ITEMS = {
@@ -685,7 +893,7 @@ function SimpleConfig:Build()
             { value = "pixel", text = "像素字体（推荐）" },
         }
         -- Legacy saved values ("roadway", "number", ...) normalize through GetFontKey, so the row always shows one of the two entries above.
-        MakeDropdown(panel, y, "统一字体（全局）", FONT_ITEMS,
+        MakeDropdown(content, y, "统一字体（全局）", FONT_ITEMS,
             function() return skins:GetFontKey() or "off" end,
             function(value)
                 ns:DB().skins.font = value
@@ -696,8 +904,8 @@ function SimpleConfig:Build()
             end)
         y = y - 24
 
-        local fontHint = Widget:Font(panel, 12, "pixel", "neutral", "LEFT")
-        fontHint:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, y)
+        local fontHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
+        fontHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
         fontHint:SetWidth(350)
         fontHint:SetJustifyH("LEFT")
         fontHint:SetText("统一字体影响所有暴雪窗口文字；关闭需重载界面恢复。")
@@ -713,14 +921,14 @@ function SimpleConfig:Build()
         end
 
         for _, group in ipairs(groups) do
-            local caption = Widget:Font(panel, 12, "pixel", "edge", "LEFT")
-            caption:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, y)
+            local caption = Widget:Font(content, 12, "pixel", "edge", "LEFT")
+            caption:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
             caption:SetText("· " .. group)
             y = y - 20
 
             for _, entry in ipairs(skins.registry) do
                 if entry.group == group then
-                    MakeCheckbox(panel, entry.label, y,
+                    MakeCheckbox(content, entry.label, y,
                         function() return skins:IsEnabled(entry.key) end,
                         function(value) skins:SetPanelEnabled(entry.key, value) end)
                     y = y - 26
@@ -733,7 +941,7 @@ function SimpleConfig:Build()
 
     local infobar = ns:GetModule("InfoBar")
     if infobar then
-        MakeSeparator(panel, y, "信息栏")
+        MakeSeparator(content, y, "信息栏")
         y = y - 26
 
         -- Rebuild nothing on a settings change: the strip is re-anchored and the blocks re-measured in place.
@@ -742,7 +950,7 @@ function SimpleConfig:Build()
             else infobar:ApplyLayout() end
         end
 
-        MakeDropdown(panel, y, "贴边", {
+        MakeDropdown(content, y, "贴边", {
             { value = true,  text = "顶边" },
             { value = false, text = "底边" },
         },
@@ -753,7 +961,7 @@ function SimpleConfig:Build()
             end)
         y = y - 28
 
-        MakeDropdown(panel, y, "高度", {
+        MakeDropdown(content, y, "高度", {
             { value = 12, text = "12 px" },
             { value = 14, text = "14 px" },
             { value = 16, text = "16 px" },
@@ -766,7 +974,7 @@ function SimpleConfig:Build()
             end)
         y = y - 28
 
-        MakeCheckbox(panel, "悬停淡入（平时只露底板）", y,
+        MakeCheckbox(content, "悬停淡入（平时只露底板）", y,
             function() return infobar:Settings().mouseover end,
             function(value)
                 infobar:Settings().mouseover = value and true or false
@@ -774,7 +982,7 @@ function SimpleConfig:Build()
             end)
         y = y - 26
 
-        MakeCheckbox(panel, "战斗时边缘呼吸闪烁", y,
+        MakeCheckbox(content, "战斗时边缘呼吸闪烁", y,
             function() return infobar:Settings().combatPulse end,
             function(value)
                 infobar:Settings().combatPulse = value and true or false
@@ -784,7 +992,7 @@ function SimpleConfig:Build()
 
         -- One switch per block, in registration order.
         for _, block in ipairs(infobar.blocks) do
-            MakeCheckbox(panel, block.label, y,
+            MakeCheckbox(content, block.label, y,
                 function() return infobar:BlockEnabled(block.key) end,
                 function(value)
                     local settings = infobar:Settings()
@@ -798,8 +1006,62 @@ function SimpleConfig:Build()
         y = y - 4
     end
 
-    -- The panel is sized to whatever was just built rather than to a hard-coded number; the hint and the reload button live in the strip below the last row.
-    panel:SetHeight(math.abs(y) + 78)
+    -- The panel keeps a fixed size on screen and the rows scroll inside it: the whole
+    -- list is far taller than any screen, and an unbounded panel would push the last
+    -- sections (Skins, InfoBar, Minimap) out of reach.  The hint and the reload button
+    -- live in the strip below the scrolled area.
+    local contentHeight = math.abs(y) + 20
+    content:SetHeight(contentHeight)
+    local screenH = (_G.GetScreenHeight and _G.GetScreenHeight()) or 800
+    Widget:Height(panel, math.min(contentHeight + 108, screenH - 40))
+
+    -- Scroll: the wheel moves the content, the thumb shows where we are and can be dragged.
+    local function MaxOffset()
+        return math.min(0, (view:GetHeight() or 0) - contentHeight)
+    end
+
+    local function UpdateThumb()
+        local viewH = view:GetHeight() or 0
+        local maxOffset = MaxOffset()
+        if maxOffset >= 0 then
+            scrollThumb:Hide()
+            return
+        end
+        scrollThumb:Show()
+        local thumbH = math.max(24, viewH * (viewH / contentHeight))
+        scrollThumb:SetHeight(thumbH)
+        local t = (scrollOffset - maxOffset) / (-maxOffset)
+        scrollThumb:ClearAllPoints()
+        scrollThumb:SetPoint("TOPLEFT", scrollTrack, "TOPLEFT", 0, -t * (viewH - thumbH))
+    end
+
+    local function SetOffset(value)
+        scrollOffset = math.max(MaxOffset(), math.min(0, value))
+        content:SetPoint("TOPLEFT", view, "TOPLEFT", 0, scrollOffset)
+        UpdateThumb()
+    end
+
+    -- One handler for the whole panel: the wheel event bubbles up from the row widgets,
+    -- and no intermediate frame handles it, so the content moves exactly one step.
+    panel:SetScript("OnMouseWheel", function(_, delta)
+        SetOffset(scrollOffset - delta * 48)
+    end)
+
+    local dragging, dragStartY, dragStartOffset
+    scrollThumb:SetScript("OnMouseDown", function()
+        -- GetCursorPosition is the documented cursor API on this client; it reports
+        -- physical pixels, so the delta is converted to UI units with Media:Mult().
+        local _, my = GetCursorPosition()
+        dragging, dragStartY, dragStartOffset = true, my, scrollOffset
+    end)
+    scrollThumb:SetScript("OnMouseDrag", function()
+        if not dragging then return end
+        local _, my = GetCursorPosition()
+        SetOffset(dragStartOffset + (my - dragStartY) * Media:Mult())
+    end)
+    scrollThumb:SetScript("OnMouseUp", function() dragging = false end)
+
+    SetOffset(0)
 
     local hint = Widget:Font(panel, 12, "pixel", "neutral", "LEFT")
     hint:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 24, 52)

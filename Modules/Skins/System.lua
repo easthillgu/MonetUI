@@ -113,6 +113,44 @@ local function SkinSettings()
     M:SkinScrollsIn(frame)
 end
 
+-- Edit Mode: the manager bar plus the three dialogs it opens.  Without this, moving a bar leaves you
+-- staring at stock Blizzard chrome with no indication of what the click did.
+local function SkinEditMode()
+    local manager = _G.EditModeManager
+    if manager then
+        Skin:Strip(manager)
+        Skin:Panel(manager, { bgAlpha = 0.97 })
+    end
+
+    M:Controls({
+        "EditModeSystemSettingsDialog", "EditModeUnsavedChangesDialog", "EditModeLayoutDialog",
+    }, function(dialog)
+        if not dialog then return end
+        Skin:Strip(dialog)
+        Skin:Panel(dialog, { bgAlpha = 0.97 })
+    end)
+
+    M:Buttons({
+        "EditModeManagerFrameAcceptChanges", "EditModeManagerFrameCancelChanges",
+        "EditModeSystemSettingsDialogAccept", "EditModeSystemSettingsDialogCancel",
+        "EditModeUnsavedChangesDialogOkay", "EditModeUnsavedChangesDialogCancel",
+        "EditModeLayoutDialogSave", "EditModeLayoutDialogCancel",
+    })
+
+    -- The system-settings dialog builds its rows lazily from a button pool, so restyle whatever has
+    -- been created by the time the panel is applied (HookShow covers the rest on each open).
+    local settings = _G.EditModeSystemSettingsDialog
+    if settings then
+        local function skinRows()
+            M:SkinButtonsIn(settings)
+            M:SkinSlidersIn(settings)
+            M:SkinScrollsIn(settings)
+        end
+        skinRows()
+        M:HookShow(settings, skinRows)
+    end
+end
+
 local function SkinAddonList()
     local frame = _G.AddonList
     if not frame then return end
@@ -179,6 +217,15 @@ end
 
 local function SkinTooltip()
     TintBackdrop(_G.GameTooltip)
+
+    -- ItemRefTooltip is the *separate* frame a ctrl-clicked item link opens in.  It has its own
+    -- backdrop and its own close button and nothing in the game touches either, so every item link the
+    -- player inspects shows stock Blizzard chrome even when the tooltip option is on.
+    local ref = _G.ItemRefTooltip
+    if ref then
+        TintBackdrop(ref)
+        if ref.CloseButton then Skin:CloseButton(ref.CloseButton) end
+    end
 end
 
 M:Panel("loot", { label = "拾取 / 掷骰", group = "系统", apply = SkinLoot,
@@ -212,6 +259,15 @@ M:Panel("gamemenu", { label = "游戏菜单", group = "系统", apply = SkinGame
 M:Panel("settings", { label = "设置面板", group = "系统", apply = SkinSettings,
     frames = { "SettingsPanel", "SettingsPanelCloseButton" } })
 
+M:Panel("editmode", { label = "编辑模式", group = "系统", apply = SkinEditMode,
+    frames = {
+        "EditModeManager", "EditModeManagerFrameAcceptChanges", "EditModeManagerFrameCancelChanges",
+        "EditModeSystemSettingsDialog", "EditModeUnsavedChangesDialog", "EditModeLayoutDialog",
+        "EditModeSystemSettingsDialogAccept", "EditModeSystemSettingsDialogCancel",
+        "EditModeUnsavedChangesDialogOkay", "EditModeUnsavedChangesDialogCancel",
+        "EditModeLayoutDialogSave", "EditModeLayoutDialogCancel",
+    } })
+
 M:Panel("addonlist", { label = "插件列表", group = "系统", apply = SkinAddonList,
     frames = {
         "AddonList", "AddonListEnableAllButton", "AddonListDisableAllButton",
@@ -219,7 +275,10 @@ M:Panel("addonlist", { label = "插件列表", group = "系统", apply = SkinAdd
     } })
 
 M:Panel("menus", { label = "下拉菜单", group = "系统", apply = SkinMenus, default = false,
-    frames = { "UIDropDownMenu_CreateFrames", "DropDownList1" } })
+    -- Only the hook itself: every DropDownListN is reached inside the hook from the level argument,
+    -- so listing them here would be decoration (see ALLOW_DYNAMIC in tools/check-frame-list.js).
+    frames = { "UIDropDownMenu_CreateFrames" } })
 
 M:Panel("tooltip", { label = "鼠标提示边框", group = "系统", apply = SkinTooltip, default = false,
-    frames = { "GameTooltip" } })
+    -- Same for ItemRefTooltipCloseButton: reached as ref.CloseButton (a member), not a global.
+    frames = { "GameTooltip", "ItemRefTooltip" } })

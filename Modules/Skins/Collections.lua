@@ -49,6 +49,36 @@ local function SkinCollections()
     end)
 end
 
+-- The talent / spell book.  PlayerSpells is the modern window; SpellBookFrame is its older name and
+-- some clients still have it, so both are tried.  Tabs are player-spell categories and the spec list is
+-- a ScrollFrame, both handled here.
+local PLAYERSPELLS_TABS = {
+    "PlayerSpellsTab1", "PlayerSpellsTab2", "PlayerSpellsTab3", "PlayerSpellsTab4",
+}
+
+local function SkinPlayerSpells()
+    M:Controls({ "PlayerSpellsFrame", "SpellBookFrame" }, function(frame)
+        if not frame then return end
+        M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
+        M:SkinScrollsIn(frame)
+        M:SkinButtonsIn(frame)
+    end)
+    M:Tabs(PLAYERSPELLS_TABS)
+
+    M:Controls({
+        "PlayerSpellsSearchBox", "SpellBookSearchBox",
+        "AssistedCombatRotationFrame", "PlayerSpellsCloseButton",
+    }, function(control)
+        if not control then return end
+        local kind = type(control.GetObjectType) == "function" and control:GetObjectType()
+        if kind == "EditBox" or kind == "SearchBox" then
+            Skin:EditBox(control)
+        else
+            Skin:Button(control)
+        end
+    end)
+end
+
 local ACHIEVEMENT_TABS = { "AchievementFrameTab1", "AchievementFrameTab2" }
 
 local function SkinAchievements()
@@ -98,6 +128,18 @@ local function SkinEncounterJournal()
         M:SkinScrollsIn(panel)
     end)
 end
+
+M:Panel("playerspells", {
+    label = "天赋 / 技能书",
+    group = "收藏",
+    apply = SkinPlayerSpells,
+    frames = {
+        "PlayerSpellsFrame", "SpellBookFrame",
+        "PlayerSpellsTab1", "PlayerSpellsTab2", "PlayerSpellsTab3", "PlayerSpellsTab4",
+        "PlayerSpellsSearchBox", "SpellBookSearchBox", "AssistedCombatRotationFrame",
+        "PlayerSpellsCloseButton",
+    },
+})
 
 M:Panel("collections", {
     label = "收藏（坐骑 / 宠物 / 玩具 / 幻化）",

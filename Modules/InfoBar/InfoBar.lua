@@ -310,7 +310,9 @@ local function CreateBar()
     -- Named so Edit Mode / bug reports can address it; entirely our own frame, nothing attaches to a Blizzard frame.  Strata stays BACKGROUND so it can never paint over gameplay UI (the minimap cluster moved to the bottom-right keeps the default top edge clear).
     bar = Widget:CreateFrame("MonetUIInfoBar", _G.UIParent)
     bar:SetFrameStrata("BACKGROUND")
-    Widget:Theme(bar, { thickness = 1, bgAlpha = 0.25 })
+    -- 2 physical px: the info bar belongs to the panel tier of the border split (unit frames, auras
+    -- and action buttons take 1px; the info bar, minimap and quest tracker take 2px).
+    Widget:Theme(bar, { thickness = 2, bgAlpha = 0.25 })
     bar:EnableMouse(true)
     bar:SetScript("OnEnter", function() OnEnter() end)
     bar:SetScript("OnLeave", function() OnLeave() end)

@@ -6,10 +6,51 @@ local ADDON_NAME, ns = ...
 local M    = ns.Skins
 local Skin = ns.Skin
 
+-- Modules/Skins/Trade.lua
+-- Mail, merchant, trainer, auction house, professions, the bank and the trade window.  Item rows keep
+-- their icons: only chrome buttons, tabs and scroll bars are restyled.
+
+local ADDON_NAME, ns = ...
+
+local M    = ns.Skins
+local Skin = ns.Skin
+
+-- The trade window plus the two money frames that pop up inside it.  Both are separate frames that
+-- stay on screen while the trade is open, so they need their own treatment, not the main frame's.
+local function SkinTrade()
+    local frame = _G.TradeFrame
+    if not frame then return end
+
+    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
+
+    M:Controls({ "TradePlayerInputMoneyFrame", "TradeRecipientInputMoneyFrame" }, function(money)
+        if not money then return end
+        Skin:Strip(money)
+        Skin:Panel(money, { noTitle = true, panel = { bgAlpha = 0.96 } })
+        M:Buttons({ "TradePlayerInputMoneyFrameOkayButton", "TradePlayerInputMoneyFrameCancelButton",
+                    "TradeRecipientInputMoneyFrameOkayButton", "TradeRecipientInputMoneyFrameCancelButton" })
+    end)
+
+    -- AcceptAllTradesButton is the newer combined accept button; the rest are the classic pair plus the
+    -- two "show items" toggles.  All optional -- M:Controls skips whatever this client does not have.
+    M:Buttons({
+        "AcceptTradeButton", "CancelTradeButton", "AcceptAllTradesButton",
+        "TradeShowPlayerTargetItems", "TradeFrameToggleReciprocate", "TradeTargetToggleReciprocate",
+    })
+
+    M:SkinScrollsIn(frame)
+end
+
 local function SkinMail()
     M:Controls({ "MailFrame", "InboxFrame", "SendMailFrame", "OpenMailFrame" }, function(frame)
         M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-        Skin:ScrollFrame(frame.InboxFrame or frame.MailListScrollFrame)
+        -- The scroll frame is reached through the inbox sub-window when the window is the mail frame
+        -- itself.  Passing `frame.InboxFrame` straight to Skin:ScrollFrame handed it a Window where a
+        -- ScrollFrame was expected: no ScrollBar member, so it returned silently and the mail list's
+        -- scroll bar was never skinned at all.
+        local scroll = frame.MailListScrollFrame
+            or (frame.InboxFrame and frame.InboxFrame.MailListScrollFrame)
+        Skin:ScrollFrame(scroll)
     end)
     M:Buttons({
         "InboxFrameOpenButton", "InboxFrameReplyButton", "InboxFrameDeleteButton",
@@ -82,6 +123,16 @@ local function SkinBank()
         M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
     end)
 end
+
+M:Panel("trade", { label = "交易", group = "交易", apply = SkinTrade,
+    frames = {
+        "TradeFrame", "TradeFrameCloseButton",
+        "AcceptTradeButton", "CancelTradeButton", "AcceptAllTradesButton",
+        "TradeShowPlayerTargetItems", "TradeFrameToggleReciprocate", "TradeTargetToggleReciprocate",
+        "TradePlayerInputMoneyFrame", "TradeRecipientInputMoneyFrame",
+        "TradePlayerInputMoneyFrameOkayButton", "TradePlayerInputMoneyFrameCancelButton",
+        "TradeRecipientInputMoneyFrameOkayButton", "TradeRecipientInputMoneyFrameCancelButton",
+    } })
 
 M:Panel("mail", { label = "邮箱", group = "交易", apply = SkinMail,
     frames = {

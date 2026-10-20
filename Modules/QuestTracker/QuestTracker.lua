@@ -12,8 +12,9 @@ local EventBus = ns.EventBus
 
 local M = { name = "QuestTracker" }
 
--- The window measures the same as the minimap canvas (256), so the two stack at one width.
-local WIDTH     = 256
+-- The window measures the same as the minimap PANEL (264), not the 256 map canvas, so the two outer
+-- frames stack at one width and one right edge.
+local WIDTH     = 264
 local PAD       = 8
 local TEXT_W    = WIDTH - PAD * 2
 local HEADER_H  = 18
@@ -53,11 +54,33 @@ local function SavePosition()
     qt.y = Math:Round(y, 0)
 end
 
+-- Where the tracker sits until the player drags it: top-right, its right edge on the minimap panel's
+-- right edge and its top on the buff container's top, so the HUD's right-hand column shares one edge.
+-- Two points rather than one, so a re-scaled or moved minimap drags that edge along while the top
+-- stays pinned to the screen.
+local AURA_TOP   = 33       -- BuffFrame's AURA_GAP: the buff container's TOP inset from UIParent
+local PANEL_EDGE = AURA_TOP - 4   -- the panel is 8 UI units wider than the map canvas, i.e. 4 per side
+
+local function ApplyDefaultPosition()
+    tracker:ClearAllPoints()
+    local minimap = ns:GetModule("Minimap")
+    local panel = minimap and minimap.panel
+    if panel then
+        tracker:SetPoint("RIGHT", panel, "RIGHT", 0, 0)
+    else
+        -- Minimap module off: the cluster keeps its parked inset, so this lands on the same edge.
+        tracker:SetPoint("RIGHT", UIParent, "RIGHT", -PANEL_EDGE, 0)
+    end
+    tracker:SetPoint("TOP", UIParent, "TOP", 0, -AURA_TOP)
+end
+
 local function RestorePosition()
     local stored = ns:DB().questTracker
     if stored and stored.point then
         tracker:ClearAllPoints()
         tracker:SetPoint(stored.point, UIParent, stored.point, stored.x, stored.y)
+    else
+        ApplyDefaultPosition()
     end
 end
 
@@ -294,7 +317,10 @@ function M:Skin()
     if not Widget or not C_QuestLog then return false end
 
     tracker = Widget:CreateFrame("MonetUIQuestTracker", UIParent, WIDTH, HEADER_H + PAD)
-    Widget:Theme(tracker, { thickness = 2, bgAlpha = 0.92 })
+    -- round: the border is the 9-slice edge art, so it stays correct at any height the tracker grows to
+    -- (a mask is applied pixel for pixel, so its radius would stretch with the window instead).  The
+    -- content is inset by PAD, far inside the 3px corner arc, so nothing else has to change.
+    Widget:Theme(tracker, { thickness = 2, bgAlpha = 0.92, round = true })
     tracker:SetMovable(true)
     tracker:SetClampedToScreen(true)
 

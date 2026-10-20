@@ -165,3 +165,28 @@ function Color:ClassColor(classFile)
     if c then return c.r, c.g, c.b end
     return nil
 end
+
+local ROLE_MARKS = { "IsGroupLeader", "IsRaidLeader", "IsGroupAssistant" }
+
+--- Vertex colour for role art (Assets/Textures/monet_role_*).  The three icons are deliberately
+-- GREYSCALE (every pixel R==G==B, see the generator), so this is the only place their hue is decided:
+-- a leader or assistant gets the highlight slot, everyone else stays a single colour.  The colour marks
+-- the ROLE ASSIGNMENT, not the class -- a tank who is not leading reads exactly like any other tank.
+-- Every query goes through pcall: on a Forever client the unit token can be secret, and a throw here would
+-- take the whole styling pass down with it.
+-- TENTATIVE: no call site consumes this yet (the role icons are registered but not yet placed); the rule
+-- is expected to be adjusted once there is something to look at.
+function Color:RoleTint(unit)
+    local marked = false
+    if unit then
+        for i = 1, #ROLE_MARKS do
+            local api = _G[ROLE_MARKS[i]]
+            if type(api) == "function" then
+                local ok, v = pcall(api, unit)
+                if ok and v then marked = true break end
+            end
+        end
+    end
+    if marked then return self:GetHighlight() end
+    return 1, 1, 1
+end

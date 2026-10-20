@@ -301,6 +301,67 @@ function Skin:HoverHighlight(control, opts)
     end)
 end
 
+--- Give a restyled control its pressed and disabled states back.
+-- Skin:Button fades the Pushed and Disabled art and puts nothing in their place, so pressing gives no
+-- feedback and a disabled button is indistinguishable from an enabled one -- the player clicks things
+-- that do nothing.  Both states are expressed on the plate we already own: press darkens it, disable
+-- dims it.  HoverHighlight owns the hover look; apply() reproduces the highlight colour itself after a
+-- press so releasing while still hovered does not drop the hover tint.
+function Skin:ControlState(control, opts)
+    if not control or type(control.HookScript) ~= "function" then return end
+    if control.__monetState then return end
+    control.__monetState = true
+    opts = opts or {}
+
+    local pressed = false
+
+    local function apply()
+        local bg = control.__monetControlBg or control.__monetSkinBg
+        if not bg or type(bg.SetBackdropBorderColor) ~= "function" then return end
+
+        local enabled = true
+        if type(control.IsEnabled) == "function" then
+            local ok, value = pcall(control.IsEnabled, control)
+            if ok then enabled = value and true or false end
+        end
+
+        if not enabled then
+            local r, g, b = Color:GetNeutral()
+            bg:SetBackdropBorderColor(r, g, b, opts.disabledAlpha or 0.3)
+            if bg.SetBackdropColor then pcall(bg.SetBackdropColor, bg, 0, 0, 0, opts.disabledBgAlpha or 0.25) end
+            return
+        end
+
+        if pressed then
+            local r, g, b = Color:GetBorder()
+            bg:SetBackdropBorderColor(r, g, b, 0.35)
+            if bg.SetBackdropColor then
+                pcall(bg.SetBackdropColor, bg, 0, 0, 0, (opts.bgAlpha or 0.9) * 0.6)
+            end
+            return
+        end
+
+        -- Widget:IsMouseOver, not a bare IsMouseOver: this client can return a SECRET boolean from it
+        -- (SecretWhenAnchoringSecret), and `value and true` on a secret raises.
+        if Widget:IsMouseOver(control) then
+            local r, g, b = Color:GetHighlight()
+            bg:SetBackdropBorderColor(r, g, b, opts.alpha or 1)
+            return
+        end
+
+        Widget:Refresh(bg)
+    end
+
+    -- OnDown / OnUp are hooked, not set: a Blizzard button usually already has a click script.
+    control:HookScript("OnDown", function() pressed = true; apply() end)
+    control:HookScript("OnUp", function() pressed = false; apply() end)
+    -- Blizzard flips enabled state without any script we can see, so hook the setters themselves.
+    if type(control.Enable) == "function" then hooksecurefunc(control, "Enable", apply) end
+    if type(control.Disable) == "function" then hooksecurefunc(control, "Disable", apply) end
+
+    apply()
+end
+
 -- The control helpers below are *re-appliable*: fades are idempotent through `__monetHidden` (cleared by Rollback) and created objects (backplate, tab underline, thumb fill) are cached on the frame and only toggled, so no helper short-circuits the whole visual pass.
 
 --- Restyle a Blizzard button (flat Monet plate + themed border + font).
@@ -323,10 +384,48 @@ function Skin:Button(button, opts)
     end
 
     self:HoverHighlight(button, { alpha = opts.borderAlpha or 1 })
+    self:ControlState(button, { alpha = opts.borderAlpha or 1, bgAlpha = opts.bgAlpha or 0.9 })
     return button
 end
 
---- Restyle a tab button (square, themed, accent underline).
+--- Reflect the selection state on a tab's Monet underline.
+-- Skin:Button -> Strip fades every texture region of the tab, SelectedTexture included, so the stock
+-- "this tab is active" art is gone and the underline has to carry the state instead.  A panel swaps
+-- tabs without any per-tab event we could subscribe to, so PanelTemplates_SelectTab/DeselectTab are
+-- hooked once by HookTabState below; this function is also called on every re-apply.
+function Skin:UpdateTabState(tab)
+    local underline = tab and tab.__monetTabBar
+    if not underline then return end
+
+    local selected = false
+    if type(tab.IsSelected) == "function" then
+        local ok, value = pcall(tab.IsSelected, tab)
+        if ok then selected = value and true or false end
+    elseif type(tab.Selected) == "table" and type(tab.Selected.GetAlpha) == "function" then
+        -- No IsSelected on this template (SettingsPanel's own tabs, for one): fall back to the stock
+        -- selected art, which Skin:Fade has already driven to alpha 0 -- so read what the tab wants,
+        -- not what we left on screen.
+        local ok, alpha = pcall(tab.Selected.GetAlpha, tab.Selected)
+        if ok then selected = (alpha or 0) > 0 end
+    end
+
+    underline:SetAlpha(selected and 1 or 0.25)
+    underline:Show()
+end
+
+local tabStateHooked = false
+local function HookTabState(Skin)
+    if tabStateHooked then return end
+    tabStateHooked = true
+    local function onChanged(tab)
+        if type(tab) == "table" and tab.__monetTab then Skin:UpdateTabState(tab) end
+    end
+    for _, fn in ipairs({ "PanelTemplates_SelectTab", "PanelTemplates_DeselectTab" }) do
+        if type(_G[fn]) == "function" then pcall(hooksecurefunc, fn, onChanged) end
+    end
+end
+
+--- Restyle a tab button (square, themed, accent underline that follows the selection state).
 function Skin:Tab(tab, opts)
     if not tab then return tab end
     self:Button(tab, opts)
@@ -334,16 +433,22 @@ function Skin:Tab(tab, opts)
     if not tab.__monetTab then
         tab.__monetTab = true
         local underline = tab:CreateTexture(nil, "OVERLAY")
-        underline:SetPoint("BOTTOMLEFT", tab, "BOTTOMLEFT", 4, 1)
-        underline:SetPoint("BOTTOMRIGHT", tab, "BOTTOMRIGHT", -4, 1)
-        underline:SetHeight(2)
+        -- Height and offsets go through SnapUnit.  At uiScale 0.71 a raw 2-unit underline is 1.42
+        -- physical px and the raw 1-unit offset sits on a half pixel, so it goes soft while every flat
+        -- border beside it stays exact -- the failure mode Media:SnapUnit exists to prevent.
+        underline:SetPoint("BOTTOMLEFT", tab, "BOTTOMLEFT", Media:SnapUnit(4), Media:SnapUnit(1))
+        underline:SetPoint("BOTTOMRIGHT", tab, "BOTTOMRIGHT", -Media:SnapUnit(4), Media:SnapUnit(1))
+        underline:SetHeight(Media:SnapUnit(2))
         tab.__monetTabBar = underline
         self:Track(underline)
+        HookTabState(self)
         self:OnTheme(function()
             local r, g, b = Color:GetBorder()
-            underline:SetColorTexture(r, g, b, 0.9)
+            underline:SetColorTexture(r, g, b, 1)
+            Skin:UpdateTabState(tab)
         end)
     end
+    self:UpdateTabState(tab)
     return tab
 end
 
@@ -368,7 +473,8 @@ function Skin:ScrollBar(scrollbar)
             -- The handle gets the same barfill material as the action-bar buttons: a gradient in the theme hue, brightening under the cursor so the grip feels alive instead of a flat swatch.
             local fill = thumb:CreateTexture(nil, "ARTWORK")
             fill:SetAllPoints(thumb)
-            fill:SetTexture(Media.texture["monet-barfill"])
+            fill:SetTexture(Media.texture["monet_barfill"])
+            Widget:TopLight(fill)
             thumb.__monetThumbFill = fill
             self:Track(fill)
 
@@ -403,9 +509,10 @@ end
 function Skin:Slider(slider)
     if not slider then return slider end
 
-    self:ControlBg(slider, { thickness = 1, bgAlpha = 0.7 })
-
-    -- Thumb: documented accessor first, then the common member names.
+    -- Thumb FIRST, because Skin:Strip fades every texture region of the slider and the thumb is one of
+    -- them.  UIPanelSliderTemplate draws its trough as Left/Middle/Right textures on the slider itself,
+    -- so skipping Strip leaves the stock blue trough sitting right under the Monet plate.  This was the
+    -- one control helper that never called Strip; Skin:EditBox fades the very same three explicitly.
     local thumb
     if type(slider.GetThumbTexture) == "function" then
         local ok, tex = pcall(slider.GetThumbTexture, slider)
@@ -413,13 +520,17 @@ function Skin:Slider(slider)
     end
     if not thumb then thumb = slider.Slider or slider.Thumb end
 
+    self:Strip(slider, { keepTexture = thumb })
+    self:ControlBg(slider, { thickness = 1, bgAlpha = 0.7 })
+
     if thumb then
         if type(thumb.CreateTexture) == "function" then
             if not thumb.__monetThumbFill then
                 self:ControlBg(thumb, { thickness = 1, bgAlpha = 0.9 })
                 local fill = thumb:CreateTexture(nil, "ARTWORK")
                 fill:SetAllPoints(thumb)
-                fill:SetTexture(Media.texture["monet-barfill"])
+                fill:SetTexture(Media.texture["monet_barfill"])
+                Widget:TopLight(fill)
                 thumb.__monetThumbFill = fill
                 self:Track(fill)
                 local function tint()
@@ -430,7 +541,12 @@ function Skin:Slider(slider)
                 self:OnTheme(tint)
             end
         elseif thumb.SetTexture then
-            pcall(thumb.SetTexture, thumb, Media.texture["monet-barfill"])
+            -- Go through SwapArt, not a raw SetTexture: SwapArt records the old art and sets
+            -- __monetArt, so Rollback can put Blizzard's thumb back.  A bare SetTexture left our
+            -- barfill welded on -- a half-rolled-back skin, which is the one thing the Record/Rollback
+            -- design promises will not happen.
+            self:SwapArt(thumb, "monet_barfill")
+            Widget:TopLight(thumb)
             local function tint()
                 local r, g, b = Color:GetBorder()
                 pcall(thumb.SetVertexColor, thumb, r, g, b, 0.95)
@@ -468,7 +584,7 @@ function Skin:CheckButton(check, opts)
     local checked = check.GetCheckedTexture and check:GetCheckedTexture()
     if checked then
         -- Our own checkmark art, tinted into the theme on top of it.
-        checked = self:SwapArt(checked, "monet-check") or checked
+        checked = self:SwapArt(checked, "monet_check") or checked
         if checked.SetVertexColor then
             local r, g, b = Color:GetBorder()
             pcall(checked.SetVertexColor, checked, r, g, b)
@@ -484,10 +600,49 @@ function Skin:CheckButton(check, opts)
 
     -- The stock highlight is gone, so hover feedback rides on the plate border.
     self:HoverHighlight(check, { alpha = (opts and opts.borderAlpha) or 1 })
+    self:ControlState(check, { alpha = (opts and opts.borderAlpha) or 1, bgAlpha = (opts and opts.bgAlpha) or 0.55 })
 
     local text = self:GetText(check) or check.Text
     if text then self:Font(text, (opts and opts.size) or 12, "pixel", nil, "neutral") end
     return check
+end
+
+--- Restyle a radio button.  Deliberately NOT a CheckButton alias: a radio's glyph is a dot, not a tick,
+-- and M:Buttons/SkinButtonsIn dispatch on GetObjectType() so a CheckButton skin here gave every radio
+-- button in the skinned windows a checkmark.  Structure mirrors Skin:CheckButton so the two read as
+-- siblings -- same plate, same press/disabled behaviour, same hover, different art.
+function Skin:RadioButton(radio, opts)
+    if not radio then return radio end
+
+    if radio.GetNormalTexture   then self:Fade(radio:GetNormalTexture()) end
+    if radio.GetPushedTexture   then self:Fade(radio:GetPushedTexture()) end
+    if radio.GetDisabledTexture then self:Fade(radio:GetDisabledTexture()) end
+    if radio.GetHighlightTexture then self:Fade(radio:GetHighlightTexture()) end
+
+    self:ControlBg(radio, { thickness = 1, bgAlpha = (opts and opts.bgAlpha) or 0.55 })
+
+    local checked = radio.GetCheckedTexture and radio:GetCheckedTexture()
+    if checked then
+        checked = self:SwapArt(checked, "monet_radio") or checked
+        if checked.SetVertexColor then
+            local r, g, b = Color:GetBorder()
+            pcall(checked.SetVertexColor, checked, r, g, b)
+            if not radio.__monetRadioTint then
+                radio.__monetRadioTint = true
+                self:OnTheme(function()
+                    local nr, ng, nb = Color:GetBorder()
+                    if checked.SetVertexColor then checked:SetVertexColor(nr, ng, nb) end
+                end)
+            end
+        end
+    end
+
+    self:HoverHighlight(radio, { alpha = (opts and opts.borderAlpha) or 1 })
+    self:ControlState(radio, { alpha = (opts and opts.borderAlpha) or 1, bgAlpha = (opts and opts.bgAlpha) or 0.55 })
+
+    local text = self:GetText(radio) or radio.Text
+    if text then self:Font(text, (opts and opts.size) or 12, "pixel", nil, "neutral") end
+    return radio
 end
 
 --- Restyle a drop-down button (Blizzard UIDropDownMenuButtonTemplate).
@@ -535,17 +690,17 @@ function Skin:SwapArt(tex, key)
     return tex
 end
 
---- Restyle a standard close button into the theme, with our own art under it: normal = monet-close-normal, pushed = monet-close-push, highlight = monet-close-hover over the top (its blend mode is untouched, so hover only brightens the art).
+--- Restyle a standard close button into the theme, with our own art under it: normal = monet_close_normal, pushed = monet_close_push, highlight = monet_close_hover over the top (its blend mode is untouched, so hover only brightens the art).
 -- The highlight is left white -- an additive tint would go invisible on the darker border colours.
 function Skin:CloseButton(button)
     if not button then return button end
 
     local normal = self:SwapArt(button.GetNormalTexture and button:GetNormalTexture(),
-        "monet-close-normal")
+        "monet_close_normal")
     local pushed = self:SwapArt(button.GetPushedTexture and button:GetPushedTexture(),
-        "monet-close-push")
+        "monet_close_push")
     self:SwapArt(button.GetHighlightTexture and button:GetHighlightTexture(),
-        "monet-close-hover")
+        "monet_close_hover")
 
     if normal and normal.SetVertexColor then
         local r, g, b = Color:GetBorder()
