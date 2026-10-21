@@ -16,7 +16,7 @@
 
 - **环境驱动配色** —— 接入 [`LibMonetColor-1.0`](#-依赖) 后颜色由当前区域环境色实时推导，而非静态色表；库缺失时优雅降级为内置默认配色。
 - **模块松耦合** —— 模块之间只通过 `Utils/EventBus.lua` 通信，互不直接依赖；每个模块都能单独开关，关掉即**完整回退**到暴雪原样。
-- **自绘材质** —— 21 组矢量 UI 材质（关闭钮三态 / 勾选框 / 状态条 / 图标 / 角饰）由 `tools/regen-textures.js` 生成，不引外部贴图。
+- **自绘材质** —— 33 张自绘 UI 贴图（关闭钮三态 / 勾选框 / 状态条 / 图标 / 角饰 / 织纹），结构性的走脚本（`tools/regen-textures.js`）、可改的走 SVG（`tools/svg/*.svg`）、笔触走 GIMP，不引外部贴图。
 - **无限客户端优先** —— 单位数值一律过保密值查询（`Utils/Secrets.lua`）；`Interface 16001`，Lua 5.1，不使用 5.2+ 特性。
 - **永不抛错** —— 访问暴雪帧一律存在性 / `pcall` 防护；失败一次性告警，不刷屏。
 
@@ -82,34 +82,22 @@ MonetUI/
 └── tools/               材质/遮罩生成脚本 + API 审核（`api-audit.js`）
 ```
 
-## 🔍 API 审核
-
-`tools/api-audit.js` 把源码与暴雪 API 文档转储（`Gethe/wow-ui-source`，branch `forever`，含 `FUNCTIONS_INDEX.md` / `EVENTS_INDEX.md` / `Blizzard_APIDocumentationGenerated/`）静态对撞，可随时复跑：
-
-```bash
-node tools/api-audit.js                       # 本体（Core / Modules / Utils / Config）
-node tools/api-audit.js --libs                # 连 Libs/ 一起
-node tools/api-audit.js <apiDir> <addonDir>   # 自定义基准 / 插件路径
-```
-
-- **HARD**（有则退出码 1）：文档里不存在的 `C_*`、未知事件、未知 `Enum.X.Y`、`SecureOnly` 调用、实参个数越界。
-- **SOFT**：legacy 全局（文档里已有 `C_*` 现代替代，如 `InCombatLockdown`）、客户端 deprecated shim（如 `C_Spell.GetSpellLossOfControlCooldown`，实机由 `Blizzard_DeprecatedSpellScript` 提供）。
-
-不覆盖（该基准本身就没有）：控件方法（`SetPoint` / `SetOwner` / `SetBackdrop*`）、FrameXML 全局（`GameTooltip_SetDefaultAnchor` 等）、字体对象与贴图路径 —— 这些对 `hated-wow` 的随包 UI 源码核。
+> 仓库只跟踪**发行集**（`.toc` 列出的文件 + `Assets/` + `Libs/`）。`tools/`、`docs/`、`AGENTS.md` 等开发资料按 `.gitignore` 不入库 —— 克隆下来是可直接用的插件，不是完整开发环境。静态审核与材质生成器的用法写在各脚本头部注释里。
 
 ## ⚠️ 状态
 
-**Phase 1/2 —— 离线验证通过，待实机验收。**
+**离线验证通过，待实机验收。**
 
-- `wuxian check` 全绿：**0 error**；仅 2 个 warning，均为有意为之（矩形化小地图覆写 `GetMinimapShape`）。
-- 待验收：自绘材质接线、信息栏、`load` / `try` 热加载。
-- 逐项进度与验收清单见 [`MonetUI.md`](MonetUI.md) 与 [`TODO.md`](TODO.md)；客户端约定见 [`AGENTS.md`](AGENTS.md)。
+- `wuxian check`（离线）全绿：**0 error / 0 warning**。
+- 静态 API 审核 `tools/api-audit.js`：**0 hard**，8 条 soft 均为 `InCombatLockdown`（文档已改为 `C_RestrictedActions.InCombatLockdown`）。
+- 待验收：自绘材质接线、信息栏、`load` / `try` 热加载、小队 / 团队框架战斗内刷新。
+- 逐项进度、验收清单与客户端约定记在**本地**开发文档（`AGENTS.md`、`MonetUI.md`、`TODO.md`，按 `.gitignore` 不入库）。
 
 ## 📄 协议
 
 - **MonetUI 自身代码**：[MIT](LICENSE)。
 - **随包第三方组件**保留各自许可：`LibStub`（公有领域）、`LibActionButton-1.0`（BSD-3-Clause，仅改四处）。完整清单与改动说明见 [`Libs/NOTICE.md`](Libs/NOTICE.md)。
-- **随包字体**各自授权：FusionPixel 的 OFL 声明见 `Assets/Fonts/OFL-FusionPixel.txt`。
+- **随包字体**各自授权：FusionPixel 为 SIL OFL 1.1（全文 `Assets/Fonts/OFL-FusionPixel.txt`）、Super Effective 为 CC BY-SA 3.0；逐条来源见 [`Assets/Fonts/NOTICE.md`](Assets/Fonts/NOTICE.md)。
 
 ---
 
