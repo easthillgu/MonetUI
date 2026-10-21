@@ -9,6 +9,7 @@
 # Binary assets: never touch
 *.ttf  binary
 *.otf  binary
+*.tga  binary
 *.png  binary
 *.jpg  binary
 *.blp  binary

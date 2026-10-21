@@ -8,7 +8,7 @@ local LibStub = _G.LibStub
 local LMC = LibStub and LibStub("LibMonetColor-1.0", true)
 
 ns.name = ADDON_NAME
-ns.version = "0.10.0"
+ns.version = "0.11.0"
 
 local DEFAULTS = {
     enabled = true,

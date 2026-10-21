@@ -14,10 +14,11 @@ node_modules/
 .opencode/
 
 # ---- 开发记录与过程文档 ----
-# 例外只有两个：项目介绍（README.md）与第三方库许可（Libs/NOTICE.md）。
+# 例外只有三个：项目介绍（README.md）、第三方库许可（Libs/NOTICE.md）、字体许可（Assets/Fonts/NOTICE.md）。
 *.md
 !README.md
 !Libs/NOTICE.md
+!Assets/Fonts/NOTICE.md
 docs/
 
 # ---- 过程产物 / 中间文件 ----

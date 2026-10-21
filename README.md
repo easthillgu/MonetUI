@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](#-协议)
 ![Interface](https://img.shields.io/badge/Interface-16001-orange.svg)
-![Version](https://img.shields.io/badge/version-0.10.0-informational.svg)
+![Version](https://img.shields.io/badge/version-0.11.0-informational.svg)
 ![Lua](https://img.shields.io/badge/Lua-5.1-2C2D72.svg)
 ![Status](https://img.shields.io/badge/status-待实机验证-yellow.svg)
 
