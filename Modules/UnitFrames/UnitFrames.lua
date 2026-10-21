@@ -1076,20 +1076,10 @@ local function HookAuraRelayout()
 end
 ]==]
 
---- Resolve the frame a stored position is anchored to; "UIParent"/nil means the screen.
-local function ResolveRelative(stored)
-    local name = stored.relativeTo
-    if not name or name == "UIParent" then return UIParent end
-    return frames[name] or UIParent
-end
-
+--- 摆好一个单位框。位置读写统一交给 Utils/Mover.lua：归一落点、网格/互相吸附、战斗锁、依赖顺序都在那边。
 local function PositionFrame(frame)
-    local db = ns:DB()
-    local stored = (db.unitFrames and db.unitFrames[frame.unit]) or frame.position or {}
-    local point = stored.point or "CENTER"
-    local relativePoint = stored.relativePoint or point
-    frame:ClearAllPoints()
-    frame:SetPoint(point, ResolveRelative(stored), relativePoint, stored.x or 0, stored.y or 0)
+    if not frame then return end
+    ns.Mover:Apply(frame.unit)
 end
 
 --- A FontString anchored above the bar: side "LEFT", "RIGHT" or "CENTER".
@@ -1278,9 +1268,17 @@ local function CreateUnitFrame(unit, position)
         end
     end
 
+    if layout.name and layout.level then
+        frame.level = Widget:Font(frame, SMALL_SIZE, "pixel", "neutral", "RIGHT")
+        -- Level anchored to TOPRIGHT of frame
+        frame.level:SetPoint("BOTTOMRIGHT", frame, "TOPRIGHT", 0, TEXT_GAP)
+    end
+
     if layout.healthText then
         frame.healthText = Widget:Font(frame, SMALL_SIZE, "pixel", { r = 1, g = 1, b = 1 }, "RIGHT")
-        -- Health% sits 2px left of Level (or right of Name if no Level)
+        -- Health% sits 2px left of Level (or right of Name if no Level).
+        -- The level must exist first: this used to test frame.level before it was
+        -- created, so every health text silently anchored after the name instead.
         if frame.level then
             frame.healthText:SetPoint("RIGHT", frame.level, "LEFT", -2, 0)
         elseif frame.name then
@@ -1290,38 +1288,18 @@ local function CreateUnitFrame(unit, position)
         end
     end
 
-    if frame.name and layout.level then
-        frame.level = Widget:Font(frame, SMALL_SIZE, "pixel", "neutral", "RIGHT")
-        -- Level anchored to TOPRIGHT of frame
-        frame.level:SetPoint("BOTTOMRIGHT", frame, "TOPRIGHT", 0, TEXT_GAP)
-    end
-
     Widget:Theme(frame, { thickness = border, bgAlpha = 0.9 })
     Widget:UnitTooltip(frame, unit)
     frame:HookScript("OnEnter", function(self) HoverBorder(self, true) end)
     frame:HookScript("OnLeave", function(self) HoverBorder(self, false) end)
 
-    frame:SetMovable(true)
-    frame:SetClampedToScreen(true)
-    frame:RegisterForDrag("LeftButton")
-    frame:SetScript("OnDragStart", function(self) self:StartMoving() end)
-    frame:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        local point, relativeTo, relativePoint, x, y = self:GetPoint()
-        local db = ns:DB()
-        local stored = db.unitFrames[unit]
-        stored.point         = point
-        stored.relativeTo    = (relativeTo == UIParent) and "UIParent"
-                               or (relativeTo and relativeTo.unit) or "UIParent"
-        stored.relativePoint = relativePoint
-        stored.x = Math:Round(x, 0)
-        stored.y = Math:Round(y, 0)
-
-        -- Re-anchor in dependency order so chained frames (player -> target -> targettarget) follow.
-        for _, name in ipairs(UNITS) do
-            if frames[name] then PositionFrame(frames[name]) end
-        end
-    end)
+    -- 拖动 / 吸附 / 位置记忆统一走 Utils/Mover.lua（默认位置是调用方给的 position 表）。
+    ns.Mover:Register(frame, unit, {
+        group   = "unitframes",
+        label   = UNIT_LABEL[unit] or unit,
+        default = position,
+        store   = function() return ns:DB().unitFrames[unit] end,
+    })
 
     frame.position = position
     frame:Hide()

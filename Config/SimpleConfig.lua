@@ -23,7 +23,7 @@ local scrollOffset = 0
 local MODULE_ORDER = {
     "UnitFrames", "Cooldown", "BuffFrame",
     "Minimap", "BagFrame", "Bags", "QuestTracker", "ActionBars", "Nameplates", "Skins",
-    "InfoBar",
+    "InfoBar", "Tooltip",
 }
 
 local MODULE_LABEL = {
@@ -38,6 +38,7 @@ local MODULE_LABEL = {
     Nameplates   = "姓名板 (Nameplates)",
     Skins        = "界面美化 (Skins)",
     InfoBar      = "信息栏 (InfoBar)",
+    Tooltip      = "鼠标提示 (Tooltip)",
 }
 
 local function MakeCheckbox(parent, label, yOffset, getter, setter)
@@ -201,6 +202,12 @@ end
 local function RefreshActionBars()
     local actionBars = ns:GetModule("ActionBars")
     if actionBars and actionBars.Apply then actionBars:Apply() end
+end
+
+--- 小队 / 团队框架改尺寸或开关都走 Apply：它只在脱战重贴安全头（战斗中会自动排队）。
+local function RefreshGroups()
+    local groups = ns:GetModule("GroupFrames")
+    if groups and groups.Apply then groups:Apply() end
 end
 
 --- Nameplate settings live in MonetUIDB.nameplates; Apply re-pushes the CVars, the hitbox size and repaints whatever is on screen.
@@ -566,6 +573,14 @@ function SimpleConfig:Build()
         mapHint:SetText("追踪 / 插件收纳开着时，暴雪原来那一个被搬进地图，不再单独隐藏。")
         y = y - 30
 
+        -- 手势速查（写在面板里，免得翻文档）
+        local gestureHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
+        gestureHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
+        gestureHint:SetWidth(352)
+        gestureHint:SetJustifyH("LEFT")
+        gestureHint:SetText("左键打标记（四个角也算）· 中键开追踪菜单 · 右键微型菜单 · 滚轮缩放")
+        y = y - 30
+
         MakeDropdown(content, y, "边框粗细", {
             { value = 1, text = "1 px" },
             { value = 2, text = "2 px（默认）" },
@@ -710,6 +725,73 @@ function SimpleConfig:Build()
         function(value)
             ns:DB().unitFrames.showTargetAuras = value
             RefreshUnitFrames()
+        end)
+    y = y - 30
+
+    MakeSeparator(content, y, "小队 / 团队框架")
+    y = y - 28
+
+    local function GroupGetter(section, key, fallback)
+        return function()
+            local cfg = ns:DB().groupFrames
+            local value = cfg and cfg[section] and cfg[section][key]
+            if value == nil then return fallback end
+            return value
+        end
+    end
+
+    local function GroupSetter(section, key)
+        return function(value)
+            ns:DB().groupFrames[section][key] = value
+            RefreshGroups()
+        end
+    end
+
+    MakeCheckbox(content, "小队框架（自己 + 小队 1-4）", y,
+        GroupGetter("party", "enabled", true), GroupSetter("party", "enabled"))
+    y = y - 26
+
+    MakeCheckbox(content, "团队框架（8 组 × 5 人）", y,
+        GroupGetter("raid", "enabled", true), GroupSetter("raid", "enabled"))
+    y = y - 26
+
+    MakeCheckbox(content, "小队框里显示自己", y,
+        GroupGetter("party", "showPlayer", true), GroupSetter("party", "showPlayer"))
+    y = y - 26
+
+    MakeCheckbox(content, "隐藏暴雪自带的小队 / 团队框", y,
+        function() return ns:DB().groupFrames.hideBlizzard end,
+        function(value)
+            ns:DB().groupFrames.hideBlizzard = value
+            RefreshGroups()
+        end)
+    y = y - 30
+
+    local PARTY_WIDTHS = {
+        { value = 100, text = "100 px" },
+        { value = 110, text = "110 px" },
+        { value = 120, text = "120 px" },
+        { value = 140, text = "140 px" },
+    }
+    MakeDropdown(content, y, "小队框宽度", PARTY_WIDTHS,
+        GroupGetter("party", "width", 110), GroupSetter("party", "width"))
+    y = y - 28
+
+    local RAID_WIDTHS = {
+        { value = 60, text = "60 px" },
+        { value = 72, text = "72 px" },
+        { value = 84, text = "84 px" },
+        { value = 96, text = "96 px" },
+    }
+    MakeDropdown(content, y, "团队框宽度", RAID_WIDTHS,
+        GroupGetter("raid", "width", 72), GroupSetter("raid", "width"))
+    y = y - 30
+
+    MakeCheckbox(content, "锁定所有可移动框（网格吸附与拖动）", y,
+        function() return ns:DB().mover.locked end,
+        function(value)
+            ns:DB().mover.locked = value
+            -- 锁是即时判断的（拖动时才读），不需要重贴：下一帧拖动就按新状态走
         end)
     y = y - 30
 
@@ -939,6 +1021,29 @@ function SimpleConfig:Build()
         y = y - 4
     end
 
+    local tooltip = ns:GetModule("Tooltip")
+    if tooltip then
+        MakeSeparator(content, y, "鼠标提示")
+        y = y - 26
+
+        -- 位置是全局行为：一个开关管所有 GameTooltip（物品 / 技能 / 角色 / 光环 / 动作条……），
+        -- 和信息栏自己的悬停提示也共用。
+        MakeCheckbox(content, "提示框跟随鼠标（物品 / 技能 / 角色…）", y,
+            function() return tooltip:GetSetting("follow") end,
+            function(value)
+                tooltip:Settings().follow = value and true or false
+                tooltip:Apply()
+            end)
+        y = y - 26
+
+        local tipHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
+        tipHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
+        tipHint:SetWidth(350)
+        tipHint:SetJustifyH("LEFT")
+        tipHint:SetText("关＝停在暴雪默认位置（右下角锚点，编辑模式可移动）。边框与底色在上方「界面美化 → 系统 → 鼠标提示边框」。")
+        y = y - 44
+    end
+
     local infobar = ns:GetModule("InfoBar")
     if infobar then
         MakeSeparator(content, y, "信息栏")
@@ -987,6 +1092,22 @@ function SimpleConfig:Build()
             function(value)
                 infobar:Settings().combatPulse = value and true or false
                 if infobar.RefreshPulse then infobar.RefreshPulse() end
+            end)
+        y = y - 26
+
+        MakeCheckbox(content, "底部经验线（悬停三角看数值）", y,
+            function() return infobar:GetSetting("xp") end,
+            function(value)
+                infobar:Settings().xp = value and true or false
+                ApplyBar()
+            end)
+        y = y - 26
+
+        MakeCheckbox(content, "满级后这条线改显示声望", y,
+            function() return infobar:GetSetting("xpFaction") end,
+            function(value)
+                infobar:Settings().xpFaction = value and true or false
+                ApplyBar()
             end)
         y = y - 26
 

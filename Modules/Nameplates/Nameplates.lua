@@ -363,7 +363,8 @@ local dressedDebuffs = 0
 -- 实机上如果 theme 一直涨，说明这个客户端把驱散色烘在贴图里，顶点色读不出来。
 local dispelBorders, themeBorders = 0, 0
 
-local DEBUFF_ICON_CROP = 0.08          -- 和 Widget:Icon / 施法图标同一个裁边比例
+local DEBUFF_W, DEBUFF_H = 18, 14       -- 和目标框的原生 AuraContainer 同一个矩形
+local DEBUFF_V_CROP = 2                 -- 18:14 的竖向裁边（上下各 2px）
 local DEBUFF_TEXT_MIN, DEBUFF_TEXT_MAX = 8, 14
 
 --- 按名字取一张贴图（只要有 SetTexCoord 就当候选）。
@@ -392,9 +393,7 @@ local function DressDebuffButton(button)
         dressedDebuffs = dressedDebuffs + 1
 
         local okW, bw = pcall(button.GetWidth, button)
-        local okH, bh = pcall(button.GetHeight, button)
         if not (okW and type(bw) == "number" and bw > 0) then bw = nil end
-        if not (okH and type(bh) == "number" and bh > 0) then bh = nil end
 
         local okR, regions = pcall(function() return { button:GetRegions() } end)
         if not okR or not regions then regions = {} end
@@ -421,8 +420,9 @@ local function DressDebuffButton(button)
             end
         end
         if icon then
-            pcall(icon.SetTexCoord, icon, DEBUFF_ICON_CROP, 1 - DEBUFF_ICON_CROP,
-                DEBUFF_ICON_CROP, 1 - DEBUFF_ICON_CROP)
+            pcall(icon.SetTexCoord, icon, 0, 1,
+                DEBUFF_V_CROP / DEBUFF_W, 1 - DEBUFF_V_CROP / DEBUFF_W)
+            d.icon = icon
         end
 
         -- 3) 边框：一律淡掉暴雪的厚边框，用 1px 重画。
@@ -465,6 +465,8 @@ local function DressDebuffButton(button)
                     and c:GetObjectType() == "Cooldown" then
                     pcall(c.SetDrawEdge, c, false)
                     pcall(c.SetDrawSwipe, c, true)
+                    pcall(c.SetAllPoints, c, button)   -- follow the 18x14 rectangle
+                    d.cooldown = c
                     break
                 end
             end
@@ -480,9 +482,22 @@ local function DressDebuffButton(button)
             end
         end
 
-        -- 字号跟着图标走：26px 的图标配 11 号数字。
+        -- 字号跟着矩形走：14px 高的图标配 8 号数字。
         d.size = math.max(DEBUFF_TEXT_MIN, math.min(DEBUFF_TEXT_MAX,
-            bh and math.floor(bh * 0.42 + 0.5) or 10))
+            math.floor(DEBUFF_H * 0.42 + 0.5)))
+    end
+
+    -- 每一次显隐都把矩形和图标压回去：这套按钮是暴雪的，回收 / 重排时它会把尺寸
+    -- 和贴图坐标写回去；只在第一次设，第二次显示就退回方块了。
+    pcall(button.SetSize, button, DEBUFF_W, DEBUFF_H)
+    if d.icon then
+        pcall(d.icon.ClearAllPoints, d.icon)
+        pcall(d.icon.SetAllPoints, d.icon, button)
+        pcall(d.icon.SetTexCoord, d.icon, 0, 1,
+            DEBUFF_V_CROP / DEBUFF_W, 1 - DEBUFF_V_CROP / DEBUFF_W)
+    end
+    if d.cooldown then
+        pcall(d.cooldown.SetAllPoints, d.cooldown, button)
     end
 
     -- 字体每次重设：暴雪回收按钮时会把字体写回去。

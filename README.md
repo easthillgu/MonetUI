@@ -25,15 +25,17 @@
 | 模块 | 说明 |
 |------|------|
 | **UnitFrames** | 玩家 / 目标 / 焦点 / 宠物单位框架：血条、能量、名字、等级、提示，连击点小格；可拖动并保存位置。 |
+| **GroupFrames** | 小队（自己 + 1–4）/ 团队（8 组 × 5 人）框架：暴雪安全头 + Monet 皮肤，职业色血条、能量、名字、职责图标、距离淡出、当前目标高亮边框、点击选中 / 右键菜单；可拖动并保存位置，默认接管暴雪自带的小队 / 团队框。 |
 | **Cooldown** | 冷却数字 / 充能 / 快捷键字体美化，技能可用状态着色。 |
 | **BuffFrame** | 自绘增益 / 减益网格，按时长排序。 |
 | **Minimap** | 小地图矩形化（256×190），去掉坐标与时钟，配主题面板。 |
 | **Bags** | 分类背包（含账号银行页切片）。旧排列式 `BagFrame` 保留，待其实机验证通过后退役。 |
 | **QuestTracker** | 任务追踪主题边框 + 标题栏拖动 + 位置保存。 |
-| **ActionBars** | 1–8 号自绘动作条（基于 `LibActionButton-1.0`），接管宠物 / 姿态条，隐藏暴雪动作条与背包条。 |
+| **ActionBars** | 1–8 号自绘动作条（基于 `LibActionButton-1.0`），接管宠物 / 姿态条，隐藏暴雪动作条与背包条。宠物条的「自动施法」提示用自绘的像素环替掉暴雪那圈旋转的蚂蚁。 |
 | **Nameplates** | 挂在暴雪姓名板底座上的细条姓名板：血条 / 名字等级 / 百分比 / 施法条 / 借用暴雪减益 / 仇恨与目标描边。 |
-| **InfoBar** | 贴屏幕边缘的整幅细条 + 6 个数据块（金钱 / 耐久 / 货币 / 延迟帧率内存 / 专精 / 好友），悬停淡入、战斗呼吸、宠物对战自动隐藏。 |
+| **InfoBar** | 贴屏幕边缘的整幅细条 + 6 个数据块（金钱 / 耐久 / 货币 / 延迟帧率内存 / 专精 / 好友），悬停淡入、战斗呼吸、宠物对战自动隐藏；底边衬线就是经验条（进度＝线的长度，进度头一枚 ▲，涨经验时三角滑过去并白热、升级时闪两下，悬停三角才弹具体数值），满级后同一条线改显示当前监视的声望、颜色随关系走。 |
 | **Skins** | 暴雪窗口美化：任务、世界地图、角色、收藏、社交、交易（邮件 / 商贩 / 拍卖 / 专业）、系统、Forever，统一铺 Monet 底板 / 边框 / 字体；可逐窗口开关。 |
+| **Tooltip** | 鼠标提示位置：一个开关让所有提示框（物品 / 技能 / 角色 / 光环 / 动作条…）跟着鼠标走，关掉则停在暴雪默认的右下角锚点。外观（边框 / 底色 / 字体）在 Skins 的「鼠标提示边框」里，默认开。 |
 
 ## 📦 安装
 
@@ -71,14 +73,29 @@
 MonetUI/
 ├── MonetUI.toc          入口清单
 ├── Core.lua             SavedVariables / 模块注册与生命周期 / 主题管线 / 斜杠命令
-├── Utils/               Math Secrets Media EventBus Color Widget Skin
+├── Utils/               Math Secrets Media EventBus Color Widget Mover Skin
 ├── Config/              SimpleConfig 配置面板
 ├── Modules/             各功能模块（见上表）
 ├── Libs/                随包库 + NOTICE.md（第三方许可清单）
 ├── Assets/              字体 / 自绘材质 / 图标
 ├── docs/                开发记录、布局与材质预览页
-└── tools/               材质与遮罩生成脚本
+└── tools/               材质/遮罩生成脚本 + API 审核（`api-audit.js`）
 ```
+
+## 🔍 API 审核
+
+`tools/api-audit.js` 把源码与暴雪 API 文档转储（`Gethe/wow-ui-source`，branch `forever`，含 `FUNCTIONS_INDEX.md` / `EVENTS_INDEX.md` / `Blizzard_APIDocumentationGenerated/`）静态对撞，可随时复跑：
+
+```bash
+node tools/api-audit.js                       # 本体（Core / Modules / Utils / Config）
+node tools/api-audit.js --libs                # 连 Libs/ 一起
+node tools/api-audit.js <apiDir> <addonDir>   # 自定义基准 / 插件路径
+```
+
+- **HARD**（有则退出码 1）：文档里不存在的 `C_*`、未知事件、未知 `Enum.X.Y`、`SecureOnly` 调用、实参个数越界。
+- **SOFT**：legacy 全局（文档里已有 `C_*` 现代替代，如 `InCombatLockdown`）、客户端 deprecated shim（如 `C_Spell.GetSpellLossOfControlCooldown`，实机由 `Blizzard_DeprecatedSpellScript` 提供）。
+
+不覆盖（该基准本身就没有）：控件方法（`SetPoint` / `SetOwner` / `SetBackdrop*`）、FrameXML 全局（`GameTooltip_SetDefaultAnchor` 等）、字体对象与贴图路径 —— 这些对 `hated-wow` 的随包 UI 源码核。
 
 ## ⚠️ 状态
 
@@ -91,7 +108,7 @@ MonetUI/
 ## 📄 协议
 
 - **MonetUI 自身代码**：[MIT](LICENSE)。
-- **随包第三方组件**保留各自许可：`LibStub`（公有领域）、`LibActionButton-1.0`（BSD-3-Clause，仅改三行）。完整清单与改动说明见 [`Libs/NOTICE.md`](Libs/NOTICE.md)。
+- **随包第三方组件**保留各自许可：`LibStub`（公有领域）、`LibActionButton-1.0`（BSD-3-Clause，仅改四处）。完整清单与改动说明见 [`Libs/NOTICE.md`](Libs/NOTICE.md)。
 - **随包字体**各自授权：FusionPixel 的 OFL 声明见 `Assets/Fonts/OFL-FusionPixel.txt`。
 
 ---

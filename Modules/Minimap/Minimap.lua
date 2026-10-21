@@ -40,12 +40,39 @@ local DEFAULT_MASK = "ui-hud-minimap-frame-generic-mask"
 local panel, zoneText, blocker
 local original  = nil      -- 首次套用时的快照，Restore() 依此还原
 local active    = false
-local pending   = false    -- 战斗中被拒的套用，脱战后补做
-local restoring = false    -- 还原被战斗挡住，等脱战补做
 local warned    = {}       -- 一次性提示
+
+-- 战斗队列：战斗中受保护的方法会被**无声拒绝**（连报错都没有），把要做的事按 key
+-- 排队，脱战（PLAYER_REGEN_ENABLED）后排空。同一个 key 只排一次 —— 多个按钮同时被拒
+-- 也只补一次（Ellesmere 的战斗队列就是这么去重的）。
+local queued = {}
+
+-- 前置声明：排空队列要用到 Restore / Skin，而它们定义在后面
+local Restore, Skin
+
+--- 排队（按 key 去重）。
+local function Queue(key)
+    queued[key] = true
+end
+
+--- 排空队列。先还原再套用：两者互斥，还原优先；每个动作单独 pcall，
+--- 一个失败不拖累另一个，失败的那个重新排回去等下一次脱战。
+local function RunQueue()
+    local wantRestore = queued["restore"]
+    local wantSkin    = queued["skin"]
+    queued = {}
+    if wantRestore then
+        if not pcall(Restore) then Queue("restore") end
+        return
+    end
+    if wantSkin then
+        if not pcall(Skin) then Queue("skin") end
+    end
+end
 
 local shapeOverridden = false
 local originalShape   = nil
+local shapeHadOriginal = false   -- 接管前这个全局本来存不存在（决定还原时是放回还是删掉）
 local pingSuppressed  = false   -- 右键要弹我们的菜单，暴雪那条"右键打标记"要堵掉
 local pingOriginal    = nil
 
@@ -140,7 +167,7 @@ local function HookShow(obj, entry)
         if not active then return end
         if not Settings()[entry.key] then return end
         if InCombatLockdown() then
-            pending = true
+            Queue("skin")
             return
         end
         if entry.art then
@@ -153,14 +180,14 @@ local function HookShow(obj, entry)
 end
 
 --- 隐藏一个集群按钮。
---- 战斗中 Hide() 会被无声拒绝（连报错都没有），所以先记 pending，脱战后再补一次。
+--- 战斗中 Hide() 会被无声拒绝（连报错都没有），所以先排队，脱战后再补一次。
 local function HideObject(obj, entry)
     RememberObject(obj)
     if entry.art then
         pcall(obj.SetAlpha, obj, 0)
     else
         if InCombatLockdown() and obj.IsProtected and obj:IsProtected() then
-            pending = true
+            Queue("skin")
         else
             pcall(obj.Hide, obj)
         end
@@ -221,30 +248,119 @@ local function ShapeMode()
     return "resize"
 end
 
---- 把地图变成矩形。
-local function ReshapeMinimap(minimap)
-    if ShapeMode() == "mask" then
-        pcall(minimap.SetMaskTexture, minimap, ns.Media:Texture("minimapRect"))
-        pcall(minimap.SetSize, minimap, MASK_CANVAS, MASK_CANVAS)
-        pcall(minimap.SetHitRectInsets, minimap, 0, 0, MASK_CROP, MASK_CROP)
-    else
-        pcall(minimap.SetMaskTexture, minimap, ns.Media.texture.blank)
-        pcall(minimap.SetSize, minimap, MAP_WIDTH, MAP_HEIGHT)
-        pcall(minimap.SetHitRectInsets, minimap, 0, 0, 0, 0)
-    end
-    pcall(minimap.SetClampRectInsets, minimap, 0, 0, 0, 0)
-    pcall(minimap.SetClampedToScreen, minimap, true)
+--- 逼引擎按新尺寸重画地图。
+--- 改了画布尺寸之后，引擎有时还沿用旧视口（地图比例不对 / 像是旧图）。
+--- Ellesmere 的做法：抖一下缩放档位再抖回来 —— 引擎被这个变化惊动，就按新尺寸重画了；
+--- 抖完立刻抖回来，肉眼只看到一瞬间。
+local function NudgeZoom(minimap)
+    if not minimap.GetZoom or not minimap.SetZoom then return end
+    local ok, zoom = pcall(minimap.GetZoom, minimap)
+    if not ok or type(zoom) ~= "number" then return end
+    if Secrets.IsSecret(zoom) then return end
+    pcall(minimap.SetZoom, minimap, zoom > 0 and 0 or 1)
+    pcall(minimap.SetZoom, minimap, zoom)
 end
 
---- 第三方小地图按钮会问 GetMinimapShape 决定摆位，方形答案让它们待在矩形里。
---- 这个客户端根本没有这个全局（手册和暴雪源码里都查不到），所以只在它真的存在
---- 时才覆写，免得凭空造一个没人读的全局（那正是 wuxian check 报的 global-write）。
+--- 把地图变成矩形。
+---
+--- 两种方案的差别在**画布和可见区是不是同一块**：
+---   "resize" —— 画布直接设成 256×190，引擎按新视口重绘：没有被裁掉的带子，引擎
+---                那层追踪点（blip）也就不会漏到地图外面。客户端自己的圆形遮罩要去
+---                掉：正方遮罩套到矩形画布上会被拉成椭圆，把地图四角切掉，所以换成
+---                一块什么都不裁的全白遮罩。命中区 0,0,0,0（整块都可见可点）。
+---   "mask"   —— 老方案：画布保持正方 256×256，用自己的遮罩裁掉上下两条。留作回退：
+---                万一这个客户端重绘出来的地图变形了，就切回这一档。
+---                这时**必须**把命中区也裁成 0,0,33,33：上下那两条被遮罩挡着看不见，
+---                却是"活的"（引擎仍按 256×256 的视口画，坐标换算也按那个视口），
+---                不裁的话点在那两条上会打出一个看不见的标记。
+---
+--- 注意：**SetHitRectInsets 不是"方形化的开关"**。这个客户端的暴雪 Minimap 一处都
+--- 没用它（整个 Blizzard_Minimap 包 0 处）—— 圆形小地图的限制是写在代码里的
+--- （Blizzard_Minimap/Mainline/Minimap.lua:141 的
+---  `if ( sqrt(x * x + y * y) < (self:GetWidth() / 2) )`），
+--- 也就是说命中区一直是方的，圆的只是"**能不能打标记**"。
+--- 所以四角打不了标记跟命中区裁不裁无关，也正因为如此，
+--- 四角要能打标记只能自己算坐标（PingAtCursor）——SquareMap / EKMinimap 那种
+--- "交给暴雪处理"的做法在方形下必然打不出四角。
+local function ReshapeMinimap(minimap)
+    -- 这些几何调用（SetSize / SetPoint / SetHitRectInsets / SetClampedToScreen /
+    -- EnableMouseWheel …）在客户端手册里全是 **protected function**：
+    -- 战斗中调用会被**静默拒绝** —— 不报错、也不生效。所以必须看 pcall 的结果，
+    -- 失败就排队，脱战后再补一次（Queue 见文件头的战斗队列）。
+    local failed = false
+    local function try(ok) if not ok then failed = true end end
+
+    local beforeW, beforeH
+    if minimap.GetSize then
+        local ok, w, h = pcall(minimap.GetSize, minimap)
+        if ok then beforeW, beforeH = w, h end
+    end
+
+    if ShapeMode() == "mask" then
+        try(pcall(minimap.SetMaskTexture, minimap, ns.Media:Texture("minimapRect")))
+        try(pcall(minimap.SetSize, minimap, MASK_CANVAS, MASK_CANVAS))
+        try(pcall(minimap.SetHitRectInsets, minimap, 0, 0, MASK_CROP, MASK_CROP))
+    else
+        try(pcall(minimap.SetMaskTexture, minimap, ns.Media.texture.blank))
+        try(pcall(minimap.SetSize, minimap, MAP_WIDTH, MAP_HEIGHT))
+        try(pcall(minimap.SetHitRectInsets, minimap, 0, 0, 0, 0))
+    end
+    try(pcall(minimap.SetClampRectInsets, minimap, 0, 0, 0, 0))
+    try(pcall(minimap.SetClampedToScreen, minimap, true))
+
+    -- 只在尺寸**真的**变了才抖：Skin() 每次换区域都会重跑，无条件抖会看到缩放闪一下。
+    -- 顺便让引擎按新视口重画一遍 blip（任务点 / 队友那些图标是引擎画在画布上的，
+    -- 改了尺寸不一定会跟着重画；遮罩方案下它们会留在旧的 256×256 视口里，
+    -- 画到被裁掉的那两条带子上）。
+    if beforeW then
+        local ok, w, h = pcall(minimap.GetSize, minimap)
+        if ok and (w ~= beforeW or h ~= beforeH) then
+            NudgeZoom(minimap)
+            if minimap.UpdateBlips then pcall(minimap.UpdateBlips, minimap) end
+        end
+    end
+
+    if failed then Queue("skin") end
+end
+
+--- ElvUI / NDui 约定：全局 GetMinimapShape 告诉第三方小地图按钮"现在的小地图是方的"，
+--- 它们据此把按钮摆进矩形里，而不是按圆形摆。
+---
+--- 这**不是暴雪 API**：暴雪自己的源码（4481 个文件）和 API 手册（mainline/mists/cata/wrath/
+--- tbc/vanilla/forever 七个版本）里都查不到这个名字。它是 ElvUI 自创的约定全局 ——
+--- ElvUI\Game\Shared\Modules\Maps\Minimap.lua 的 SetGetMinimapShape() 写着
+--- `GetMinimapShape = M.GetMinimapShape`，初始化处还留了一句
+--- "this is just to support for other mods"；NDui 抄了同一套（Core\GUI.lua 里
+--- `GetMinimapShape = B.GetMinimapShape`，且只在自家小地图启用时才赋）。
+---
+--- 按这个约定，**谁给小地图换皮，谁负责回答**。所以：
+---   * 皮肤在的时候，保证这个全局存在，且答 "SQUARE"（我们的两种模式（mask 正方 / resize
+---     矩形）都不是圆的，第三方按钮要的正是"别按圆摆"）；
+---   * 皮肤撤了，把接管前的值原样放回去；接管前本来没有，就删掉，别留一个过期的全局。
+---     （之前只在全局已存在时才覆写，等于"皮肤在但没人回答"，第三方按钮拿到 nil 会直接报错。）
+---
+--- 写法用 rawset：写的是**别人的全局**，不是我们漏写的 local；
+--- 而且这是 wuxian check 唯一不报 global-write 的形式（实测 `_G.X =` / `_G["X"] =` /
+--- 裸 `X =` / `-- GLOBALS:` 注释都会被报成 "writes the global GetMinimapShape"）。
 local function ApplyShape()
     if shapeOverridden then return end
-    if type(_G.GetMinimapShape) ~= "function" then return end
     originalShape = rawget(_G, "GetMinimapShape")
-    _G.GetMinimapShape = function() return "SQUARE" end
+    shapeHadOriginal = originalShape ~= nil
+    rawset(_G, "GetMinimapShape", function() return "SQUARE" end)
     shapeOverridden = true
+end
+
+--- 把 GetMinimapShape 还回去（只有真的接管过才动它）。
+local function RestoreShape()
+    if not shapeOverridden then return end
+    if shapeHadOriginal then
+        rawset(_G, "GetMinimapShape", originalShape)
+    else
+        rawset(_G, "GetMinimapShape", nil)
+    end
+    shapeOverridden = false
+    originalShape = nil
+    shapeHadOriginal = false
 end
 
 -- ------------------------------------------------------------------ 缩放
@@ -300,6 +416,13 @@ local function EnsureBlocker(minimap)
                 PingAtCursor(_G.Minimap)
                 return
             end
+            if button == "MiddleButton" then
+                -- 中键 = 暴雪的追踪菜单（那个按钮已经在地图里了）。
+                -- 不做"停在按钮上就让位"的判断：暴雪的这些按钮不用中键，
+                -- 而中键按在追踪按钮上恰恰是最自然的"开追踪菜单"手势。
+                OpenTrackingMenu()
+                return
+            end
             if button ~= "RightButton" then return end
             -- 停在按钮上时不弹菜单（暴雪按钮自己要用这个键）
             if M.buttons and M.buttons:IsOverButton() then return end
@@ -317,6 +440,12 @@ local function EnsureBlocker(minimap)
     blocker:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMRIGHT", 0, -inset)
     blocker:SetShown(active)
 
+    -- 滚轮归覆盖层管（缩放地图），暴雪小地图自己那条要关掉 ——
+    -- 否则两边都响应，同一个滚轮既缩地图又缩相机（Ellesmere 5424-5425 的做法）。
+    if minimap.EnableMouseWheel then
+        pcall(minimap.EnableMouseWheel, minimap, false)
+    end
+
     if not zoneText then
         -- 区域名条画在覆盖层上（地图内部，中间靠上），不是面板的标题条
         zoneText = Widget:Font(blocker, 12, "pixel", "edge", "CENTER")
@@ -325,6 +454,27 @@ local function EnsureBlocker(minimap)
         if zoneText.SetShadowOffset then zoneText:SetShadowOffset(1, -1) end
         zoneText:Hide()
     end
+end
+
+--- 打开暴雪的追踪菜单。
+---
+--- 追踪按钮我们已经搬进地图了（Modules/Minimap/Buttons.lua 的 SetupTracking），
+--- 它是客户端的 DropdownButton，菜单由 Blizzard_Menu 的菜单系统开
+--- （DropdownButtonMixin:OpenMenu → Menu.GetManager():OpenMenu），
+--- 所以中键直接调它即可，不用自己画菜单。
+--- 不同版本这个入口方法名不一样，逐个退路（OpenMenu → ToggleMenu → Click）。
+local function OpenTrackingMenu()
+    local cluster = _G.MinimapCluster
+    local btn = cluster and cluster.Tracking and cluster.Tracking.Button
+    btn = btn or _G.MiniMapTrackingButton or _G.MiniMapTracking
+    if not btn then return false end
+    for _, name in ipairs({ "OpenMenu", "ToggleMenu", "Click" }) do
+        local fn = btn[name]
+        if type(fn) == "function" then
+            if pcall(fn, btn) then return true end
+        end
+    end
+    return false
 end
 
 --- 把暴雪自己的"点击 = 打标记"堵掉。
@@ -463,6 +613,11 @@ local function Remember(minimap)
     if minimap.GetHitRectInsets  then state.hit     = { minimap:GetHitRectInsets() } end
     if minimap.GetClampRectInsets then state.clamp  = { minimap:GetClampRectInsets() } end
     if minimap.IsClampedToScreen then state.clamped = minimap:IsClampedToScreen() end
+    -- 滚轮归我们管（覆盖层自己缩放地图），暴雪那条要关掉；还原时按原值放回去
+    if minimap.IsMouseWheelEnabled then
+        local ok, wheel = pcall(minimap.IsMouseWheelEnabled, minimap)
+        if ok then state.wheel = wheel end
+    end
 
     local cluster = _G.MinimapCluster
     if cluster and cluster.GetNumPoints then
@@ -478,7 +633,7 @@ end
 
 --- 把默认小地图还回去：锚点、遮罩、尺寸、点击区、集群按钮、罗盘、GetMinimapShape。
 --- 受保护的方法一律 pcall；失败（多半是战斗锁定）就记下来，脱战后再补。
-local function Restore()
+function Restore()
     local state = original
     if not state then return end
 
@@ -520,14 +675,13 @@ local function Restore()
         if state.clamped ~= nil then
             try(pcall(minimap.SetClampedToScreen, minimap, state.clamped))
         end
+        if state.wheel ~= nil and minimap.EnableMouseWheel then
+            try(pcall(minimap.EnableMouseWheel, minimap, state.wheel))
+        end
     end
 
-    -- 还原那次有意的全局覆写（只有真的覆写过才动它）。
-    if shapeOverridden then
-        _G.GetMinimapShape = originalShape
-        shapeOverridden = false
-        originalShape = nil
-    end
+    -- 还原那次有意的全局接管（只有真的接管过才动它）。
+    RestoreShape()
 
     -- 右键打标记那条路放回去
     if pingSuppressed and minimap then
@@ -541,18 +695,16 @@ local function Restore()
     if M.microMenu then M.microMenu:Close() end
 
     if failed then
-        restoring = true
-        pending = true
+        Queue("restore")
         WarnOnce("restore", "小地图还原未完全成功（可能处于战斗中），脱战后自动补做。")
     else
         original = nil
-        restoring = false
     end
 end
 
 -- ------------------------------------------------------------------ 主流程
 
-local function Skin()
+function Skin()
     if not active then return false end
     local minimap = _G.Minimap
     if not minimap then return false end
@@ -592,14 +744,9 @@ function M:Initialize()
     end)
     EventBus:Register("MONETUI_THEME_CHANGED",    function() if active then UpdateZoneText() end end)
 
-    -- 战斗中受保护的方法被无声拒绝：脱战后补做。
+    -- 战斗中受保护的方法被无声拒绝：脱战后按队列补做。
     EventBus:Register("PLAYER_REGEN_ENABLED", function()
-        if restoring then
-            Restore()
-        elseif pending then
-            pending = false
-            Skin()
-        end
+        RunQueue()
     end)
 
     active = true
@@ -616,6 +763,11 @@ function M:SetEnabled(enabled)
     end
     if panel then panel:SetShown(active) end
     if blocker then blocker:SetShown(active) end
+end
+
+--- 别的模块在战斗里被拒了，排队等脱战补做（战斗队列只有一个出口，交给它统一排）。
+function M:RequestSkin()
+    Queue("skin")
 end
 
 --- 配置面板改完设置后调用：重新套用一遍（幂等）。
@@ -663,9 +815,28 @@ function M:HandleCommand(rest)
         local w, h = minimap:GetSize()
         local zoom = minimap.GetZoom and minimap:GetZoom() or "?"
         ns:Print(string.format("  地图 %d×%d，缩放 %s", w or 0, h or 0, tostring(zoom)))
+        -- 视野半径（码）：改尺寸前后比这个数，就知道矩形视口是"各向异性"
+        -- （横向能看更多世界、纵向更少）还是"被拉伸变形"（世界范围不变、地图被抻了）。
+        local api = _G.C_Minimap
+        if api and api.GetViewRadius then
+            local ok, yards = pcall(api.GetViewRadius)
+            if ok and type(yards) == "number" and not Secrets.IsSecret(yards) then
+                ns:Print(string.format("  视野半径 %d 码（改尺寸前后比这个数）", math.floor(yards)))
+            end
+        end
+        -- 命中区：暴雪的圆形小地图是**代码里判**的（Minimap.lua:141 的半径判断），
+        -- 命中区一直是方的；我们只在遮罩方案下把看不见的上下两条裁掉。
+        if minimap.GetHitRectInsets then
+            local ok, l, r, t, b = pcall(minimap.GetHitRectInsets, minimap)
+            if ok then
+                ns:Print(string.format("  命中区内缩 左%d 右%d 上%d 下%d（遮罩方案裁掉看不见的带子）",
+                    l or 0, r or 0, t or 0, b or 0))
+            end
+        end
     else
         ns:Print("  |cffff6b6bMinimap 不存在|r")
     end
+    ns:Print("  手势：左键打标记（四角也算）· 中键追踪菜单 · 右键微型菜单 · 滚轮缩放")
     local mode = ShapeMode()
     ns:Print(string.format("  形状方案 %s：%s",
         mode == "mask" and "遮罩裁剪" or "引擎重绘",

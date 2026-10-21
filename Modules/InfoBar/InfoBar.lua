@@ -7,11 +7,15 @@ local ADDON_NAME, ns = ...
 local Widget   = ns.Widget
 local EventBus = ns.EventBus
 local Color    = ns.Color
+local Media    = ns.Media
 
 local M = { name = "InfoBar", blocks = {} }
 ns.InfoBar = M
 
 local blocks = M.blocks
+
+-- 条身装饰（经验条这类不参与左右排队的元素）：建条时构建一次，布局 / 换肤时重算。
+local decorations = {}
 
 local GAP       = 2     -- gap between neighbouring blocks
 local PADDING   = 16    -- horizontal breathing room inside a block
@@ -39,6 +43,11 @@ local function Setting(key)
     local value = M:Settings()[key]
     if value == nil then value = ns.DEFAULTS.infobar[key] end
     return value
+end
+
+--- 公开的取值入口：装饰件（Modules/InfoBar/XP.lua）要用同一套默认值回退。
+function M:GetSetting(key)
+    return Setting(key)
 end
 
 function M:BlockEnabled(key)
@@ -147,16 +156,22 @@ local function OnLeave()
     end
 end
 
-local function ShowTooltip(owner)
+--- 条身上的装饰元素（经验条、进度线……）也要算作"鼠标在条上"，否则提示框还开着，条已经淡回去了。
+function M:Hover(hovering)
+    if hovering then OnEnter() else OnLeave() end
+end
+
+--- 提示框锚向：条贴顶就往下弹，贴底就往上弹。装饰件（经验线）复用同一套，免得两处各写一遍。
+--- 想让提示框跟着鼠标走是全局开关（Modules/Tooltip.lua），这里只管"贴在条上"这种摆法。
+function M:ShowTooltip(owner)
     local tip = _G.GameTooltip
     if not tip then return end
-    -- A bar pinned to the top edge has to open downwards, and vice versa.
     local top = Setting("anchorTop")
     pcall(tip.SetOwner, tip, owner, top and "ANCHOR_BOTTOM" or "ANCHOR_TOP",
           0, top and -6 or 6)
 end
 
-local function HideTooltip()
+function M:HideTooltip()
     local tip = _G.GameTooltip
     if tip then pcall(tip.Hide, tip) end
 end
@@ -189,10 +204,15 @@ function M:SetText(block, text)
 end
 
 --- Redistribute visible blocks: left-anchored grow rightwards, right-anchored leftwards, in registration order.
+--- Every block except the first of its side carries a 1px divider in the 2px gap before it, so the
+--- strip reads as separate read-outs rather than one run-on string.
 function M:Relayout()
     if not bar then return end
 
     local left, right = 0, 0
+    local seenLeft, seenRight = false, false
+    local dr, dg, db = Color:GetBorder()
+
     for i = 1, #blocks do
         local block = blocks[i]
         local frame = block.frame
@@ -205,6 +225,30 @@ function M:Relayout()
             else
                 frame:SetPoint("LEFT", bar, "LEFT", left, 0)
                 left = left + width + GAP
+            end
+
+            local divider = frame.monetDivider
+            if divider then
+                divider:ClearAllPoints()
+                divider:Hide()
+                local draw = false
+                if block.position == "RIGHT" then
+                    if seenRight then
+                        divider:SetPoint("LEFT", frame, "RIGHT", 1, 0)
+                        draw = true
+                    end
+                    seenRight = true
+                else
+                    if seenLeft then
+                        divider:SetPoint("RIGHT", frame, "LEFT", -1, 0)
+                        draw = true
+                    end
+                    seenLeft = true
+                end
+                if draw then
+                    divider:SetColorTexture(dr, dg, db, 0.55)
+                    divider:Show()
+                end
             end
         end
     end
@@ -237,6 +281,46 @@ function M:GetBlock(key)
     return nil
 end
 
+--- 往条身上挂装饰元素（经验条、进度线……）。它们不进左右排队，自己锚在条体的边上。
+-- build 只在条体建好时跑一次；apply 在每次重排 / 换肤 / 设置变化后跑，用来重算位置和颜色。
+-- @param spec { key = string, build = function(bar), apply = function(bar) }
+function M:AddDecoration(spec)
+    if type(spec) ~= "table" or type(spec.build) ~= "function" then return nil end
+
+    for i = 1, #decorations do
+        if spec.key and decorations[i].key == spec.key then return decorations[i] end
+    end
+
+    decorations[#decorations + 1] = spec
+
+    -- 模块晚于条体加载也没关系；条体已经在的话立刻补建。
+    if bar then
+        local ok, err = pcall(spec.build, bar)
+        if not ok then
+            spec.reported = true
+            ns:Print("信息栏装饰 [" .. tostring(spec.key) .. "] 构建失败：" .. tostring(err))
+        elseif type(spec.apply) == "function" then
+            pcall(spec.apply, bar)
+        end
+    end
+    return spec
+end
+
+function M:ApplyDecorations()
+    if not bar then return end
+    for i = 1, #decorations do
+        local spec = decorations[i]
+        if type(spec.apply) == "function" then
+            -- 每个装饰各自兜底：一个坏了不能连累条本身；同一处错误只报一次，免得刷屏。
+            local ok, err = pcall(spec.apply, bar)
+            if not ok and not spec.reported then
+                spec.reported = true
+                ns:Print("信息栏装饰 [" .. tostring(spec.key) .. "] 刷新失败：" .. tostring(err))
+            end
+        end
+    end
+end
+
 local function BuildBlockFrame(block)
     if block.frame or not bar then return end
 
@@ -253,7 +337,7 @@ local function BuildBlockFrame(block)
         if self.SetBackdropColor then
             self:SetBackdropColor(r * 0.35, g * 0.35, b * 0.35, 0.25)
         end
-        ShowTooltip(self)
+        M:ShowTooltip(self)
         if block.tooltip then pcall(block.tooltip, block) end
         local tip = _G.GameTooltip
         if tip then pcall(tip.Show, tip) end
@@ -262,7 +346,7 @@ local function BuildBlockFrame(block)
     frame:SetScript("OnLeave", function(self)
         OnLeave()
         if self.SetBackdropColor then self:SetBackdropColor(0, 0, 0, 0) end
-        HideTooltip()
+        M:HideTooltip()
     end)
 
     if block.onClick then
@@ -282,6 +366,13 @@ local function BuildBlockFrame(block)
     local text = Widget:Font(frame, 12, "pixel", "highlight", "CENTER")
     text:SetPoint("CENTER", frame, "CENTER", 0, 0)
     frame.text = text
+
+    -- Divider between neighbouring blocks (shown by Relayout only for blocks that have a
+    -- visible predecessor on their own side).  1 physical pixel wide, 8 tall, centred.
+    local divider = frame:CreateTexture(nil, "OVERLAY")
+    divider:SetSize(Media:Mult(), 8 * Media:Mult())
+    divider:Hide()
+    frame.monetDivider = divider
 
     block.frame = frame
     block.text = text
@@ -318,6 +409,16 @@ local function CreateBar()
     bar:SetScript("OnLeave", function() OnLeave() end)
 
     AnchorBar()
+
+    -- 装饰件（Modules/InfoBar/XP.lua 的经验线）在条体之后建：它们要读条的宽度和高度。
+    for i = 1, #decorations do
+        local spec = decorations[i]
+        local ok, err = pcall(spec.build, bar)
+        if not ok then
+            spec.reported = true
+            ns:Print("信息栏装饰 [" .. tostring(spec.key) .. "] 构建失败：" .. tostring(err))
+        end
+    end
 end
 
 local function UpdateBlock(block)
@@ -410,7 +511,11 @@ function M:Initialize()
 
     -- The theme engine already re-tinted registered widgets (it registered at file load, this at login), so re-apply the animated opacities after its blanket refresh.
     EventBus:Register("MONETUI_THEME_CHANGED", function()
-        if M.active then ApplyColors() end
+        if M.active then
+            ApplyColors()
+            -- 装饰件自己上色（经验线用的是 resource 色），主题一换要重涂。
+            M:ApplyDecorations()
+        end
     end)
 
     -- Layout / visibility rules depend on these three.
@@ -440,6 +545,8 @@ function M:ApplyLayout()
     if not bar then return end
     AnchorBar()
     self:Relayout()
+    -- 装饰件跟着条体的尺寸 / 贴边方向走（经验条就挂在底边那条衬线上）。
+    self:ApplyDecorations()
     bar:SetShown(self.active and not hiddenForPetBattle)
 end
 
@@ -475,6 +582,8 @@ local PROBED = {
     "GetInventoryItemDurability",
     "C_FriendList.GetNumFriends", "C_FriendList.GetNumOnlineFriends",
     "UnitClass", "InCombatLockdown",
+    "UnitXP", "UnitXPMax", "GetXPExhaustion",
+    "IsXPUserDisabled", "GetMaxLevelForPlayerExpansion", "BreakUpLargeNumbers",
     "ToggleCharacter", "ToggleFriends", "ToggleTalentFrame",
 }
 

@@ -4,6 +4,7 @@
 ## Author: EastHillGu
 ## Version: 0.10.0
 ## Category: Interface
+## IconTexture: Interface\AddOns\MonetUI\Assets\Textures\monet_addon_icon.tga
 ## X-Website: https://github.com/EastHillGu/MonetUI
 ## SavedVariables: MonetUIDB
 
@@ -21,6 +22,7 @@ Utils\Media.lua
 Utils\EventBus.lua
 Utils\Color.lua
 Utils\Widget.lua
+Utils\Mover.lua
 Utils\Skin.lua
 
 # Core
@@ -31,6 +33,7 @@ Config\SimpleConfig.lua
 
 # Modules
 Modules\UnitFrames\UnitFrames.lua
+Modules\UnitFrames\Groups.lua
 Modules\Cooldown\Cooldown.lua
 Modules\BuffFrame\BuffFrame.lua
 Modules\Minimap\Minimap.lua
@@ -41,10 +44,12 @@ Modules\Bags\Bags.lua
 Modules\QuestTracker\QuestTracker.lua
 Modules\ActionBars\ActionBars.lua
 Modules\Nameplates\Nameplates.lua
+Modules\Tooltip.lua
 
-# InfoBar (screen-edge strip with data blocks)
+# InfoBar (screen-edge strip with data blocks + the experience line on its bottom hairline)
 Modules\InfoBar\InfoBar.lua
 Modules\InfoBar\Blocks.lua
+Modules\InfoBar\XP.lua
 
 # Skins (Blizzard panel beautification)
 Modules\Skins\Skins.lua

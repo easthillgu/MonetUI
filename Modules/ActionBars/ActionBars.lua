@@ -9,6 +9,7 @@ local Widget   = ns.Widget
 local Color    = ns.Color
 local Media    = ns.Media
 local EventBus = ns.EventBus
+local Secrets  = ns.Secrets
 
 local M = { name = "ActionBars" }
 
@@ -159,11 +160,21 @@ local BAR_DEFS = {
 local ADOPTED_DEFS = {
     { key = "BarPet",    containers = { "PetActionBarFrame", "PetActionBar" },
       pattern = "PetActionButton%d", count = 10, label = "宠物",
+      glow = "autoCast",
       point = "BOTTOMRIGHT", relativeTo = "Bar3", relativePoint = "TOPRIGHT", x = 0, y = 2 },
     { key = "BarStance", containers = { "StanceBarFrame", "StanceBar" },
       pattern = "StanceButton%d", count = 10, label = "姿态",
       point = "BOTTOMLEFT", relativeTo = "Bar3", relativePoint = "TOPLEFT", x = 0, y = 2 },
 }
+
+--- 宠物条（唯一带自动施法提示的那条）。自绘动作条关掉时它没被接管，也要能单独拿到。
+local PET_DEF
+for _, def in ipairs(ADOPTED_DEFS) do
+    if def.glow == "autoCast" then
+        PET_DEF = def
+        break
+    end
+end
 
 -- 暴雪自己的动作条，顺序和按钮绑定一致：1 号条 ACTIONBUTTON<i>、2 号条 MULTIACTIONBAR1BUTTON<i>，以此类推。
 local ACTION_BAR_FRAMES = {
@@ -685,6 +696,124 @@ local function ResolveContainer(def)
     return nil
 end
 
+-- 宠物条的"自动施法"提示：本客户端暴雪用的是一圈旋转的蚂蚁（按钮的 AutoCastOverlay.Shine），
+-- 角标（Corners，"这个技能可以自动施法"）是另一块，别动。这里把蚂蚁换成自绘的像素环：
+-- 暴雪的动画摁掉，状态自己按 GetPetActionInfo 的第 6 个返回值（autoCastEnabled）跟。
+-- 自绘动作条开着时环沿边框跑；关着时改成静态的一圈（宠物条交还暴雪，但提示不丢）。
+-- 战斗中也照常跟：只是往按钮上加几个方块，不碰受保护的框体。
+
+local GetPetActionInfo = _G.GetPetActionInfo
+
+--- 摁掉暴雪的旋转蚂蚁。暴雪每次刷新按钮状态都会把它再点亮，所以这里把方法本身换掉，
+-- 顺带把已经点亮的旧动画停掉。
+local function SuppressAutoCastShine(button)
+    local overlay = button.AutoCastOverlay
+    if not overlay then return end
+    if not overlay.monetShineSuppressed then
+        overlay.monetShineSuppressed = true
+        if type(overlay.UpdateShineAnim) == "function" then
+            overlay.monetShineUpdate = overlay.UpdateShineAnim
+            overlay.UpdateShineAnim = function() end
+        end
+    end
+    local shine = overlay.Shine
+    if shine then
+        if shine.Anim then pcall(shine.Anim.Stop, shine.Anim) end
+        shine:Hide()
+    end
+end
+
+--- 还原成暴雪原样（只在模块整个停用时走这条，否则玩家会永久失去原版提示）。
+-- 只是关掉「自绘动作条」不算：那时宠物条归暴雪管，但提示换成一圈静态像素环。
+local function RestoreAutoCastShine(button)
+    local overlay = button.AutoCastOverlay
+    if not overlay or not overlay.monetShineUpdate then return end
+    overlay.UpdateShineAnim = overlay.monetShineUpdate
+    overlay.monetShineUpdate = nil
+    overlay.monetShineSuppressed = nil
+    overlay:UpdateShineAnim()
+end
+
+--- 这个槽位开没开自动施法。返回顺序：name, texture, isToken, isActive, autoCastAllowed,
+--- autoCastEnabled, spellID ... -- 第 6 个才是"开着"，第 5 个是"可以开"。
+local function PetAutoCastEnabled(index)
+    if not GetPetActionInfo then return false end
+    local ok, _, _, _, _, _, enabled = pcall(GetPetActionInfo, index)
+    if not ok then return false end
+    return Secrets.Bool(enabled, false)
+end
+
+--- 像素环的边长：跟着暴雪的自动施法遮罩走（那圈蚂蚁就画在这块遮罩里：45 - 8 = 37），
+--- 遮罩不在就按按钮宽度推。取的是像素环该落在哪，不是图标本身的大小。
+local function PetGlowSide(button, entry)
+    local overlay = button.AutoCastOverlay
+    local mask = overlay and overlay.Mask
+    if mask and mask.GetWidth then
+        local ok, width = pcall(mask.GetWidth, mask)
+        if ok then
+            local size = Secrets.Number(width)
+            if size and size > 4 then return size end
+        end
+    end
+    return (entry.base or 30) + 7
+end
+
+--- 开着自动施法的按钮上跑一圈像素环，其余的干净。
+-- 自绘动作条开着 → 环跟着跑；关着 → 宠物条还是暴雪自己的样子，环改成静态的一圈。
+local function SyncPetGlow(def, entry)
+    local isStatic = not M.own
+    local scale = entry.scale or 1
+    for index = 1, def.count do
+        local button = _G[def.pattern:format(index)]
+        if not button then break end
+
+        SuppressAutoCastShine(button)
+
+        if PetAutoCastEnabled(index) then
+            Widget:PixelGlow(button, {
+                side   = PetGlowSide(button, entry),
+                scale  = scale,
+                static = isStatic,
+            })
+        else
+            Widget:StopPixelGlow(button)
+        end
+    end
+end
+
+--- 宠物条的像素环跟一遍当前状态。自绘动作条关着时这条条没被接管，得自己去拿容器。
+local function SyncPetGlowNow()
+    local def = PET_DEF
+    if not def then return end
+
+    local entry = adopted[def.key]
+    if not entry or not entry.frame then
+        local bar = ResolveContainer(def)
+        if not bar then return end
+        local first = _G[def.pattern:format(1)]
+        local base
+        if first and first.GetWidth then
+            local ok, width = pcall(first.GetWidth, first)
+            if ok then base = Secrets.Number(width) end
+        end
+        entry = { def = def, frame = bar, scale = 1, base = base }
+    end
+
+    SyncPetGlow(def, entry)
+end
+
+--- 模块整个关掉：环拆掉，暴雪的旋转蚂蚁还回去（不然玩家会永久失去原版提示）。
+local function TeardownPetGlow()
+    local def = PET_DEF
+    if not def then return end
+    for index = 1, def.count do
+        local button = _G[def.pattern:format(index)]
+        if not button then break end
+        Widget:StopPixelGlow(button)
+        RestoreAutoCastShine(button)
+    end
+end
+
 local function AdoptBar(def)
     local bar, name = ResolveContainer(def)
     if not bar then return nil end
@@ -718,6 +847,7 @@ local function AdoptBar(def)
     local size  = ButtonSize()
     local scale = entry.base and (size / entry.base) or 1
     pcall(bar.SetScale, bar, scale)
+    entry.scale = scale
 
     Anchor(bar, StoredPosition(def, def.key), def)
 
@@ -728,6 +858,10 @@ local function AdoptBar(def)
         if icon then pcall(icon.SetTexCoord, icon, CROP, 1 - CROP, CROP, 1 - CROP) end
         Widget:SetFont(button.HotKey, HOTKEY_SIZE, "pixel")
         Widget:SetFont(button.Count, COUNT_SIZE, "pixel")
+    end
+
+    if def.glow == "autoCast" then
+        SyncPetGlow(def, entry)
     end
 
     return entry
@@ -746,10 +880,12 @@ local function AdoptAll()
 end
 
 --- 放开接管：交还给暴雪原来的大小。位置留给下一次暴雪的排版去纠正，因为插件不能替暴雪写它自己的布局。
+-- 缩放归 1：交还后的宠物条不再是自绘按钮的大小，像素环的点距要按未缩放重算（见 SyncPetGlow）。
 local function ReleaseBar(entry)
     local bar = entry and entry.frame
     if not bar then return end
     pcall(bar.SetScale, bar, 1)
+    entry.scale = 1
 end
 
 -- 暴雪那排按钮还在（只是藏起来了），玩家的按键其实按的是它们。这里把同一批按键改成"点击我们
@@ -794,6 +930,12 @@ local ADOPT_EVENTS = {
     "UPDATE_VEHICLE_ACTIONBAR", "PLAYER_MOUNT_DISPLAY_CHANGED",
 }
 
+-- 宠物条"自动施法"的状态事件：跟 ADOPT_EVENTS 分开登记，因为像素环不受战斗锁影响
+-- （往按钮上加几个方块不用搬受保护的框体），开关自动施法在战斗中也得立刻跟上。
+local PET_GLOW_EVENTS = {
+    "PET_BAR_UPDATE", "PET_BAR_UPDATE_USABLE", "PET_UI_UPDATE", "UNIT_PET",
+}
+
 function M:RegisterEvents()
     EventBus:Register("PLAYER_ENTERING_WORLD", function()
         M:Apply()
@@ -828,6 +970,10 @@ function M:RegisterEvents()
 
     for _, event in ipairs(ADOPT_EVENTS) do
         EventBus:Register(event, function() AdoptAll() end)
+    end
+
+    for _, event in ipairs(PET_GLOW_EVENTS) do
+        EventBus:Register(event, function() SyncPetGlowNow() end)
     end
 
     EventBus:Register("MONETUI_THEME_CHANGED", function() M:UpdateAll() end)
@@ -990,6 +1136,10 @@ function M:Apply()
 
     ReassignBindings()
     self:UpdateAll()
+
+    -- 宠物条的自动施法提示：自绘条开着是动画环，关着是静态环（这条路径不依赖 AdoptAll）。
+    SyncPetGlowNow()
+
     applied = true
 end
 
@@ -1008,6 +1158,7 @@ function M:SetEnabled(enabled)
         adoptedDirty = false
         ClearBindings()
         self:RestoreBlizzard()
+        TeardownPetGlow()
     end
 end
 

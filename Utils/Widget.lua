@@ -100,26 +100,24 @@ function Widget:Bar(parent, width, height, textureKey)
     return bar
 end
 
--- The canvas weave (Assets/Textures/monet_canvas_weave.tga, drawn by tools/regen-textures.js):
--- 64x64, a grid of 2px threads with an 8px step, so the cloth repeats every 8 rows.  The
--- number is the texture's, not a taste call -- the texcoord window below is measured in it.
+-- The bar ground (Assets/Textures/monet_stripe_weave.tga, drawn by tools/regen-textures.js):
+-- 64x64, one-direction 45° hairlines on a 4px period.  The number is the texture's, not a
+-- taste call -- the texcoord window below is measured in it.
 local WEAVE_SIZE = 64
 
---- The Monet "canvas" ground for a bar: the same woven cloth the buttons sit on
---- (monet_canvas_weave), laid over the bar's background so the empty part of a bar reads as
---- painted canvas instead of a flat hole.  The fill stays flat on purpose -- a bar's volume
---- is SetGradient geometry (see Widget:BarGradient), and a woven fill would fight it.
+--- The Monet ground for a bar: a fine 45° hairline cloth (monet_stripe_weave), laid over the
+--- bar's background so the empty part of a bar reads as painted cloth instead of a flat hole.
+--- The fill stays flat on purpose -- a bar's volume is SetGradient geometry (see
+--- Widget:BarGradient), and a patterned fill would fight it.
 --- ORDER MATTERS: call this AFTER the bar's other background textures, so the cloth draws
 --- over them (same draw layer, creation order) while the fill still covers it.
---- The weave is 64 rows tall and a unit frame bar is only a couple of UI units tall: a 64-row
---- texture squeezed into three rows is averaged into a flat tone by the mip/filter stage, so
---- the texture is sampled through a texcoord window of the bar's own height instead.  The
---- window is measured in PHYSICAL pixels (Media:Mult() is the size of one physical pixel in
---- UI units), so one texel lands on one physical pixel and the threads read as threads
---- instead of as a smear.  The window always starts on the same row of the cloth (the weave
---- repeats every 8 rows), so a 1px power bar and a 2px health bar show the same phase.
+--- The texture is TILED, not stretched: one texel per physical pixel on both axes, so the 45°
+--- angle stays 45° at any bar width and a 4px health bar still shows fine lines instead of a
+--- smeared grid.  The window always starts on the same row of the tile, so a 1px power bar and
+--- a 4px health bar show the same phase.
 ---   opts.height  bar height in UI units (default: the bar's own height)
----   opts.alpha   opacity of the weave (default 0.5)
+---   opts.alpha   opacity of the cloth (default 0.85: high enough to read against the black /
+---                red "lost" colour that sits under it)
 --- @return the weave texture, cached on the bar as __monetWeave
 function Widget:BarWeave(bar, opts)
     if not bar then return nil end
@@ -133,18 +131,30 @@ function Widget:BarWeave(bar, opts)
         -- (Andromeda's health element is the reference: its "lost" background is created the
         -- same way and the fill stays on top.)
         weave = bar:CreateTexture(nil, "BACKGROUND")
-        weave:SetTexture(Media.texture["monet_canvas_weave"])
+        -- REPEAT on both axes: the texcoord below asks for more than one tile of the
+        -- 64px stripe (1 texel = 1 physical pixel), so the default CLAMP would smear
+        -- the last column instead of repeating the hatch.
+        weave:SetTexture(Media.texture["monet_stripe_weave"], "REPEAT", "REPEAT")
         weave:SetAllPoints(bar)
         bar.__monetWeave = weave
     end
 
-    -- One texel per physical pixel.
+    -- One texel per physical pixel on both axes.  Media:Mult() is UI units per physical pixel,
+    -- so the tile spans 64 * Mult() UI units; the count of repeats is width / (64 * Mult()).
+    -- The vertical window is CONTINUOUS (height / Mult, not rounded to whole texels): rounding
+    -- it while the horizontal span stays exact would sample x and y at different densities and
+    -- tilt the 45° hatch on fractional scales.  With both axes on the same Mult(), the angle is
+    -- 45° for every bar size, including a 1px power bar.
+    local mult = Media:Mult()
+    local width = opts.width or (bar:GetWidth() or 1)
     local height = opts.height or (bar:GetHeight() or 2)
-    local rows = math.max(1, math.min(WEAVE_SIZE - 1, math.floor(height / Media:Mult() + 0.5)))
-    weave:SetTexCoord(0, 1, 1 / WEAVE_SIZE, (1 + rows) / WEAVE_SIZE)
+    local cols = math.max(0, width / (mult * WEAVE_SIZE))
+    local v0 = 1 / WEAVE_SIZE
+    local v1 = v0 + height / (mult * WEAVE_SIZE)
+    weave:SetTexCoord(0, cols, v0, v1)
 
     local r, g, b = Color:GetNeutral()
-    local alpha = opts.alpha or 0.5
+    local alpha = opts.alpha or 0.85
     weave:SetVertexColor(r, g, b, alpha)
 
     -- The ground follows the theme like the flat background does.
@@ -323,7 +333,10 @@ end
 function Widget:Refresh(frame, opts)
     opts = opts or themed[frame] or {}
 
-    if opts.kind == "bar" then
+    if opts.kind == "pixelglow" then
+        -- 像素环：颜色跟主题走，刷新只重新上色，不动几何。
+        Widget:RefreshPixelGlow(frame)
+    elseif opts.kind == "bar" then
         if frame.bg then
             local r, g, b = Color:GetNeutral()
             frame.bg:SetColorTexture(r, g, b, opts.bgAlpha or 0.25)
@@ -500,15 +513,31 @@ end
 
 --- The Monet button/slot "material": a seamless weave tile laid UNDER the content (this is the Andromeda/NDui "tiled backdrop texture" step, drawn from scratch) plus an ADD-blended top-lit gradient sheen (monet_barfill) OVER the content.
 -- Both layers are near-white and tintable, so one theme colour drives the whole material; purely additive -- two texture regions, the frame itself untouched, which keeps it safe on Blizzard secure buttons.
---   opts.weaveAlpha / opts.alpha  strength of weave / sheen (defaults 0.6 / 0.2);  opts.r,g,b tint;  opts.weaveLayer,Sublevel / layer,Sublevel draw layers (BACKGROUND/2, OVERLAY/1)
+--   opts.weaveAlpha / opts.alpha  strength of weave / sheen (defaults 0.75 / 0.2);  opts.r,g,b tint;  opts.weaveLayer,Sublevel / layer,Sublevel draw layers (BACKGROUND/2, OVERLAY/1)
 function Widget:ButtonMaterial(frame, opts)
     if frame.__monetMaterial then return frame.__monetMaterial end
     opts = opts or {}
 
     local weave = frame:CreateTexture(nil, opts.weaveLayer or "BACKGROUND", nil, opts.weaveSublevel or 2)
-    weave:SetTexture(Media.texture["monet_diagonal_weave"])
+    -- Same fine 45° hatch as the bar ground, tiled 1 texel = 1 physical pixel: a 28px
+    -- button shows 28x28 texels of the 64px tile, so two neighbouring buttons continue
+    -- the same hatch instead of each squeezing a whole tile into its own square.
+    weave:SetTexture(Media.texture["monet_stripe_weave"], "REPEAT", "REPEAT")
     weave:SetAllPoints(frame)
-    weave:SetVertexColor(opts.r or 1, opts.g or 1, opts.b or 1, opts.weaveAlpha or 0.6)
+    local function FitWeave()
+        local mult = Media:Mult()
+        local fw = frame:GetWidth() or 0
+        local fh = frame:GetHeight() or 0
+        weave:SetTexCoord(0, math.max(0, fw / (mult * WEAVE_SIZE)),
+            0, math.max(0, fh / (mult * WEAVE_SIZE)))
+    end
+    FitWeave()
+    -- Action buttons are created at Blizzard's template size and resized to the user's
+    -- buttonSize later; re-fit so the hatch stays 1:1 at the final size.
+    if type(frame.HookScript) == "function" then
+        pcall(frame.HookScript, frame, "OnSizeChanged", FitWeave)
+    end
+    weave:SetVertexColor(opts.r or 1, opts.g or 1, opts.b or 1, opts.weaveAlpha or 0.75)
 
     local sheen = frame:CreateTexture(nil, opts.layer or "OVERLAY", nil, opts.sublevel or 1)
     sheen:SetTexture(Media.texture["monet_barfill"])
@@ -607,6 +636,181 @@ function Widget:Shadow(frame, opts)
         return nil
     end
     return sh
+end
+
+-- 像素环：一串小方块沿着框体的边缘跑。
+-- 暴雪的宠物条用一圈旋转的"蚂蚁"（按钮的 AutoCastOverlay.Shine）提示自动施法；这个环把它替掉。
+-- 全部是几何 + 纯色方块，不带贴图：颜色由主题给，粗细按物理像素算（任何 UI 缩放下都是同一个粗细）。
+local pixelGlows = setmetatable({}, { __mode = "k" })
+
+--- 沿正方形边框走一圈：d 是从左上角起、顺时针量出的边长距离，返回相对中心的 x / y。
+local function SquarePoint(side, d)
+    local half = side / 2
+    if d < side then return -half + d, half end
+    if d < side * 2 then return half, half - (d - side) end
+    if d < side * 3 then return half - (d - side * 2), -half end
+    return -half, -half + (d - side * 3)
+end
+
+--- 把一串方块摆到环上。
+-- 动画环：头像素在前，尾巴依次往后（沿着跑动的反方向排），整串沿边框跑。
+-- 静态环：方块等距铺满一圈，不动（自绘动作条关掉时的样子）。
+local function LayoutPixelGlow(st)
+    local side = st.side
+    if not side or side <= 0 then return end
+    local perimeter = side * 4
+    local count = st.count
+    for i = 1, count do
+        local tex = st.tex[i]
+        if tex then
+            local d, alpha
+            if st.static then
+                d = (i - 1) * (st.step or 0)
+                alpha = st.ringAlpha
+            else
+                -- 尾巴在头后面，所以距离是减的；取模把尾巴绕回环的另一头，不然它会跑到框外面去。
+                d = (st.phase * perimeter - (i - 1) * st.spacing) % perimeter
+                -- 尾巴比头淡：一串方块里最前的那颗最亮。
+                local t = count > 1 and (i - 1) / (count - 1) or 0
+                alpha = st.headAlpha + (st.alpha - st.headAlpha) * t
+            end
+            local x, y = SquarePoint(side, d)
+            tex:ClearAllPoints()
+            tex:SetPoint("CENTER", st.frame, "CENTER", x, y)
+            tex:SetVertexColor(st.r, st.g, st.b, alpha)
+        end
+    end
+end
+
+-- 一个驱动跑所有动画环：环自己在转，驱动只在有动画环的时候醒着（静态环铺一次就不再吃每帧开销）。
+local animatedGlows = 0
+local pixelGlowDriver = CreateFrame("Frame")
+pixelGlowDriver:Hide()
+pixelGlowDriver:SetScript("OnUpdate", function(self, elapsed)
+    for frame, st in pairs(pixelGlows) do
+        if not st.static then
+            if not frame:IsShown() then
+                -- 框体藏了（宠物条收起来、条被换页）：收摊，等下次点亮再重新开始
+                Widget:StopPixelGlow(frame)
+            else
+                st.phase = (st.phase + elapsed / st.period) % 1
+                LayoutPixelGlow(st)
+            end
+        end
+    end
+    if animatedGlows <= 0 then
+        animatedGlows = 0
+        self:Hide()
+    end
+end)
+
+--- 上色：调用方给了颜色就用给定的，否则取主题的 highlight 槽。
+function Widget:RefreshPixelGlow(frame)
+    local st = pixelGlows[frame]
+    if not st then return end
+    local opts = st.opts or {}
+    local r, g, b = opts.r, opts.g, opts.b
+    if not r then r, g, b = Color:GetHighlight() end
+    st.r, st.g, st.b = r, g, b
+    LayoutPixelGlow(st)
+end
+
+--- 开启（或更新）一个框体的像素环。环画在框体自己的 ARTWORK 层：图标之上，按键提示之下。
+--   opts.side     环的边长，单位是框体自己的单位（默认取框体宽度）
+--   opts.scale    框体父链上的缩放：物理像素要靠它换算成框体单位
+--   opts.static   true = 静态环（等距铺满一圈、不动），默认是沿边框跑的动画环
+--   opts.pixel    一颗方块几物理像素（默认 2）；  opts.spacing  方块之间几物理像素（默认 3）
+--   opts.count    动画环几颗方块（默认 7）；  opts.period  跑一圈几秒（默认 3.5）
+--   opts.pitch    静态环的点距，物理像素（默认 4）；  opts.ringAlpha  静态环的透明度（默认 0.85）
+--   opts.alpha    尾巴的透明度（默认 0.2）；  opts.headAlpha  头部的透明度（默认 1）
+--   opts.r,g,b    颜色（默认取主题的 highlight 槽）
+function Widget:PixelGlow(frame, opts)
+    if not frame then return end
+    opts = opts or {}
+
+    local st = pixelGlows[frame]
+    if not st then
+        st = { tex = {}, phase = 0 }
+        pixelGlows[frame] = st
+        st.frame = frame
+    end
+
+    st.opts = opts
+    st.period = opts.period or 3.5
+    st.alpha = opts.alpha or 0.2
+    st.headAlpha = opts.headAlpha or 1
+
+    -- 物理像素 -> 框体单位：被缩放过的条里，框体自己的单位比 UIParent 的单位大 scale 倍。
+    local scale = opts.scale or 1
+    local mult = Media:Mult()
+    local pixel = (opts.pixel or 2) * mult / scale
+    st.spacing = (opts.spacing or 3) * mult / scale
+    st.side = opts.side or frame:GetWidth() or 0
+
+    -- 静态环 / 动画环切换：驱动只跟动画环，切一次就改一次计数，免得白跑每帧。
+    local wasAnimated = st.animated or false
+    st.static = opts.static and true or false
+    st.animated = not st.static
+    if st.animated ~= wasAnimated then
+        animatedGlows = animatedGlows + (st.animated and 1 or -1)
+    end
+
+    if st.static then
+        -- 等距铺满一圈：点距是物理像素，点数按周长推，余数摊平（step 按实际点数重算，首尾不会撞在一起）。
+        local pitch = (opts.pitch or 4) * mult / scale
+        local perimeter = st.side * 4
+        if pitch <= 0 then pitch = 1 end
+        st.count = math.max(4, math.floor(perimeter / pitch))
+        st.step = perimeter / st.count
+        st.ringAlpha = opts.ringAlpha or 0.85
+    else
+        st.count = opts.count or 7
+        st.step = nil
+    end
+
+    for i = 1, st.count do
+        local tex = st.tex[i]
+        if not tex then
+            tex = frame:CreateTexture(nil, "ARTWORK")
+            tex:SetTexture(Media.texture.blank)
+            tex:SetBlendMode("ADD")
+            st.tex[i] = tex
+        end
+        tex:SetSize(pixel, pixel)
+        tex:Show()
+    end
+    for i = st.count + 1, #st.tex do
+        st.tex[i]:Hide()
+    end
+
+    -- 主题变了要重新上色：登记进 themed，RefreshThemes 会回来刷。
+    local entry = themed[frame]
+    if not entry or entry.kind ~= "pixelglow" then
+        themed[frame] = { kind = "pixelglow" }
+    end
+
+    Widget:RefreshPixelGlow(frame)
+    if st.animated then pixelGlowDriver:Show() end
+end
+
+--- 停掉像素环：方块藏起来，登记也撤掉。
+function Widget:StopPixelGlow(frame)
+    local st = pixelGlows[frame]
+    if not st then return end
+    pixelGlows[frame] = nil
+    local entry = themed[frame]
+    if entry and entry.kind == "pixelglow" then themed[frame] = nil end
+    for i = 1, #st.tex do
+        local tex = st.tex[i]
+        if tex then tex:Hide() end
+    end
+    if st.animated then
+        animatedGlows = animatedGlows - 1
+        if animatedGlows <= 0 then
+            animatedGlows = 0
+            pixelGlowDriver:Hide()
+        end
+    end
 end
 
 --- An oil-painted brush underline (monet_brush_stroke) beneath `anchor` -- our version of Andromeda's gradient hairline.

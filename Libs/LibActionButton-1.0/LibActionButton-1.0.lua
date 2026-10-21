@@ -3,10 +3,11 @@
 -- This is the BSD-3-Clause "LibActionButton-1.0" by Hendrik "nevcairiel" Leppkes
 -- (the licence text follows and a copy lives next to this file), taken from the
 -- copy that ships with Andromeda, which adapted it for this client (无限 /
--- "Forever", Interface 16001).  MonetUI changed three marked lines only: the
+-- "Forever", Interface 16001).  MonetUI changed four marked lines only: the
 -- library name carries a -MonetUI suffix (so LibStub can never mix this copy up
 -- with another addon's fork), LibCustomGlow is looked up under its stock name,
--- and CallbackHandler-1.0 became optional.  Everything else is untouched.
+-- CallbackHandler-1.0 became optional, and the spell-learned event is
+-- registered under its 11.0 name.  Everything else is untouched.
 
 --[[
 Copyright (c) 2010-2022, Hendrik "nevcairiel" Leppkes <h.leppkes@gmail.com>
@@ -1271,7 +1272,9 @@ function InitializeEventHandler()
 	lib.eventFrame:RegisterEvent("START_AUTOREPEAT_SPELL")
 	lib.eventFrame:RegisterEvent("STOP_AUTOREPEAT_SPELL")
 	lib.eventFrame:RegisterEvent("UNIT_INVENTORY_CHANGED")
-	lib.eventFrame:RegisterEvent("LEARNED_SPELL_IN_TAB")
+	-- MonetUI change: 11.0 renamed this event -- LEARNED_SPELL_IN_TAB never fires on retail
+	-- (Blizzard_ActionBar/ActionButton.lua:284 registers LEARNED_SPELL_IN_SKILL_LINE).
+	lib.eventFrame:RegisterEvent("LEARNED_SPELL_IN_SKILL_LINE")
 	lib.eventFrame:RegisterEvent("PET_STABLE_UPDATE")
 	lib.eventFrame:RegisterEvent("PET_STABLE_SHOW")
 	lib.eventFrame:RegisterEvent("SPELL_UPDATE_CHARGES")
@@ -1321,7 +1324,7 @@ function OnEvent(frame, event, arg1, ...)
 		if UseCustomFlyout then
 			UpdateFlyoutSpells()
 		end
-	elseif (event == "UNIT_INVENTORY_CHANGED" and arg1 == "player") or event == "LEARNED_SPELL_IN_TAB" then
+	elseif (event == "UNIT_INVENTORY_CHANGED" and arg1 == "player") or event == "LEARNED_SPELL_IN_TAB" or event == "LEARNED_SPELL_IN_SKILL_LINE" then
 		local tooltipOwner = GameTooltip_GetOwnerForbidden()
 		if tooltipOwner and ButtonRegistry[tooltipOwner] then
 			tooltipOwner:SetTooltip()

@@ -195,11 +195,15 @@ Media.texture = {
     -- orientation (the reference skin does the same: texture = material, SetGradient = shading).
     ["monet_barfill"]      = ASSET .. "Textures\\monet_barfill",
 
-    -- seamless canvas weave: the button/slot material base, tiled UNDER the icon; paired with monet_barfill by Widget:ButtonMaterial.
-    -- Also the bar GROUND (Widget:BarWeave): 64x64, threads every 8px -- the texcoord window in BarWeave is measured in those.
+    -- legacy 平纹布底（已被 monet_stripe_weave 取代，保留作回退素材）
     ["monet_canvas_weave"] = ASSET .. "Textures\\monet_canvas_weave",
 
-    -- diagonal crosshatch variant of the same material (45° woven stripes): the alternative ground for Widget:ButtonMaterial -- pick one of the two
+    -- bar ground (Widget:BarWeave): 64x64, one-direction 45° hairlines on a 4px period.
+    -- Fine enough to read as cloth at a 4px health bar; tiled 1 texel = 1 physical pixel
+    -- so the angle never stretches with the bar width.
+    ["monet_stripe_weave"] = ASSET .. "Textures\\monet_stripe_weave",
+
+    -- 十字斜纹变体：备用材质（当前按钮 / 状态条都改用 monet_stripe_weave）
     ["monet_diagonal_weave"] = ASSET .. "Textures\\monet_diagonal_weave",
 
     ["monet_close_normal"]  = ASSET .. "Textures\\monet_close_normal",

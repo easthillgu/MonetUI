@@ -46,8 +46,12 @@ local function Resolve(path)
 end
 
 --- 记下暴雪按钮被搬走之前的父级、锚点、尺寸与贴图透明度（还原时放回去）。
-local function SaveParent(frame)
-    if savedParents[frame] then return end
+--- layout 是我们给它安排的锚点（还原按钮时按它摆回去，重入钩子也靠它复原）。
+local function SaveParent(frame, layout)
+    if savedParents[frame] then
+        if layout then savedParents[frame].layout = layout end
+        return
+    end
     local points = {}
     if frame.GetNumPoints then
         for i = 1, frame:GetNumPoints() do
@@ -68,7 +72,51 @@ local function SaveParent(frame)
         points = points,
         size   = { frame:GetWidth(), frame:GetHeight() },
         art    = art,
+        layout = layout,
     }
+end
+
+-- ------------------------------------------------------------------ 摆位 / 重入
+
+-- 重入标志：我们的钩子会调 SetParent / SetPoint，那两个又会触发钩子自己。
+local reasserting = false
+
+--- 把按钮摆到容器里的某个位置。
+--- layout = { 点, 相对点, x, y }（相对 container）。
+local function PlaceButton(frame, layout)
+    reasserting = true
+    pcall(frame.ClearAllPoints, frame)
+    pcall(frame.SetPoint, frame, layout[1], layout[2], layout[3], layout[4], layout[5])
+    pcall(frame.SetParent, frame, container)
+    pcall(frame.SetSize, frame, B.WIDTH, B.HEIGHT)
+    reasserting = false
+end
+
+--- 暴雪有时会把按钮搬回去（换区域、集群 Relayout、UpdateMinimapConfig 之后），
+--- 钩一次 SetParent / SetPoint / SetScale，把我们的摆位按回去。
+--- 钩子里只做「按回去」的动作，所以暴雪自己的状态机不会错乱（Ellesmere 3680-3681、
+--- 3983-3998 的同款做法）。
+local function Reassert(frame)
+    if reasserting then return end
+    local saved = frame and savedParents[frame]
+    if not saved or not saved.layout then return end
+    if InCombatLockdown() then
+        -- 战斗中搬不动（受保护），排队等脱战补做
+        pcall(function()
+            local minimapModule = ns:GetModule("Minimap")
+            if minimapModule and minimapModule.RequestSkin then minimapModule:RequestSkin() end
+        end)
+        return
+    end
+    PlaceButton(frame, saved.layout)
+end
+
+local function HookReassert(frame)
+    if frame.monetReassertHooked then return end
+    frame.monetReassertHooked = true
+    hooksecurefunc(frame, "SetParent", function(self) Reassert(self) end)
+    hooksecurefunc(frame, "SetPoint",  function(self) Reassert(self) end)
+    hooksecurefunc(frame, "SetScale",  function(self) Reassert(self) end)
 end
 
 --- 把暴雪按钮的某张贴图压掉（只压 alpha，不隐藏 —— 隐藏父帧会停掉它的状态更新）。
@@ -147,13 +195,10 @@ local function SetupTracking()
     local btn = Resolve("MinimapCluster.Tracking.Button")
     if not btn then return end
 
-    SaveParent(btn)
-    if btn:GetParent() ~= container then
-        pcall(btn.SetParent, btn, container)
-    end
-    pcall(btn.ClearAllPoints, btn)
-    pcall(btn.SetPoint, btn, "BOTTOMLEFT", container, "BOTTOMLEFT", 4, 4)
-    pcall(btn.SetSize, btn, B.WIDTH, B.HEIGHT)
+    local layout = { "BOTTOMLEFT", "BOTTOMLEFT", 4, 4 }
+    SaveParent(btn, layout)
+    PlaceButton(btn, layout)
+    HookReassert(btn)
 
     HideArt(btn, "StateTexture")
     HideArt(btn, "AddTexture")
@@ -172,13 +217,10 @@ local function SetupCompartment()
     local btn = Resolve("AddonCompartmentFrame")
     if not btn then return end
 
-    SaveParent(btn)
-    if btn:GetParent() ~= container then
-        pcall(btn.SetParent, btn, container)
-    end
-    pcall(btn.ClearAllPoints, btn)
-    pcall(btn.SetPoint, btn, "TOPRIGHT", container, "TOPRIGHT", -4, -4)
-    pcall(btn.SetSize, btn, B.WIDTH, B.HEIGHT)
+    local layout = { "TOPRIGHT", "TOPRIGHT", -4, -4 }
+    SaveParent(btn, layout)
+    PlaceButton(btn, layout)
+    HookReassert(btn)
 
     HideArt(btn, "StateTexture")
     HideArt(btn, "AddTexture")
@@ -265,6 +307,9 @@ local function RestoreOne(path)
     if not frame then return end
     local saved = savedParents[frame]
     if not saved then return end
+    -- 先把存档删掉，再动手还原：重入钩子看到"这个按钮已经交还给暴雪了"就不会
+    -- 在我们 SetParent / SetPoint 的过程中又把它搬回容器里（否则还原会被钩子推翻）。
+    savedParents[frame] = nil
     pcall(frame.SetParent, frame, saved.parent)
     pcall(frame.ClearAllPoints, frame)
     for _, pt in ipairs(saved.points) do
@@ -275,7 +320,6 @@ local function RestoreOne(path)
         pcall(info.region.SetAlpha, info.region, info.alpha)
     end
     if frame.monetBadge then pcall(frame.monetBadge.Hide, frame.monetBadge) end
-    savedParents[frame] = nil
 end
 
 --- 把三个按钮摆到覆盖层上（overlay 是小地图可见区那块透明层）。
@@ -308,9 +352,17 @@ end
 
 --- 还原：把暴雪按钮搬回原来的父级与锚点，我们画的底板藏起来。
 function B:Restore()
-    for frame in pairs(savedParents) do
+    -- 先把帧名收集成一张表再逐个还原：遍历中改 savedParents（还要把条目置 nil）
+    -- 既可能撞上"遍历中改表"的规矩，也可能撞上弱键被回收。
+    local frames = {}
+    for frame in pairs(savedParents) do frames[#frames + 1] = frame end
+
+    for _, frame in ipairs(frames) do
         local saved = savedParents[frame]
         if frame and saved then
+            -- 先把存档删掉再还原：重入钩子看到"已经交还给暴雪了"就不会在
+            -- 还原的过程中又把它搬回容器里（同 RestoreOne 的理由）。
+            savedParents[frame] = nil
             pcall(frame.SetParent, frame, saved.parent)
             pcall(frame.ClearAllPoints, frame)
             for _, pt in ipairs(saved.points) do

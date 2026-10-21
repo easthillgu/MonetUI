@@ -29,13 +29,15 @@ MonetUI本身完全自写，只有下面这些文件来自他人，按各自许�
 - 来源：取自 **Andromeda** 随包分发的 `libraries/LibActionButton-1.0/` 副本。
   Andromeda 是 GPL-3.0 项目，但该库文件本身是 BSD-3 授权，Andromeda 只是随包分发，
   并没有（也不能）改变它的许可，因此可以合法再分发。
-- MonetUI 的改动**只有三行**（文件内以 `MonetUI change:` 标注）：
+- MonetUI 的改动**只有四处**（文件内以 `MonetUI change:` 标注）：
   1. `MAJOR_VERSION` 改为 `"LibActionButton-1.0-MonetUI"` —— 避免与 ElvUI / Andromeda
      各自的同名 fork 在 LibStub 里互相顶替；
   2. `LibCustomGlow` 改用库名 `"LibCustomGlow-1.0"` 查找（原来查的是 Andromeda 私有名），
      这样任何装了标准 LibCustomGlow 的插件都能让按钮吃到技能高亮；
   3. `CallbackHandler-1.0` 由必需改为可选（缺失时用一个空的 `lib.callbacks` 兜底），
-     与 MonetUI「只硬依赖 LibStub」的原则一致。
+     与 MonetUI「只硬依赖 LibStub」的原则一致；
+  4. 学新法术的刷新事件改用 11.0 后的名字 `LEARNED_SPELL_IN_SKILL_LINE`
+     （`LEARNED_SPELL_IN_TAB` 在本客户端永不触发；注册与 `OnEvent` 分支同时改）。
 - 其余代码原样保留，未做任何改写。
 
 ## 为什么把它放进包里

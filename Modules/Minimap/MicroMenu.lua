@@ -118,12 +118,36 @@ local function Build()
     return frame
 end
 
+--- 现在有没有别的菜单开着？
+--- 暴雪的追踪菜单、LibDBPanel 这类插件会在同一次右键里开菜单；我们再 Toggle 一次，
+--- 人家刚开的菜单就被我们关掉了（同一个右键既开又关，看着像"点了没反应"）。
+--- AishCore 的做法：查 DropDownList1 与菜单管理器（Comfort.lua 544-551）。
+local function AnyMenuOpen()
+    local list = _G.DropDownList1
+    if list and list.IsShown then
+        local ok, shown = pcall(list.IsShown, list)
+        if ok and shown then return true end
+    end
+    local menu = _G.Menu
+    if menu and menu.GetManager then
+        -- 布尔换算也放在 pcall 里：万一返回值是保密值，条件判断会直接报错
+        local ok, anyOpen = pcall(function()
+            local open = menu.GetManager():GetOpenMenu()
+            return open and true or false
+        end)
+        if ok and anyOpen then return true end
+    end
+    return false
+end
+
 --- 在小地图旁边弹出（anchor 一般是小地图面板）。
 function M:Toggle(anchor)
     if frame and frame:IsShown() then
         self:Close()
         return
     end
+    -- 已经有别的菜单开着就别抢（见 AnyMenuOpen 的说明）
+    if AnyMenuOpen() then return end
     self:Build()
     if not frame then return end
 

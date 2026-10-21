@@ -14,6 +14,7 @@ local DEFAULTS = {
     enabled = true,
     modules = {
         UnitFrames   = true,
+        GroupFrames  = true,
         Cooldown     = true,
         BuffFrame    = true,
         Minimap      = true,
@@ -24,6 +25,16 @@ local DEFAULTS = {
         Nameplates   = true,
         Skins        = true,
         InfoBar      = true,
+        Tooltip      = true,
+    },
+    -- 位置服务（Utils/Mover.lua）：全 addon 的框共用一套拖拽 / 吸附 / 锁。locked 是全局锁，locks 按组覆盖；
+    -- grid 是网格步长（物理像素，0 = 关），snap / snapRange 是框与框互相吸附的开关与范围（物理像素）。
+    mover = {
+        locked    = false,
+        locks     = {},
+        grid      = 8,
+        snap      = true,
+        snapRange = 6,
     },
     theme = {
         useMonetColor  = true,
@@ -87,6 +98,23 @@ local DEFAULTS = {
                    point = "RIGHT",  relativeTo = "player",   relativePoint = "LEFT",   x = -6,   y = 0 },
         focus  = { width = 60,  health = 4, power = 1, fillColor = "class", lostColor = "danger",
                    point = "RIGHT",  relativeTo = "player",   relativePoint = "LEFT",   x = -100, y = -40 },
+    },
+    -- 小队 / 团队框架（Modules/UnitFrames/Groups.lua）：暴雪安全头 + Monet 皮肤，位置交给 Utils/Mover.lua。
+    -- party 是"自己 + 小队 1..4"一列；raid 是 8 组 × 5 人，每组一个头、并排成一排（空组留空位）。
+    -- hideBlizzard 只在我们真的把头建出来之后才生效：模板缺失时暴雪的框一定留着，不能让人没框可用。
+    groupFrames = {
+        hideBlizzard = true,
+        party = {
+            enabled = true,
+            width = 110, health = 18, power = 4, spacing = 2,
+            showPlayer = true,
+            point = "CENTER", relativeTo = "UIParent", relativePoint = "CENTER", x = -330, y = 40,
+        },
+        raid = {
+            enabled = true,
+            width = 72, health = 24, power = 3, spacing = 2, groupGap = 8,
+            point = "CENTER", relativeTo = "UIParent", relativePoint = "CENTER", x = 300, y = 0,
+        },
     },
     -- Blizzard's bottom chrome is re-parented off screen, not destroyed, so the buttons keep working for keybinds.
     -- ownBars: MonetUI draws its own 1..8 bars on LibActionButton-1.0 (Modules/ActionBars) and parks Blizzard's bars; with it off only hideBlizzard can still hide them.  First-run layout lives in BAR_DEFS, positions holds a per-bar override.
@@ -173,12 +201,14 @@ local DEFAULTS = {
         hidePromo       = true,
         hideCompass     = true,
     },
-    -- Info bar (信息栏, Modules/InfoBar): one full-width strip along a screen edge carrying small data blocks.  anchorTop pins it to the top edge (so it clears the bottom action bars), height is the strip height (14 fits a 12px font), mouseover keeps the blocks invisible until hovered, combatPulse breathes red in combat / yellow with pending invites; blocks are one switch per data block.
+    -- Info bar (信息栏, Modules/InfoBar): one full-width strip along a screen edge carrying small data blocks.  anchorTop pins it to the top edge (so it clears the bottom action bars), height is the strip height (14 fits a 12px font), mouseover keeps the blocks invisible until hovered, combatPulse breathes red in combat / yellow with pending invites, xp draws the experience progress on the bottom hairline (hover the ▲ to read the numbers) and xpFaction hands that same line to the watched reputation at max level; blocks are one switch per data block.
     infobar = {
         anchorTop   = true,
         height      = 14,
         mouseover   = true,
         combatPulse = true,
+        xp          = true,
+        xpFaction   = true,
         blocks = {
             gold       = true,
             durability = true,
@@ -187,6 +217,12 @@ local DEFAULTS = {
             spec       = true,
             friends    = true,
         },
+    },
+    -- 鼠标提示 (Modules/Tooltip)：位置是全局行为，和美化分开开关。follow = 所有提示框（物品 / 技能 / 角色 / 光环……）
+    -- 跟着鼠标走 —— 默认开，因为暴雪的默认锚点在屏幕右下角，那正好是 MonetUI 放小地图集群的地方；
+    -- 关掉就退回暴雪的默认容器（编辑模式下可移动）。
+    tooltip = {
+        follow = true,
     },
 }
 ns.DEFAULTS = DEFAULTS
@@ -580,7 +616,9 @@ local function PrintScale()
                                     lw, lh, pw, ph))
         end
     end
-    if _G.C_Console and _G.C_Console.GetAllCommands then
+    -- 本客户端没有 C_Console 命名空间（wow-forever-api 索引里只有全局 ConsoleGetAllCommands），
+    -- 这里以前用 C_Console.GetAllCommands 当开关，永远为假，那行提示从来没打出来过。
+    if type(_G.ConsoleGetAllCommands) == "function" then
         ns:Print("提示：graphicsTextureResolution = "
             .. tostring((_G.C_CVar and _G.C_CVar.GetCVar and _G.C_CVar.GetCVar("graphicsTextureResolution")) or "?")
             .. "（UI 贴图不受它缩放，仅供确认）")

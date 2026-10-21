@@ -162,6 +162,44 @@ local function SkinAddonList()
     end)
 end
 
+--- NineSlice 面板（本客户端的 GameTooltip / ItemRefTooltip 都是这种）：边框和底色不是 backdrop，
+--- 而是子框架 NineSlice 上各片贴图的顶点色 —— 对它们调 SetBackdropBorderColor 一点反应都没有，
+--- 所以「鼠标提示边框」以前在这个客户端是空转的。返回 true 表示这个框架走的是这条线。
+local function PaintNine(frame, nine)
+    local r, g, b = ns.Color:GetBorder()
+    nine:SetBorderColor(r, g, b, 1)
+    local ar, ag, ab = ns.Color:GetAmbient()
+    nine:SetCenterColor(ar * 0.35, ag * 0.35, ab * 0.35, 0.95)
+end
+
+local function TintNineSlice(frame)
+    local nine = frame and frame.NineSlice
+    if not nine or type(nine.SetBorderColor) ~= "function" or type(nine.SetCenterColor) ~= "function" then
+        return false
+    end
+
+    if not frame.__monetNineTint then
+        frame.__monetNineTint = true
+
+        local dr, dg, db, da = nine:GetBorderColor()
+        local cr, cg, cb, ca = nine:GetCenterColor()
+
+        Skin:Record(function()
+            if dr then nine:SetBorderColor(dr, dg, db, da) end
+            if cr then nine:SetCenterColor(cr, cg, cb, ca) end
+            frame.__monetNineTint = nil
+        end)
+
+        -- 关掉美化后主题刷新还会跑，所以这里先问一句"这片框架现在还算被美化着吗"
+        Skin:OnTheme(function()
+            if frame.__monetNineTint then PaintNine(frame, nine) end
+        end)
+    end
+
+    PaintNine(frame, nine)
+    return true
+end
+
 --- Recolour a frame's existing backdrop.  Menus and the tooltip already own a backdrop, so no backplate child is added; originals are recorded for rollback.
 local function TintBackdrop(frame)
     if not frame or type(frame.SetBackdropBorderColor) ~= "function" then return end
@@ -204,26 +242,47 @@ local function TintBackdrop(frame)
     frame:SetBackdropBorderColor(r, g, b, 1)
 end
 
+--- 面板底：先试 NineSlice（本客户端的提示框、下拉菜单都是这种），没有 NineSlice 才退回 backdrop。
+local function TintPanel(frame)
+    if not frame then return end
+    if TintNineSlice(frame) then return end
+    TintBackdrop(frame)
+end
+
 local function SkinMenus()
     local create = _G.UIDropDownMenu_CreateFrames
     if type(create) ~= "function" or create.__monetHooked then return end
     create.__monetHooked = true
 
     hooksecurefunc("UIDropDownMenu_CreateFrames", function(level, menuIndex)
-        TintBackdrop(_G["DropDownList" .. tostring(level)])
-        TintBackdrop(_G["DropDownList" .. tostring(level) .. "Menu" .. tostring(menuIndex)])
+        TintPanel(_G["DropDownList" .. tostring(level)])
+        TintPanel(_G["DropDownList" .. tostring(level) .. "Menu" .. tostring(menuIndex)])
+    end)
+end
+
+--- 提示框的九宫格颜色每次隐藏都会被 GameTooltip_ClearStyle 刷回暴雪默认值
+--- （GameTooltipDataMixin:OnHide → SharedTooltip_SetBackdropStyle(self, nil)），只在登录时染一次等于没染。
+--- 挂到那个函数上补一刀：只补「默认样式」；暴雪自己的特殊样式（符文锻造金、腐化紫、Azerite）保留原样。
+local function WatchTooltipStyle()
+    if WatchTooltipStyle.done or type(_G.SharedTooltip_SetBackdropStyle) ~= "function" then return end
+    WatchTooltipStyle.done = true
+
+    hooksecurefunc("SharedTooltip_SetBackdropStyle", function(frame, style)
+        if style or not frame or not frame.__monetNineTint then return end
+        TintNineSlice(frame)
     end)
 end
 
 local function SkinTooltip()
-    TintBackdrop(_G.GameTooltip)
+    TintPanel(_G.GameTooltip)
+    WatchTooltipStyle()
 
     -- ItemRefTooltip is the *separate* frame a ctrl-clicked item link opens in.  It has its own
-    -- backdrop and its own close button and nothing in the game touches either, so every item link the
+    -- chrome and its own close button and nothing in the game touches either, so every item link the
     -- player inspects shows stock Blizzard chrome even when the tooltip option is on.
     local ref = _G.ItemRefTooltip
     if ref then
-        TintBackdrop(ref)
+        TintPanel(ref)
         if ref.CloseButton then Skin:CloseButton(ref.CloseButton) end
     end
 end
@@ -279,6 +338,6 @@ M:Panel("menus", { label = "下拉菜单", group = "系统", apply = SkinMenus, 
     -- so listing them here would be decoration (see ALLOW_DYNAMIC in tools/check-frame-list.js).
     frames = { "UIDropDownMenu_CreateFrames" } })
 
-M:Panel("tooltip", { label = "鼠标提示边框", group = "系统", apply = SkinTooltip, default = false,
+M:Panel("tooltip", { label = "鼠标提示边框", group = "系统", apply = SkinTooltip, default = true,
     -- Same for ItemRefTooltipCloseButton: reached as ref.CloseButton (a member), not a global.
     frames = { "GameTooltip", "ItemRefTooltip" } })

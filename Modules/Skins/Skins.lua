@@ -285,6 +285,9 @@ local FONT_OBJECTS = {
     "GameFontNormalMed1", "GameFontNormalMed2", "GameFontNormalMed3",
     "NumberFontNormal", "NumberFontNormalSmall", "NumberFontNormalLarge",
     "NumberFontNormalHuge", "NumberFont_Shadow_Small",
+    -- 提示框用自己的字体对象（不是 GameFont*），不在这里列出来，全局字体开关就管不到物品 / 技能 / 角色
+    -- 那几万行提示框文字 —— 它们会继续用暴雪的 FRIZQT__/ARHei，和界面其余部分不一样。
+    "GameTooltipText", "GameTooltipTextSmall", "GameTooltipHeaderText",
 }
 
 function M:GetFontKey()
