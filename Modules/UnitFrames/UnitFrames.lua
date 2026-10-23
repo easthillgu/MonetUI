@@ -1057,7 +1057,7 @@ local function StyleAuraButton(button, kind, spec)
             local region = regions[i]
             if type(region) == "table" and type(region.GetObjectType) == "function"
                 and region:GetObjectType() == "FontString" then
-                Widget:SetFont(region, textSize, "pixel", nil, true)
+                Widget:SetFont(region, textSize, "pingfang", Media.outlineFlags, true)
                 pcall(region.ClearAllPoints, region)
                 pcall(region.SetPoint, region, "BOTTOM", button, "BOTTOM", 0, inset)
                 pcall(region.SetJustifyH, region, "CENTER")
@@ -1070,7 +1070,9 @@ local function StyleAuraButton(button, kind, spec)
     -- 建在冷却帧上（作为它的 region）—— 实测引擎自己那行数字就是这样画的、位于图标之上；
     -- 挂在按钮的子帧里会被图标盖住。
     local duration = cd:CreateFontString(nil, "OVERLAY")
-    Widget:SetFont(duration, textSize, "pixel", nil, true)
+    -- 时长数字用 PingFangPixel + 硬描边：这套字号是跟着图标尺寸算的（目标框光环 14-20px，
+    -- 算出来 4-8px），像素字体在这个尺寸下认不出来。
+    Widget:SetFont(duration, textSize, "pingfang", Media.outlineFlags, true)
     duration:SetPoint("BOTTOM", button, "BOTTOM", 0, inset)
     duration:SetJustifyH("CENTER")
 
@@ -1773,6 +1775,8 @@ function M:RegisterEvents()
     EventBus:Register("PLAYER_REGEN_ENABLED", function()
         -- 战斗中换主题时挂起的容器重建（战斗中建容器会被拦）。
         if M.__auraRebuildPending then RebuildTargetAuras() end
+        -- 战斗中 SetEnabled 被挡住的安全单位按钮显隐，脱战补上。
+        M:FlushPendingEnabled()
         M:UpdateAll()
     end)
     -- Death / resurrection: the bars grey out and come back.
@@ -1809,28 +1813,43 @@ function M:Initialize()
     self:UpdateAll()
 end
 
-function M:SetEnabled(enabled)
-    -- Hand the borrowed aura list back before the target frame goes away.
-    if not enabled then
-        -- B 方案：容器随 target 帧一起隐藏，没有要归还的暴雪子帧
-    end
+--- 安全单位按钮的显示/隐藏。**战斗中不能调**（SecureUnitButtonTemplate 的 SetShown 受保护，
+--- 日志里 MonetUITargetFrame:Hide()/Show() 攒了两百多次），脱战再补。
+local pendingEnabled
 
-    -- 模块整个关掉：暴雪的施法条还回去（我们自己那条也没了）。
-    self:HideBlizzardCastBars(not enabled)
-
+local function ApplyEnabled(enabled)
     for _, frame in pairs(frames) do
         local show = enabled and UnitExists(frame.unit)
-        frame:SetShown(show and true or false)
+        pcall(frame.SetShown, frame, show and true or false)
         -- A hidden module must not keep the state layer's ticker running.
         if frame.monetBorder and frame.monetBorder.SetEnabled then
             frame.monetBorder:SetEnabled(enabled and true or false)
         end
     end
+end
+
+function M:SetEnabled(enabled)
+    -- 模块整个关掉：暴雪的施法条还回去（我们自己那条也没了）。
+    self:HideBlizzardCastBars(not enabled)
+
+    if InCombatLockdown() then
+        pendingEnabled = enabled
+        return
+    end
+    ApplyEnabled(enabled)
 
     -- 重新开启时 UpdateAll -> RefreshUnit -> EnsureTargetAuras 会把容器显示回来。
     if enabled then
         self:UpdateAll()
     end
+end
+
+--- 脱战补一次被战斗挡住的显示/隐藏（RegisterEvents 的 PLAYER_REGEN_ENABLED 会调用）。
+function M:FlushPendingEnabled()
+    if pendingEnabled == nil then return end
+    local enabled = pendingEnabled
+    pendingEnabled = nil
+    ApplyEnabled(enabled)
 end
 
 ns:Register("UnitFrames", M)
