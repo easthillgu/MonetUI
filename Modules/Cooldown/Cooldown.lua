@@ -278,7 +278,8 @@ local function Tick(cd, elapsed)
     -- 0.5s cap keeps the per-tick re-hide check and the alert colour responsive.
     local value, suffix, nextUpdate, bucket
     if remain >= 0.5 then
-        value, suffix, nextUpdate, bucket = Math:Countdown(remain, tenthsTH, mmssTH)
+        -- compact 帧（buff 图标）关掉 mm:ss 开关，走 "59m" 这种短格式。
+        value, suffix, nextUpdate, bucket = Math:Countdown(remain, tenthsTH, state.compact and 0 or mmssTH)
     else
         value, suffix, bucket = "", "", nil
         nextUpdate = FAST_INTERVAL
@@ -369,13 +370,17 @@ end
 
 --- Register a cooldown frame with the auto-scaling text renderer.
 -- Safe to call repeatedly (theme refresh, size change): it only re-styles and asks for an immediate re-render.
-function M:Attach(cd, size)
+-- compact = true：不用 mm:ss 那种宽格式（"1:05"），退回紧凑的 "59m"/"23h"/"3d"。
+-- 小格子（buff 图标 28px）放不下 5 个字符，颜色 / 放大 / 缩放逻辑完全一样。
+function M:Attach(cd, size, compact)
     if not cd then return nil end
     size = tonumber(size) or BASE_SIZE
+    compact = compact and true or false
 
     local state = attached[cd]
     if state then
         state.size = size
+        state.compact = compact
         UpdateScale(cd, state)        -- the bar may have been resized
         state.look = nil              -- force the font/colour to be re-applied
         state.next = 0                -- render on the next frame
@@ -384,6 +389,7 @@ function M:Attach(cd, size)
 
     state = {
         size         = size,
+        compact      = compact,
         externalHide = false,         -- what outside code last asked for
         own          = false,
         next         = 0,
@@ -412,8 +418,8 @@ function M:Attach(cd, size)
 end
 
 --- Style hook used everywhere a cooldown frame is dressed (this module and the action bars): keeps Blizzard's numbers on until the text can be ours.
-function M:StyleCooldown(cd, size)
-    local state = self:Attach(cd, size)
+function M:StyleCooldown(cd, size, compact)
+    local state = self:Attach(cd, size, compact)
     if state and not state.own then
         state.externalHide = false
         SetNumbers(cd, false)
