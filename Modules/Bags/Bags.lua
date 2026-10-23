@@ -87,7 +87,13 @@ local function BuildItem(bag, slot, info)
     it.texture = info.iconFileID
 
     if info.hyperlink and C_Item and C_Item.GetItemInfo then
-        local ok, name, link, quality, ilvl, _, _, _, equipLoc, tex, sellPrice,
+        -- 返回顺序（客户端文档 ItemDocumentation.lua:GetItemInfo）：
+        --   1 itemName  2 itemLink  3 itemQuality  4 itemLevel  5 itemMinLevel
+        --   6 itemType  7 itemSubType  8 itemStackCount  9 itemEquipLoc
+        --  10 itemTexture  11 sellPrice  12 classID  13 subclassID ...
+        -- 第 8 项之后这里曾经少写了一个占位符，于是 equipLoc 拿到的是堆叠数、
+        -- classID 拿到的是卖价 —— 分类（装备/材料/收藏）永远不命中，图标也全是空的。
+        local ok, name, link, quality, ilvl, _, _, _, _, equipLoc, tex, sellPrice,
               classID, subClassID = pcall(C_Item.GetItemInfo, info.hyperlink)
         if ok then
             it.name      = name or it.name
@@ -366,29 +372,36 @@ local function FillWindow(win, items)
 end
 
 --- Tile the visible, not-yet-dragged windows in category order from the anchor.
+--- 锚点是 **UIParent 的左上角**（x 向右、y 向下），窗口向右排、向下堆。
+--- 原来 anchor.x = -33 被当成"离右边 33"来用，套在 TOPLEFT 上就是"离左边 33"，
+--- 第一个窗口整个跑到屏幕外，只剩一两个看得见。
 local function LayoutWindows()
     local anchor = Setting("anchor") or {}
     local perRow = Setting("windowsPerRow") or 2
     local spacing = 14
 
     local base = _G[anchor.frame] or UIParent
-    local originX = anchor.x or -33
-    local originY = anchor.y or -120
+    local originX = anchor.x or 24
+    local originY = anchor.y or -140
 
-    local col, x, rowH = 0, 0, 0
+    local col, x, rowW, rowH, rowBottom = 0, 0, 0, 0, 0
     for _, cat in ipairs(CATEGORIES) do
         local win = windows[cat.key]
         if win and win:IsShown() and not WindowPosition(cat.key) then
             local w, h = win:GetWidth(), win:GetHeight()
             if col >= perRow then
-                x = x + rowH + spacing   -- step right by the widest of the row
-                col, rowH = 0, 0
+                -- 这一排排满了：整排往右挪一格（按这一排最宽的），再整排往下挪一格
+                -- （按上一排最高的）。每扇窗高度不同，用当前窗的高度会让下一排压上来。
+                x = x + rowW + spacing
+                rowBottom = rowBottom + rowH + spacing
+                col, rowW, rowH = 0, 0, 0
             end
             win:ClearAllPoints()
-            win:SetPoint("TOPLEFT", base, "TOPLEFT", originX - x, originY - col * (h + spacing))
+            win:SetPoint("TOPLEFT", base, "TOPLEFT", originX + x, originY - rowBottom)
 
             col = col + 1
-            rowH = math.max(rowH, w)
+            rowW = math.max(rowW, w)
+            rowH = math.max(rowH, h)
         end
     end
 end
@@ -427,26 +440,89 @@ end
 
 local blizzardHidden = {}
 
-local function HideBlizzardBags(enable)
+--- 暴雪的背包框：零售 12.x 默认是**合并背包**（ContainerFrameCombinedBags），
+--- 老客户端才是 ContainerFrame1..N。两个都得管。
+local function BlizzardBagFrames()
+    local frames = {}
     for index = 1, 13 do
         local frame = _G["ContainerFrame" .. index]
-        if frame then
-            if enable then
-                if frame:IsShown() then
-                    blizzardHidden[frame] = true
-                    frame:Hide()
-                end
-            elseif blizzardHidden[frame] then
-                blizzardHidden[frame] = nil
+        if frame then frames[#frames + 1] = frame end
+    end
+    local combined = _G.ContainerFrameCombinedBags
+    if combined then frames[#frames + 1] = combined end
+    return frames
+end
+
+--- 藏 / 还暴雪的背包框。
+--- 还原时必须真的 Show 回来：只把记账抹掉的话，暴雪的框永远留在隐藏状态，
+--- 玩家就一个背包都打不开了。
+local function HideBlizzardBags(enable)
+    for _, frame in ipairs(BlizzardBagFrames()) do
+        if enable then
+            if frame:IsShown() then
+                blizzardHidden[frame] = true
+                frame:Hide()
             end
+        elseif blizzardHidden[frame] then
+            blizzardHidden[frame] = nil
+            pcall(frame.Show, frame)
         end
     end
 end
 
+--- 暴雪的背包框每次被打开都要拦一道：把我们的分类窗口顶上来，暴雪那条继续藏着。
+--- 玩家按 B（或点背包钮）时暴雪走的就是 ContainerFrame:Show()，
+--- 所以钩 Show / SetShown 就够 —— 不用自己去抢按键。
+---
+--- 两件事必须留到**下一帧**再做：
+---   1. 藏框 —— 暴雪正在 Show 它的框时我们就把框藏了，它自己的
+---      "生成物品格子" 那一步会拿到 nil（ContainerFrame.lua 的 'itemButton' is a nil value）。
+---      晚一帧藏，暴雪的流程能正常跑完，只是玩家会看到背包闪一下。
+---   2. 开关我们的窗口 —— 暴雪一次开背包会把合并框 Show 六次（背包 + 5 个包），
+---      同一帧里的多次触发只能算一次。
+local blizzardHooked = false
+local interceptGuard = false
+
+local function HookBlizzardBags()
+    for _, frame in ipairs(BlizzardBagFrames()) do
+        if not frame.__monetBagHook then
+            frame.__monetBagHook = true
+            local function Intercept(self)
+                if not ns:IsModuleEnabled("Bags") then return end
+                if interceptGuard then return end
+                interceptGuard = true
+                local defer = function()
+                    interceptGuard = false
+                    for _, other in ipairs(BlizzardBagFrames()) do
+                        pcall(other.Hide, other)
+                    end
+                    M:Toggle()
+                end
+                if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+                    C_Timer.After(0, defer)
+                else
+                    defer()
+                end
+            end
+            hooksecurefunc(frame, "Show", Intercept)
+            hooksecurefunc(frame, "SetShown", Intercept)
+        end
+    end
+    blizzardHooked = true
+end
+
 local shown = false
 
-function M:Toggle()
-    shown = not shown
+--- 打开 / 关闭分类背包。force = true 时只开（给"暴雪背包被打开"那条路用）。
+function M:Toggle(force)
+    if force == nil then
+        shown = not shown
+    elseif force then
+        shown = true
+    else
+        shown = false
+    end
+
     if shown then
         HideBlizzardBags(true)
         Rebuild("bags")
@@ -459,6 +535,10 @@ end
 function M:Initialize()
     if not ns:DB().bags then ns:DB().bags = {} end
 
+    -- 暴雪的背包框（ContainerFrame1…13）一开始可能还没建出来，
+    -- 每次事件都补钩一次（幂等）。
+    HookBlizzardBags()
+
     -- BAG_UPDATE fires often and for every bag: the handler only marks a rebuild, coalesced to one frame by the flag.
     local pending = false
     local driver = CreateFrame("Frame")
@@ -469,6 +549,7 @@ function M:Initialize()
     end)
 
     local function Mark()
+        HookBlizzardBags()
         if not shown then return end
         pending = true
         driver:Show()
@@ -487,14 +568,20 @@ function M:Initialize()
         end
     end)
     EventBus:Register("BANKFRAME_CLOSED", function()
-        for _, win in pairs(windows) do win:Hide() end
-        shown = false
+        -- 银行关了就把背包那几扇窗放回去（原来这里一关就再也不回来了）。
+        if shown then
+            Rebuild("bags")
+        else
+            for _, win in pairs(windows) do win:Hide() end
+        end
         HideBlizzardBags(false)
     end)
 end
 
 function M:HandleCommand(rest)
     if rest == "bank" then
+        shown = true
+        HideBlizzardBags(true)
         Rebuild("bank")
         return true
     end
@@ -507,6 +594,8 @@ function M:SetEnabled(enabled)
         for _, win in pairs(windows) do win:Hide() end
         shown = false
         HideBlizzardBags(false)
+    else
+        HookBlizzardBags()
     end
 end
 
