@@ -1,7 +1,25 @@
 -- Modules/ActionBars/ActionBars.lua
--- MonetUI 的动作条：1 到 8 号动作条，外加接管的宠物条 / 姿态条；主流做法（Bartender4、Dominos、ElvUI、Andromeda）：藏起暴雪默认条，在客户端安全模板上自建按钮，施法由客户端完成、战斗中不失效；暴雪按钮只移入隐藏框体，按键绑定仍有效。
--- 按钮本身来自 LibActionButton-1.0（随包放在 Libs/，BSD-3，见 Libs/NOTICE.md），
--- 和 Bartender4 / ElvUI / Andromeda 用的是同一个库：
+-- MonetUI 的动作条：1 到 8 号动作条，外加接管的宠物条 / 姿态条。
+--
+-- **不依赖任何动作条库**（LibActionButton 已从本文件与 .toc 里移除）。
+-- 按钮全部自建，但**施法由客户端完成**，所以战斗中不会失效：
+--
+--   * 按钮 = CreateFrame("CheckButton", name, bar, "SecureActionButtonTemplate", index)
+--     第 5 个参数是 id，客户端靠它算槽位：slot = id + (page - 1) * 12。
+--   * 条 = SecureHandlerStateTemplate。_onstate-page 片段把状态页写进条自己的
+--     "actionpage" 属性；按钮设 useparent-actionpage，客户端每次点击都重新算槽位，
+--     于是翻页 / 载具 / 覆盖条 / 变形条全部由客户端决定，我们不碰任何安全逻辑。
+--   * 图标 / 数量 / 宏名 / 热键 由我们自己读 C_ActionBar 的数据画；
+--     冷却交给客户端（RegisterActionUIButton），所以永远不会和真实状态脱节。
+--
+-- 暴雪自己的条只是**藏起来**（Park），不搬动：零售 12.x 上搬动受保护的框体会变成
+-- 强污染，暴雪的编辑模式再想挪一下就被拒（ADDON_ACTION_BLOCKED 一片刷屏）。
+-- 藏起来不影响按键：ACTIONBUTTON1 这类绑定走的是 _G["ActionButton1"]，
+-- 那是暴雪的按钮，玩家按下去照常施法；我们另外把同一批键覆盖到自己按钮上，
+-- 于是"按下去看到的"和"按下去生效的"是同一个按钮。
+--
+-- 宠物条 / 姿态条不重画：它们是暴雪自己的按钮（图标更新、自动施法圈、冷却都由
+-- 客户端在管），我们只搬位置、缩放、裁图标（见 ADOPTED_DEFS）。
 
 local ADDON_NAME, ns = ...
 
@@ -10,21 +28,17 @@ local Color    = ns.Color
 local Media    = ns.Media
 local EventBus = ns.EventBus
 local Secrets  = ns.Secrets
+local Skin     = ns.Skin
 
 local M = { name = "ActionBars" }
 
--- Everything the module touches that this build could be missing is looked up once and used through a pcall wrapper, so a missing global degrades instead of breaking the addon.
-
-local LibStub = _G.LibStub
-local LAB     = LibStub and LibStub("LibActionButton-1.0-MonetUI", true)
-
-local InCombatLockdown        = _G.InCombatLockdown
-local RegisterStateDriver     = _G.RegisterStateDriver
-local UnregisterStateDriver   = _G.UnregisterStateDriver
+local ActionBar        = _G.C_ActionBar
+local RegisterStateDriver   = _G.RegisterStateDriver
+local UnregisterStateDriver = _G.UnregisterStateDriver
 local SetOverrideBindingClick = _G.SetOverrideBindingClick
 local ClearOverrideBindings   = _G.ClearOverrideBindings
 local GetBindingKey           = _G.GetBindingKey
-local GetBindingByKey         = _G.C_KeyBindings and _G.C_KeyBindings.GetBindingByKey
+local C_KeyBindings            = _G.C_KeyBindings and _G.C_KeyBindings.GetBindingByKey
 local CanExitVehicle          = _G.CanExitVehicle
 local VehicleExit             = _G.VehicleExit
 local TaxiRequestEarlyLanding = _G.TaxiRequestEarlyLanding
@@ -56,7 +70,6 @@ local DEFAULT_SPACING = 2
 local DEFAULT_BARS    = 5
 
 local BUTTONS_PER_BAR = 12
-local BAR_PAGES       = 18   -- pages the paging bar can be switched to
 
 --- 冷却数字交给 Cooldown 模块渲染（自动缩放 + 紧急变色放大）；模块缺席时退回原纯字体样式。
 local function StyleCooldownFrame(cd)
@@ -93,16 +106,8 @@ local function BarCount()
     return count and count >= 1 and count or DEFAULT_BARS
 end
 
---- 玩家自己的"按下即施法"偏好；按钮交给客户端时要用同一个值。
-local KEY_DOWN
-local function ClickOnDown()
-    if KEY_DOWN == nil then
-        local get = (_G.C_CVar and _G.C_CVar.GetCVarBool) or _G.GetCVarBool
-        local ok, value = pcall(get, "ActionButtonUseKeyDown")
-        KEY_DOWN = (ok and value) and true or false
-    end
-    return KEY_DOWN
-end
+--- 玩家自己的"按下即施法"偏好由客户端自己处理（SecureActionButton_OnClick 看
+--- ActionButtonUseKeyDown），我们不需要知道它。
 
 --- 某个暴雪绑定名绑着的键，没有就返回 nil。
 -- GetBindingKey 缺席时用命名空间版本兜底（后者要键、返回绑定名，所以结果要排错）。
@@ -114,8 +119,8 @@ local function BindingFor(action)
         if type(key) == "string" and key ~= "" then return key end
     end
 
-    if GetBindingByKey then
-        local key = Call(GetBindingByKey, action)
+    if C_KeyBindings then
+        local key = Call(C_KeyBindings, action)
         if type(key) == "string" and key ~= ""
             and key ~= action and not key:find("ACTIONBUTTON") then
             return key
@@ -129,9 +134,11 @@ end
 -- 前缀，玩家已有的按键设置因此原样生效。位置存在存档里（见 Core.lua），表里给的只是初次锚点。
 
 local BAR_DEFS = {
+    -- 屏幕底边基线由 Utils/Layout.lua 统一给出（小地图、聊天框都按它对齐），别在这里写死数字。
     { key = "Bar1", index = 1, page = 1,  paged = true,  bind = "ACTIONBUTTON",
       blizzard = "MainMenuBar",
-      point = "BOTTOM", relativeTo = "UIParent", relativePoint = "BOTTOM", x = 0,   y = 24 },
+      point = "BOTTOM", relativeTo = "UIParent", relativePoint = "BOTTOM", x = 0,
+      y = (ns.Layout and ns.Layout.bottom) or 24 },
     { key = "Bar2", index = 2, page = 6,  bind = "MULTIACTIONBAR1BUTTON",
       blizzard = "MultiBarBottomLeft",
       point = "BOTTOM", relativeTo = "Bar1",     relativePoint = "TOP",    x = 0,   y = 2 },
@@ -176,10 +183,12 @@ for _, def in ipairs(ADOPTED_DEFS) do
     end
 end
 
--- 暴雪自己的动作条，顺序和按钮绑定一致：1 号条 ACTIONBUTTON<i>、2 号条 MULTIACTIONBAR1BUTTON<i>，以此类推。
+-- 8 条动作条：暴雪那几条只做 alpha 0（见 Park），点击板盖住它们看不见的裸按钮；
+-- 显示与施法全部由我们自己的按钮承担（槽位由安全片段写，见 PAGE_CHILD 那段）。
 local ACTION_BAR_FRAMES = {
-    "MainMenuBar", "MultiBarBottomLeft", "MultiBarBottomRight",
-    "MultiBarLeft", "MultiBarRight", "MultiBar5", "MultiBar6", "MultiBar7",
+    "MainMenuBar", "MainActionBar",
+    "MultiBarBottomLeft", "MultiBarBottomRight",
+    "MultiBarRight", "MultiBarLeft", "MultiBar5", "MultiBar6", "MultiBar7",
     "OverrideActionBar", "PossessActionBar",
 }
 
@@ -188,12 +197,43 @@ local BAG_BAR_FRAMES = {
     "BagsBar", "MainMenuBarBackpackButton",
 }
 
+-- 收起暴雪那几条动作条的做法（照 Ellesmere 在 12.x 上验证过的，参考插件
+-- EllesmereUIActionBars.lua:1004-1036 与 :1308-1319）：
+--   * MainActionBar 留在原地（宠物对战要还原微型菜单）：只 alpha 0 + 收掉两端装饰；
+--   * 其余条 SetParent 到一个常隐框体 —— 不经过 Hide()/SetShown() 那条受保护 setter，
+--     也就不会在战斗转换时被记成 ADDON_ACTION_BLOCKED；
+--   * 按钮一律 UnregisterAllEvents + SetAttributeNoHandler("statehidden", true)：不自己 Hide，
+--     暴雪自己的 UpdateShownButtons 读到这个属性就会 SetShown(false)。这一步很关键：以前
+--     我们自己 Hide/SetShown，战斗转换时暴雪的 SetShownBase 就被拒（日志里那一串
+--     MultiBarBottomLeftButton1:SetShown()）。
+--   * OverrideActionBar / PossessActionBar 不碰：搬它们会把受保护子树弄脏、阻断
+--     BeginActionBarTransition（Ellesmere :1595 的教训）。载具时让暴雪自己显示。
+local hiddenParent
+
+local function HiddenParent()
+    if not hiddenParent then
+        hiddenParent = CreateFrame("Frame", "MonetUIActionBarDump", UIParent)
+        hiddenParent:SetAllPoints(UIParent)
+        hiddenParent:Hide()
+    end
+    return hiddenParent
+end
+
+--- 让暴雪自己把按钮藏起来：不碰受保护的 Hide/SetShown，只写 statehidden。
+local function QuietHideButton(button)
+    if not button then return end
+    pcall(button.UnregisterAllEvents, button)
+    pcall(button.SetAttributeNoHandler, button, "statehidden", true)
+end
+
 -- 1 号条会自己翻页（载具、覆盖、变形、额外动作条都用它），所以挂一个状态驱动；换页片段跑在
--- 客户端内部：`newstate` 是新页号，`self` 是头框体，ChildUpdate 把新页号交给每个按钮的 secure 片段。
+-- 客户端内部：`newstate` 是新页号，`self` 是头框体。片段在**安全环境**里写 actionpage，
+-- 再 ChildUpdate 让每个按钮的安全子片段重算自己的 "action"（槽位只能这么写，见 PAGE_CHILD 那段）。
 
 local ON_STATE_PAGE = [[
-    self:SetAttribute("state", newstate)
-    control:ChildUpdate("state", newstate)
+    local page = tonumber(newstate) or 1
+    self:SetAttribute("actionpage", page)
+    self:ChildUpdate("mui-page", page)
 ]]
 
 -- 1 号条：宠物对战时暴雪会换成宠物技能，这里跟着藏。
@@ -203,6 +243,7 @@ local VISIBILITY_MAIN = "[petbattle] hide; show"
 local VISIBILITY_OTHER =
     "[petbattle][overridebar][vehicleui][possessbar][shapeshift] hide; show"
 
+-- 状态页 → 槽位页的映射（客户端实测量：载具 16 / 覆盖 18 / 变形 17 / 奖励条 7..11）。
 local FULL_PAGE = "[bar:6]6;[bar:5]5;[bar:4]4;[bar:3]3;[bar:2]2;[possessbar]16;" ..
                   "[overridebar]18;[shapeshift]17;[vehicleui]16;[bonusbar:5]11;" ..
                   "[bonusbar:4]10;[bonusbar:3]9;[bonusbar:2]8;[bonusbar:1]7;1"
@@ -217,11 +258,29 @@ local EXIT_SNIPPET = [[
 ]]
 
 -- 留出降落伞：模板缺失时用来创建框体 / 退回暴雪动作条。
+-- 顺序有讲究：零售 12.x 上把 SecureHandlerStateTemplate 和 BackdropTemplate 写在**同一条**模板串
+-- 里，建出来的框体仍有 SetAttribute，却没有 WrapScript / Execute —— 安全处理器等于没装上
+-- （实测：单独用 SecureHandlerStateTemplate 有 WrapScript，合写就是 nil）。动作条的美术全是自绘的，用不到
+-- BackdropTemplate。
 local CONTAINER_TEMPLATES = {
-    "SecureHandlerStateTemplate, BackdropTemplate",
     "SecureHandlerStateTemplate",
+    "SecureHandlerStateTemplate, BackdropTemplate",
     "BackdropTemplate",
-    "Frame",
+    "",   -- 不带模板（零售 12.x 里 "Frame" 不是合法模板）
+}
+
+-- 按钮模板：只要 SecureActionButtonTemplate。
+-- **绝对不要再拼 QuickKeybindButtonTemplate**：它在 QuickKeybind.xml:13 里写了
+-- <OnClick method="QuickKeybindButtonOnClick"/>，而模板串里后写的覆盖先写的 ——
+-- 安全点击处理器 SecureActionButton_OnClick 会被整个顶掉。那个 OnClick 只在
+-- 快速按键模式（KeybindFrames_InQuickKeybindMode）下干活，平时一次点击什么都不做：
+-- 不发技能、不显示错误、连"按钮被按下"都没有，表现就是"点上去毫无反应"。
+-- 暴雪自家按钮靠 ActionBarButtonTemplate 的 mixin 手动二合一（ActionButton.lua:1503-1506：
+-- 先调 ActionBarActionButtonMixin.OnClick 再调 QuickKeybindButtonOnClick），
+-- 自绘按钮没有那层 mixin，就只能二选一 —— 选能施法的那个。
+local BUTTON_TEMPLATES = {
+    "SecureActionButtonTemplate",
+    "",   -- 不带模板（保底：至少还能画个图标）
 }
 
 local bars    = {}   -- key -> { def, frame, buttons }
@@ -238,38 +297,110 @@ local buildFailure  -- "lab" | "header" | "button" | "template"
 local leaveVehicle
 
 local FAILURE_TEXT = {
-    lab      = "没找到 LibActionButton-1.0，已保留暴雪默认动作条。",
+    lab      = "没找到安全按钮模板，已保留暴雪默认动作条。",
     header   = "此客户端没有安全头框体模板，已保留暴雪默认动作条。",
     button   = "此客户端没有安全按钮模板，已保留暴雪默认动作条。",
     template = "自绘动作条创建失败，已保留暴雪默认动作条。",
 }
 
--- 把暴雪的框体塞进一个永远隐藏的框里，而不是销毁它：它的按键仍然能按、事件仍然能收，只是
--- 玩家看不见，任何情况下都能原样放回去。
+-- 把暴雪的框体藏起来，而不是销毁它：按键仍然能按、事件仍然能收，只是玩家看不见，
+-- 任何情况下都能原样放回去。
+--
+-- 三条都被这个客户端否掉了：Hide()/SetShown() 会被暴雪的 SetShownBase 复活；
+-- SetParent 搬进隐藏框会让编辑模式（UpdateRightActionBarPositions）算出的缩放变 0
+-- （"MultiBarRight:SetScale(): Scale must be > 0"）；销毁更不行（按键绑在它身上）。
+-- 最后只剩一条稳的：**留在原地，只 SetAlpha(0) + 关鼠标**（见 Park）。
 
-local hidden
-
-local function NewFrame(kind, name, parent, templates)
+local function NewFrame(kind, name, parent, templates, validate)
     for _, template in ipairs(templates) do
-        local ok, frame = pcall(CreateFrame, kind, name, parent, template)
-        if ok and frame then return frame, template end
+        local ok, frame
+        if template == "" then
+            -- 零售 12.x 里 "Frame" 已经不是合法模板了（CreateFrame 会报
+            -- "Couldn't find inherited node 'Frame'"），不带模板建框体才是对的。
+            ok, frame = pcall(CreateFrame, kind, name, parent)
+        else
+            ok, frame = pcall(CreateFrame, kind, name, parent, template)
+        end
+        if ok and frame and (not validate or validate(frame)) then return frame, template end
     end
     return nil
 end
 
-local function HiddenFrame()
-    if not hidden then
-        hidden = NewFrame("Frame", "MonetUIHiddenFrame", UIParent, { "Frame" })
-        if hidden then hidden:Hide() end
+--- 1 号条自带的翻页箭头（ActionBarPageNumber，frameLevel 100，压在我们上面）：
+--- 条 alpha 0 之后它看不见，但仍然是可点的普通按钮。只关鼠标，不 Hide()。
+--- 这块**不是**受保护的框体（实测 IsProtected=false），所以关鼠标不会弄脏谁；
+--- 又因为它 level 100 比我们的条（61/66）高，没法靠层级盖住，只能关掉。
+local function KillPagerMouse(bar)
+    local pager = bar and bar.ActionBarPageNumber
+    if not pager then return end
+    local function killOne(f)
+        if not f or type(f.EnableMouse) ~= "function" then return end
+        pcall(f.EnableMouse, f, false)
+        if f.EnableMouseClicks then pcall(f.EnableMouseClicks, f, false) end
+        if f.EnableMouseMotion then pcall(f.EnableMouseMotion, f, false) end
     end
-    return hidden
+    killOne(pager)
+    killOne(pager.UpButton)
+    killOne(pager.DownButton)
+    if type(pager.GetChildren) == "function" then
+        for i = 1, pager:GetNumChildren() do
+            killOne((select(i, pager:GetChildren())))
+        end
+    end
 end
 
-local function Park(name, parent)
+--- 收起一条暴雪动作条：**只 SetAlpha(0)**，别的一个都不碰。
+---
+--- 走过的弯路，留在这里免得再踩：
+---   * Hide() / SetShown()：暴雪的显示状态走受保护的 SetShownBase / UpdateShownButtons，
+---     Hide 一次它下一拍就 SetShown(true) 回来（这条路不经过 Lua 的 Show，hook 抓不到）——
+---     屏幕上那三排"发白"的 45×45 按钮一直是暴雪的，我们的 28×28 只在下面露一条边。
+---   * SetParent 到隐藏框体：编辑模式（UpdateRightActionBarPositions）按父级几何算条的缩放，
+---     算出来是 0，直接炸 "MultiBarRight:SetScale(): Scale must be > 0"。
+---   * 关它按钮的鼠标（EnableMouse）：那些按钮/容器是**受保护**框体，碰一下就被弄脏，
+---     之后暴雪自己更新它们就变成 ADDON_ACTION_FORBIDDEN，每次点击动作条都弹
+---     "MonetUI 已被禁用，因为该功能只对暴雪的 UI 开放"。
+--- 现在：MainActionBar 只 alpha 0，其余条换到常隐框体，按钮交给暴雪自己按 statehidden 藏。
+local function Park(name)
     local frame = _G[name]
     if not frame or frame.__monetParked then return false end
-    if not pcall(frame.SetParent, frame, parent) then return false end
     frame.__monetParked = true
+    frame.__monetAlpha  = frame:GetAlpha()
+    frame.__monetParent = frame:GetParent()
+
+    if name == "MainActionBar" or name == "MainMenuBar" then
+        pcall(frame.SetAlpha, frame, 0)
+        local caps = frame.Caps
+        if caps and caps.Hide then pcall(caps.Hide, caps) end
+        if frame.BorderArt and frame.BorderArt.Hide then pcall(frame.BorderArt.Hide, frame.BorderArt) end
+        KillPagerMouse(frame)
+    else
+        pcall(frame.SetParent, frame, HiddenParent())
+    end
+
+    if type(frame.actionButtons) == "table" then
+        for _, button in pairs(frame.actionButtons) do QuietHideButton(button) end
+    end
+    return true
+end
+
+
+--- 背包条走 Hide：它的位置正好压在我们的小地图上，而小地图在 LOW 层，铺不了点击板
+--- （板子必须在 MEDIUM 才盖得住暴雪的按钮，那样会连小地图一起挡掉）。
+--- 背包条不是动作条那种"被 SetShownBase 复活"的框体，Hide 之后不会再自己冒出来。
+local function ParkBag(name)
+    local frame = _G[name]
+    if not frame or frame.__monetParked then return false end
+    frame.__monetParked = true
+    frame.__monetHidden = true
+    frame.__monetAlpha  = frame:GetAlpha()
+    if type(hooksecurefunc) == "function" and not frame.__monetParkHook then
+        frame.__monetParkHook = true
+        hooksecurefunc(frame, "Show", function(self)
+            if self.__monetParked and self.__monetHidden then pcall(self.Hide, self) end
+        end)
+    end
+    pcall(frame.Hide, frame)
     return true
 end
 
@@ -277,8 +408,22 @@ local function Restore(name)
     local frame = _G[name]
     if not frame or not frame.__monetParked then return false end
     frame.__monetParked = nil
-    pcall(frame.SetParent, frame, UIParent)
-    pcall(frame.Show, frame)
+    if frame.__monetHidden then
+        frame.__monetHidden = nil
+        pcall(frame.Show, frame)
+        pcall(frame.SetAlpha, frame, frame.__monetAlpha or 1)
+        return true
+    end
+    pcall(frame.SetAlpha, frame, frame.__monetAlpha or 1)
+    if frame.__monetParent and frame.__monetParent ~= hiddenParent then
+        pcall(frame.SetParent, frame, frame.__monetParent)
+    end
+    frame.__monetParent = nil
+    if type(frame.actionButtons) == "table" then
+        for _, button in pairs(frame.actionButtons) do
+            pcall(button.SetAttributeNoHandler, button, "statehidden", nil)
+        end
+    end
     return true
 end
 
@@ -305,23 +450,22 @@ local function Anchor(frame, stored, def)
         stored.x or def.x or 0, stored.y or def.y or 0)
 end
 
+-- ---------------------------------------------------------------------------
+-- 按钮
+-- ---------------------------------------------------------------------------
+
 -- 库里把暴雪 ActionButtonTemplate 的一堆部件都留着（冷却、堆叠、宏名、射程、闪光、自动施法圈……）。
--- 这里收敛成 MonetUI 的样子：图标内缩 1 像素，露出来的那圈就是描边；多余的美术全部关掉。
+-- 这里收敛成 MonetUI 的样子：图标内缩 1 像素，露出来的那圈就是描边；多余的美术全部不要。
 
 local RINGS = setmetatable({}, { __mode = "k" })
 
---- 描边颜色：装着装备的槽位用高亮色（库里用 Border 的显隐表示"已装备"，跟着它走），其余用当前边框色。
+--- 描边颜色：装着装备的槽位用高亮色，其余用当前边框色。
 -- ring 铺满按钮、只在图标外露 1 像素即描边；well 只铺图标范围，空槽时就是"空格子"的底色（有图标时被完全盖住）。
 local function RefreshRing(button)
     local parts = RINGS[button]
     if not parts then return end
 
-    local r, g, b
-    if button.Border and button.Border:IsShown() then
-        r, g, b = Color:GetHealth()
-    else
-        r, g, b = Color:GetBorder()
-    end
+    local r, g, b = Color:GetBorder()
     parts.ring:SetColorTexture(r, g, b, 0.9)
 
     local nr, ng, nb = Color:GetNeutral()
@@ -334,23 +478,92 @@ local function RefreshRings()
     end
 end
 
---- 堆叠数量库里只有写字、没有开关，显隐归我们管，而且随时可以改回来。
-local function ApplyCountVisibility(button)
-    local count = button and button.Count
-    if not count then return end
-    if Config().showCount == false then
-        count:Hide()
+--- 当前这一格对应哪个槽位。
+-- 条自己的 "actionpage" 属性是客户端写的（状态驱动 → _onstate-page 片段），
+-- 槽位 = 页号 * 12 + 按钮序号，和暴雪的编号一致。
+local function SlotFor(bar, index)
+    local page = bar.frame:GetAttribute("actionpage")
+    page = tonumber(page) or bar.def.page
+    return PageSlot(page, index)
+end
+
+-- 翻页 / 槽位契约（照 Ellesmere 在同一客户端验证过的做法，实机已证实）：
+--
+--   RegisterStateDriver(bar, "page", 条件)
+--     → 条的 _onstate-page 片段（**安全环境**里跑）写 actionpage + ChildUpdate("mui-page", page)
+--     → 每个按钮的 _childupdate-mui-page 片段（**安全环境**里跑）写自己的 "action" 属性
+--
+-- **槽位只能由片段写。** 用 Lua 写 "action" / "actionpage" 得到的是脏值，客户端拿着它调
+-- `UseAction`（受保护全局）就判插件越权 → ADDON_ACTION_FORBIDDEN「MonetUI 已被禁用，因为该功能
+-- 只对暴雪的 UI 开放」。实机对照：同一个按钮，Lua 写 action → 每次点击必弹窗；改成片段写
+-- action → 正常施法、零弹窗（UNIT_SPELLCAST_SUCCEEDED 收到 185358 奥术射击）。
+--
+-- 因此：按钮一律 SetID(0) + type=action + typerelease=actionrelease，槽位只来自 "action" 属性，
+-- 而这个属性只有下面的片段会写。
+local PAGE_CHILD = "mui-page"
+
+--- 第 i 个按钮的翻页子片段：page → 槽位（12 个一组，和暴雪编号一致）。
+local function PageChildSnippet(baseIndex)
+    return ("local page = tonumber(message) or 1; self:SetAttribute('action', %d + (page - 1) * 12)")
+        :format(baseIndex)
+end
+
+--- 给按钮装翻页子片段（幂等）：客户端换页时由 ChildUpdate 触发，跑在安全环境里。
+local function InstallPageChild(button, index)
+    if button.__monetPageChild then return end
+    button.__monetPageChild = true
+    pcall(button.SetAttributeNoHandler, button, "_childupdate-" .. PAGE_CHILD, PageChildSnippet(index))
+end
+
+--- 让条把当前页下发给所有按钮一次（片段跑，安全环境）。
+local function PushPageToChildren(bar)
+    local page = tonumber(bar.frame:GetAttribute("actionpage")) or bar.def.page
+    pcall(bar.frame.Execute, bar.frame,
+        ("self:ChildUpdate(%q, %d)"):format(PAGE_CHILD, page))
+end
+
+--- 这一格现在对应哪个槽位：优先用片段写的 "action" 属性（和客户端点击时算的完全一致）。
+local function SlotOf(button, bar, index)
+    if button and button.GetAttribute then
+        local slot = button:GetAttribute("action")
+        if type(slot) == "number" and slot > 0 then return slot end
+    end
+    return SlotFor(bar, index)
+end
+
+--- useOnKeyDown 跟着玩家的 cvar 走（按下 / 抬起施法）。cvar 变化时由 SetClickOptions 重写。
+local function SetUseOnKeyDown(button)
+    local cvar = _G.GetCVarBool and GetCVarBool("ActionButtonUseKeyDown")
+    pcall(button.SetAttribute, button, "useOnKeyDown", cvar ~= false)
+end
+
+--- 冷却：**自己画，但绝不读机密数字**。
+--- 用 C_ActionBar.GetActionCooldown 只取 isActive（NeverSecret），计时交给
+--- GetActionCooldownDuration 返回的 duration 对象，再 SetCooldownFromDurationObject。
+--- 这样在副本/战斗中（冷却被标成机密）也不会触发
+--- "Secret values are only allowed during untainted execution"。
+--- 用 C_ActionBar.RegisterActionUIButton 是错的：客户端回写我们的冷却框，参数是机密值，必报错
+--- （Ellesmere 的注释里也写了它对自建按钮 "paints NOTHING"）。
+local function PaintCooldown(button, slot)
+    local cooldown = button and button.cooldown
+    if not cooldown or type(slot) ~= "number" then return end
+    local ok, info = pcall(C_ActionBar.GetActionCooldown, slot)
+    local durationObject
+    if ok and info and info.isActive and C_ActionBar.GetActionCooldownDuration then
+        local ok2, dur = pcall(C_ActionBar.GetActionCooldownDuration, slot)
+        if ok2 then durationObject = dur end
+    end
+    if durationObject and cooldown.SetCooldownFromDurationObject then
+        pcall(cooldown.SetCooldownFromDurationObject, cooldown, durationObject)
     else
-        count:Show()
+        pcall(cooldown.Clear, cooldown)
     end
 end
 
---- 快捷键太长会顶出按钮（SHIFT-1、MOUSEWHEELUP…），缩成 s1 / MU 这类写法。库用 SetText 更新、
--- 这里挂在它之后用 SetFormattedText 回写，所以不会自己套自己；射程指示点（RANGE_INDICATOR）原样留下。
-local function ShortenHotkey(fs)
-    local ok, text = pcall(fs.GetText, fs)
-    if not ok or type(text) ~= "string" or text == "" then return end
-    if RANGE_INDICATOR and text == RANGE_INDICATOR then return end
+--- 快捷键太长会顶出按钮（SHIFT-1、MOUSEWHEELUP…），缩成 s1 / MU 这类写法。
+local function ShortenKey(text)
+    if type(text) ~= "string" or text == "" then return text end
+    if RANGE_INDICATOR and text == RANGE_INDICATOR then return text end
 
     local short = text
     short = short:gsub("MOUSEWHEELUP", "MU")
@@ -363,17 +576,26 @@ local function ShortenHotkey(fs)
     short = short:gsub("NUMPAD", "N")
     short = short:gsub("SPACE", "Sp")
     short = short:gsub("CAPSLOCK", "CL")
+    return short
+end
 
-    if short ~= text then
-        pcall(fs.SetFormattedText, fs, "|cffffffff%s|r", short)
+--- 把热键写在按钮角上（没有绑定就藏起来）。
+local function SetHotkey(button)
+    if not button or not button.hotkey then return end
+    local key = BindingFor(button.bindName)
+    if key then
+        pcall(button.hotkey.SetText, button.hotkey, ShortenKey(key))
+        pcall(button.hotkey.Show, button.hotkey)
+    else
+        pcall(button.hotkey.SetText, button.hotkey, "")
+        pcall(button.hotkey.Hide, button.hotkey)
     end
 end
 
+--- 画一个按钮的自绘部分（底板、图标、数字、宏名、热键、冷却）。
 local function SkinButton(button)
     if button.__monetSkinned then return end
     button.__monetSkinned = true
-
-    local icon = button.icon
 
     -- 图标往后缩 1 像素，露出来的底色就是描边；空槽时 well 顶上（见 RefreshRing）。
     local ring = button:CreateTexture(nil, "BACKGROUND", nil, 0)
@@ -385,144 +607,184 @@ local function SkinButton(button)
 
     RINGS[button] = { ring = ring, well = well }
 
-    if icon then
-        icon:ClearAllPoints()
-        icon:SetPoint("TOPLEFT", button, "TOPLEFT", BORDER, -BORDER)
-        icon:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -BORDER, BORDER)
-        icon:SetTexCoord(CROP, 1 - CROP, CROP, 1 - CROP)
-    end
+    local icon = button:CreateTexture(nil, "ARTWORK")
+    icon:SetPoint("TOPLEFT", button, "TOPLEFT", BORDER, -BORDER)
+    icon:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -BORDER, BORDER)
+    button.icon = icon
 
-    -- 美化材质：和背包格子同源的顶亮底沉渐变（monet_barfill，ADD），叠在图标之上有体积感；纯增量，不动暴雪按钮本体。
-    Widget:ButtonMaterial(button, { alpha = 0.16 })
+    -- 图标自带一圈 8% 的描边（暴雪画的）；不裁掉，我们的 1 像素描边外面还会多一圈黑边。
+    -- 收养的宠物条 / 姿态条在 AdoptBar 里裁的是同一份 CROP，两条条看起来才一致。
+    Skin:CropIcon(icon, CROP, 1 - CROP, CROP, 1 - CROP)
 
-    -- 暴雪的原生美术：空槽的方框、装备绿光、闪光、新技能提示，统统不要。
-    if button.NormalTexture then button.NormalTexture:SetAlpha(0) end
-    if button.SlotBackground then button.SlotBackground:SetAlpha(0) end
-    if button.Flash then button.Flash:SetAlpha(0) end
-    if button.NewActionTexture then button.NewActionTexture:SetAlpha(0) end
-    if button.IconMask then pcall(button.IconMask.Hide, button.IconMask) end
+    -- 美化材质：weave（底纹）铺在图标下方（BACKGROUND/2），sheen（顶亮渐变）也放在
+    -- 图标下方（BACKGROUND/3，高于 weave 低于 ARTWORK 图标）。之前 sheen 走默认 OVERLAY/1
+    -- —— ADD 混合的近白渐变直接叠在图标上，等于给每个图标蒙一层白，实测隐藏 sheen 后
+    -- 图标区域平均像素差 ~11（明显发白），隐藏 weave 则几乎无变化（~0.2）。把 sheen 压到
+    -- 图标之下后：空槽仍有"顶亮底沉"的体积感，有图标时图标保持原色不被洗白。
+    Widget:ButtonMaterial(button, { alpha = 0.16, layer = "BACKGROUND", sublevel = 3 })
 
-    -- Border 贴图本身不画，但它的显隐就是库表达"这件装备在身"的地方，留给描边用。
-    if button.Border then
-        pcall(button.Border.SetTexture, button.Border, nil)
-        RefreshRing(button)
-        hooksecurefunc(button.Border, "Show", function() RefreshRing(button) end)
-        hooksecurefunc(button.Border, "Hide", function() RefreshRing(button) end)
-    end
+    -- 热键
+    -- 颜色必须是白的（原来用主题的 edge 色，在技能图标上根本看不清）。
+    local hotkey = Widget:Font(button, HOTKEY_SIZE, "pixel", { r = 1, g = 1, b = 1 }, "LEFT")
+    hotkey:SetPoint("TOPLEFT", button, "TOPLEFT", 2, -1)
+    button.hotkey = hotkey
 
-    local anchor = icon or button
+    -- 堆叠数量
+    local count = Widget:Font(button, COUNT_SIZE, "pixel", { r = 1, g = 1, b = 1 }, "RIGHT")
+    count:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -2, 1)
+    button.count = count
 
-    local cooldown = button.cooldown
-    if cooldown then
-        cooldown:ClearAllPoints()
-        cooldown:SetAllPoints(anchor)
-        StyleCooldownFrame(cooldown)
-    end
+    -- 宏名
+    local macro = Widget:Font(button, MACRO_SIZE, "pixel", "edge", "CENTER")
+    macro:SetPoint("BOTTOM", button, "BOTTOM", 0, 1)
+    button.macro = macro
 
-    local pushed = button.PushedTexture
-    if pushed then
-        pushed:ClearAllPoints()
-        pushed:SetAllPoints(anchor)
-        pushed:SetColorTexture(0, 0, 0, 0.45)
-    end
+    -- 冷却：**自己建自己的框**，但计时由我们自己从 duration 对象灌进去（见 PaintCooldown）。
+    -- 绝不能用 C_ActionBar.RegisterActionUIButton：客户端回写我们的冷却框时参数是机密值，
+    -- 受限环境（副本/战斗）里必报 "Secret values are only allowed during untainted execution"。
+    local cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
+    cooldown:SetAllPoints(button)
+    if cooldown.SetDrawEdge then pcall(cooldown.SetDrawEdge, cooldown, false) end
+    if cooldown.SetDrawBling then pcall(cooldown.SetDrawBling, cooldown, false) end
+    if cooldown.SetDrawSwipe then pcall(cooldown.SetDrawSwipe, cooldown, true) end
+    if cooldown.SetHideCountdownNumbers then pcall(cooldown.SetHideCountdownNumbers, cooldown, false) end
+    StyleCooldownFrame(cooldown)
+    button.cooldown = cooldown
 
-    -- "当前动作"（比如战士的当前姿态技能）用高亮色，而不是暴雪的对勾。
-    local checked = button.CheckedTexture
-    if checked then
-        checked:ClearAllPoints()
-        checked:SetAllPoints(anchor)
-        local r, g, b = Color:GetHighlight()
-        checked:SetColorTexture(r, g, b, 0.3)
-    end
+    -- 按下 / 悬停：默认**必须是隐藏的**，由按钮自己的事件来显隐。
+    -- 以前这两张贴图建出来就一直 shown（全仓没有一处切 visible），45% 黑 + 15% 白常年压在
+    -- 图标上：对比度掉一半、整体发灰发白。
+    local pushed = button:CreateTexture(nil, "OVERLAY")
+    pushed:SetPoint("TOPLEFT", button, "TOPLEFT", BORDER, -BORDER)
+    pushed:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -BORDER, BORDER)
+    pushed:SetColorTexture(0, 0, 0, 0.45)
+    pushed:Hide()
+    button.pushed = pushed
 
-    local highlight = button.HighlightTexture
-    if highlight then
-        highlight:ClearAllPoints()
-        highlight:SetAllPoints(anchor)
-        highlight:SetColorTexture(1, 1, 1, 0.15)
-    end
+    -- 悬停高亮
+    local highlight = button:CreateTexture(nil, "OVERLAY")
+    highlight:SetPoint("TOPLEFT", button, "TOPLEFT", BORDER, -BORDER)
+    highlight:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -BORDER, BORDER)
+    highlight:SetColorTexture(1, 1, 1, 0.15)
+    highlight:Hide()
+    button.highlight = highlight
 
-    if button.SpellHighlightTexture then
-        pcall(button.SpellHighlightTexture.SetAllPoints, button.SpellHighlightTexture, button)
-    end
-
-    if button.HotKey then
-        button.HotKey:SetWordWrap(false)
-        hooksecurefunc(button.HotKey, "SetText", ShortenHotkey)
-    end
-
-    -- 堆叠数量库里没有开关，自己关（见 ApplyCountVisibility）。
-    ApplyCountVisibility(button)
+    RefreshRing(button)
 end
 
---- 库认得的那部分配置：字体、位置、颜色、点击时机。
-local function ButtonConfig()
-    local db = Config()
-    local er, eg, eb = Color:GetEdge()
+--- 把这一格的内容（图标 / 数字 / 宏名 / 冷却）刷新成槽位 slot 的样子。
+local function UpdateButtonContent(button, slot)
+    if not button then return end
 
-    return {
-        outOfRangeColoring = "button",
-        tooltip            = "enabled",
-        clickOnDown        = ClickOnDown(),
-        flyoutDirection    = "UP",
-        hideElements = {
-            hotkey        = db.showHotkey == false,
-            macro         = db.showMacro == false,
-            equipped      = false,  -- 已装备的提示留给描边（见 SkinButton）
-            border        = true,   -- 暴雪的图标外框，永远不画
-            borderIfEmpty = true,
-        },
-        text = {
-            hotkey = {
-                font     = { font = Media:Font("pixel"), size = HOTKEY_SIZE, flags = Media.fontFlags },
-                position = { anchor = "TOPLEFT", relAnchor = "TOPLEFT", offsetX = 2, offsetY = -1 },
-                justifyH = "LEFT",
-                color    = { 1, 1, 1 },
-            },
-            count = {
-                font     = { font = Media:Font("pixel"), size = COUNT_SIZE, flags = Media.fontFlags },
-                position = { anchor = "BOTTOMRIGHT", relAnchor = "BOTTOMRIGHT", offsetX = -2, offsetY = 1 },
-                justifyH = "RIGHT",
-                color    = { 1, 1, 1 },
-            },
-            macro = {
-                font     = { font = Media:Font("pixel"), size = MACRO_SIZE, flags = Media.fontFlags },
-                position = { anchor = "BOTTOM", relAnchor = "BOTTOM", offsetX = 0, offsetY = 1 },
-                justifyH = "CENTER",
-                color    = { er, eg, eb },
-            },
-        },
-    }
+    -- 图标：文件 ID 不是秘密值，可以直接给贴图。
+    local texture = ActionBar and ActionBar.GetActionTexture and ActionBar.GetActionTexture(slot)
+    if type(texture) == "number" and texture > 0 then
+        pcall(button.icon.SetTexture, button.icon, texture)
+        pcall(button.icon.Show, button.icon)
+    else
+        pcall(button.icon.SetTexture, button.icon, nil)
+        pcall(button.icon.Hide, button.icon)
+    end
+
+    -- 堆叠数量：受限环境下可能是秘密值，拿不到就不显示。
+    local count
+    if ActionBar and ActionBar.GetActionDisplayCount and not Secrets.CooldownsSecret() then
+        count = ActionBar.GetActionDisplayCount(slot)
+    end
+    if type(count) == "number" and count > 1 then
+        pcall(button.count.SetText, button.count, count)
+        pcall(button.count.Show, button.count)
+    else
+        pcall(button.count.SetText, button.count, "")
+        pcall(button.count.Hide, button.count)
+    end
+
+    -- 宏名
+    local macroText
+    if ActionBar and ActionBar.GetActionText then
+        macroText = ActionBar.GetActionText(slot)
+    end
+    if type(macroText) == "string" and macroText ~= "" then
+        pcall(button.macro.SetText, button.macro, macroText)
+        pcall(button.macro.Show, button.macro)
+    else
+        pcall(button.macro.SetText, button.macro, "")
+        pcall(button.macro.Hide, button.macro)
+    end
+
+    -- 冷却自己画（不读机密数字，见 PaintCooldown）
+    PaintCooldown(button, slot)
 end
 
-local function CreateButton(bar, index)
+-- CreateFrame 的第 5 个参数（id）只有直接调用才能给，所以按钮不走 NewFrame。
+local function CreateSecureButton(name, parent, id)
+    for _, template in ipairs(BUTTON_TEMPLATES) do
+        local ok, frame
+        if template == "" then
+            ok, frame = pcall(CreateFrame, "CheckButton", name, parent, nil, id)
+        else
+            ok, frame = pcall(CreateFrame, "CheckButton", name, parent, template, id)
+        end
+        if ok and frame then return frame, template end
+    end
+    return nil
+end
+
+local function BuildButton(bar, index)
     local def  = bar.def
     local name = "MonetUI" .. def.key .. "Button" .. index
 
-    local ok, button = pcall(LAB.CreateButton, LAB, index, name, bar.frame)
-    if not ok or not button then return nil end
+    local button = CreateSecureButton(name, bar.frame, index)
+    if not button then return nil end
+
+    -- 安全按钮契约（和 Ellesmere 在 12.x 上验证过的写法一致）：
+    --   * SetID(0)：让客户端的 CalculateAction 走"显式 action 属性"这条（path 2），
+    --     而不是 id + actionpage；
+    --   * type / typerelease：鼠标点击走 up 边（客户端对硬件鼠标强制 useOnKeyDown=false），
+    --     键盘走 down 边；
+    --   * useOnKeyDown 跟着玩家的 cvar 走，cvar 变化时由 SetUseOnKeyDown 重写；
+    --   * **action 属性只由安全片段写**（InstallPageChild / _childupdate-mui-page）。
+    --     这是"能不能施法"的分水岭：Lua 写 action → 客户端判插件越权，每次点击弹
+    --     "MonetUI 已被禁用，因为该功能只对暴雪的 UI 开放"；片段写 → 正常施法（已实机验证）。
+    pcall(button.SetID, button, 0)
+    pcall(button.RegisterForClicks, button, "AnyDown", "AnyUp")
+    pcall(button.SetAttribute, button, "type", "action")
+    pcall(button.SetAttribute, button, "typerelease", "actionrelease")
+    pcall(button.SetAttribute, button, "checkselfcast", true)
+    pcall(button.SetAttribute, button, "checkfocuscast", true)
+    pcall(button.SetAttribute, button, "checkmouseovercast", true)
+    SetUseOnKeyDown(button)
+    InstallPageChild(button, index)
+
+    -- 拖出 / 拖入：PickupAction / PlaceAction 同样是受保护全局，战斗外可以用（战斗中客户端会拒）。
+    pcall(button.RegisterForDrag, button, "LeftButton", "RightButton")
+    button:SetScript("OnDragStart", function(self)
+        if InCombatLockdown() then return end
+        local slot = SlotOf(self, bar, index)
+        if slot and not IsModifiedClick("PICKUPACTION") then
+            local locked = true
+            if Settings and Settings.GetValue then
+                local ok, value = pcall(Settings.GetValue, "lockActionBars")
+                if ok then locked = value end
+            end
+            if locked then return end
+        end
+        if slot and PickupAction then pcall(PickupAction, slot) end
+    end)
+    button:SetScript("OnReceiveDrag", function(self)
+        if InCombatLockdown() then return end
+        local slot = SlotOf(self, bar, index)
+        if slot and PlaceAction then pcall(PlaceAction, slot) end
+    end)
 
     button.bindName = def.bind .. index
-    button.bar      = bar
-
-    -- 状态 0 是兜底（翻页驱动没装上就停在第一页）；1..18 号状态是驱动换页时客户端要查的表。
-    for state = 0, BAR_PAGES do
-        local slot
-        if def.paged then
-            slot = (state == 0) and index or PageSlot(state, index)
-        else
-            slot = PageSlot(def.page, index)
-        end
-        button:SetState(state, "action", slot)
-    end
-
-    Widget:SetFont(button.HotKey, HOTKEY_SIZE, "pixel")
-    Widget:SetFont(button.Count, COUNT_SIZE, "pixel")
-    Widget:SetFont(button.Name, MACRO_SIZE, "pixel")
+    -- bar 必须是**框体**（SetHotkey 之类还会用到）。
+    button.bar      = bar.frame
 
     SkinButton(button)
-    -- 只在这里刷一次：CreateButton 内部那次更新跑在钩子装上之前。
-    pcall(button.UpdateConfig, button, ButtonConfig())
+
+    -- 热键文字（跟着玩家的按键设置走）
+    SetHotkey(button)
 
     return button
 end
@@ -557,20 +819,62 @@ local function PositionBar(bar)
     Anchor(bar.frame, StoredPosition(bar.def, bar.def.key), bar.def)
 end
 
+--- 把一条上所有按钮的内容刷新一遍（槽位变了才需要）。
+local function RefreshBar(bar)
+    for index, button in ipairs(bar.buttons) do
+        UpdateButtonContent(button, SlotOf(button, bar, index))
+    end
+end
+
+-- 页号是**客户端**写的：状态驱动每 0.2 秒才结算一次，然后 _onstate-page 片段把
+-- 新页号写进条自己的 "actionpage" 属性。我们的事件（翻页 / 槽位变化）发生在
+-- 结算之前或之后都说不准，中间那一小段时间按钮显示的还是旧页的图标。
+-- 所以这里盯一次 actionpage：变了就重画（每 0.2 秒读 8 个属性，很便宜）。
+local pageWatcher
+
+local function WatchPages(show)
+    if not pageWatcher then
+        pageWatcher = CreateFrame("Frame")
+        pageWatcher:SetScript("OnUpdate", function(self, elapsed)
+            self.timer = (self.timer or 0) + (elapsed or 0)
+            if self.timer < 0.2 then return end
+            self.timer = 0
+            for _, bar in pairs(bars) do
+                local page = tonumber(bar.frame:GetAttribute("actionpage")) or bar.def.page
+                if page ~= bar.page then
+                    bar.page = page
+                    RefreshBar(bar)
+                end
+            end
+        end)
+    end
+    if show then pageWatcher:Show() else pageWatcher:Hide() end
+end
+
 local function CreateBar(def)
     if buildFailure then return nil end
 
-    local frame, template = NewFrame("Frame", "MonetUI" .. def.key, UIParent, CONTAINER_TEMPLATES)
+    local frame, template = NewFrame("Frame", "MonetUI" .. def.key, UIParent, CONTAINER_TEMPLATES,
+        function(f) return type(f.WrapScript) == "function" end)
     if not frame then
         buildFailure = buildFailure or "header"
         return nil
     end
-    if not template:find("SecureHandlerStateTemplate") then
+    -- 模板串里有 SecureHandlerStateTemplate 不等于安全处理器真的装上了（见 CONTAINER_TEMPLATES
+    -- 的注释）：以 WrapScript 为准，否则要等状态驱动走到 WrapScript 才炸。
+    if not template:find("SecureHandlerStateTemplate") or type(frame.WrapScript) ~= "function" then
         buildFailure = buildFailure or "header"
         return nil
     end
 
-    pcall(frame.SetAttribute, frame, "_onstate-page", ON_STATE_PAGE)
+    pcall(frame.SetAttributeNoHandler, frame, "_onstate-page", ON_STATE_PAGE)
+    -- 初始页号也**必须在安全环境里**写：Lua 直接 SetAttribute 得到的是脏值，
+    -- 客户端点击时拿它调 UseAction 就会判插件越权（见 PAGE_CHILD 那段的长注释）。
+    pcall(frame.Execute, frame, ("self:SetAttribute('actionpage', %d)"):format(def.page))
+
+    -- 抬到暴雪动作条之上（ActionButton 52 / MultiBar* 3），点击才落到我们自己的按钮上；
+    -- 暴雪那几条条被 Park 掉（MainActionBar alpha 0，其余换到常隐框体），点击不会落到它们身上。
+    pcall(frame.SetFrameLevel, frame, 60)
 
     local bar = {
         def        = def,
@@ -581,7 +885,7 @@ local function CreateBar(def)
     }
 
     for index = 1, BUTTONS_PER_BAR do
-        local button = CreateButton(bar, index)
+        local button = BuildButton(bar, index)
         if not button then break end
         bar.buttons[#bar.buttons + 1] = button
     end
@@ -599,6 +903,10 @@ local function CreateBar(def)
 
     LayoutBar(bar)
     PositionBar(bar)
+    -- 按钮建好、位置定好后，把当前页下发给它们一次（片段跑，安全环境里写 action）
+    PushPageToChildren(bar)
+    bar.page = tonumber(frame:GetAttribute("actionpage")) or def.page
+    RefreshBar(bar)
     return bar
 end
 
@@ -614,6 +922,7 @@ local function SetBarShown(bar, shown)
         end
         pcall(bar.frame.Hide, bar.frame)
     end
+
 end
 
 -- 暴雪的下车按钮长在主菜单条上，而那条已经被我们藏起来了，所以自己做一个：飞行途中请求提前
@@ -648,7 +957,7 @@ local function CreateLeaveVehicle()
     local icon = button:CreateTexture(nil, "ARTWORK")
     icon:SetAllPoints(button)
     icon:SetTexture("Interface\\Vehicles\\UI-Vehicles-Button-Exit-Up")
-    icon:SetTexCoord(CROP, 1 - CROP, CROP, 1 - CROP)
+    Skin:CropIcon(icon, CROP, 1 - CROP, CROP, 1 - CROP)
 
     button:SetScript("OnClick", function(self)
         if UnitOnTaxi and UnitOnTaxi("player") then
@@ -814,6 +1123,103 @@ local function TeardownPetGlow()
     end
 end
 
+--- 零售 12.x 的姿态条 / 宠物条外面套了一层编辑模式管理的框体（StanceBar / PetActionBar）：
+--- 直接搬它会被暴雪的布局改回去，还会把框体弄成"强污染"（暴雪自己再动它就报
+--- ADDON_ACTION_BLOCKED 一片刷屏）。真正装按钮的是里面的按钮容器
+--- （StanceBarButtonContainer1…），它们不受布局管：搬容器，外层框体留在原地（它没有美术）。
+---
+--- 注意每个容器**只装一个按钮**（1..10 号各一个），而且都锚在外层壳的 BOTTOMLEFT 上、按 32
+--- 递增排开。所以不能只搬 1 号容器 —— 2..10 号还挂在壳的老位置上，表现就是"宠物条 /
+--- 姿态条只显示一个按钮"。这里把整串容器都取出来，由调用方按 1 号的位置重新排。
+local function ButtonContainers(bar)
+    if not bar or type(bar.GetName) ~= "function" then return nil end
+    local ok, base = pcall(bar.GetName, bar)
+    if not ok or not base then return nil end
+    local list
+    for i = 1, 12 do
+        local c = _G[base .. "ButtonContainer" .. i]
+        if c then
+            list = list or {}
+            list[#list + 1] = c
+        end
+    end
+    return list
+end
+
+--- 把 1 号之外的容器串到 1 号旁边：宠物条右对齐、往左长，姿态条往右长。
+---
+--- 间距要换算成**壳的虚拟坐标系**里的单位：外面看着 30（自绘按钮 28 + 间隙 2），而这一串容器
+--- 带着 0.9333 的缩放，真实落点 = 虚拟 × scale，所以虚拟步距 = 30 / scale ≈ 32.14。
+--- 写死 32（暴雪自己的值）会让 10 个按钮累计右偏 1.2 个单位 —— 肉眼能看出来。
+local function ChainContainers(containers, point, scale)
+    local first = containers[1]
+    if #containers < 2 or not first then return end
+
+    local growLeft = point:find("RIGHT", 1, true) ~= nil
+    local pitch = ButtonSize() + Spacing()
+    if not scale or scale <= 0 then scale = 1 end
+    local step = pitch / scale
+
+    for i = 2, #containers do
+        local c = containers[i]
+        pcall(c.ClearAllPoints, c)
+        local offset = step * (i - 1)
+        pcall(c.SetPoint, c, "BOTTOMLEFT", first, "BOTTOMLEFT", growLeft and -offset or offset, 0)
+    end
+end
+
+--- 这一串容器带着壳的 0.9333 缩放，**`GetRect` / `GetPoint` 对它们报的是"虚拟"坐标**：
+--- 容器说自己 L=1215.67，拿一个不缩放的探针框锚到里面的按钮上量，真实落点是 1134.6 ——
+--- 正好差 1/0.9333。所以别拿 GetRect 的数字去换算屏幕坐标，那是把已经除过缩放的数字再除一遍。
+--- 搬它们照常按壳自己的锚点走：锚点和偏移会一起被缩放，落点反而是准的。
+
+--- 收养条的"空格子"美术。
+--- 暴雪只让**有技能的槽位**显示按钮：空格子的按钮本身是 hidden 的，一整排就缺一个口
+--- （宠物条最常见：4 号格没有宠物技能，那一格就空着，看着像少画了一块）。
+--- 这里把描边 + 中性底 + 织纹/顶光画在**按钮的容器**上：容器的贴图永远画在自己的子按钮
+--- 之下，所以按钮在的时候被完全盖住、按钮藏起来时正好露出来 —— 和自绘动作条的空槽是
+--- 同一套材质，纯美术，不 Show/Hide 受保护的按钮、也不动层级，没有污染风险。
+local function BuildEmptySlot(button)
+    local slot = button.__monetEmptySlot
+    if slot then return slot end
+
+    local holder = button.GetParent and button:GetParent()
+    if not holder then return nil end
+
+    local ring = holder:CreateTexture(nil, "BACKGROUND", nil, 0)
+    ring:SetAllPoints(button)
+    local well = holder:CreateTexture(nil, "BACKGROUND", nil, 1)
+    well:SetPoint("TOPLEFT", button, "TOPLEFT", BORDER, -BORDER)
+    well:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -BORDER, BORDER)
+
+    local r, g, b = Color:GetBorder()
+    ring:SetColorTexture(r, g, b, 0.9)
+    local nr, ng, nb = Color:GetNeutral()
+    well:SetColorTexture(nr, ng, nb, 0.45)
+
+    local material = Widget:ButtonMaterial(holder, { alpha = 0.16, layer = "BACKGROUND", sublevel = 3 })
+
+    slot = {
+        ring  = ring,
+        well  = well,
+        weave = material and material.weave,
+        sheen = material and material.sheen,
+    }
+    button.__monetEmptySlot = slot
+    return slot
+end
+
+--- 这一格空着（暴雪把按钮藏了）时空槽顶上，有按钮时让开。
+local function SyncEmptySlot(button)
+    local slot = button and button.__monetEmptySlot
+    if not slot then return end
+    local empty = not button:IsShown()
+    if slot.ring  then slot.ring:SetShown(empty)  end
+    if slot.well  then slot.well:SetShown(empty)  end
+    if slot.weave then slot.weave:SetShown(empty) end
+    if slot.sheen then slot.sheen:SetShown(empty) end
+end
+
 local function AdoptBar(def)
     local bar, name = ResolveContainer(def)
     if not bar then return nil end
@@ -833,15 +1239,14 @@ local function AdoptBar(def)
     entry.frame = bar
     entry.name  = name
 
-    -- 从被藏起来的父框体里搬出来
-    if bar:GetParent() ~= UIParent then
-        pcall(bar.SetParent, bar, UIParent)
-    end
+    -- 暴雪的条本来就在 UIParent 下面。以前我们把它们塞进隐藏框（SetParent），零售 12.x 上这会把
+    -- 受保护的框体弄成"强污染"，暴雪的编辑模式再想给它们挪一下就被拒（ADDON_ACTION_BLOCKED
+    -- 刷屏）。现在只是隐藏，不再搬动它们。
 
     -- 缩放到自绘按钮的尺寸，暴雪条内部的排布原样不动；基准宽度只量一次（量时缩放还是 1），免得每次乘一遍自己设的缩放。
-    local first = _G[def.pattern:format(1)]
-    if not entry.base and first then
-        local base = first:GetWidth()
+    local firstButton = _G[def.pattern:format(1)]
+    if not entry.base and firstButton then
+        local base = firstButton:GetWidth()
         if base and base > 8 then entry.base = base end
     end
     local size  = ButtonSize()
@@ -849,15 +1254,76 @@ local function AdoptBar(def)
     pcall(bar.SetScale, bar, scale)
     entry.scale = scale
 
-    Anchor(bar, StoredPosition(def, def.key), def)
+    local containers = ButtonContainers(bar)
+    local first = containers and containers[1]
+    local stored = StoredPosition(def, def.key)
+
+    -- 外层壳（PetActionBar / StanceBar）我们不动它，只搬里面的按钮容器。但它是**开鼠标**的：
+    -- 宠物条那个实测 1303×1193、贴 UIParent，正好盖住屏幕中间一大块 —— 表现就是
+    -- 世界里点不中、按住左/右键都转不了视角，而外圈的 UI（动作条、小地图）照常能点。
+    -- 壳自己没有美术也没有按钮（按钮在 ButtonContainer 里各自收鼠标），所以把它的鼠标关掉。
+    if first and first ~= bar then
+        pcall(bar.EnableMouse, bar, false)
+        pcall(bar.EnableMouseMotion, bar, false)
+
+        -- 一个容器只装一个按钮：整串跟着 1 号排开，否则只有 1 号搬过去、其余留在壳的老位置。
+        local point = stored.point or def.point or "CENTER"
+        Anchor(first, stored, def)
+        ChainContainers(containers, point, scale)
+    else
+        Anchor(first or bar, stored, def)
+    end
+
+    -- 暴雪改按钮显隐时不发事件，直接后钩条自己的 UpdateShownButtons（Lua 方法，安全钩）：
+    -- 每次它刷新完，把空槽美术同步一遍。
+    if not bar.__monetSlotHook then
+        bar.__monetSlotHook = true
+        if type(hooksecurefunc) == "function" and type(bar.UpdateShownButtons) == "function" then
+            hooksecurefunc(bar, "UpdateShownButtons", function()
+                for index = 1, def.count do
+                    local b = _G[def.pattern:format(index)]
+                    if b then SyncEmptySlot(b) end
+                end
+            end)
+        end
+    end
 
     for index = 1, def.count do
         local button = _G[def.pattern:format(index)]
         if not button then break end
+        if BuildEmptySlot(button) then SyncEmptySlot(button) end
         local icon = button.icon
-        if icon then pcall(icon.SetTexCoord, icon, CROP, 1 - CROP, CROP, 1 - CROP) end
+        if icon then Skin:CropIcon(icon, CROP, 1 - CROP, CROP, 1 - CROP) end
+        -- 暴雪的按钮是受保护的（改它自己的美术会把框体弄脏），所以外观由我们垫在它下面的一块
+        -- Monet 底板来做：底色和描边换成主题的，图标、键位数字照旧。
+        Skin:ControlBg(button, { thickness = 1, bgAlpha = 0.55 })
+        -- 暴雪自己的按钮美术（外框 / 按下 / 高亮）收掉，只留图标 —— 和自绘动作条一个样子。
+        Skin:FadeButtonArt(button)
+        -- 织理 + 顶亮底沉的高光，和自绘动作条同一套材质。
+        -- 但收养按钮的图标在 **BACKGROUND/0**（实测 StanceButton1.icon = BACKGROUND/0，
+        -- 自绘按钮的图标在 ARTWORK），BACKGROUND/2、3 是同层更高的 sublevel，会画到图标
+        -- 上面 —— 姿态条图标上叠着斜纹就是这么来的。CreateTexture 的 sublevel 允许 -8..7，
+        -- 所以这里把织理/光泽压到负 sublevel（-2、-1），垫在暴雪图标之下、我们自己的
+        -- ControlBg 底板之上。
+        Widget:ButtonMaterial(button, {
+            alpha = 0.16,
+            weaveLayer = "BACKGROUND", weaveSublevel = -2,
+            layer = "BACKGROUND",      sublevel = -1,
+        })
+        -- 热键用白色（主题的 edge 色在图标上看不清）。
         Widget:SetFont(button.HotKey, HOTKEY_SIZE, "pixel")
         Widget:SetFont(button.Count, COUNT_SIZE, "pixel")
+        if button.HotKey then
+            Widget:ColorText(button.HotKey, { r = 1, g = 1, b = 1 })
+        end
+
+        -- 我们自己给这些受保护按钮套了美术，暴雪自己的 UpdateShownButtons 就可能被拒
+        -- （日志里 PetActionButton7:SetShown() 那一串），结果按钮停在"藏起来"的状态 ——
+        -- 表现就是宠物条只显示几个、格子被吃掉。脱战时我们直接把整排显示出来：
+        -- 空槽也显示（空格子的美术由 BuildEmptySlot 补），和"10 个按钮"的预期一致。
+        if not InCombatLockdown() then
+            pcall(button.Show, button)
+        end
     end
 
     if def.glow == "autoCast" then
@@ -886,17 +1352,30 @@ local function ReleaseBar(entry)
     if not bar then return end
     pcall(bar.SetScale, bar, 1)
     entry.scale = 1
+    -- 接管时把壳的鼠标关掉了（它 1303×1193，会把屏幕中间整块吃掉），交还时要开回来，
+    -- 否则退回暴雪宠物条之后那圈按钮点不动。
+    if not InCombatLockdown() then
+        pcall(bar.EnableMouse, bar, true)
+    end
 end
 
--- 暴雪那排按钮还在（只是藏起来了），玩家的按键其实按的是它们。这里把同一批按键改成"点击我们
--- 自己的按钮"的覆盖绑定：覆盖绑定优先，按下去触发的是玩家看得见的那一排，目标页跟着我们的按钮走。
-
+-- 暴雪那排按钮还在（只是藏起来了），玩家的按键其实按的是它们。这里把同一批键**改道**到
+-- 暴雪自己的动作命令上（"ACTIONBUTTON1"、"MULTIACTIONBAR1BUTTON1"……）：
+--
+-- 为什么不用 SetOverrideBindingClick（"按下去就点我们这个按钮"）：
+-- 客户端的 SecureActionButton_OnClick 里 clickAction = (down and useOnKeyDown) or
+-- (not down and not useOnKeyDown) —— 按键触发的"点击"没有 down 事件，而零售默认
+-- ActionButtonUseKeyDown = 1，于是 clickAction 永远是 false，**按下去什么也不会发生**。
+-- 走动作命令则和暴雪自己的绑定完全一致（ActionButtonDown → down = true → 动作触发）。
+--
+-- 键名从暴雪绑定名（ACTIONBUTTON<i>、MULTIACTIONBAR1BUTTON<i>…）反查；
+-- 玩家没给这一格绑键就不接管，战斗中只打标记，PLAYER_REGEN_ENABLED 后再补。
 local function ReassignBindings()
     if Locked() then
         bindingsDirty = true
         return
     end
-    if not (SetOverrideBindingClick and ClearOverrideBindings) then return end
+    if not (SetOverrideBinding and ClearOverrideBindings) then return end
     bindingsDirty = false
 
     for _, bar in pairs(bars) do
@@ -904,7 +1383,8 @@ local function ReassignBindings()
         for _, button in ipairs(bar.buttons) do
             local key = BindingFor(button.bindName)
             if key then
-                pcall(SetOverrideBindingClick, bar.frame, false, key, button:GetName())
+                -- bindName 就是暴雪的动作命令名（ACTIONBUTTON1 / MULTIACTIONBAR1BUTTON1…）
+                pcall(SetOverrideBinding, bar.frame, false, key, button.bindName)
             end
         end
     end
@@ -936,6 +1416,19 @@ local PET_GLOW_EVENTS = {
     "PET_BAR_UPDATE", "PET_BAR_UPDATE_USABLE", "PET_UI_UPDATE", "UNIT_PET",
 }
 
+-- 槽位 / 页号变了要重画图标：客户端在这些事件里换槽。
+local SLOT_EVENTS = {
+    "ACTIONBAR_SLOT_CHANGED", "ACTIONBAR_PAGE_CHANGED",
+    "UPDATE_SHAPESHIFT_FORM", "UPDATE_VEHICLE_ACTIONBAR", "PLAYER_ENTERING_WORLD",
+    "SPELLS_CHANGED", "ACTIONBAR_UPDATE_USABLE",
+}
+
+-- 冷却事件单独一条轻量路径：只重画冷却框，不重扫 96 个按钮的图标/文字。
+local COOLDOWN_EVENTS = {
+    "ACTIONBAR_UPDATE_COOLDOWN", "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_CHARGES",
+    "SPELL_UPDATE_ICON", "ACTIONBAR_UPDATE_USABLE", "SPELLS_CHANGED",
+}
+
 function M:RegisterEvents()
     EventBus:Register("PLAYER_ENTERING_WORLD", function()
         M:Apply()
@@ -956,14 +1449,14 @@ function M:RegisterEvents()
     end)
 
     EventBus:Register("UPDATE_BINDINGS", function()
-        KEY_DOWN = nil
         ReassignBindings()
+        M:UpdateHotkeys()
         M:UpdateAll()
     end)
 
     EventBus:Register("CVAR_UPDATE", function(_, name)
         if name == "ActionButtonUseKeyDown" then
-            KEY_DOWN = nil
+            M:SetClickOptions()
             M:UpdateAll()
         end
     end)
@@ -976,24 +1469,35 @@ function M:RegisterEvents()
         EventBus:Register(event, function() SyncPetGlowNow() end)
     end
 
+    for _, event in ipairs(SLOT_EVENTS) do
+        EventBus:Register(event, function() M:UpdateAll() end)
+    end
+
+    for _, event in ipairs(COOLDOWN_EVENTS) do
+        EventBus:Register(event, function() M:UpdateCooldowns() end)
+    end
+
     EventBus:Register("MONETUI_THEME_CHANGED", function() M:UpdateAll() end)
     EventBus:Register("MONETUI_RESTRICTION_CHANGED", function() M:UpdateAll() end)
 end
 
---- 刷新所有按钮的外观配置；库自己管冷却、数量、可用性、射程，所以只在主题或设置变化时跑，不需要轮询。
-function M:UpdateAll()
-    if Locked() then
-        refreshDirty = true
-        return
-    end
-
-    local config = ButtonConfig()
+--- 只重画冷却（战斗中也要跑：冷却框是我们自己的贴图，不受保护）。
+function M:UpdateCooldowns()
     for _, bar in pairs(bars) do
-        for _, button in ipairs(bar.buttons) do
-            pcall(button.UpdateConfig, button, config)
-            ApplyCountVisibility(button)
-            StyleCooldownFrame(button.cooldown)
+        for index, button in ipairs(bar.buttons) do
+            PaintCooldown(button, SlotOf(button, bar, index))
         end
+    end
+end
+
+--- 刷新所有按钮的外观配置；冷却由客户端驱动，图标 / 数字 / 宏名我们自己读。
+function M:UpdateAll()
+    -- 这里**不挡战斗**：图标 / 键位文字 / 冷却全是我们自己的贴图，读的也是非机密 API，
+    -- 战斗中一样要刷（载具换页、冷却起转都在战斗里发生）。真正的受保护操作在
+    -- RefreshLayout（挪框体）里，那里才看 Locked()。
+
+    for _, bar in pairs(bars) do
+        RefreshBar(bar)
     end
 
     RefreshRings()
@@ -1007,10 +1511,28 @@ function M:UpdateAll()
     end
 end
 
+--- 热键文字：跟着玩家的按键设置走（换键、改设置都要重画）。
+--- 按下 / 抬起施法的偏好变了：把所有按钮的 useOnKeyDown 重写一遍（属性写入本身不越权）。
+function M:SetClickOptions()
+    for _, bar in pairs(bars) do
+        for _, button in ipairs(bar.buttons) do
+            SetUseOnKeyDown(button)
+        end
+    end
+end
+
+function M:UpdateHotkeys()
+    for _, bar in pairs(bars) do
+        for _, button in ipairs(bar.buttons) do
+            SetHotkey(button)
+        end
+    end
+end
+
 --- 布局或尺寸改过之后重新摆一遍。
 function M:RefreshLayout()
     if Locked() then
-        -- 按钮本体是受保护的安全模板：战斗中挪不动（LibActionButton 的 SecureHandlerStateTemplate），
+        -- 按钮本体是受保护的安全模板：战斗中挪不动（SecureActionButtonTemplate），
         -- 硬来会被客户端拒绝。这次改动记下来，脱战补做。
         layoutDirty = true
         return
@@ -1018,19 +1540,18 @@ function M:RefreshLayout()
     for _, bar in pairs(bars) do
         LayoutBar(bar)
         PositionBar(bar)
+
     end
     AdoptAll()
     self:UpdateAll()
 end
 
 function M:ParkBlizzard()
-    local box = HiddenFrame()
-    if not box then return end
     for _, name in ipairs(ACTION_BAR_FRAMES) do
-        Park(name, box)
+        Park(name)
     end
     for _, name in ipairs(BAG_BAR_FRAMES) do
-        Park(name, box)
+        ParkBag(name)
     end
 end
 
@@ -1054,7 +1575,7 @@ function M:Build()
     if built then return M.ready end
     built = true
 
-    if not LAB then
+    if not ActionBar then
         buildFailure = "lab"
         M.ready = false
         ReportFailure()
@@ -1096,6 +1617,7 @@ function M:Apply()
             SetBarShown(bar, own and def.index <= count)
         end
     end
+    WatchPages(own)
 
     if own then
         AdoptAll()
@@ -1117,10 +1639,9 @@ function M:Apply()
     end
 
     -- 背包条我们从来不替代，所以它只看自己的开关。
-    local box = HiddenFrame()
-    if box and db.hideBagBar ~= false then
-        Park("BagsBar", box)
-        Park("MainMenuBarBackpackButton", box)
+    if db.hideBagBar ~= false then
+        Park("BagsBar")
+        Park("MainMenuBarBackpackButton")
     end
 
     if own and not announced then
@@ -1148,6 +1669,7 @@ function M:SetEnabled(enabled)
         self:Apply()
     else
         M.own = false
+        WatchPages(false)
         for _, bar in pairs(bars) do
             pcall(bar.frame.Hide, bar.frame)
         end
