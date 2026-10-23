@@ -609,12 +609,15 @@ local function EnsureDropCatcher(bar)
     local frame = bar.frame
     -- **必须用暴雪模板建**：实机证明普通 Frame 收不到 OnReceiveDrag（一次都没有），
     -- 而之前那版 ActionBarButtonTemplate 做的透明代理是能收到拖放的。所以接住器也用它。
+    -- **必须带名字**：ActionButtonTemplate 的 OnLoad -> UpdateHotkeys 会拼 GetName()，
+    -- 匿名框体会抛 "ActionButton.lua:489: attempt to concatenate a nil value"（日志里 16 次）。
+    local catcherName = "MonetUIDropCatcher" .. tostring(bar.index or 0)
     local catcher
     for _, tmpl in ipairs({ "ActionBarButtonTemplate, SecureActionButtonTemplate",
                             "ActionButtonTemplate, SecureActionButtonTemplate",
                             "SecureActionButtonTemplate" }) do
-        local ok, frame = pcall(CreateFrame, "CheckButton", nil, UIParent, tmpl)
-        if ok and frame then catcher = frame break end
+        local ok, made = pcall(CreateFrame, "CheckButton", catcherName, UIParent, tmpl)
+        if ok and made then catcher = made break end
     end
     if not catcher then return nil end
     catcher:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
@@ -836,6 +839,9 @@ local function CreateSecureButton(name, parent, id)
     return nil
 end
 
+-- 托盘提示只打印一次（每个会话），不刷屏。
+local hintedFlyout
+
 local function BuildButton(bar, index)
     local def  = bar.def
     local name = "MonetUI" .. def.key .. "Button" .. index
@@ -854,6 +860,59 @@ local function BuildButton(bar, index)
     --     "MonetUI 已被禁用，因为该功能只对暴雪的 UI 开放"；片段写 → 正常施法（已实机验证）。
     pcall(button.SetID, button, 0)
     pcall(button.RegisterForClicks, button, "AnyDown", "AnyUp")
+
+    -- 暴雪的 SpellFlyout（多阶法术 / 宠物技能那种"弹出托盘"）要求按钮实现
+    -- FlyoutButtonMixin 的最小一份（Blizzard_Flyout/Flyout.lua:72-116）：
+    --   GetPopupDirection()  托盘朝哪边展开（SpellFlyout.lua:260 要用）
+    --   TogglePopup()        挂上 / 摘掉 SpellFlyout（SpellFlyout.lua:350 要用）
+    --   IsPopupOpen/ClosePopup
+    -- 裸 SecureActionButtonTemplate 一个都没有 → 点开托盘就报
+    -- "SpellFlyout.lua:260/350: attempt to call a nil value"。
+    button.popupDirection = "UP"
+    button.popupOffset = 0
+    if not button.GetPopupDirection then
+        button.GetPopupDirection = function(self) return self.popupDirection or "UP" end
+    end
+    if not button.IsPopupOpen then
+        button.IsPopupOpen = function(self)
+            local popup = _G.SpellFlyout
+            return (popup and popup:IsAttachedToButton(self)) and true or false
+        end
+    end
+    if not button.TogglePopup then
+        -- 本客户端的边界：托盘挂在我们（插件）的按钮下面时，选项的施法一定是脏的 ——
+        -- 实机 ADDON_ACTION_FORBIDDEN MonetUI CastSpellByID（父级改了 UIParent 也没用，
+        -- 因为 SpellFlyout:Toggle 在布托盘时就已把法术 ID 通过 SetAttribute 写进脏上下文）。
+        -- 所以鼠标点击**不展开**托盘，改成提示用快捷键：那条走暴雪自己的 ActionButton，
+        -- 展开的托盘选项可以正常点击（已实机确认）。
+        button.TogglePopup = function(self)
+            if not hintedFlyout then
+                hintedFlyout = true
+                ns:Print("这类技能的弹出托盘请用快捷键打开 —— 用鼠标从插件动作条展开的托盘，选项无法施放。")
+            end
+        end
+    end
+    if not button.ClosePopup then
+        -- 托盘如果曾经挂在我们身上（旧版行为），这里仍要能干净放手，否则暴雪按钮再弹会撞
+        -- assertsafe("FlyoutPopup already has a button set.")。
+        button.ClosePopup = function(self)
+            local popup = _G.SpellFlyout
+            if popup and popup.flyoutButton == self then
+                pcall(popup.DetatchFromButton, popup)
+            end
+        end
+    end
+    -- 条隐藏 / 换页 / 上载具时按钮会被藏起来：托盘不能留在我们身上，
+    -- 否则下一次别人（包括暴雪自己的 ActionButton）要弹托盘就撞断言。
+    if not button.__monetFlyoutHooked then
+        button.__monetFlyoutHooked = true
+        button:HookScript("OnHide", function(self)
+            local popup = _G.SpellFlyout
+            if popup and popup.flyoutButton == self then
+                pcall(popup.DetatchFromButton, popup)
+            end
+        end)
+    end
     pcall(button.SetAttribute, button, "type", "action")
     pcall(button.SetAttribute, button, "typerelease", "actionrelease")
     pcall(button.SetAttribute, button, "checkselfcast", true)
@@ -1275,6 +1334,46 @@ local function ChainContainers(containers, point, scale)
     end
 end
 
+--- 受保护写入的"签名"：只有这些值变了，才值得去碰暴雪的受保护框体。
+local function AdoptSignature(point, scale, stored, count)
+    return table.concat({
+        tostring(point), tostring(scale),
+        tostring(stored.relativeTo), tostring(stored.relativePoint),
+        tostring(stored.x), tostring(stored.y),
+        tostring(count),
+    }, "|")
+end
+
+--- 已经就位了吗：签名一致 + 实测锚点/步距/缩放都没被暴雪动过。
+--- 这里只读不写（GetPoint / GetScale），所以每来一个宠物事件都问一遍也不产生任何 BLOCKED。
+local function AdoptInPlace(entry, bar, containers, point, scale, stored, def)
+    local count = #(containers or {})
+    if not entry.signature or entry.signature ~= AdoptSignature(point, scale, stored, count) then
+        return false
+    end
+    local okScale, barScale = pcall(bar.GetScale, bar)
+    if okScale and math.abs((barScale or 1) - scale) > 0.001 then return false end
+
+    local first = containers and containers[1]
+    if not first then return true end
+
+    local p1, _, rp1, x1, y1 = first:GetPoint(1)
+    if p1 ~= point then return false end
+    if rp1 ~= (stored.relativePoint or def.relativePoint or point) then return false end
+    if math.abs((x1 or 0) - (stored.x or def.x or 0)) > 0.01 then return false end
+    if math.abs((y1 or 0) - (stored.y or def.y or 0)) > 0.01 then return false end
+
+    if count > 1 then
+        local p2, _, _, x2 = containers[2]:GetPoint(1)
+        if p2 ~= "BOTTOMLEFT" then return false end
+        local step = (ButtonSize() + Spacing()) / (scale > 0 and scale or 1)
+        local growLeft = point:find("RIGHT", 1, true) ~= nil
+        local want = growLeft and -step or step
+        if math.abs((x2 or 0) - want) > 0.5 then return false end
+    end
+    return true
+end
+
 --- 这一串容器带着壳的 0.9333 缩放，**`GetRect` / `GetPoint` 对它们报的是"虚拟"坐标**：
 --- 容器说自己 L=1215.67，拿一个不缩放的探针框锚到里面的按钮上量，真实落点是 1134.6 ——
 --- 正好差 1/0.9333。所以别拿 GetRect 的数字去换算屏幕坐标，那是把已经除过缩放的数字再除一遍。
@@ -1358,27 +1457,36 @@ local function AdoptBar(def)
     end
     local size  = ButtonSize()
     local scale = entry.base and (size / entry.base) or 1
-    pcall(bar.SetScale, bar, scale)
-    entry.scale = scale
 
     local containers = ButtonContainers(bar)
     local first = containers and containers[1]
     local stored = StoredPosition(def, def.key)
+    local point = stored.point or def.point or "CENTER"
 
-    -- 外层壳（PetActionBar / StanceBar）我们不动它，只搬里面的按钮容器。但它是**开鼠标**的：
-    -- 宠物条那个实测 1303×1193、贴 UIParent，正好盖住屏幕中间一大块 —— 表现就是
-    -- 世界里点不中、按住左/右键都转不了视角，而外圈的 UI（动作条、小地图）照常能点。
-    -- 壳自己没有美术也没有按钮（按钮在 ButtonContainer 里各自收鼠标），所以把它的鼠标关掉。
-    if first and first ~= bar then
-        pcall(bar.EnableMouse, bar, false)
-        pcall(bar.EnableMouseMotion, bar, false)
+    -- 记忆化（选项 A）：签名一致、实测锚点也没被暴雪动过，就**跳过所有受保护写操作**。
+    -- 宠物事件（PET_BAR_UPDATE / UNIT_PET / 目标变化…）会频繁走到这里；以前每来一次都对
+    -- StanceBar / PetActionBar 写一遍 SetScale / SetPoint / EnableMouse，日志里攒出
+    -- "StanceBar:SetPointBase()" / "PetActionBar:SetShownBase()" 这类 BLOCKED（只进日志、不弹窗）。
+    -- 现在只在"真的要变"或"暴雪把位置改回去了"时才写。
+    if not AdoptInPlace(entry, bar, containers, point, scale, stored, def) then
+        entry.signature = AdoptSignature(point, scale, stored, #(containers or {}))
+        pcall(bar.SetScale, bar, scale)
+        entry.scale = scale
 
-        -- 一个容器只装一个按钮：整串跟着 1 号排开，否则只有 1 号搬过去、其余留在壳的老位置。
-        local point = stored.point or def.point or "CENTER"
-        Anchor(first, stored, def)
-        ChainContainers(containers, point, scale)
-    else
-        Anchor(first or bar, stored, def)
+        -- 外层壳（PetActionBar / StanceBar）我们不动它，只搬里面的按钮容器。但它是**开鼠标**的：
+        -- 宠物条那个实测 1303×1193、贴 UIParent，正好盖住屏幕中间一大块 —— 表现就是
+        -- 世界里点不中、按住左/右键都转不了视角，而外圈的 UI（动作条、小地图）照常能点。
+        -- 壳自己没有美术也没有按钮（按钮在 ButtonContainer 里各自收鼠标），所以把它的鼠标关掉。
+        if first and first ~= bar then
+            pcall(bar.EnableMouse, bar, false)
+            pcall(bar.EnableMouseMotion, bar, false)
+
+            -- 一个容器只装一个按钮：整串跟着 1 号排开，否则只有 1 号搬过去、其余留在壳的老位置。
+            Anchor(first, stored, def)
+            ChainContainers(containers, point, scale)
+        else
+            Anchor(first or bar, stored, def)
+        end
     end
 
     -- 暴雪改按钮显隐时不发事件，直接后钩条自己的 UpdateShownButtons（Lua 方法，安全钩）：
@@ -1609,7 +1717,9 @@ function M:UpdateAll()
 
     RefreshRings()
 
-    if leaveVehicle then
+    if leaveVehicle and not InCombatLockdown() then
+        -- 这是个 SecureHandler 框体：战斗中 SetSize / SetPoint 会被客户端拒
+        -- （日志里 MonetUIActionBarExit:SetSize()）。改尺寸留到脱战后由 UpdateAll 补。
         local size = ButtonSize()
         leaveVehicle.frame:SetSize(size + 2 * BORDER, size + 2 * BORDER)
         Anchor(leaveVehicle.frame, StoredPosition({ point = "CENTER", relativeTo = "UIParent",
