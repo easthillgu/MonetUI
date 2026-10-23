@@ -31,7 +31,7 @@
 | **Minimap** | 小地图矩形化（256×190），去掉坐标与时钟，配主题面板。 |
 | **Bags** | 分类背包（含账号银行页切片）。旧排列式 `BagFrame` 保留，待其实机验证通过后退役。 |
 | **QuestTracker** | 任务追踪主题边框 + 标题栏拖动 + 位置保存。 |
-| **ActionBars** | 1–8 号自绘动作条（基于 `LibActionButton-1.0`），接管宠物 / 姿态条，隐藏暴雪动作条与背包条。宠物条的「自动施法」提示用自绘的像素环替掉暴雪那圈旋转的蚂蚁。 |
+| **ActionBars** | 1–8 号自绘动作条（**不依赖任何动作条库**：按钮用客户端的 `SecureActionButtonTemplate` + `actionpage` 属性自绘，施法 / 翻页 / 载具条全部由客户端判定），接管宠物 / 姿态条，隐藏暴雪动作条与背包条。宠物条的「自动施法」提示用自绘的像素环替掉暴雪那圈旋转的蚂蚁。 |
 | **Nameplates** | 挂在暴雪姓名板底座上的细条姓名板：血条 / 名字等级 / 百分比 / 施法条 / 借用暴雪减益 / 仇恨与目标描边。 |
 | **InfoBar** | 贴屏幕边缘的整幅细条 + 6 个数据块（金钱 / 耐久 / 货币 / 延迟帧率内存 / 专精 / 好友），悬停淡入、战斗呼吸、宠物对战自动隐藏；底边衬线就是经验条（进度＝线的长度，进度头一枚 ▲，涨经验时三角滑过去并白热、升级时闪两下，悬停三角才弹具体数值），满级后同一条线改显示当前监视的声望、颜色随关系走。 |
 | **Skins** | 暴雪窗口美化：任务、世界地图、角色、收藏、社交、交易（邮件 / 商贩 / 拍卖 / 专业）、系统、Forever，统一铺 Monet 底板 / 边框 / 字体；可逐窗口开关。 |
@@ -48,8 +48,8 @@
 ## 🔗 依赖
 
 - **硬依赖：无** —— `LibStub` 已内嵌在 `Libs/` 下，不需要额外安装任何库。
-- **随包**：`LibMonetColor-1.0`、`MonetColorMapData-1.0`（自家仓库 [monetcolors](https://github.com/easthillgu/monetcolors) 的产物）、`LibActionButton-1.0`。
-- **可选**：`CallbackHandler-1.0`、`LibCustomGlow-1.0`（缺失时动作条高亮静默降级）。
+- **随包**：`LibMonetColor-1.0`、`MonetColorMapData-1.0`（自家仓库 [monetcolors](https://github.com/easthillgu/monetcolors) 的产物）。
+- **动作条不依赖任何动作条库**：按钮用客户端自己的 `SecureActionButtonTemplate` + `actionpage` 属性自绘，施法、翻页、载具 / 变形 / 覆盖条全部由客户端判定。
 
 > ⚠️ **不要**同时启用独立的 `LibMonetColor-1.0` 插件 —— MonetUI 已内嵌同一版本，同 `MAJOR` 二次注册会直接退出。
 
@@ -96,7 +96,7 @@ MonetUI/
 ## 📄 协议
 
 - **MonetUI 自身代码**：[MIT](LICENSE)。
-- **随包第三方组件**保留各自许可：`LibStub`（公有领域）、`LibActionButton-1.0`（BSD-3-Clause，仅改四处）。完整清单与改动说明见 [`Libs/NOTICE.md`](Libs/NOTICE.md)。
+- **随包第三方组件**保留各自许可：`LibStub`（公有领域）。完整清单见 [`Libs/NOTICE.md`](Libs/NOTICE.md)。
 - **随包字体**各自授权：FusionPixel 为 SIL OFL 1.1（全文 `Assets/Fonts/OFL-FusionPixel.txt`）、Super Effective 为 CC BY-SA 3.0；逐条来源见 [`Assets/Fonts/NOTICE.md`](Assets/Fonts/NOTICE.md)。
 
 ---
