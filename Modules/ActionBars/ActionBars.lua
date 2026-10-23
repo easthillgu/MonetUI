@@ -360,7 +360,7 @@ end
 ---   * 关它按钮的鼠标（EnableMouse）：那些按钮/容器是**受保护**框体，碰一下就被弄脏，
 ---     之后暴雪自己更新它们就变成 ADDON_ACTION_FORBIDDEN，每次点击动作条都弹
 ---     "MonetUI 已被禁用，因为该功能只对暴雪的 UI 开放"。
---- 现在：MainActionBar 只 alpha 0，其余条换到常隐框体，按钮交给暴雪自己按 statehidden 藏。
+--- 现在：所有暴雪动作条（含 MainActionBar）都换到常隐框体，按钮交给暴雪自己按 statehidden 藏。
 local function Park(name)
     local frame = _G[name]
     if not frame or frame.__monetParked then return false end
@@ -368,14 +368,15 @@ local function Park(name)
     frame.__monetAlpha  = frame:GetAlpha()
     frame.__monetParent = frame:GetParent()
 
+    -- **全部换父到常隐框体，包括 MainActionBar。**
+    -- 之前 MainActionBar 留在原地只 alpha 0（Ellesmere 的做法），但实测 12.1.5 上它仍然把
+    -- 自己矩形内的鼠标事件全部吃掉：bar2 整条（y 61..89）落在它 786..1348 × 45..90 里，
+    -- 拖放和点击都到不了任何上层框体（把 bar2 临时搬到 y=200 立刻正常）。换父之后它
+    -- vis=false，不再占那片屏幕区域，接住器与按钮都能正常收到事件。
+    pcall(frame.SetParent, frame, HiddenParent())
+
     if name == "MainActionBar" or name == "MainMenuBar" then
-        pcall(frame.SetAlpha, frame, 0)
-        local caps = frame.Caps
-        if caps and caps.Hide then pcall(caps.Hide, caps) end
-        if frame.BorderArt and frame.BorderArt.Hide then pcall(frame.BorderArt.Hide, frame.BorderArt) end
         KillPagerMouse(frame)
-    else
-        pcall(frame.SetParent, frame, HiddenParent())
     end
 
     if type(frame.actionButtons) == "table" then
@@ -553,11 +554,116 @@ local function PaintCooldown(button, slot)
         local ok2, dur = pcall(C_ActionBar.GetActionCooldownDuration, slot)
         if ok2 then durationObject = dur end
     end
+
+
     if durationObject and cooldown.SetCooldownFromDurationObject then
         pcall(cooldown.SetCooldownFromDurationObject, cooldown, durationObject)
     else
         pcall(cooldown.Clear, cooldown)
     end
+end
+
+-- ---------------------------------------------------------------------------
+-- 拖放接住器
+--
+-- 为什么需要它：把技能拖到格子上时，客户端是按"光标下最上层的可点框体"派发 OnReceiveDrag 的。
+-- 我们的按钮虽然 level 61，但暴雪主条（MainActionBar，alpha 0、鼠标还开着、level 50）
+-- 的矩形 786,45 562×45 正好压住 bar1 上半截和 bar2 整条 —— 实测 bar2 整排收不到
+-- OnReceiveDrag（日志里只有 dstart，没有一次 receive），表现就是"bar2 放不进去、
+-- 其它两排要对准一点"。
+--
+-- 解法：每条条上挂一只**只在手里拿着东西时才开鼠标**的透明接住器（level 70，压住整条），
+-- 放下时按光标坐标**算**出目标格（不再依赖命中判定），再 PlaceAction。
+-- 平时它关着鼠标，所以点击照旧落在我们自己的按钮上。
+local dropCatchers = setmetatable({}, { __mode = "k" })
+
+local function CursorUI()
+    local x, y = GetCursorPosition()
+    if not x then return nil end
+    local scale = UIParent:GetEffectiveScale() or 1
+    if scale == 0 then scale = 1 end
+    return x / scale, y / scale
+end
+
+--- 光标落在这一条的第几格（1..12），不在条上返回 nil。
+local function IndexAtCursor(bar)
+    local cx, cy = CursorUI()
+    if not cx or not cy then return nil end
+    local frame = bar.frame
+    local left, bottom = frame:GetLeft(), frame:GetBottom()
+    if not left or not bottom then return nil end
+    local s = (frame:GetEffectiveScale() or 1) / (UIParent:GetEffectiveScale() or 1)
+    local x0, y0 = left * s, bottom * s
+    local w, h = (frame:GetWidth() or 0) * s, (frame:GetHeight() or 0) * s
+    if cx < x0 or cx > x0 + w or cy < y0 or cy > y0 + h then return nil end
+    local pitch = (ButtonSize() + Spacing()) * s
+    if pitch <= 0 then return nil end
+    local index = math.floor((cx - x0) / pitch) + 1
+    if index < 1 then index = 1 end
+    if index > #bar.buttons then index = #bar.buttons end
+    return index
+end
+
+local function EnsureDropCatcher(bar)
+    if dropCatchers[bar] then return dropCatchers[bar] end
+    local frame = bar.frame
+    -- **必须用暴雪模板建**：实机证明普通 Frame 收不到 OnReceiveDrag（一次都没有），
+    -- 而之前那版 ActionBarButtonTemplate 做的透明代理是能收到拖放的。所以接住器也用它。
+    local catcher
+    for _, tmpl in ipairs({ "ActionBarButtonTemplate, SecureActionButtonTemplate",
+                            "ActionButtonTemplate, SecureActionButtonTemplate",
+                            "SecureActionButtonTemplate" }) do
+        local ok, frame = pcall(CreateFrame, "CheckButton", nil, UIParent, tmpl)
+        if ok and frame then catcher = frame break end
+    end
+    if not catcher then return nil end
+    catcher:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+    catcher:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+    catcher:SetFrameStrata("MEDIUM")
+    catcher:SetFrameLevel(70)
+    catcher:SetAlpha(0)
+    -- **必须 Show**：OnUpdate 只在 Show 的框体上跑，隐藏的框体也不参与鼠标命中 ——
+    -- 之前没 Show，结果它既不轮询也收不到放下事件（拖放依旧全废）。
+    catcher:Show()
+    catcher:EnableMouse(false)
+    catcher:SetScript("OnReceiveDrag", function(self)
+        if InCombatLockdown() then return end
+        local index = IndexAtCursor(bar)
+        local button = index and bar.buttons[index]
+        local slot = button and SlotOf(button, bar, index)
+        if slot and PlaceAction then pcall(PlaceAction, slot) end
+        self.holding = false
+        pcall(self.EnableMouse, self, false)
+    end)
+    -- **OnReceiveDrag 在这个客户端不派发给普通框体**（实机：接住器 mouse=true、光标确实拿着法术，
+    -- 但一次 RECV 都没有）。所以真正的落点走 OnMouseUp：松手时只要手里还有东西，就按坐标算格子
+    -- 再 PlaceAction —— 这也是"点一下把技能放进格子"的标准行为。
+    catcher:SetScript("OnMouseUp", function(self)
+        if InCombatLockdown() then return end
+        if GetCursorInfo() == nil then return end
+        local index = IndexAtCursor(bar)
+        local button = index and bar.buttons[index]
+        local slot = button and SlotOf(button, bar, index)
+        if slot and PlaceAction then pcall(PlaceAction, slot) end
+    end)
+    -- 10Hz 轮询：只在手里拿着东西（法术/物品/宏）时开鼠标
+    local acc = 0
+    catcher:SetScript("OnUpdate", function(self, elapsed)
+        acc = acc + (elapsed or 0)
+        if acc < 0.1 then return end
+        acc = 0
+        if not frame:IsShown() then
+            if self.holding then self.holding = false; pcall(self.EnableMouse, self, false) end
+            return
+        end
+        local holding = GetCursorInfo() ~= nil
+        if holding ~= self.holding then
+            self.holding = holding
+            pcall(self.EnableMouse, self, holding)
+        end
+    end)
+    dropCatchers[bar] = catcher
+    return catcher
 end
 
 --- 快捷键太长会顶出按钮（SHIFT-1、MOUSEWHEELUP…），缩成 s1 / MU 这类写法。
@@ -905,6 +1011,7 @@ local function CreateBar(def)
     PositionBar(bar)
     -- 按钮建好、位置定好后，把当前页下发给它们一次（片段跑，安全环境里写 action）
     PushPageToChildren(bar)
+    EnsureDropCatcher(bar)
     bar.page = tonumber(frame:GetAttribute("actionpage")) or def.page
     RefreshBar(bar)
     return bar
