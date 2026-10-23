@@ -263,9 +263,10 @@ end
 --- 提示框的九宫格颜色每次隐藏都会被 GameTooltip_ClearStyle 刷回暴雪默认值
 --- （GameTooltipDataMixin:OnHide → SharedTooltip_SetBackdropStyle(self, nil)），只在登录时染一次等于没染。
 --- 挂到那个函数上补一刀：只补「默认样式」；暴雪自己的特殊样式（符文锻造金、腐化紫、Azerite）保留原样。
+local tooltipStyleWatched = false
 local function WatchTooltipStyle()
-    if WatchTooltipStyle.done or type(_G.SharedTooltip_SetBackdropStyle) ~= "function" then return end
-    WatchTooltipStyle.done = true
+    if tooltipStyleWatched or type(_G.SharedTooltip_SetBackdropStyle) ~= "function" then return end
+    tooltipStyleWatched = true
 
     hooksecurefunc("SharedTooltip_SetBackdropStyle", function(frame, style)
         if style or not frame or not frame.__monetNineTint then return end

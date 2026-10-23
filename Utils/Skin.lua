@@ -353,8 +353,18 @@ function Skin:ControlState(control, opts)
     end
 
     -- OnDown / OnUp are hooked, not set: a Blizzard button usually already has a click script.
-    control:HookScript("OnDown", function() pressed = true; apply() end)
-    control:HookScript("OnUp", function() pressed = false; apply() end)
+    -- The script names differ between clients: the old ones (and Forever) know OnDown / OnUp,
+    -- retail (12.x) only knows OnMouseDown / OnMouseUp -- HookScript("OnDown") there raises
+    -- "bad argument #2" and killed the whole skin pass.  Try both and keep the one that sticks.
+    local function hookPress(names, fn)
+        for i = 1, #names do
+            if pcall(control.HookScript, control, names[i], fn) then return true end
+        end
+        return false
+    end
+
+    hookPress({ "OnDown", "OnMouseDown" }, function() pressed = true; apply() end)
+    hookPress({ "OnUp", "OnMouseUp" }, function() pressed = false; apply() end)
     -- Blizzard flips enabled state without any script we can see, so hook the setters themselves.
     if type(control.Enable) == "function" then hooksecurefunc(control, "Enable", apply) end
     if type(control.Disable) == "function" then hooksecurefunc(control, "Disable", apply) end
@@ -720,12 +730,46 @@ function Skin:CloseButton(button)
     return button
 end
 
+--- 给图标写裁剪（去掉暴雪图标自带的那一圈边框）。
+-- 参数是 (x0, x1, y0, y1)：纹素坐标按 SetTexCoord(left, right, bottom, top) 落，横向一对、纵向一对。
+--
+-- 零售 12.x 的纹素坐标是"秘密值"，只有紧跟在 SetTexture 之后写进去才生效；顺序反了，客户端会把
+-- 图标拉成一条竖缝（12.1.5 实测：先裁剪再换贴图 = 竖缝；先换贴图再裁剪 = 正常）。所以这里统一按
+-- "换贴图 -> 写裁剪"的顺序落一次，并给图标挂一个钩子：以后每次换贴图都补一遍裁剪（动作条的图标
+-- 每刷新一次就会换贴图，不补就会一直保持竖缝）。
+function Skin:CropIcon(icon, x0, x1, y0, y1)
+    if not icon or type(icon.SetTexCoord) ~= "function" then return icon end
+    x0, x1 = x0 or 0, x1 or 1
+    y0, y1 = y0 or 0, y1 or 1
+
+    local function apply(target)
+        local t = target
+        if type(t) ~= "table" then t = icon end
+        if t and type(t.SetTexCoord) == "function" then
+            pcall(t.SetTexCoord, t, x0, x1, y0, y1)
+        end
+    end
+
+    if not icon.__monetCropHook and type(icon.SetTexture) == "function" and type(hooksecurefunc) == "function" then
+        icon.__monetCropHook = true
+        hooksecurefunc(icon, "SetTexture", function(self) apply(self) end)
+    end
+
+    -- 先把贴图重写一遍，裁剪必须跟在它后面
+    if type(icon.SetTexture) == "function" and type(icon.GetTexture) == "function" then
+        local tex = icon:GetTexture()
+        if tex then pcall(icon.SetTexture, icon, tex) end
+    end
+    apply()
+    return icon
+end
+
 --- Crop an icon to a square and give it a Monet border.
 function Skin:Icon(icon, border)
     if not icon or icon.__monetIcon then return icon end
     icon.__monetIcon = true
 
-    if icon.SetTexCoord then pcall(icon.SetTexCoord, icon, 0.08, 0.92, 0.08, 0.92) end
+    self:CropIcon(icon, 0.08, 0.92, 0.08, 0.92)
     if border and icon.GetObjectType and icon:GetObjectType() == "Texture" then
         local bg = NewBackdropFrame(icon:GetParent(), 1)
         bg:SetPoint("TOPLEFT", icon, "TOPLEFT", -1, 1)

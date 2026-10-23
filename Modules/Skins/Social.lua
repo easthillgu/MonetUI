@@ -69,7 +69,43 @@ end
 -- Strip already fades Blizzard's blue; the plate replaces it.
 local CHAT_FRAMES = { "ChatFrame1", "ChatFrame2", "ChatFrame3", "ChatFrame4" }
 
+--- 聊天框底边对齐到全局基线（和第一动作条同一条线，见 Utils/Layout.lua）。
+--- 聊天窗口的位置是暴雪记在账号级布局里的，我们从没设过它（之前底边是 50，动作条 24），
+--- 所以这里只"校底边"：左边的 X 保持用户自己的值，停靠的子窗口跟着主窗口走。
+local function AlignChatBottom()
+    local chat = _G.ChatFrame1
+    if not chat or type(chat.GetRect) ~= "function" then return end
+    local ok, left, bottom = pcall(chat.GetRect, chat)
+    if not ok or type(left) ~= "number" or type(bottom) ~= "number" then return end
+
+    local target = ns.Layout and ns.Layout.bottom
+    if type(target) ~= "number" then return end
+
+    -- 暴雪给聊天框加了屏幕内缩（实测左/下都留 32），SetPoint 到底边会被**夹回 32**，
+    -- 所以 y=24 根本落不下来。先把下边内缩放宽到 target，其余三边保持暴雪原值。
+    local okIns, insLeft, insRight, insTop, insBottom = pcall(chat.GetClampRectInsets, chat)
+    if okIns and type(insLeft) == "number" and type(insRight) == "number"
+        and type(insTop) == "number" and type(insBottom) == "number" then
+        if -insBottom > target then
+            pcall(chat.SetClampRectInsets, chat, insLeft, insRight, insTop, -target)
+        end
+    end
+
+    if math.abs(bottom - target) < 0.01 then return end
+
+    pcall(chat.ClearAllPoints, chat)
+    pcall(chat.SetPoint, chat, "BOTTOMLEFT", UIParent, "BOTTOMLEFT", left, target)
+end
+
+-- 暴雪的布局（编辑模式 / 登录恢复）可能在套用皮肤之后把聊天框放回去，所以每个
+-- PLAYER_ENTERING_WORLD 再校一次；套用皮肤时也校一次（改设置立刻可见）。
+if ns.EventBus then
+    ns.EventBus:Register("PLAYER_ENTERING_WORLD", AlignChatBottom)
+end
+
 local function SkinChat()
+    AlignChatBottom()
+
     M:Controls(CHAT_FRAMES, function(chat)
         ns.Skin:Strip(chat)
         ns.Skin:Panel(chat, { thickness = 1, bgAlpha = 0.35 })

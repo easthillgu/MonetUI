@@ -77,8 +77,14 @@ end
 function Widget:Width(frame, width)   if frame then frame:SetWidth(Media:SnapUnit(width)) end return frame end
 function Widget:Height(frame, height) if frame then frame:SetHeight(Media:SnapUnit(height)) end return frame end
 
-function Widget:CreateFrame(name, parent, width, height, template)
-    local frame = CreateFrame("Frame", name, parent, template or "BackdropTemplate")
+--- 建一个框体。
+--- kind = "Frame"（默认）/ "CheckButton" / "Button"……
+--- template 省略时用 "BackdropTemplate"（要有 SetBackdrop）。
+--- 单位框要当"安全单位按钮"用（见 Modules/UnitFrames/UnitFrames.lua）：
+--- kind = "CheckButton" + template = "SecureUnitButtonTemplate, BackdropTemplate"
+--- —— 两个模板写在同一条串里实测可用（SetBackdrop 在、SetAttribute 在、受保护标记也在）。
+function Widget:CreateFrame(name, parent, width, height, template, kind)
+    local frame = CreateFrame(kind or "Frame", name, parent, template or "BackdropTemplate")
     if width then Widget:Size(frame, width, height or width) end
     return frame
 end
@@ -187,9 +193,13 @@ function Widget:Font(parent, size, key, colorKey, justify, layer)
 end
 
 --- Re-apply an existing FontString's font (used when a widget already exists).
-function Widget:SetFont(fs, size, key, flags)
+--- exact = true 时**不**吸附到像素格（Media:SnapSize 把 ≤10 的都夹到 10）。
+--- 只有"按图标尺寸等比缩放"的场合用得上：光环图标只有 14 单位高，
+--- 10px 的数字塞进去就顶满整格，按比例算出来是 8 —— 那就得让它真的是 8。
+function Widget:SetFont(fs, size, key, flags, exact)
     if not fs or not fs.SetFont then return fs end
-    pcall(fs.SetFont, fs, Media:Font(key), Media:SnapSize(size), flags or Media.fontFlags)
+    local finalSize = exact and (tonumber(size) or 12) or Media:SnapSize(size)
+    pcall(fs.SetFont, fs, Media:Font(key), finalSize, flags or Media.fontFlags)
     return fs
 end
 
@@ -289,21 +299,16 @@ function Widget:ApplyBackdrop(frame, opts)
     end
     bd.bgFile = Media.texture.blank
     if opts.round then
-        -- A rounded panel takes the 9-slice edge art instead of the flat BLANK: the backdrop draws a
-        -- texture's outer EDGE_SIZE px as the four corners and stretches the edges, so an arc drawn
-        -- in the art rounds the border at any frame size.  A mask could not do this -- it is applied
-        -- pixel for pixel, so the radius would stretch with the frame's height.
-        -- Three couplings come with the art, all of them fixed by ROUND_EDGES:
-        --   * EDGE_SIZE is both the corner slice and the sampled strip, so it has to cover the whole
-        --     arc (slice).
-        --   * the ring painted inside the art is what makes the visible line that wide (ring).
-        --   * the ring is baked in texture pixels, which are UI units here.  A flat border is held at
-        --     a constant *physical* width through Media:Mult(); a curved one cannot be, because the
-        --     art cannot hold half a texel -- hence three ring widths and PickRoundEdge.
-        local e = PickRoundEdge(opts.thickness)
-        bd.edgeFile = Media.texture[e.key]
-        bd.edgeSize = math.max(e.slice, e.ring)
-        bd.insets = { left = e.ring, right = e.ring, top = e.ring, bottom = e.ring }
+        -- MonetUI: the client's 9-slice (the backdrop's edge file) only works with Blizzard's
+        -- own BLP edge art.  On retail (12.x) a TGA/PNG edge file comes out as a row of
+        -- dashes -- the missing-texture pattern -- so the rounded frame came out broken
+        -- (the minimap panel and the quest tracker had a dotted border).  The border is
+        -- therefore drawn flat: a continuous line of the theme's border colour, square
+        -- corners.  The round art (monet_round_edge*) stays in the assets.
+        local edge = math.max(1, (opts.thickness or 1) * Media:Mult())
+        bd.edgeFile = Media.texture.blank
+        bd.edgeSize = edge
+        bd.insets = { left = edge, right = edge, top = edge, bottom = edge }
     else
         -- edgeSize / insets are physical pixels (thickness * Media:Mult()), so the line stays crisp at any UI scale instead of softening when scale ~= 1.
         local edge = opts.thickness * Media:Mult()

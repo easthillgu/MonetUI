@@ -7,6 +7,7 @@ local ADDON_NAME, ns = ...
 local Skin     = ns.Skin
 local Media    = ns.Media
 local EventBus = ns.EventBus
+local Widget   = ns.Widget
 
 local M = { name = "Skins" }
 ns.Skins = M
@@ -221,13 +222,20 @@ function M:SkinButtonsIn(frame, opts)
     local children = { frame:GetChildren() }
     for i = 1, #children do
         local child = children[i]
-        local kind = type(child.GetObjectType) == "function" and child:GetObjectType()
-        if kind == "RadioButton" then
-            Skin:RadioButton(child, opts)
-        elseif kind == "CheckButton" then
-            Skin:CheckButton(child, opts)
-        elseif kind == "Button" and not LooksLikeItemButton(child) then
-            Skin:Button(child, opts)
+        -- 受保护窗口的子控件在零售服上是 forbidden object：连 GetObjectType 都可能抛
+        -- "Attempt to access forbidden object from code tainted by an AddOn"，所以整段都走 pcall。
+        local okKind, kind = pcall(child.GetObjectType, child)
+        if okKind then
+            if kind == "RadioButton" then
+                pcall(Skin.RadioButton, Skin, child, opts)
+            elseif kind == "CheckButton" then
+                pcall(Skin.CheckButton, Skin, child, opts)
+            elseif kind == "Button" then
+                local okItem, isItem = pcall(LooksLikeItemButton, child)
+                if not okItem or not isItem then
+                    pcall(Skin.Button, Skin, child, opts)
+                end
+            end
         end
     end
 end
@@ -238,9 +246,10 @@ function M:SkinScrollsIn(frame)
     local children = { frame:GetChildren() }
     for i = 1, #children do
         local child = children[i]
-        local kind = type(child.GetObjectType) == "function" and child:GetObjectType()
-        if kind == "ScrollFrame" then
-            Skin:ScrollFrame(child)
+        -- forbidden object 上连 GetObjectType 都会抛（见 SkinButtonsIn 的注释），一律 pcall。
+        local okKind, kind = pcall(child.GetObjectType, child)
+        if okKind and kind == "ScrollFrame" then
+            pcall(Skin.ScrollFrame, Skin, child)
         end
     end
 end
@@ -251,9 +260,9 @@ function M:SkinSlidersIn(frame)
     local children = { frame:GetChildren() }
     for i = 1, #children do
         local child = children[i]
-        local kind = type(child.GetObjectType) == "function" and child:GetObjectType()
-        if kind == "Slider" then
-            Skin:Slider(child)
+        local okKind, kind = pcall(child.GetObjectType, child)
+        if okKind and kind == "Slider" then
+            pcall(Skin.Slider, Skin, child)
         end
     end
 end
