@@ -17,14 +17,21 @@ Media.texturesDir  = ASSET .. "Textures\\"
 --   pixel    Fusion Pixel 12px (SIL OFL, license: Assets/Fonts/OFL-FusionPixel.txt).
 --            True rectangle outlines on a grid of em/12, so one design pixel equals one screen pixel at the multiples of 12 (12, 24) our call sites use; off-grid text is hardened by MONOCHROME.
 --   cooldown Super Effective, a tiny ASCII-only pixel face for countdown digits -- digits only, never pass Chinese to it.
+--   pingfang PingFangPixel, a normal (vector) face for numbers that must stay legible when the icon is
+--            small: a 12px grid face turns into noise at 8-10px (aura durations on 28px icons).
 -- Unknown keys fall back to `pixel`, so legacy saved settings that still say "roadway", "number", "combat" or "default" resolve to the pixel font.
 Media.font = {
     pixel    = ASSET .. "Fonts\\fusion-pixel-12.ttf",
     cooldown = ASSET .. "Fonts\\super-effective.ttf",
+    pingfang = ASSET .. "Fonts\\Pingfangpixel.ttf",
 }
 
 -- Default render flags for every FontString we set: MONOCHROME switches antialiasing off -- on the grid it changes nothing, off the grid it turns the grey fringe into hard stair-steps instead of blur.
 Media.fontFlags = "MONOCHROME"
+
+-- 小字号光环时长专用的硬描边：OUTLINE 给一圈 1px 边，MONOCHROME 关掉抗锯齿（边是硬台阶、不糊）。
+-- 像素字体永远不要用它（会把字模格子糊成一片，见上）；PingFangPixel 不在 12px 网格上，用了反而清楚。
+Media.outlineFlags = "OUTLINE, MONOCHROME"
 
 --- Snap a font size onto the pixel grid (multiples of 12) and to a sane floor.
 -- Allows 10px as a valid size for compact unit frame text; otherwise snaps to 12px grid.

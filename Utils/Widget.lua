@@ -240,11 +240,12 @@ function Widget:Cooldown(parent, size)
 end
 
 --- Style the built-in countdown numbers of a Cooldown widget.
-function Widget:StyleCooldownText(cd, size, key, color)
+function Widget:StyleCooldownText(cd, size, key, color, flags, exact)
     if not cd then return end
     for _, region in ipairs({ cd:GetRegions() }) do
         if region and region.GetObjectType and region:GetObjectType() == "FontString" then
-            pcall(region.SetFont, region, Media:Font(key or "cooldown"), Media:SnapSize(size), Media.fontFlags)
+            local px = exact and (tonumber(size) or 12) or Media:SnapSize(size)
+            pcall(region.SetFont, region, Media:Font(key or "cooldown"), px, flags or Media.fontFlags)
             local r, g, b = 1, 1, 1
             if type(color) == "table" then r, g, b = color.r, color.g, color.b end
             pcall(region.SetTextColor, region, r, g, b, 1)

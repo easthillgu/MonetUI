@@ -122,7 +122,10 @@ local function UpdateScale(cd, state)
     local scale = avg > 0 and (avg / REF_ICON) or 1
     state.scale = scale
     state.hiddenBySize = scale < MIN_SCALE
-    state.fontPx = Media:SnapSize((state.size or BASE_SIZE) * scale)
+    -- 像素字体（super-effective）必须落在 12px 网格上；PingFangPixel 这类矢量字体不吸附，
+    -- 否则 8-10px 的光环时长会被顶到 10 或 12 而撑出格子。
+    local raw = (state.size or BASE_SIZE) * scale
+    state.fontPx = (state.font == "cooldown") and Media:SnapSize(raw) or math.max(8, math.floor(raw + 0.5))
     return scale
 end
 
@@ -138,8 +141,8 @@ local function EnsureText(cd, state)
     fs:SetAllPoints()
     fs:SetJustifyH("CENTER")
     fs:SetJustifyV("MIDDLE")
-    pcall(fs.SetFont, fs, Media:Font("cooldown"),
-        state.fontPx or Media:SnapSize(state.size), Media.fontFlags)
+    pcall(fs.SetFont, fs, Media:Font(state.font or "cooldown"),
+        state.fontPx or Media:SnapSize(state.size), state.flags or Media.fontFlags)
     fs:SetTextColor(1, 1, 1, 1)
     fs:Hide()
 
@@ -185,11 +188,11 @@ local function ApplyLook(cd, state, tight)
             -- Small bars would rather keep the readable size than overflow.
             size = math.min(size, math.max(base, math.floor(width * ALERT_WIDTH)))
         end
-        pcall(fs.SetFont, fs, Media:Font("cooldown"), size, Media.fontFlags)
+        pcall(fs.SetFont, fs, Media:Font(state.font or "cooldown"), size, state.flags or Media.fontFlags)
         local r, g, b = Color:GetDanger()
         fs:SetTextColor(r, g, b, 1)
     else
-        pcall(fs.SetFont, fs, Media:Font("cooldown"), base, Media.fontFlags)
+        pcall(fs.SetFont, fs, Media:Font(state.font or "cooldown"), base, state.flags or Media.fontFlags)
         fs:SetTextColor(1, 1, 1, 1)
     end
 end
@@ -372,15 +375,19 @@ end
 -- Safe to call repeatedly (theme refresh, size change): it only re-styles and asks for an immediate re-render.
 -- compact = true：不用 mm:ss 那种宽格式（"1:05"），退回紧凑的 "59m"/"23h"/"3d"。
 -- 小格子（buff 图标 28px）放不下 5 个字符，颜色 / 放大 / 缩放逻辑完全一样。
-function M:Attach(cd, size, compact)
+--- @param font "cooldown"（像素，动作条）| "pingfang"（矢量 + 硬描边，光环时长，小字号也看得清）
+function M:Attach(cd, size, compact, font)
     if not cd then return nil end
     size = tonumber(size) or BASE_SIZE
     compact = compact and true or false
+    font = (font == "pingfang") and "pingfang" or "cooldown"
 
     local state = attached[cd]
     if state then
         state.size = size
         state.compact = compact
+        state.font = font
+        state.flags = (font == "pingfang") and Media.outlineFlags or Media.fontFlags
         UpdateScale(cd, state)        -- the bar may have been resized
         state.look = nil              -- force the font/colour to be re-applied
         state.next = 0                -- render on the next frame
@@ -390,6 +397,8 @@ function M:Attach(cd, size, compact)
     state = {
         size         = size,
         compact      = compact,
+        font         = font,
+        flags        = (font == "pingfang") and Media.outlineFlags or Media.fontFlags,
         externalHide = false,         -- what outside code last asked for
         own          = false,
         next         = 0,
@@ -418,8 +427,8 @@ function M:Attach(cd, size, compact)
 end
 
 --- Style hook used everywhere a cooldown frame is dressed (this module and the action bars): keeps Blizzard's numbers on until the text can be ours.
-function M:StyleCooldown(cd, size, compact)
-    local state = self:Attach(cd, size, compact)
+function M:StyleCooldown(cd, size, compact, font)
+    local state = self:Attach(cd, size, compact, font)
     if state and not state.own then
         state.externalHide = false
         SetNumbers(cd, false)

@@ -102,7 +102,9 @@ local function CreateAuraButton(parent, size)
     if cooldowns and cooldowns.StyleCooldown then
         -- compact = true：28px 的图标放不下 "31:50"，用 "31m" 这种短格式；
         -- 颜色（分钟蓝 / 秒红）、临近到期放大等逻辑和动作条冷却是同一套。
-        cooldowns:StyleCooldown(button.cooldown, 12, true)
+        -- 字体用 PingFangPixel（不是像素字体）：28px 图标把字号压到 8-10px 时，
+        -- 12px 网格字体会糊成一片；矢量字体 + 硬描边（OUTLINE, MONOCHROME）才看得清。
+        cooldowns:StyleCooldown(button.cooldown, 12, true, "pingfang")
     end
 
     button.count = Widget:Font(button, 12, "pixel", { r = 1, g = 1, b = 1 }, "RIGHT")
