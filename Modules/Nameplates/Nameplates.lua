@@ -297,7 +297,7 @@ local function Build(base)
     local iconSize = castHeight - BORDER * 2
     local icon = Widget:Icon(fill, iconSize, "ARTWORK")
     icon:SetPoint("TOPLEFT", cast, "TOPLEFT", BORDER, -BORDER)
-    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    ns.Skin:CropIcon(icon, 0.08, 0.92, 0.08, 0.92)
 
     local timer = Widget:Font(cast, nameSize, "pixel", "neutral", "RIGHT")
     timer:SetPoint("RIGHT", cast, "RIGHT", -3, 0)
@@ -548,14 +548,19 @@ local function BlizzardUnitFrame(base)
     return base and rawget(base, "UnitFrame") or nil
 end
 
---- Take the plate over: hide Blizzard's box (kept, not destroyed) and borrow its aura list;
---- only hidden, so a later Restore gives back exactly what the game drew.
+--- Take the plate over: fade Blizzard's box out (kept and still shown, see below) and borrow its aura list;
+--- only faded, so a later Restore gives back exactly what the game drew.
 local function HideBlizzardPlate(base, plate)
     local uf = BlizzardUnitFrame(base)
     if not uf then return false end
 
-    pcall(uf.Hide, uf)
+    -- **不要 Hide**：本客户端的姓名板点击是 C++ 做的，点击区来自
+    -- NamePlateUnitFrameMixin:UpdateHitTestArea 里 SetHitTestPoints 设的那几个点，而它们锚在
+    -- 暴雪的血条 / 名字上。把 UnitFrame 藏起来，这些锚点就没有可测的矩形了 —— 表现就是
+    -- "点不中玩家 / 宠物，只有没被我们接管的 NPC 才点得中"。只把 alpha 压到 0：
+    -- 视觉上一样看不见，但 hit test 仍然有效。
     if uf.SetAlpha then pcall(uf.SetAlpha, uf, 0) end
+    if uf.IsShown and not uf:IsShown() then pcall(uf.Show, uf) end
 
     local auras = rawget(uf, "AurasFrame")
     if auras and Setting("showDebuffs") ~= false then
@@ -793,14 +798,13 @@ local function UpdateBorder(plate)
     end
 end
 
---- Blizzard can show its own UnitFrame again on any update; keep it hidden while ours.
+--- Blizzard can show its own UnitFrame again on any update; keep it faded (never hidden — the
+--- C++ nameplate hit test is anchored to its bars, see HideBlizzardPlate).
 local function KeepBlizzardHidden(plate)
     local uf = plate.blizzardUF
     if not uf then return end
-    if uf.IsShown and uf:IsShown() then
-        pcall(uf.Hide, uf)
-        if uf.SetAlpha then pcall(uf.SetAlpha, uf, 0) end
-    end
+    if uf.IsShown and not uf:IsShown() then pcall(uf.Show, uf) end
+    if uf.SetAlpha then pcall(uf.SetAlpha, uf, 0) end
 end
 
 local function UpdatePlate(plate)
