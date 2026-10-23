@@ -540,13 +540,7 @@ function SimpleConfig:Build()
             MapSetting("microMenu"), MapSetter("microMenu"))
         y = y - 28
 
-        -- 形状方案：默认让引擎按 256×190 的视口重绘（没有被裁掉的带子，追踪点不会漏到
-        -- 地图外面）；遮罩裁剪是老方案，留作回退。
-        MakeDropdown(content, y, "地图形状", {
-            { value = "resize", text = "引擎重绘（256×190，无裁剪）" },
-            { value = "mask",   text = "遮罩裁剪（回退：正方画布 + 裁掉上下）" },
-        }, MapSetting("shape"), MapSetter("shape"))
-        y = y - 28
+        -- 地图形状只有一套（正方画布 + 遮罩裁带），不再提供切换
 
         -- 地图内的三个独立按钮（3:4 矩形图标）
         local mapCaption = Widget:Font(content, 12, "pixel", "edge", "LEFT")
@@ -581,19 +575,14 @@ function SimpleConfig:Build()
         gestureHint:SetText("左键打标记（四个角也算）· 中键开追踪菜单 · 右键微型菜单 · 滚轮缩放")
         y = y - 30
 
-        MakeDropdown(content, y, "边框粗细", {
-            { value = 1, text = "1 px" },
-            { value = 2, text = "2 px（默认）" },
-            { value = 3, text = "3 px" },
-        }, MapSetting("border"), MapSetter("border"))
-        y = y - 30
-
-        MakeDropdown(content, y, "右下角间距", {
-            { value = 0,  text = "0 px（贴边）" },
-            { value = 16, text = "16 px" },
-            { value = 33, text = "33 px（默认）" },
-            { value = 50, text = "50 px" },
-            { value = 66, text = "66 px" },
+        -- 底边高度是统一的（Utils/Layout.lua 的基线，和第一动作条同一条线），
+        -- 这个下拉只管**右边缘**离屏幕右边多远。
+        MakeDropdown(content, y, "右边缘间距", {
+            { value = 0,  text = "0（贴边）" },
+            { value = 16, text = "16" },
+            { value = 33, text = "33（默认）" },
+            { value = 50, text = "50" },
+            { value = 66, text = "66" },
         }, MapSetting("gap"), MapSetter("gap"))
         y = y - 30
 
@@ -1169,18 +1158,28 @@ function SimpleConfig:Build()
     end)
 
     local dragging, dragStartY, dragStartOffset
+    -- 零售 12.x 的 SetScript 会校验脚本名，"OnMouseDrag" 不是客户端认的名字（会直接报错，
+    -- 配置面板因此开不起来）。拖动改成"按住时每帧跟一次光标"：OnUpdate 只在拖动期间挂着。
+    local function Drag()
+        if not dragging then
+            scrollThumb:SetScript("OnUpdate", nil)
+            return
+        end
+        local _, my = GetCursorPosition()
+        SetOffset(dragStartOffset + (my - dragStartY) * Media:Mult())
+    end
+
     scrollThumb:SetScript("OnMouseDown", function()
         -- GetCursorPosition is the documented cursor API on this client; it reports
         -- physical pixels, so the delta is converted to UI units with Media:Mult().
         local _, my = GetCursorPosition()
         dragging, dragStartY, dragStartOffset = true, my, scrollOffset
+        scrollThumb:SetScript("OnUpdate", Drag)
     end)
-    scrollThumb:SetScript("OnMouseDrag", function()
-        if not dragging then return end
-        local _, my = GetCursorPosition()
-        SetOffset(dragStartOffset + (my - dragStartY) * Media:Mult())
+    scrollThumb:SetScript("OnMouseUp", function()
+        dragging = false
+        scrollThumb:SetScript("OnUpdate", nil)
     end)
-    scrollThumb:SetScript("OnMouseUp", function() dragging = false end)
 
     SetOffset(0)
 

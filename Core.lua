@@ -54,7 +54,7 @@ local DEFAULTS = {
         windowsPerRow  = 2,
         showReagentBag = true,
         showBank       = true,
-        anchor         = { frame = "UIParent", x = -33, y = -120 },
+        anchor         = { frame = "UIParent", x = 24, y = -140 },
         positions      = {},   -- per-category window spots the user dragged to
     },
     -- Cooldown countdown text (Modules/Cooldown): the renderer scales the unit itself (60s -> minutes, 1h -> hours, 24h -> days, via Math:DurationText) and treats the last alertSeconds as "tight".  false for scale hands the numbers back to Blizzard; false for alert keeps one colour and one size.
@@ -175,21 +175,20 @@ local DEFAULTS = {
         zoneText     = true,   -- 自建区域名（悬停小地图时显示在地图内部中间靠上）
         zonePvPColor = true,   -- 战区 / 冲突区域时区域名染成危险色
         scrollZoom   = true,   -- 方形地图上滚轮缩放（四角也够得到）
-        border       = 2,      -- 面板边框粗细
-        gap          = 33,     -- 集群贴到屏幕右下角的间距
+        border       = 1,      -- 面板边框粗细（固定 1 物理像素，旧存档里的值不再生效）
+        gap          = 33,     -- 面板**右边缘**离屏幕右边的距离（底边由 Utils/Layout.lua 统一对齐第一动作条）
         zoom         = -1,     -- 记住的缩放级别（-1 = 没记过，第一次滚轮后才有值）
-        -- 地图形状：
-        --   "resize" —— 画布直接设成 256×190，引擎按新视口重绘：没有被裁掉的带子，
-        --                引擎那层追踪点也就不会漏到地图外面。
-        --   "mask"   —— 老方案：画布保持正方 256×256，用自己的遮罩裁掉上下两条（回退用：
-        --                万一这个客户端重绘出来的地图变形，就切回这一档）。
-        shape        = "resize",
+        -- 地图形状只有一套：正方画布 256×256 + 遮罩裁掉上下各 33，露出 256×190 的可见带。
+        -- 画面不重绘，所以不会被拉伸。曾经还有一档 "resize"（画布直接 256×190），因为
+        -- 非正方形 SetSize 在 WoW 里是把正方渲染拉伸（纵向压扁 ~26%），已经删掉；
+        -- 老存档里的 shape 键由 schema 5 清掉（见 Migrate）。
         -- 地图内的三个独立按钮（3:4 矩形图标）
         mapTracking    = true, -- 追踪（左下）
         mapDifficulty  = true, -- 难度（左上）
         mapCompartment = true, -- 插件收纳（右上）
         microMenu      = true, -- 右键小地图弹出微型游戏菜单
         hideZoneText    = true,
+        hideCoords      = true,
         hideClock       = true,
         hideMail        = true,
         hideTracking    = true,
@@ -200,6 +199,8 @@ local DEFAULTS = {
         hideCompartment = true,
         hidePromo       = true,
         hideCompass     = true,
+        hideBorderTop   = true,
+        hideMicroMenu   = true,
     },
     -- Info bar (信息栏, Modules/InfoBar): one full-width strip along a screen edge carrying small data blocks.  anchorTop pins it to the top edge (so it clears the bottom action bars), height is the strip height (14 fits a 12px font), mouseover keeps the blocks invisible until hovered, combatPulse breathes red in combat / yellow with pending invites, xp draws the experience progress on the bottom hairline (hover the ▲ to read the numbers) and xpFaction hands that same line to the watched reputation at max level; blocks are one switch per data block.
     infobar = {
@@ -244,7 +245,7 @@ local function MergeDefaults(dst, src)
 end
 
 --- Database schema.  Bumping this re-applies the settings that changed their meaning in the shipped defaults (see Migrate).
-local SCHEMA = 3
+local SCHEMA = 5
 
 --- One-off adjustments to a database written by an older MonetUI: MergeDefaults only fills in *missing* keys, so a value whose number changed has to be pushed explicitly.  Stored positions are the player's and are never touched here.
 local function Migrate(db)
@@ -276,6 +277,14 @@ local function Migrate(db)
                     stored.power  = defaults.power
                 end
             end
+        end
+    end
+
+    -- v4: 小地图曾经把默认形状翻成 "mask"（非正方形 SetSize 会把正方渲染拉伸）。
+    -- v5: 现在形状只剩一套，"shape" 这个键作废 —— 顺手从老存档里删掉，免得以后有人问它是干什么的。
+    if (db.schema or 1) < 5 then
+        if type(db.minimap) == "table" then
+            db.minimap.shape = nil
         end
     end
 

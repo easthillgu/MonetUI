@@ -13,7 +13,6 @@ Libs\LibStub\LibStub.lua
 Libs\LibMonetColor-1.0\LibMonetColor-1.0.lua
 Libs\MonetColorMapData-1.0\MonetColorMapData-1.0.lua
 Libs\LibMonetColor-Anim-1.0\LibMonetColor-Anim-1.0.lua
-Libs\LibActionButton-1.0\LibActionButton-1.0.lua
 
 # Utilities
 Utils\Math.lua
@@ -22,6 +21,7 @@ Utils\Media.lua
 Utils\EventBus.lua
 Utils\Color.lua
 Utils\Widget.lua
+Utils\Layout.lua
 Utils\Mover.lua
 Utils\Skin.lua
 
@@ -38,6 +38,7 @@ Modules\Cooldown\Cooldown.lua
 Modules\BuffFrame\BuffFrame.lua
 Modules\Minimap\Minimap.lua
 Modules\Minimap\Buttons.lua
+Modules\Minimap\Pins.lua
 Modules\Minimap\MicroMenu.lua
 Modules\BagFrame\BagFrame.lua
 Modules\Bags\Bags.lua
