@@ -263,6 +263,12 @@ local clusterTarget = { gap = MINIMAP_GAP, bottom = MINIMAP_GAP }
 --- 按实测的可见面板边补差；平移是线性的，量一次就差多少补多少。
 --- 返回是否还需要再看一眼（差值还没收敛）。
 local function AlignCluster()
+    -- 集群是编辑模式管理的受保护框体：战斗中 SetPoint 会被判越权。本函数还会从
+    -- C_Timer.After 的回调里跑（见 MoveCluster），所以守卫必须放在最前面。
+    if InCombatLockdown() then
+        Queue("skin")
+        return false
+    end
     local cluster = _G.MinimapCluster
     local minimap = _G.Minimap
     if not cluster or not minimap or type(minimap.GetRect) ~= "function" then return false end
@@ -292,6 +298,10 @@ local function AlignCluster()
 end
 
 local function MoveCluster()
+    if InCombatLockdown() then
+        Queue("skin")
+        return
+    end
     local cluster = _G.MinimapCluster
     if not cluster then return end
 
@@ -319,6 +329,7 @@ local function MoveCluster()
     AlignCluster()
     if C_Timer and C_Timer.After then
         C_Timer.After(0, function()
+            if InCombatLockdown() then Queue("skin") return end
             for _ = 1, 3 do
                 if not AlignCluster() then break end
             end
