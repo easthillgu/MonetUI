@@ -238,9 +238,11 @@ local function StyleButton(button, cfg, small)
     EnsureSelectBorder(button)
     SizeSelectBorder(button)
 
-    -- Clique / 点击施法类插件认这张表；没装也没有副作用
-    if type(ClickCastFrames) == "table" then
-        ClickCastFrames[button] = true
+    -- Clique / 点击施法类插件认这张表；没装也没有副作用。
+    -- 走 _G 拿：这个全局在本客户端根本没有，直接写全局名会被静态检查当成"用了一个不存在的全局"。
+    local clickcast = _G.ClickCastFrames
+    if type(clickcast) == "table" then
+        clickcast[button] = true
     end
 end
 

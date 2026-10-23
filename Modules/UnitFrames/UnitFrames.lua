@@ -103,6 +103,54 @@ local function Shared(key)
     return (ns.DEFAULTS.unitFrames or {})[key]
 end
 
+-- 暴雪的施法条：这一套我们自己画（单位框上的火花），暴雪那条必须藏掉，
+-- 否则两条叠在一起。
+-- 名字按客户端代际不同：零售 12.x 是 PlayerCastingBarFrame / OverlayPlayerCastingBarFrame /
+-- PetCastingBarFrame，老客户端是 CastingBarFrame / PlayerCastFrame。
+-- TargetFrameSpellBar 是目标框的子帧（跟着目标框一起被藏）。
+local CAST_BAR_FRAMES = {
+    "PlayerCastingBarFrame",
+    "OverlayPlayerCastingBarFrame",
+    "PetCastingBarFrame",
+    "CastingBarFrame",
+    "PlayerCastFrame",
+    "CastingBarFrame1",
+    "CastingBarFrame2",
+    "CastingBarFrame3",
+    "CastingBarFrame4",
+    "TargetFrameSpellBar",
+}
+
+--- 藏掉暴雪的施法条（幂等：暴雪自己会 Show 回来，所以钩一次 Show 按回去）。
+function M:HideBlizzardCastBars(enable)
+    for _, name in ipairs(CAST_BAR_FRAMES) do
+        local frame = _G[name]
+        if frame then
+            if enable then
+                if not frame.__monetCastHidden then
+                    frame.__monetCastHidden = true
+                    if frame.SetScript then
+                        pcall(frame.SetScript, frame, "OnShow", frame.Hide)
+                    end
+                    if type(hooksecurefunc) == "function" and not frame.__monetCastHook then
+                        frame.__monetCastHook = true
+                        hooksecurefunc(frame, "Show", function(self)
+                            if self.__monetCastHidden then pcall(self.Hide, self) end
+                        end)
+                    end
+                end
+                pcall(frame.Hide, frame)
+            elseif frame.__monetCastHidden then
+                frame.__monetCastHidden = nil
+                if frame.SetScript then
+                    pcall(frame.SetScript, frame, "OnShow", nil)
+                end
+                pcall(frame.Show, frame)
+            end
+        end
+    end
+end
+
 --- One setting for one unit: stored value, then per-unit default, then the shared block.
 local function Setting(unit, key)
     local stored = (ns:DB().unitFrames or {})[unit]
@@ -614,7 +662,7 @@ local function UpdateCast(frame)
     if type(name) == "nil" then
         frame.cast:Hide()
         frame.cast.spark:Hide()
-        frame:SetScript("OnUpdate", nil)
+        frame.cast:SetScript("OnUpdate", nil)
         return
     end
 
@@ -627,6 +675,21 @@ local function UpdateCast(frame)
         frame.cast.spark:SetTextColor(SPARK_RED[1], SPARK_RED[2], SPARK_RED[3], 1)
     end
 
+    -- 受限时 startMS / endMS 是保密值（Secret number），OnUpdate 里的减法会抛
+    -- "attempt to perform arithmetic on a secret number value"（零售服实测）。拿不到普通数字就
+    -- 把火花钉在起点并停掉 OnUpdate，收尾交给下一次施法事件；施法条本身照常显示。
+    if Secrets.IsSecret(startMS) or Secrets.IsSecret(endMS) then
+        frame.cast.startTimeMS = nil
+        frame.cast.endTimeMS = nil
+        frame.cast.channeling = channel
+        frame.cast:Show()
+        frame.cast.spark:Show()
+        frame.cast.spark:ClearAllPoints()
+        frame.cast.spark:SetPoint("BOTTOM", frame.cast, "BOTTOMLEFT", 0, 0)
+        frame.cast:SetScript("OnUpdate", nil)
+        return
+    end
+
     -- Store times for spark calculation
     frame.cast.startTimeMS = startMS
     frame.cast.endTimeMS = endMS
@@ -634,8 +697,12 @@ local function UpdateCast(frame)
     frame.cast:Show()
     frame.cast.spark:Show()
 
-    frame:SetScript("OnUpdate", function(self, elapsed)
-        local cast = self.cast
+    -- OnUpdate 挂在**普通子框**（frame.cast）上，不挂在单位框上：
+    -- 单位框现在是受保护的安全单位按钮，战斗中改它的脚本会被拒，
+    -- 而战斗恰恰是施条动画最要紧的时候。
+    local castFrame = frame.cast
+    castFrame:SetScript("OnUpdate", function(self, elapsed)
+        local cast = castFrame
         if not cast or not cast.endTimeMS then
             self:SetScript("OnUpdate", nil)
             return
@@ -679,7 +746,7 @@ local function HideCast(frame)
     frame.cast.endTimeMS = nil
     frame.cast.startTimeMS = nil
     frame.cast.channeling = false
-    frame:SetScript("OnUpdate", nil)
+    frame.cast:SetScript("OnUpdate", nil)
 end
 
 -- ============================================================================
@@ -702,12 +769,14 @@ end
 --       BorrowTargetAuras / RestoreTargetAuras / StackTargetAuras + HookAuraRelayout()。
 
 -- Icon size chosen so the justified row lands on an integer spacing:
---   158px content / 18px wide icons => 8 per row, gaps = (158 - 8*18) / 7 = 2.0px exactly.
--- Height 14 keeps the icons compact (18:14); the square spell art is cropped to that aspect.
-local TARGET_AURA_ICON_W   = 18
-local TARGET_AURA_ICON_H   = 14
-local TARGET_AURA_BORDER_PX = 0   -- no width inset: keeps the full 18px, so the art is not stretched
-local TARGET_AURA_V_CROP_PX = 2   -- height crop top and bottom (18 - 2 - 2 = 14)
+--   158px content / 24px wide icons => 6 per row, gaps = (158 - 6*24) / 5 = 2.8px.
+-- Height 18 keeps the icons compact (24:18 = 4:3); the square spell art is cropped to that aspect.
+-- 时长 / 堆叠数字的字号按**图标高度**等比算（见 StyleAuraButton），所以这里改图标尺寸，
+-- 字会自己跟着走 —— 没有任何写死的字号。
+local TARGET_AURA_ICON_W   = 24
+local TARGET_AURA_ICON_H   = 18
+local TARGET_AURA_BORDER_PX = 0   -- no width inset: keeps the full 24px, so the art is not stretched
+local TARGET_AURA_V_CROP_PX = 3   -- height crop top and bottom (24 - 3 - 3 = 18)
 local TARGET_AURA_SPACING  = 2    -- base spacing (used when icons don't fill row)
 local TARGET_AURA_ROWS     = 2
 
@@ -775,74 +844,286 @@ local function FlowCall(container, newName, oldName, ...)
 end
 
 -- 引擎按钮只在我们手里一次：之后光环变机密（战斗中），Post-creation 访问会被拒。
-local auraButtons = setmetatable({}, { __mode = "k" })
-
 local function TintAuraButton(button)
-    local border = button.__monetBorder
-    if not border then return end
-    local r, g, b = Color:GetBorder()
-    local _, _, _, a = Color:GetEdge()
-    border:SetColorTexture(r, g, b, a or 1)
+    local host = button.__monetBorderHost
+    if not host then return end
+    -- 只写我们自己的子帧。写在按钮的 region 上会被 Bad self 拒掉（pcall 吞掉后边框就永远是
+    -- 创建那一刻的颜色，换主题也不变）—— 子帧没有这个限制，重涂是幂等的。
+    Widget:ApplyBorder(host, 1)
+end
+
+-- 时长文本的染色曲线：配色和动作条冷却（Modules/Cooldown）同一套 ——
+--   <10s 红 · <60s 黄 · <1h 蓝 · <1d 绿 · 更长灰
+-- 曲线由**引擎**按剩余时长求值（DurationTextBinding 的 RemainingDuration 属性），
+-- 所以就算光环数值是机密的，颜色照样会变；只建一条，所有光环按钮共用。
+local durationColorCurve
+
+local function GetDurationColorCurve()
+    if durationColorCurve ~= nil then return durationColorCurve or nil end
+
+    local curveUtil = _G.C_CurveUtil
+    if type(curveUtil) ~= "table" or type(curveUtil.CreateColorCurve) ~= "function"
+        or type(_G.CreateColor) ~= "function" then
+        durationColorCurve = false
+        return nil
+    end
+    local ok, curve = pcall(curveUtil.CreateColorCurve)
+    -- 注意：本客户端的曲线对象是 **userdata**（不是 table），只认 table 会把它当成失败。
+    local curveType = type(curve)
+    if not ok or (curveType ~= "table" and curveType ~= "userdata")
+        or type(curve.AddPoint) ~= "function" then
+        durationColorCurve = false
+        return nil
+    end
+
+    local function point(x, r, g, b)
+        local okColor, color = pcall(_G.CreateColor, r, g, b, 1)
+        if okColor and color then pcall(curve.AddPoint, curve, x, color) end
+    end
+    -- 每个单位切换点两侧各放一个点，做出 1 秒的快速过渡（曲线本身是连续插值的）。
+    point(0,        0.99, 0.21, 0.07)   -- 秒：红（<10s）
+    point(10,       0.99, 0.21, 0.07)
+    point(11,       1.00, 0.91, 0.00)   -- 秒：黄
+    point(59,       1.00, 0.91, 0.00)
+    point(61,       0.13, 0.78, 0.87)   -- 分钟：蓝
+    point(3599,     0.13, 0.78, 0.87)
+    point(3601,     0.31, 0.80, 0.21)   -- 小时：绿
+    point(86399,    0.31, 0.80, 0.21)
+    point(86401,    0.75, 0.75, 0.70)   -- 天：灰
+    point(31536000, 0.75, 0.75, 0.70)
+
+    durationColorCurve = curve
+    return curve
+end
+
+--- debuff 的**解魔法类型色边框**。原来那条有色边框不是被裁图标裁掉的，是模板差异：
+--- 我们用的是 CustomAuraButtonTemplate（光板，没有任何边框 region），暴雪目标框的 debuff
+--- 按钮模板才自带 DispelBorder。
+---
+--- 做法：用引擎的 AddDispelTypeTexture 把边框交回**引擎**上色（暴雪代码按 auraData.dispelName
+--- 调 AuraUtil.SetAuraBorderColor），全程不经过插件代码，所以"initializeFrame 之后按钮不可写"
+--- 这条限制不影响它。样式用 PreserveAsset：引擎**只改顶点色**、不动贴图，于是形状还是我们的
+--- —— 四条 1 物理像素的直边拼一个平直矩形环，和 buff 那圈主题边框同一套几何（暴雪那种圆角厚
+--- 图集边框太"重"，不贴 Monet）。
+--- 引擎要求一个边框 = 一个 Texture，所以四条边各自注册一次；它们同时被 Show/Hide、同时上色。
+local function AddDispelBorder(button, pad, expand)
+    local styles = _G.Enum and _G.Enum.CustomAuraButtonDispelTypeTextureStyle
+    local style = styles and styles.PreserveAsset
+    if style == nil or type(button.AddDispelTypeTexture) ~= "function" then return false end
+    -- expand = 环相对按钮外扩多少（正数向外）；厚度永远是 pad。默认向外扩一个 pad，
+    -- 目标框用这个；玩家 buff 行传 0，环就贴着按钮边、画在按钮**里面**，和自绘那套一致。
+    if type(expand) ~= "number" then expand = pad end
+
+    -- 和暴雪原版一致：没有解魔法类型的 debuff（物理/流血）也画一圈灰边，不然后者完全没边框。
+    local opts = {
+        style = style,
+        showWhenHarmful = true,     -- 有害光环（debuff）
+        showWhenHelpful = false,
+        showWithoutDispelType = true,
+    }
+
+    local edges = {
+        -- { 起点, 终点, 起点偏移, 终点偏移, 方向 }
+        { "TOPLEFT",     "TOPRIGHT",    -expand,  expand, "h" },
+        { "BOTTOMLEFT",  "BOTTOMRIGHT", -expand, -expand, "h" },
+        { "TOPLEFT",     "BOTTOMLEFT",  -expand,  expand, "v" },
+        { "TOPRIGHT",    "BOTTOMRIGHT",  expand,  expand, "v" },
+    }
+
+    local made = 0
+    for i = 1, #edges do
+        local from, to, off, offY, axis = edges[i][1], edges[i][2], edges[i][3], edges[i][4], edges[i][5]
+        local texture = button:CreateTexture(nil, "OVERLAY")
+        if texture then
+            -- 先定白色（引擎随后把顶点色改成解魔法类型色），再定几何，最后才交给引擎。
+            pcall(texture.SetColorTexture, texture, 1, 1, 1, 1)
+            if axis == "h" then
+                pcall(texture.SetPoint, texture, from, button, from, off, offY)
+                pcall(texture.SetPoint, texture, to, button, to, -off, offY)
+                pcall(texture.SetHeight, texture, pad)
+            else
+                pcall(texture.SetPoint, texture, from, button, from, off, offY)
+                pcall(texture.SetPoint, texture, to, button, to, off, -offY)
+                pcall(texture.SetWidth, texture, pad)
+            end
+            if pcall(button.AddDispelTypeTexture, button, texture, opts) then
+                made = made + 1
+                button.__monetDispelBorder = texture
+            else
+                pcall(texture.Hide, texture)
+            end
+        end
+    end
+    return made > 0
 end
 
 --- initializeFrame：一个引擎按钮只进来一次。碰按钮的事必须在这里做完。
-local function StyleAuraButton(button)
+--- spec（可选）：{ width, height, crop } —— BuffFrame 的战斗兜底复用这套样式，但玩家 buff 行是
+--- 方形图标、且不裁边（目标框的 18x14 槽才需要 3:4 裁切）。不传 spec 就等于原来的目标框样子。
+local function StyleAuraButton(button, kind, spec)
     if type(button) ~= "table" then return end
 
-    local frameLevel = 1
-    local okLevel, level = pcall(button.GetFrameLevel, button)
-    if okLevel and type(level) == "number" then frameLevel = level end
-
-    pcall(button.SetSize, button, TARGET_AURA_ICON_W, TARGET_AURA_ICON_H)
+    local specW = (type(spec) == "table" and spec.width) or TARGET_AURA_ICON_W
+    local specH = (type(spec) == "table" and spec.height) or TARGET_AURA_ICON_H
+    pcall(button.SetSize, button, specW, specH)
     -- 引擎按钮默认**可点**：压在条上会吃掉换目标的点击。只有这个窗口能可靠关掉。
     pcall(button.SetMouseClickEnabled, button, false)
 
-    -- 1px 边框 = 比图标大 1px 的底色，图标再盖上去。
-    local border = button:CreateTexture(nil, "BACKGROUND")
-    border:SetPoint("TOPLEFT", button, "TOPLEFT", -1, 1)
-    border:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 1, -1)
-    border:SetColorTexture(0, 0, 0, 1)
-    button.__monetBorder = border
+    local okLevel, buttonLevel = pcall(button.GetFrameLevel, button)
+    if not (okLevel and type(buttonLevel) == "number") then buttonLevel = 1 end
+    local pad = Media:Mult()
+    if type(pad) ~= "number" or pad <= 0 then pad = 1 end
+
+    -- spec.borderInside = true：边框画在按钮**里面**（自绘那套就是这样：边框占按钮矩形内侧
+    -- 那 1px，图标再内缩 1px 让出来）。默认仍向外扩，目标框那套沿用这个已验证的外观。
+    local borderInside = (type(spec) == "table" and spec.borderInside) and true or false
+
+    -- debuff 优先用引擎的解魔法类型色边框（就是"原始那种带色边框"）；buff 用主题边框。
+    -- 引擎那条建不出来（枚举/方法缺失）时退回主题边框，不会出现完全没边框的图标。
+    if kind ~= "debuff" or not AddDispelBorder(button, pad, borderInside and 0 or nil) then
+        -- 边框画在**我们自己的子帧**上，不画进按钮的贴图：引擎按钮在 initializeFrame 返回之后
+        -- 就受 DenyTaintedAccessWhenAurasAreSecret 约束，之后再对它的 region 调 SetColorTexture
+        -- 会被拒 —— 这就是"边框染色失败"、换主题也不跟随的根因。子帧是我们建的，任何时候都能重涂
+        -- （Ellesmere 的 borderHost 同一个道理）。
+        -- 几何：默认比图标外扩 1 个**物理像素**（Media:Mult 就是那个换算），层级压到按钮之下，所以环
+        -- 只在图标外沿露出来；用 ApplyBorder（只有边、无底色）而不是整块色贴图 —— 万一层级没压住，
+        -- 也只有那 1px 的环会盖到图标，不会把图标糊成一块色。
+        local borderHost = CreateFrame("Frame", nil, button, "BackdropTemplate")
+        if borderInside then
+            borderHost:SetAllPoints(button)
+        else
+            borderHost:SetPoint("TOPLEFT", button, "TOPLEFT", -pad, pad)
+            borderHost:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", pad, -pad)
+        end
+        borderHost:SetFrameLevel(math.max(0, buttonLevel - 1))
+        borderHost:EnableMouse(false)
+        Widget:ApplyBorder(borderHost, 1)
+        button.__monetBorderHost = borderHost
+    end
 
     local icon = button:CreateTexture(nil, "ARTWORK")
-    icon:SetAllPoints(button)
-    -- Crop the square spell art to the 3:4 (H:W) slot aspect.
-    local x0, x1, y0, y1 = AuraIconTexCoord()
-    icon:SetTexCoord(x0, x1, y0, y1)
+    -- spec.iconInset：图标从按钮四边内缩多少（要和边框宽度一致，否则边框会被图标压住）。
+    local iconInset = (type(spec) == "table" and spec.iconInset) or 0
+    if type(iconInset) == "number" and iconInset > 0 then
+        icon:SetPoint("TOPLEFT", button, "TOPLEFT", iconInset, -iconInset)
+        icon:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -iconInset, iconInset)
+    else
+        icon:SetAllPoints(button)
+    end
+    -- spec.crop：nil = 目标框那套 3:4 槽裁切；false = 不裁；{x0,x1,y0,y1} = 指定裁切。
+    -- 玩家 buff 行要的正是自绘那套 CropIcon(0.08, 0.92, …)：法术图标自带一圈 8% 的描边，
+    -- 不裁掉的话画面会缩在格子中间，和脱战时那套看着不是一个东西。
+    local crop = type(spec) == "table" and spec.crop or nil
+    if crop == nil then
+        -- Crop the square spell art to the 3:4 (H:W) slot aspect.
+        local x0, x1, y0, y1 = AuraIconTexCoord()
+        ns.Skin:CropIcon(icon, x0, x1, y0, y1)
+    elseif type(crop) == "table" then
+        ns.Skin:CropIcon(icon, crop[1], crop[2], crop[3], crop[4])
+    end
 
     local cd = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
-    cd:SetAllPoints(button)
+    -- 冷却覆盖图标本身（不是整颗按钮），这样扫过的底色不会染到边框那一圈。
+    cd:SetAllPoints(icon)
     pcall(cd.SetDrawEdge, cd, false)
     pcall(cd.SetDrawSwipe, cd, true)
 
-    -- 文字载体：在冷却之上，且**不吃鼠标**。
-    local textHost = CreateFrame("Frame", nil, button)
-    textHost:SetAllPoints(button)
-    textHost:SetFrameLevel(frameLevel + 5)
-    textHost:EnableMouse(false)
+    -- 时长 / 堆叠数字的字号**跟着图标当前的实际尺寸走**（不写死字号）：现量按钮的宽高，
+    -- 高度不超过 45%（上下各留约 2 单位内边距）、宽度保证最长 5 个字符（"1h37m"）不越界，
+    -- 两个上限取更小的那个，再夹一个可读下限。
+    -- Andromeda 的口径是 fontSize = floor(size / 30 * 10 + 0.5)（modules/blizzard/aura.lua），
+    -- 但那是给 30px 方形图标、外加 HalfHeight 字体算的；我们的图标是 4:3 的小格，
+    -- 直接照抄会顶满整格还往外溢。只要图标尺寸（TARGET_AURA_ICON_W/H 或以后的配置项）
+    -- 变了，这里算出来的字号就跟着变，不需要改代码。
+    -- exact = true 让算出来的值真的生效（Widget:SetFont 默认会把 ≤10 的都夹到 10）。
+    local okW, iconW = pcall(button.GetWidth, button)
+    local okH, iconH = pcall(button.GetHeight, button)
+    if not (okW and type(iconW) == "number" and iconW > 0) then iconW = TARGET_AURA_ICON_W end
+    if not (okH and type(iconH) == "number" and iconH > 0) then iconH = TARGET_AURA_ICON_H end
+    local textSize = math.max(4, math.min(
+        math.floor(iconH * 0.45 + 0.5),
+        math.floor(iconW / 3.4 + 0.5)))
+    -- 调用方可以强制字号（BuffFrame 要跟它自绘那套的 12px 对齐）。
+    if type(spec) == "table" and type(spec.textSize) == "number" then
+        textSize = spec.textSize
+    end
 
-    local stack = textHost:CreateFontString(nil, "OVERLAY")
-    Widget:SetFont(stack, 10, "pixel")        -- 字体必须在 SetApplicationCount 之前
-    stack:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -1, 1)
+    -- 时长文本：先给冷却自带的那行数字留条后路（换成像素字体、压进图标下沿），
+    -- 万一下面 RegisterDurationText 不被客户端接受，就继续用它们。
+    local inset = math.max(2, math.floor(textSize * 0.55 + 0.5))
+    local okRegions, regions = pcall(function() return { cd:GetRegions() } end)
+    if okRegions then
+        for i = 1, #regions do
+            local region = regions[i]
+            if type(region) == "table" and type(region.GetObjectType) == "function"
+                and region:GetObjectType() == "FontString" then
+                Widget:SetFont(region, textSize, "pixel", nil, true)
+                pcall(region.ClearAllPoints, region)
+                pcall(region.SetPoint, region, "BOTTOM", button, "BOTTOM", 0, inset)
+                pcall(region.SetJustifyH, region, "CENTER")
+            end
+        end
+    end
+
+    -- 自己建 FontString 注册给 SetDurationText：只有这条路能带**颜色曲线**
+    -- （textColor.curve + RemainingDuration，引擎按剩余时长求值，机密值也有效）。
+    -- 建在冷却帧上（作为它的 region）—— 实测引擎自己那行数字就是这样画的、位于图标之上；
+    -- 挂在按钮的子帧里会被图标盖住。
+    local duration = cd:CreateFontString(nil, "OVERLAY")
+    Widget:SetFont(duration, textSize, "pixel", nil, true)
+    duration:SetPoint("BOTTOM", button, "BOTTOM", 0, inset)
+    duration:SetJustifyH("CENTER")
+
+    -- 层数：同样画在冷却帧上（在图标之上），锚在右上角，和左下角的时长错开。
+    local stack = cd:CreateFontString(nil, "OVERLAY")
+    Widget:SetFont(stack, textSize, "pixel", nil, true)
+    stack:SetPoint("TOPRIGHT", button, "TOPRIGHT", -1, -1)
     stack:SetJustifyH("RIGHT")
-
-    local duration = textHost:CreateFontString(nil, "OVERLAY")
-    Widget:SetFont(duration, 10, "pixel")
-    duration:SetPoint("CENTER", button, "CENTER", 0, 0)
 
     -- 区域全部就绪之后才注册（见上面第 3 条约束）。
     pcall(button.SetIcon, button, icon)
     pcall(button.SetDurationCooldown, button, cd)
     pcall(button.SetApplicationCount, button, stack, {})
-    -- 时长文本的选项参数各代客户端不一致：失败一次就退回最简形式，再失败就不显示。
-    if not pcall(button.SetDurationText, button, duration, {}) then
+
+    -- 带颜色曲线注册时长；客户端不接受这套选项时退回最简形式，再不行才用冷却自带的数字。
+    local prop = _G.Enum and Enum.DurationTextBindingProperty
+    prop = prop and prop.RemainingDuration
+    local curve = GetDurationColorCurve()
+    local registered = false
+    if curve and prop ~= nil then
+        registered = pcall(button.SetDurationText, button, duration,
+            { textColor = { curve = curve, property = prop } })
+    end
+    if not registered then
+        registered = pcall(button.SetDurationText, button, duration, {})
+        -- 退一步：文本已注册、只是这次没接受颜色选项，就单独给绑定设曲线
+        -- （不同客户端对 options 的校验不一致，这条路等价）。
+        if registered and curve and prop ~= nil
+            and type(button.GetDurationTextBinding) == "function" then
+            local okBinding, binding = pcall(button.GetDurationTextBinding, button)
+            local bindingType = type(binding)
+            if okBinding and (bindingType == "table" or bindingType == "userdata")
+                and type(binding.SetTextColorCurve) == "function" then
+                pcall(binding.SetTextColorCurve, binding, curve, prop)
+            end
+        end
+    end
+    if registered then
+        -- 我们自己的文本生效了：关掉冷却自带的那行数字，避免同一格里两份时长。
+        pcall(cd.SetHideCountdownNumbers, cd, true)
+    else
         duration:Hide()
     end
 
-    button.__monetDuration = duration
-    auraButtons[button] = true
     TintAuraButton(button)
 end
+
+--- 导出给 BuffFrame：战斗里客户端不给插件读光环，玩家 buff 行改由引擎 AuraContainer 显示，
+--- 按钮样式必须和目标框一致，所以共用这一个函数（尺寸/裁切由 spec 覆盖）。
+ns.AuraButtonStyle = StyleAuraButton
+--- 曲线必须由**非 securecall** 的调用方先建好：引擎的 initializeFrame 是 securecall 进去跑的，
+--- 在里面首次调 C_CurveUtil.CreateColorCurve 会被拒。
+ns.PrepareAuraStyle = GetDurationColorCurve
 
 --- 流式布局：贴左下、向右上长、每行自动计算图标数并两端对齐（justified）。
 -- Anchor at BOTTOMLEFT of frame (frame outer left edge), grow RIGHT then UP.
@@ -850,7 +1131,18 @@ local function ApplyContainerLayout(container, frame)
     local iconsPerRow, actualSpacing, rowWidth = ComputeAuraLayout(frame:GetWidth())
 
     FlowCall(container, "SetFlowLayoutAnchorPoint", "SetAuraLayoutAnchorPoint", "BOTTOMLEFT")
-    FlowCall(container, "SetFlowLayoutGrowthDirection", "SetAuraLayoutGrowthDirection", "RIGHT", "UP")
+    -- 生长方向必须传 AnchorUtil.FlowDirection 的**枚举值**（Right=1 / Up=1、Left/Down=-1）。
+    -- 传字符串 "RIGHT"/"UP" 会被 wrapper 里的 assert 拒掉，pcall 吞掉之后方向还是默认的
+    -- 向下 —— 这就是之前"满一行往下换行"的原因。先试数字版，老客户端再退字符串版。
+    local flow = _G.AnchorUtil and _G.AnchorUtil.FlowDirection
+    local growthSet = false
+    if type(flow) == "table" and flow.Right ~= nil and flow.Up ~= nil then
+        growthSet = FlowCall(container, "SetFlowLayoutGrowthDirection", "SetAuraLayoutGrowthDirection",
+            flow.Right, flow.Up)
+    end
+    if not growthSet then
+        FlowCall(container, "SetFlowLayoutGrowthDirection", "SetAuraLayoutGrowthDirection", "RIGHT", "UP")
+    end
 
     local axes = _G.AnchorUtil and _G.AnchorUtil.FlowLayoutAxis
     if axes and type(container.SetFlowLayoutAxis) == "function" then
@@ -861,8 +1153,12 @@ local function ApplyContainerLayout(container, frame)
     FlowCall(container, "SetFlowLayoutElementSpacing", "SetAuraLayoutElementSpacing", actualSpacing)
     FlowCall(container, "SetFlowLayoutLineSpacing", "SetAuraLayoutLineSpacing", actualSpacing)
 
-    -- Maximum line size = frame content width (so it wraps at frame edge)
-    FlowCall(container, "SetFlowLayoutMaximumLineSize", "SetAuraLayoutRowWidth", rowWidth)
+    -- 最大行宽。**不能**正好给 rowWidth：引擎判断换行时会先把一个 elementSpacing 也算进
+    -- 下一格的位置（即 6 格需要 6*24 + 6*2.8 = 160.8，而不是我们算的两端对齐 158），
+    -- 于是恰好排满 6 个的一行在第 6 个之前就换行了（实测 5 个就换行）。多给一个间距的余量，
+    -- 刚好放下 iconsPerRow 个、又放不下 iconsPerRow + 1 个。
+    local lineSize = rowWidth + actualSpacing
+    FlowCall(container, "SetFlowLayoutMaximumLineSize", "SetAuraLayoutRowWidth", lineSize)
 
     -- Store for potential refresh
     container.__monetAuraLayout = {
@@ -874,7 +1170,7 @@ local function ApplyContainerLayout(container, frame)
 end
 
 --- 建一个只装一组光环的容器。成功返回 container，失败返回 nil + 原因。
-local function CreateAuraContainer(parent, key, filterString)
+local function CreateAuraContainer(parent, key, filterString, kind)
     if not EnsureAuraContainerAddOn() then
         return nil, "Blizzard_AuraContainer 未加载"
     end
@@ -900,11 +1196,19 @@ local function CreateAuraContainer(parent, key, filterString)
             elementHeight  = TARGET_AURA_ICON_H,
             layoutIndex    = 1,
         },
-        initializeFrame = StyleAuraButton,
+        -- 闭包把"这是 debuff 组"带进 init：debuff 走引擎的解魔法类型色边框。
+        initializeFrame = function(button) StyleAuraButton(button, kind) end,
     }
-    -- 这两个枚举常量缺失时传 nil 更安全，别塞 0 让引擎按「第 0 种排序」处理。
-    if _G.AuraContainerSortMethod then opts.sortMethod = _G.AuraContainerSortMethod end
-    if _G.AuraContainerSortDirection then opts.sortDirection = _G.AuraContainerSortDirection end
+    -- 这两个是枚举**表**（AuraContainerSortMethod.Default = 0、SortDirection.Normal = 0），
+    -- 直接把表当参数传会被引擎拒绝（"sortMethod must be a valid AuraContainerSortMethod"，
+    -- 零售 12.x 实测）。取出标量再传；取不到就干脆不传，让引擎用默认排序。
+    local sortMethod = _G.AuraContainerSortMethod
+    if type(sortMethod) == "table" then sortMethod = sortMethod.Default end
+    if type(sortMethod) == "number" then opts.sortMethod = sortMethod end
+
+    local sortDirection = _G.AuraContainerSortDirection
+    if type(sortDirection) == "table" then sortDirection = sortDirection.Normal end
+    if type(sortDirection) == "number" then opts.sortDirection = sortDirection end
 
     local okAdd, err = pcall(container.AddAuraGroup, container, key, filterString, opts)
     if not okAdd then
@@ -919,7 +1223,7 @@ end
 local targetAuraDebuffs, targetAuraBuffs
 
 --- 建/显示目标光环容器。取代 A 方案的 BorrowTargetAuras。
---- debuff 贴近血条，buff 叠在 debuff 之上（和暴雪 TargetFrame 的排法一致）。
+--- buff 贴着血条、debuff 叠在 buff 之上，两组都是满一行往上换行。
 local function EnsureTargetAuras(frame)
     if not frame then return end
 
@@ -929,8 +1233,19 @@ local function EnsureTargetAuras(frame)
         return
     end
 
+    -- 染色曲线必须在这里（不安全上下文）先建好：引擎按钮的 initializeFrame 是
+    -- securecall 进去跑的，在里面第一次调 C_CurveUtil.CreateColorCurve 会被拒，
+    -- 结果所有按钮都拿不到曲线、时长只剩白色。
+    GetDurationColorCurve()
+
     if not targetAuraDebuffs then
-        local debuffs, why = CreateAuraContainer(frame, "monetTargetDebuffs", "HARMFUL")
+        -- 战斗中建容器会被拦：拿到的一组容器**永远是空的**（实测 0 个按钮显示、换目标也不刷新），
+        -- 而且之后没人再重建。所以战斗里干脆不建，等脱战（PLAYER_REGEN_ENABLED）补做。
+        if type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown() then
+            M.__auraRebuildPending = true
+            return
+        end
+        local debuffs, why = CreateAuraContainer(frame, "monetTargetDebuffs", "HARMFUL", "debuff")
         if not debuffs then
             -- 一次性警告，不刷屏。
             if not M.__auraWarned then
@@ -940,22 +1255,52 @@ local function EnsureTargetAuras(frame)
             return
         end
         targetAuraDebuffs = debuffs
-        targetAuraDebuffs:SetPoint("BOTTOMLEFT", frame, "TOPLEFT", 0, Shared("targetAuraGap") or 22)
 
-        local buffs = CreateAuraContainer(frame, "monetTargetBuffs", "HELPFUL")
+        local buffs = CreateAuraContainer(frame, "monetTargetBuffs", "HELPFUL", "buff")
+        targetAuraBuffs = buffs
+
+        -- 排法（都是 BOTTOMLEFT 锚点 + 向上生长）：buff 贴着血条，第一行满了往上排第二行；
+        -- debuff 再叠在 buff 上面，同样是满行往上换行。buff 变高时 debuff 跟着往上抬。
+        local gap = Shared("targetAuraGap") or 22
         if buffs then
-            targetAuraBuffs = buffs
-            targetAuraBuffs:SetPoint("BOTTOMLEFT", targetAuraDebuffs, "TOPLEFT", 0, TARGET_AURA_SPACING)
+            buffs:SetPoint("BOTTOMLEFT", frame, "TOPLEFT", 0, gap)
+            debuffs:SetPoint("BOTTOMLEFT", buffs, "TOPLEFT", 0, TARGET_AURA_SPACING)
+        else
+            debuffs:SetPoint("BOTTOMLEFT", frame, "TOPLEFT", 0, gap)
         end
     end
 
     if targetAuraDebuffs then targetAuraDebuffs:Show() end
     if targetAuraBuffs then targetAuraBuffs:Show() end
+
+    -- 换目标以后上一个目标的光环还留在屏幕上：引擎只在光环**变化**时刷新按钮，
+    -- 换目标本身不算变化。客户端自己留了口子 —— AuraContainerSharedMixin:UpdateAllAuras
+    -- 的注释就写着 "Exposed to allow external events to trigger refreshes where needed
+    -- (e.g. target changes)" —— 这里就是那个 external event。
+    if targetAuraDebuffs then pcall(targetAuraDebuffs.UpdateAllAuras, targetAuraDebuffs) end
+    if targetAuraBuffs then pcall(targetAuraBuffs.UpdateAllAuras, targetAuraBuffs) end
 end
 
---- 主题变化时重涂边框。引擎按钮由引擎持有，我们只留弱引用。
-local function TintTargetAuras()
-    for button in pairs(auraButtons) do TintAuraButton(button) end
+--- 主题变化时**重建**容器。引擎光环按钮在 initializeFrame 返回之后就不可再写 —— 实测连我们
+--- 自己建在按钮里的子帧都被 DenyTaintedAccessWhenAurasAreSecret 拒掉（SetBackdropBorderColor /
+--- SetAlpha / Hide 全部报 "Attempt to access forbidden object from code tainted by an AddOn"）。
+--- 所以边框颜色只能在创建窗口里定稿，换主题的唯一出路是把容器连同按钮一起扔掉重建。
+--- 战斗中建容器会被拦（会得到一组永远空的容器），这时只挂个标记，脱战后补做。
+local function RebuildTargetAuras()
+    if type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown() then
+        M.__auraRebuildPending = true
+        return
+    end
+    M.__auraRebuildPending = false
+    for _, container in ipairs({ targetAuraDebuffs, targetAuraBuffs }) do
+        if container then
+            pcall(container.ClearAllPoints, container)
+            pcall(container.Hide, container)
+            pcall(container.SetParent, container, nil)
+        end
+    end
+    targetAuraDebuffs, targetAuraBuffs = nil, nil
+    EnsureTargetAuras(frames.target)
 end
 
 -- ============================================================================
@@ -1196,10 +1541,21 @@ local function CreateUnitFrame(unit, position)
     -- No split: health + 1px separator + power
     local height = border * 2 + healthHeight + 1 + powerHeight
 
+    -- 安全单位按钮：和暴雪一样，左键 = 选中（设为目标），右键 = 弹单位菜单
+    -- （设置焦点等）。SecureUnitButtonTemplate 的两个模板写在同一条串里实测可用。
+    -- 受保护的框体上非安全脚本（OnEnter / OnLeave / OnUpdate）照样能设，
+    -- 只有 SetAttribute / RegisterForClicks 这类安全动作在战斗中会被拒。
     local frame = Widget:CreateFrame("MonetUI" .. unit:gsub("^%l", string.upper) .. "Frame",
-        UIParent, width, height)
+        UIParent, width, height, "SecureUnitButtonTemplate, BackdropTemplate", "CheckButton")
     frame.unit = unit
     frame.label = UNIT_LABEL[unit] or unit
+
+    -- 单位按钮的契约：unit + *type1(target) + *type2(togglemenu)。
+    -- 全部在创建时设好（登录时不在战斗中），之后战斗里不需要再改。
+    pcall(frame.SetAttribute, frame, "unit", unit)
+    pcall(frame.SetAttribute, frame, "*type1", "target")
+    pcall(frame.SetAttribute, frame, "*type2", "togglemenu")
+    pcall(frame.RegisterForClicks, frame, "AnyUp")
 
     local health = Widget:Bar(frame, width - border * 2, healthHeight)
     health:SetPoint("TOPLEFT", frame, "TOPLEFT", border, -border)
@@ -1414,16 +1770,20 @@ function M:RegisterEvents()
 
     EventBus:Register("PLAYER_ENTERING_WORLD", function() M:UpdateAll() end)
     EventBus:Register("GROUP_ROSTER_UPDATE", function() M:UpdateAll() end)
-    EventBus:Register("PLAYER_REGEN_ENABLED", function() M:UpdateAll() end)
+    EventBus:Register("PLAYER_REGEN_ENABLED", function()
+        -- 战斗中换主题时挂起的容器重建（战斗中建容器会被拦）。
+        if M.__auraRebuildPending then RebuildTargetAuras() end
+        M:UpdateAll()
+    end)
     -- Death / resurrection: the bars grey out and come back.
     EventBus:Register("PLAYER_DEAD", function() M:UpdateAll() end)
     EventBus:Register("PLAYER_ALIVE", function() M:UpdateAll() end)
     EventBus:Register("PLAYER_UNGHOST", function() M:UpdateAll() end)
     EventBus:Register("MONETUI_RESTRICTION_CHANGED", function() M:UpdateAll() end)
     EventBus:Register("MONETUI_THEME_CHANGED", function()
-    -- The aura buttons belong to the engine, so M:UpdateAll cannot reach them: their borders are
-    -- re-tinted here, explicitly.
-    TintTargetAuras()
+    -- The aura buttons belong to the engine and are unwritable after creation, so a theme change
+    -- cannot re-tint them: the containers are rebuilt instead (border colour is fixed at creation).
+    RebuildTargetAuras()
     M:UpdateAll()
 end)
 end
@@ -1439,6 +1799,9 @@ function M:Initialize()
         self:SuppressBlizzard(true)
     end
 
+    -- 暴雪的施法条：这一套自己画，暴雪那条藏掉。
+    self:HideBlizzardCastBars(true)
+
     -- The state layer paints the borders; without it the theme slot is used.
     RegisterDynamicBorders()
 
@@ -1451,6 +1814,9 @@ function M:SetEnabled(enabled)
     if not enabled then
         -- B 方案：容器随 target 帧一起隐藏，没有要归还的暴雪子帧
     end
+
+    -- 模块整个关掉：暴雪的施法条还回去（我们自己那条也没了）。
+    self:HideBlizzardCastBars(not enabled)
 
     for _, frame in pairs(frames) do
         local show = enabled and UnitExists(frame.unit)
