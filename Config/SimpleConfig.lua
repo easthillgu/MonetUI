@@ -17,8 +17,9 @@ local refreshStatus
 -- The rows live in a scrollable content frame: the panel itself stays a fixed size on
 -- screen (it is clamped to the screen, so an unbounded height would push the last
 -- sections out of reach), and the content is what moves.
-local content, view, scrollThumb, scrollTrack
+local root, view, scrollThumb, scrollTrack   -- root = 滚动内容根框；各分组（可折叠）挂在它下面
 local scrollOffset = 0
+local setOffset        -- Build 里定义，Show/Toggle 打开面板时归零
 
 local MODULE_ORDER = {
     "UnitFrames", "Cooldown", "BuffFrame",
@@ -53,26 +54,13 @@ local function MakeCheckbox(parent, label, yOffset, getter, setter)
 
     local text = Widget:Font(parent, 12, "pixel", "neutral", "LEFT")
     text:SetPoint("LEFT", cb, "RIGHT", 6, 0)
+    -- 单行 + 限宽：长标签（"剩余时间紧张时变红、放大字体"这种）换行后会压到下一行，
+    -- 实机看到的就是两行字叠在一起。限宽后最多是被切掉一点，不会重叠。
+    text:SetWidth(276)
+    text:SetWordWrap(false)
     text:SetText(label)
 
     return cb, text
-end
-
-local function MakeSeparator(parent, yOffset, caption)
-    local line = parent:CreateTexture(nil, "ARTWORK")
-    line:SetPoint("TOPLEFT", parent, "TOPLEFT", 20, yOffset)
-    line:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -20, yOffset)
-    line:SetHeight(1)
-    local r, g, b = Color:GetNeutral()
-    line:SetColorTexture(r, g, b, 0.35)
-
-    if caption then
-        local title = Widget:Font(parent, 12, "pixel", "edge", "LEFT")
-        title:SetPoint("BOTTOMLEFT", line, "TOPLEFT", 0, 4)
-        title:SetText(caption)
-    end
-
-    return line
 end
 
 -- Blizzard's menu framework (UIDropDownMenu / MenuUtil) is not part of the documented client API and differs between builds, so the panel paints its own small themed list instead of depending on either.
@@ -110,6 +98,9 @@ end
 local function MakeDropdown(parent, y, caption, items, getter, setter)
     local label = Widget:Font(parent, 12, "pixel", "neutral", "LEFT")
     label:SetPoint("TOPLEFT", parent, "TOPLEFT", 24, y - 4)
+    -- 同 1)：描述限宽到控件左侧，超出的部分切掉而不是钻到下拉框下面
+    label:SetWidth(120)
+    label:SetWordWrap(false)
     label:SetText(caption)
 
     local button = Widget:CreateFrame(nil, parent, 190, 20)
@@ -120,6 +111,9 @@ local function MakeDropdown(parent, y, caption, items, getter, setter)
     local value = Widget:Font(button, 12, "pixel", "edge", "LEFT")
     value:SetPoint("LEFT", button, "LEFT", 7, 0)
     value:SetPoint("RIGHT", button, "RIGHT", -16, 0)
+    -- 长选项（"自动（按分辨率固定，像素完美）"）会折成两行、从 20px 高的按钮里溢出来，
+    -- 压到下一行上。关掉换行，超宽就切在按钮右边。
+    value:SetWordWrap(false)
 
     local chevron = Widget:Font(button, 12, "pixel", "neutral", "RIGHT")
     chevron:SetPoint("RIGHT", button, "RIGHT", -5, 0)
@@ -300,10 +294,71 @@ function SimpleConfig:Build()
     view:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -24, 58)
     view:SetClipsChildren(true)
 
-    content = CreateFrame("Frame", nil, view)
-    content:SetPoint("TOPLEFT", view, "TOPLEFT", 0, 0)
-    content:SetPoint("TOPRIGHT", view, "TOPRIGHT", 0, 0)
-    content:SetHeight(100)
+    root = CreateFrame("Frame", nil, view)
+    root:SetPoint("TOPLEFT", view, "TOPLEFT", 0, 0)
+    root:SetPoint("TOPRIGHT", view, "TOPRIGHT", 0, 0)
+    root:SetHeight(100)
+
+    -- ---- 可折叠分组 ------------------------------------------------------------
+    -- 每个分组 = 一个容器（常显的标题带 + 可隐藏的 body）。行代码不用改：
+    -- 它们照旧以 `content`（= 当前分组的 body）左上角为原点、`y` 为行偏移。
+    -- 展开状态变了只做一件事：relayout() 把各组重新摞一遍、面板跟着内容缩放。
+    local SECTIONS = {}
+    local HEADER_H = 24
+    local relayout          -- 定义在滚动逻辑里（要用到 SetOffset）
+    local content, y, sec   -- 每个分组重新赋值，不能声明成分组内的 local
+
+    local function BeginSection(caption, expanded)
+        local holder = CreateFrame("Frame", nil, root)
+        holder:SetPoint("TOPLEFT", root, "TOPLEFT", 0, 0)
+        holder:SetPoint("TOPRIGHT", root, "TOPRIGHT", 0, 0)
+        holder:SetHeight(HEADER_H)
+
+        local header = CreateFrame("Button", nil, holder)
+        header:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, 0)
+        header:SetPoint("TOPRIGHT", holder, "TOPRIGHT", 0, 0)
+        header:SetHeight(HEADER_H)
+        header:EnableMouse(true)
+
+        local line = header:CreateTexture(nil, "ARTWORK")
+        line:SetPoint("TOPLEFT", header, "TOPLEFT", 20, -6)
+        line:SetPoint("TOPRIGHT", header, "TOPRIGHT", -20, -6)
+        line:SetHeight(1)
+        local nr, ng, nb = Color:GetNeutral()
+        line:SetColorTexture(nr, ng, nb, 0.35)
+
+        -- 展开标记画在标题**左边**，标题再往右让 14：这样折叠时那一行仍然是可读的"分组名"。
+        local mark = Widget:Font(header, 12, "pixel", "edge", "LEFT")
+        mark:SetPoint("TOPLEFT", line, "BOTTOMLEFT", 0, -3)
+        mark:SetText(expanded and "-" or "+")
+
+        local title = Widget:Font(header, 12, "pixel", "edge", "LEFT")
+        title:SetPoint("TOPLEFT", line, "BOTTOMLEFT", 14, -3)
+        title:SetText(caption)
+
+        local glow = header:CreateTexture(nil, "HIGHLIGHT")
+        glow:SetAllPoints(header)
+        glow:SetColorTexture(1, 1, 1, 0.05)
+
+        local body = CreateFrame("Frame", nil, holder)
+        body:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, -HEADER_H)
+        body:SetPoint("TOPRIGHT", holder, "TOPRIGHT", 0, -HEADER_H)
+        body:SetHeight(1)
+        body:SetShown(expanded)
+
+        local entry = { holder = holder, body = body, mark = mark, expanded = expanded, bodyHeight = 1 }
+        SECTIONS[#SECTIONS + 1] = entry
+
+        header:SetScript("OnClick", function()
+            entry.expanded = not entry.expanded
+            entry.body:SetShown(entry.expanded)
+            entry.mark:SetText(entry.expanded and "-" or "+")
+            CloseDropdown()
+            if relayout then relayout() end
+        end)
+
+        return entry
+    end
 
     -- Slim scrollbar on the right: a track plus a draggable thumb, both drawn here
     -- (the client's own scrollbar art is not part of the Monet look).
@@ -334,10 +389,10 @@ function SimpleConfig:Build()
         thumbTex:SetColorTexture(er, eg, eb, 0.8)
     end)
 
-    local y = -12
-
-    MakeSeparator(content, y, "主题")
-    y = y - 26
+    -- 主题 / 模块：默认展开（其余收起，一屏就能看完，点标题带展开）
+    sec = BeginSection("主题", true)
+    content = sec.body
+    y = 0
 
     MakeCheckbox(content, "使用 MonetColor 动态主题", y,
         function()
@@ -354,7 +409,7 @@ function SimpleConfig:Build()
 
     local statusText = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
     statusText:SetPoint("TOPLEFT", content, "TOPLEFT", 46, y)
-    statusText:SetWidth(330)
+    statusText:SetWidth(300)
     statusText:SetJustifyH("LEFT")
     y = y - 20
 
@@ -389,7 +444,7 @@ function SimpleConfig:Build()
     -- they land on whole physical pixels.  "auto" pins it per resolution (see
     -- Utils/Media.lua scalePresets); "game" leaves it to the client's own setting.
     local SCALE_ITEMS = {
-        { value = "auto", text = "自动（按分辨率固定，像素完美）" },
+        { value = "auto", text = "自动（按分辨率固定）" },
         { value = "game", text = "跟随游戏设置" },
     }
     MakeDropdown(content, y, "UI 缩放", SCALE_ITEMS,
@@ -403,8 +458,11 @@ function SimpleConfig:Build()
         end)
     y = y - 28
 
-    MakeSeparator(content, y, "模块")
-    y = y - 28
+    sec.bodyHeight = -y + 4
+
+    sec = BeginSection("模块", true)
+    content = sec.body
+    y = 0
 
     local function moduleGetter(name)
         return function() return ns:IsModuleEnabled(name) end
@@ -422,9 +480,11 @@ function SimpleConfig:Build()
         y = y - 28
     end
 
-    y = y - 6
-    MakeSeparator(content, y, "冷却计时")
-    y = y - 28
+    sec.bodyHeight = -y + 4
+
+    sec = BeginSection("冷却计时", false)
+    content = sec.body
+    y = 0
 
     local function CooldownSaved()
         local db = ns:DB()
@@ -508,11 +568,13 @@ function SimpleConfig:Build()
         end)
     y = y - 30
 
-    y = y - 6
+    sec.bodyHeight = -y + 4
+
     local minimap = ns:GetModule("Minimap")
     if minimap then
-        MakeSeparator(content, y, "小地图")
-        y = y - 28
+        sec = BeginSection("小地图", false)
+        content = sec.body
+        y = 0
 
         local function MapSetting(key)
             return function() return minimap:GetSettings()[key] end
@@ -562,18 +624,19 @@ function SimpleConfig:Build()
 
         local mapHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
         mapHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
-        mapHint:SetWidth(352)
+        mapHint:SetWidth(328)
         mapHint:SetJustifyH("LEFT")
         mapHint:SetText("追踪 / 插件收纳开着时，暴雪原来那一个被搬进地图，不再单独隐藏。")
-        y = y - 30
+        -- 上面这句在 328 宽里折成两行，行距要给到 38 才不压下一行。
+        y = y - 38
 
         -- 手势速查（写在面板里，免得翻文档）
         local gestureHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
         gestureHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
-        gestureHint:SetWidth(352)
+        gestureHint:SetWidth(328)
         gestureHint:SetJustifyH("LEFT")
         gestureHint:SetText("左键打标记（四个角也算）· 中键开追踪菜单 · 右键微型菜单 · 滚轮缩放")
-        y = y - 30
+        y = y - 38
 
         -- 底边高度是统一的（Utils/Layout.lua 的基线，和第一动作条同一条线），
         -- 这个下拉只管**右边缘**离屏幕右边多远。
@@ -602,11 +665,12 @@ function SimpleConfig:Build()
         end
 
         y = y - 4
+        sec.bodyHeight = -y + 4
     end
 
-    y = y - 6
-    MakeSeparator(content, y, "单位框架")
-    y = y - 28
+    sec = BeginSection("单位框架", false)
+    content = sec.body
+    y = 0
 
     MakeCheckbox(content, "隐藏暴雪默认的玩家/目标框架（需重载恢复）", y,
         function() return ns:DB().unitFrames.hideBlizzard end,
@@ -717,8 +781,11 @@ function SimpleConfig:Build()
         end)
     y = y - 30
 
-    MakeSeparator(content, y, "小队 / 团队框架")
-    y = y - 28
+    sec.bodyHeight = -y + 4
+
+    sec = BeginSection("小队 / 团队框架", false)
+    content = sec.body
+    y = 0
 
     local function GroupGetter(section, key, fallback)
         return function()
@@ -784,8 +851,11 @@ function SimpleConfig:Build()
         end)
     y = y - 30
 
-    MakeSeparator(content, y, "动作条")
-    y = y - 28
+    sec.bodyHeight = -y + 4
+
+    sec = BeginSection("动作条", false)
+    content = sec.body
+    y = 0
 
     MakeCheckbox(content, "自绘动作条（LibActionButton）", y,
         function() return ns:DB().actionBars.ownBars end,
@@ -874,8 +944,11 @@ function SimpleConfig:Build()
         end)
     y = y - 30
 
-    MakeSeparator(content, y, "姓名板")
-    y = y - 28
+    sec.bodyHeight = -y + 4
+
+    sec = BeginSection("姓名板", false)
+    content = sec.body
+    y = 0
 
     -- Which units get a plate at all (CVars; see Modules/Nameplates).
     MakeCheckbox(content, "显示敌方姓名板", y, NameplateCheckbox("showEnemy"))
@@ -954,10 +1027,13 @@ function SimpleConfig:Build()
         function() return NameplateSetting("viewDistance") end, NameplateSetter("viewDistance"))
     y = y - 30
 
+    sec.bodyHeight = -y + 4
+
     local skins = ns:GetModule("Skins")
     if skins then
-        MakeSeparator(content, y, "界面美化")
-        y = y - 26
+        sec = BeginSection("界面美化", false)
+        content = sec.body
+        y = 0
 
         local FONT_ITEMS = {
             { value = "off",   text = "关闭（原生字体）" },
@@ -977,10 +1053,10 @@ function SimpleConfig:Build()
 
         local fontHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
         fontHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
-        fontHint:SetWidth(350)
+        fontHint:SetWidth(328)
         fontHint:SetJustifyH("LEFT")
         fontHint:SetText("统一字体影响所有暴雪窗口文字；关闭需重载界面恢复。")
-        y = y - 26
+        y = y - 34
 
         -- Group the windows by section, in registration order.
         local groups, seen = {}, {}
@@ -1008,12 +1084,14 @@ function SimpleConfig:Build()
         end
 
         y = y - 4
+        sec.bodyHeight = -y + 4
     end
 
     local tooltip = ns:GetModule("Tooltip")
     if tooltip then
-        MakeSeparator(content, y, "鼠标提示")
-        y = y - 26
+        sec = BeginSection("鼠标提示", false)
+        content = sec.body
+        y = 0
 
         -- 位置是全局行为：一个开关管所有 GameTooltip（物品 / 技能 / 角色 / 光环 / 动作条……），
         -- 和信息栏自己的悬停提示也共用。
@@ -1027,16 +1105,18 @@ function SimpleConfig:Build()
 
         local tipHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
         tipHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
-        tipHint:SetWidth(350)
+        tipHint:SetWidth(328)
         tipHint:SetJustifyH("LEFT")
         tipHint:SetText("关＝停在暴雪默认位置（右下角锚点，编辑模式可移动）。边框与底色在上方「界面美化 → 系统 → 鼠标提示边框」。")
         y = y - 44
+        sec.bodyHeight = -y + 4
     end
 
     local infobar = ns:GetModule("InfoBar")
     if infobar then
-        MakeSeparator(content, y, "信息栏")
-        y = y - 26
+        sec = BeginSection("信息栏", false)
+        content = sec.body
+        y = 0
 
         -- Rebuild nothing on a settings change: the strip is re-anchored and the blocks re-measured in place.
         local function ApplyBar()
@@ -1114,20 +1194,19 @@ function SimpleConfig:Build()
         end
 
         y = y - 4
+        sec.bodyHeight = -y + 4
     end
 
-    -- The panel keeps a fixed size on screen and the rows scroll inside it: the whole
-    -- list is far taller than any screen, and an unbounded panel would push the last
-    -- sections (Skins, InfoBar, Minimap) out of reach.  The hint and the reload button
-    -- live in the strip below the scrolled area.
-    local contentHeight = math.abs(y) + 20
-    content:SetHeight(contentHeight)
-    local screenH = (_G.GetScreenHeight and _G.GetScreenHeight()) or 800
-    Widget:Height(panel, math.min(contentHeight + 108, screenH - 40))
+    -- 面板最高只到屏幕 - 40，正文在里面滚；提示行和「重载界面」按钮固定在最下面那条带子里。
+    -- 内容高度不再写死：分组折叠后由 relayout() 现算。
 
     -- Scroll: the wheel moves the content, the thumb shows where we are and can be dragged.
+    local function ContentHeight()
+        return root:GetHeight() or 0
+    end
+
     local function MaxOffset()
-        return math.min(0, (view:GetHeight() or 0) - contentHeight)
+        return math.min(0, (view:GetHeight() or 0) - ContentHeight())
     end
 
     local function UpdateThumb()
@@ -1138,22 +1217,50 @@ function SimpleConfig:Build()
             return
         end
         scrollThumb:Show()
-        local thumbH = math.max(24, viewH * (viewH / contentHeight))
+        local contentH = ContentHeight()
+        local thumbH = math.max(24, viewH * (viewH / (contentH > 0 and contentH or viewH)))
         scrollThumb:SetHeight(thumbH)
-        local t = (scrollOffset - maxOffset) / (-maxOffset)
+        -- 0 = 列表顶（滑块在轨道顶端），1 = 列表底。原来是 (offset - max) / -max：
+        -- offset 为 0 时算出 1，滑块一打开就贴在轨道最下面（实机就是这个现象）。
+        local t = (maxOffset ~= 0) and (scrollOffset / maxOffset) or 0
         scrollThumb:ClearAllPoints()
         scrollThumb:SetPoint("TOPLEFT", scrollTrack, "TOPLEFT", 0, -t * (viewH - thumbH))
     end
 
     local function SetOffset(value)
         scrollOffset = math.max(MaxOffset(), math.min(0, value))
-        content:SetPoint("TOPLEFT", view, "TOPLEFT", 0, scrollOffset)
+        -- 两个角一起挪：只改 TOPLEFT 时，创建时钉在 view 顶边的 TOPRIGHT 会跟它打架，
+        -- 内容会被拉变（宽高固定时表现为位置忽上忽下）。
+        root:ClearAllPoints()
+        root:SetPoint("TOPLEFT", view, "TOPLEFT", 0, scrollOffset)
+        root:SetPoint("TOPRIGHT", view, "TOPRIGHT", 0, scrollOffset)
         UpdateThumb()
+    end
+    setOffset = SetOffset
+
+    -- 展开 / 收起：重新摞一遍分组，内容高度、面板高度、滚动范围一起更新。
+    relayout = function()
+        local acc = 0
+        for i = 1, #SECTIONS do
+            local entry = SECTIONS[i]
+            entry.holder:ClearAllPoints()
+            entry.holder:SetPoint("TOPLEFT", root, "TOPLEFT", 0, -acc)
+            entry.holder:SetPoint("TOPRIGHT", root, "TOPRIGHT", 0, -acc)
+            local height = HEADER_H + (entry.expanded and entry.bodyHeight or 0)
+            entry.holder:SetHeight(height)
+            acc = acc + height
+        end
+        root:SetHeight(acc + 10)
+        local screenH = (_G.GetScreenHeight and _G.GetScreenHeight()) or 800
+        Widget:Height(panel, math.min((root:GetHeight() or 0) + 108, screenH - 40))
+        SetOffset(scrollOffset)
     end
 
     -- One handler for the whole panel: the wheel event bubbles up from the row widgets,
     -- and no intermediate frame handles it, so the content moves exactly one step.
     panel:SetScript("OnMouseWheel", function(_, delta)
+        -- 本客户端的滚轮符号是反的（实测：往下滚 delta = +1）。既然往下滚要看后面的内容，
+        -- 偏移就得往负走，所以这里是减号。之前我照零售服的直觉改成加号，方向就反了。
         SetOffset(scrollOffset - delta * 48)
     end)
 
@@ -1181,7 +1288,7 @@ function SimpleConfig:Build()
         scrollThumb:SetScript("OnUpdate", nil)
     end)
 
-    SetOffset(0)
+    relayout()
 
     local hint = Widget:Font(panel, 12, "pixel", "neutral", "LEFT")
     hint:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 24, 52)
@@ -1213,12 +1320,15 @@ function SimpleConfig:Toggle()
             end
         end
         RefreshDropdowns()
+        if setOffset then setOffset(0) end
         frame:Show()
     end
 end
 
 function SimpleConfig:Show()
-    self:Build():Show()
+    self:Build()
+    if setOffset then setOffset(0) end
+    panel:Show()
 end
 
 function SimpleConfig:Hide()
