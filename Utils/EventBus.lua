@@ -89,8 +89,18 @@ function EventBus:Register(event, callback)
         if not string.find(event, "^MONETUI_") then
             -- The frame must exist *before* pcall evaluates its arguments: writing pcall(frame.RegisterEvent, EnsureFrame(), event) indexes the still-nil `frame` outside the pcall. An unknown or restricted event must never abort module setup.
             local f = EnsureFrame()
-            local ok, err = pcall(f.RegisterEvent, f, event)
-            if not ok then Report(event, err) end
+            -- 零售服删掉/改名了的事件（例如 WORLD_MAP_UPDATE）不必在登录时往聊天框里报一行：
+            -- 先问客户端认不认；没有这个 API 的客户端退回原来的 pcall 兜底。
+            local known = true
+            local valid = _G.C_EventUtils and _G.C_EventUtils.IsEventValid
+            if type(valid) == "function" then
+                local okValid, isValid = pcall(valid, event)
+                if okValid then known = isValid and true or false end
+            end
+            if known then
+                local ok, err = pcall(f.RegisterEvent, f, event)
+                if not ok then Report(event, err) end
+            end
         end
     end
     return callback
