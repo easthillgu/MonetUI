@@ -28,8 +28,28 @@ local difficultyFrame  -- 难度指示（完全是我们自己的框）
 -- 暴雪按钮被搬进来之前的父级与锚点（还原时放回去）
 local savedParents = setmetatable({}, { __mode = "k" })
 
--- 暴雪按钮上会被我们压掉 alpha 的贴图（还原时按原值放回去）
-local ART_KEYS = { "StateTexture", "AddTexture", "Text" }
+-- 暴雪按钮上会被我们压掉 alpha 的贴图（还原时按原值放回去）。
+-- NormalTexture / PushedTexture / HighlightTexture 是暴雪自己的按钮美术：追踪按钮的
+-- NormalTexture 就是暴雪的"追踪"图标，我们的自绘徽章画上去以后两者会**同时**出现，
+-- 所以要一并压掉（还原时按原值放回去）。
+local ART_KEYS = { "StateTexture", "AddTexture", "Text",
+                   "NormalTexture", "PushedTexture", "HighlightTexture" }
+
+--- 按钮上的一张贴图：先看字段（NormalTexture / PushedTexture / HighlightTexture …），
+--- 字段没有就用取器（GetNormalTexture …）。
+--- 暴雪的追踪 / 收纳按钮就是后者 —— 它们的贴图是 XML 里没有 parentKey 的
+--- <NormalTexture atlas="…">，字段拿不到，只有取器拿得到。
+local function ArtRegion(frame, key)
+    if not frame then return nil end
+    local okField, region = pcall(function() return frame[key] end)
+    if okField and region then return region end
+    local getter = frame["Get" .. key]
+    if type(getter) == "function" then
+        local ok, value = pcall(getter, frame)
+        if ok then return value end
+    end
+    return nil
+end
 
 -- ------------------------------------------------------------------ 小工具
 
@@ -61,7 +81,7 @@ local function SaveParent(frame, layout)
     end
     local art = {}
     for _, key in ipairs(ART_KEYS) do
-        local region = frame[key]
+        local region = ArtRegion(frame, key)
         if region and region.GetAlpha then
             local ok, alpha = pcall(region.GetAlpha, region)
             if ok then art[#art + 1] = { region = region, alpha = alpha } end
@@ -83,10 +103,13 @@ local reasserting = false
 
 --- 把按钮摆到容器里的某个位置。
 --- layout = { 点, 相对点, x, y }（相对 container）。
+--- 注意相对**帧**永远是 container，只有相对**点**在 layout 里 ——
+--- 早先把 layout[2] 当成 relativeTo 传给了 SetPoint（那是个字符串），
+--- SetPoint 直接失败，按钮一个锚点都没有，等于飘在父框的原点、永远看不见。
 local function PlaceButton(frame, layout)
     reasserting = true
     pcall(frame.ClearAllPoints, frame)
-    pcall(frame.SetPoint, frame, layout[1], layout[2], layout[3], layout[4], layout[5])
+    pcall(frame.SetPoint, frame, layout[1], container, layout[2], layout[3], layout[4])
     pcall(frame.SetParent, frame, container)
     pcall(frame.SetSize, frame, B.WIDTH, B.HEIGHT)
     reasserting = false
@@ -121,11 +144,15 @@ end
 
 --- 把暴雪按钮的某张贴图压掉（只压 alpha，不隐藏 —— 隐藏父帧会停掉它的状态更新）。
 local function HideArt(frame, key)
-    local region = frame and frame[key]
+    local region = ArtRegion(frame, key)
     if region and region.SetAlpha then pcall(region.SetAlpha, region, 0) end
 end
 
 --- 徽章染色：贴图是中性灰底 + 白色描边的"模具"，颜色全靠顶点色乘上去。
+-- BadgeColor 定义在本文件靠后的位置，TintIcon / SetHover 却在它前面调用它：不先声明成 upvalue
+-- 的话这两个函数看到的是全局 `BadgeColor`（nil），零售服一旦真的走到小地图按钮那条路就报
+-- "attempt to call a nil value"（Forever 上那条路走不到，所以一直没暴露）。
+local BadgeColor
 local function TintIcon(icon, key)
     if not icon then return end
     local r, g, b = BadgeColor(key)
@@ -169,7 +196,7 @@ local function SetHover(tex, hovered)
 end
 
 --- 徽章染色：追踪 / 收纳用主题边框色，难度徽章用副本难度色。
-local function BadgeColor(key)
+function BadgeColor(key)
     if key == "border" then
         local r, g, b = ns.Color:GetBorder()
         return r, g, b
@@ -200,8 +227,21 @@ local function SetupTracking()
     PlaceButton(btn, layout)
     HookReassert(btn)
 
+    -- 按钮搬走之后，暴雪那个容器框（零售 12.x 会在集群角上留一个旋涡按钮）就空了：把它收起来，
+    -- 免得地图上方挂着一个点不动的旧按钮。老客户端上这个框默认就是隐藏的，收起来没有影响。
+    local oldParent = savedParents[btn] and savedParents[btn].parent
+    if oldParent and oldParent ~= container and oldParent ~= UIParent then
+        pcall(oldParent.Hide, oldParent)
+        pcall(oldParent.SetAlpha, oldParent, 0)
+    end
+
     HideArt(btn, "StateTexture")
     HideArt(btn, "AddTexture")
+    -- 暴雪自己的按钮美术（外框 / 按下 / 高亮）收掉：自绘徽章画上去以后，
+    -- 暴雪的"追踪"图标会和我们自己的徽章**同时**出现，两个图标叠在一起。
+    HideArt(btn, "NormalTexture")
+    HideArt(btn, "PushedTexture")
+    HideArt(btn, "HighlightTexture")
 
     if not btn.monetBadge then
         btn.monetBadge = AddBadge(btn, "monet_map_tracking", "border")
@@ -225,6 +265,10 @@ local function SetupCompartment()
     HideArt(btn, "StateTexture")
     HideArt(btn, "AddTexture")
     HideArt(btn, "Text")     -- 插件数量那一行（列表在菜单里，不必再占地方）
+    -- 同追踪按钮：暴雪的"收纳"图标要收掉，否则和我们自己的徽章同时出现。
+    HideArt(btn, "NormalTexture")
+    HideArt(btn, "PushedTexture")
+    HideArt(btn, "HighlightTexture")
 
     if not btn.monetBadge then
         btn.monetBadge = AddBadge(btn, "monet_map_compartment", "border")

@@ -17,51 +17,67 @@ local frame      -- 菜单面板
 local catcher    -- 点别处关闭
 local rows       -- 已建的行
 
---- 入口定义：label 是显示文字，find 返回可调用的函数（没有就返回 nil，这一行不画）。
+--- 入口定义：label 是显示文字，buttons 是暴雪微型按钮的候选名字（两个客户端的名字不一样，
+--- 谁在用谁），action 是按钮不在时的备用开关函数。
+--
+-- 动作优先直接调按钮自己的 OnClick —— 和玩家点那一排按钮完全一样，客户端改名也不会失效
+-- （零售 12.x 把 ToggleCharacterSheet 之类删干净了，角色面板只能这么开）。
 local ENTRIES = {
-    { label = "角色", find = function()
-        if type(_G.ToggleCharacterSheet) == "function" then return _G.ToggleCharacterSheet end
-        if type(_G.CharacterFrame_ToggleCharacterFrame) == "function" then return _G.CharacterFrame_ToggleCharacterFrame end
-    end },
-    { label = "法术", find = function()
+    { label = "角色", buttons = { "CharacterMicroButton" } },
+    { label = "法术", buttons = { "PlayerSpellsMicroButton", "SpellbookMicroButton" },
+      action = function()
         local util = _G.PlayerSpellsUtil
         if util and type(util.ToggleSpellBookFrame) == "function" then
-            return function() util.ToggleSpellBookFrame() end
+            return util.ToggleSpellBookFrame()
         end
-        if type(_G.ToggleSpellBook) == "function" then return _G.ToggleSpellBook end
-    end },
-    { label = "背包", find = function()
-        if type(_G.ToggleAllBags) == "function" then return _G.ToggleAllBags end
-    end },
-    { label = "任务", find = function()
-        if type(_G.ToggleQuestLog) == "function" then return _G.ToggleQuestLog end
-    end },
-    { label = "成就", find = function()
-        if type(_G.ToggleAchievementFrame) == "function" then return _G.ToggleAchievementFrame end
-    end },
-    { label = "好友", find = function()
-        if type(_G.ToggleFriendsFrame) == "function" then return _G.ToggleFriendsFrame end
-    end },
-    { label = "地图", find = function()
-        if type(_G.ToggleWorldMap) == "function" then return _G.ToggleWorldMap end
-    end },
-    { label = "日历", find = function()
-        if type(_G.ToggleCalendar) == "function" then return _G.ToggleCalendar end
-    end },
-    { label = "收藏", find = function()
-        if type(_G.ToggleCollectionsJournal) == "function" then return _G.ToggleCollectionsJournal end
-    end },
-    { label = "副本", find = function()
-        if type(_G.ToggleEncounterJournal) == "function" then return _G.ToggleEncounterJournal end
-    end },
-    { label = "设置", find = function()
+        if type(_G.ToggleSpellBook) == "function" then return _G.ToggleSpellBook() end
+      end },
+    { label = "背包", buttons = { "BagMicroButton" },
+      action = function() if type(_G.ToggleAllBags) == "function" then _G.ToggleAllBags() end end },
+    { label = "任务", buttons = { "QuestLogMicroButton" },
+      action = function() if type(_G.ToggleQuestLog) == "function" then _G.ToggleQuestLog() end end },
+    { label = "成就", buttons = { "AchievementMicroButton" },
+      action = function() if type(_G.ToggleAchievementFrame) == "function" then _G.ToggleAchievementFrame() end end },
+    { label = "好友", buttons = { "GuildMicroButton", "GJMicroButton", "SocialsMicroButton" },
+      action = function() if type(_G.ToggleFriendsFrame) == "function" then _G.ToggleFriendsFrame() end end },
+    { label = "地图", buttons = { "MapMicroButton" },
+      action = function() if type(_G.ToggleWorldMap) == "function" then _G.ToggleWorldMap() end end },
+    { label = "日历", buttons = { "CalendarMicroButton" },
+      action = function() if type(_G.ToggleCalendar) == "function" then _G.ToggleCalendar() end end },
+    { label = "收藏", buttons = { "CollectionsMicroButton" },
+      action = function() if type(_G.ToggleCollectionsJournal) == "function" then _G.ToggleCollectionsJournal() end end },
+    { label = "副本", buttons = { "EJMicroButton" },
+      action = function() if type(_G.ToggleEncounterJournal) == "function" then _G.ToggleEncounterJournal() end end },
+    { label = "职业", buttons = { "ProfessionMicroButton" } },
+    { label = "寻找组", buttons = { "LFDMicroButton" } },
+    { label = "住房", buttons = { "HousingMicroButton" } },
+    { label = "商店", buttons = { "StoreMicroButton" } },
+    { label = "帮助", buttons = { "HelpMicroButton" } },
+    { label = "设置", buttons = { "MainMenuMicroButton" },
+      action = function()
         local settings = _G.Settings
         if settings and type(settings.OpenToCategory) == "function" and settings.INTERFACE_CATEGORY_ID then
-            return function() settings.OpenToCategory(settings.INTERFACE_CATEGORY_ID) end
+            return settings.OpenToCategory(settings.INTERFACE_CATEGORY_ID)
         end
-        if type(_G.ToggleGameMenu) == "function" then return _G.ToggleGameMenu end
-    end },
+        if type(_G.ToggleGameMenu) == "function" then return _G.ToggleGameMenu() end
+      end },
 }
+
+--- 这一行的动作：优先用微型按钮自己的 OnClick（和点那一排按钮一模一样），
+--- 按钮不在（零售 12.x 把背包/地图/日历那几个撤了）就用备用的开关函数。
+local function ActionFor(entry)
+    for _, name in ipairs(entry.buttons or {}) do
+        local button = _G[name]
+        if button and type(button.GetScript) == "function" then
+            local ok, fn = pcall(button.GetScript, button, "OnClick")
+            if ok and type(fn) == "function" then
+                return function() pcall(fn, button) end
+            end
+        end
+    end
+    if type(entry.action) == "function" then return entry.action end
+    return nil
+end
 
 --- 菜单贴着地图左上角展开（向左下），比"跟着鼠标跑"稳：地图本来就在屏幕右下角，
 --- 菜单往左展开一定完整可见，不用去猜鼠标的屏幕坐标换算。
@@ -79,7 +95,7 @@ local function Build()
     rows = {}
     local y = -4
     for _, entry in ipairs(ENTRIES) do
-        local action = entry.find and entry.find()
+        local action = ActionFor(entry)
         if action then
             local row = CreateFrame("Button", nil, frame)
             row:SetPoint("TOPLEFT", frame, "TOPLEFT", 3, y)
@@ -148,7 +164,7 @@ function M:Toggle(anchor)
     end
     -- 已经有别的菜单开着就别抢（见 AnyMenuOpen 的说明）
     if AnyMenuOpen() then return end
-    self:Build()
+    Build()
     if not frame then return end
 
     frame:ClearAllPoints()

@@ -1,9 +1,11 @@
 -- Modules/Minimap/Minimap.lua
--- 方形小地图：右下角 256×190 的矩形地图 + Monet 面板 + 顶部区域名条，
--- 并接管暴雪的集群按钮（时钟 / 邮件 / 追踪 / 缩放 / 难度 / 制造订单 / 着陆页 /
--- 插件收纳 / 罗盘底板），默认逐项隐藏，可在配置面板单独开关。
+-- 方形小地图：右下角 256×190 的矩形可见区（正方画布 256×256 + 遮罩裁掉上下两条带）
+-- + Monet 面板 + 顶部区域名条，并接管暴雪的集群按钮（时钟 / 邮件 / 追踪 / 缩放 / 难度 /
+-- 制造订单 / 着陆页 / 插件收纳 / 罗盘底板），默认逐项隐藏，可在配置面板单独开关。
 --
 -- 皮肤动过的一切都在首次套用时快照，关闭模块即完整还原。
+--
+-- 第三方小地图 pin（HBD）落进被裁的带子里的处理，在 Modules/Minimap/Pins.lua。
 --
 -- 本客户端（Interface 16001，camelot）的暴雪 UI 与零售版不同，帧名以客户端源码为准：
 --   Interface/AddOns/Blizzard_Minimap/Mainline/Minimap.xml —— 集群结构（ZoneTextButton /
@@ -22,15 +24,28 @@ local M = { name = "Minimap" }
 
 -- ------------------------------------------------------------------ 几何
 
--- 可见的地图：256×190（两种形状方案一样）。
+-- 可见的地图：256×190。画布保持正方 256×256，用遮罩裁掉上下两条带 —— 地图画面**不重绘**，
+-- 所以不会被拉伸（非正方形 SetSize 在 WoW 里是把正方渲染拉伸，见 TODO 里 2026-10-21 那条）。
+--
+-- 上下两条带**等宽**（各 33）：可见带 = 画布 33..223，地图圆心就是画布圆心，圆角上下对称。
+-- 唯一的硬约束是"画布不能有任何像素探到屏幕外"：客户端给"被屏幕切过"的帧算遮罩时，会把整张
+-- 遮罩按**可见高度**重算（实测：画布底 −7 时 33/33 的遮罩落成 32.1/27.1，可见底边跑到 34，
+-- 比面板内底高 8，露出一条 7 单位宽的面板底色 —— 就是"小地图底部与边框之间的灰条"）。
+-- 画布整个在屏幕里时遮罩才是严格 1:1（texel = UI 单位），几何才可预测。
+-- 所以画布底贴屏幕底(0)，底部基线（Utils/Layout.lua 的 bottom）就得抬到
+-- MASK_CROP − PANEL_PAD = 31，小地图/动作条/聊天框一起跟着抬。
 local MINIMAP_GAP    = 33        -- 集群贴到屏幕右下角的间距
 local MAP_WIDTH      = 256      -- 可见的地图宽度
 local MAP_HEIGHT     = 190      -- 可见的地图高度
-local MASK_CANVAS    = 256      -- 遮罩方案的画布：正方，上下各裁 33
-local MASK_CROP      = 33
-local HEADER_HEIGHT  = 16        -- 区域名条的高度（画在地图内部，不是面板标题条）
-local PANEL_WIDTH    = MAP_WIDTH + 8
-local PANEL_HEIGHT   = MAP_HEIGHT + 8
+local MASK_CANVAS    = 256      -- 画布：正方
+local MASK_CROP      = (MASK_CANVAS - MAP_HEIGHT) / 2   -- 33：上下各一条等宽透明带
+
+-- 面板（边框 + 底色）围着**可见带**画，不再围着 256×256 的画布。
+-- 边框固定 1 个物理像素（Media:Mult 把像素换算成 UI 单位），再留 1 个单位的缝，
+-- 于是面板比可见带每边大 (边框 + 缝)。原来面板大 8（每边 4）、边框 2，
+-- 中间空出 2 个单位，看起来就是"边框和地图脱节"。
+local BORDER_PX      = 1
+local PANEL_PAD      = 2        -- 面板每边比可见带多出的 UI 单位（边框 1px + 缝 1 单位）
 
 -- 暴雪用图集遮罩画圆形地图（客户端自己的 MinimapClusterMixin:UpdateMinimapConfig 会
 -- 把它设回 ui-hud-minimap-frame-generic-mask）。帧体没有「读遮罩」的接口，所以还原
@@ -97,19 +112,32 @@ end
 -- 再"藏起来"就把刚搬进去的按钮藏没了）。
 local BUTTONS = {
     { key = "hideZoneText",    label = "区域文字", paths = { "MinimapCluster.ZoneTextButton" } },
+    { key = "hideCoords",      label = "坐标",     paths = { "MinimapCluster.MinimapContainer.PlayerCoords" } },
     { key = "hideClock",       label = "时钟",     paths = { "TimeManagerClockButton", "GameTimeFrame" } },
     { key = "hideMail",        label = "邮件",     paths = { "MinimapCluster.IndicatorFrame.MailFrame", "MiniMapMailFrame" } },
     { key = "hideTracking",    label = "追踪",     paths = { "MinimapCluster.Tracking.Button", "MiniMapTrackingButton" }, skipKey = "mapTracking" },
     { key = "hideZoom",        label = "缩放按钮", paths = { "MinimapCluster.MinimapContainer.Minimap.ZoomIn",
                                                             "MinimapCluster.MinimapContainer.Minimap.ZoomOut" } },
-    { key = "hideDifficulty",  label = "难度",     paths = { "MiniMapInstanceDifficulty", "GuildInstanceDifficulty" } },
+    { key = "hideDifficulty",  label = "难度",     paths = { "MiniMapInstanceDifficulty", "GuildInstanceDifficulty",
+                                                            "MinimapCluster.InstanceDifficulty" } },
     { key = "hideCrafting",    label = "制造订单", paths = { "MinimapCluster.IndicatorFrame.CraftingOrderFrame", "MiniMapCraftingOrderFrame" } },
     { key = "hideLanding",     label = "着陆页",   paths = { "ExpansionLandingPageMinimapButton" } },
     { key = "hideCompartment", label = "插件收纳", paths = { "AddonCompartmentFrame" }, skipKey = "mapCompartment" },
     { key = "hidePromo",       label = "活动链接", paths = { "MinimapBackdrop.ExternalEventURLButton" } },
     { key = "hideCompass",     label = "罗盘底板", paths = { "MinimapCompassTexture", "MinimapCompassTextureUnderlay",
                                                             "MinimapBackdrop.StaticOverlayTexture" }, art = true },
+    -- 旧小地图的顶边：零售 12.x 把它拆成了 MinimapCluster.BorderTop（老名字 MinimapBorderTop
+    -- 在这个客户端上不存在），一条横条留在地图上方，只能按新名字收掉。
+    { key = "hideBorderTop",   label = "地图顶边", paths = { "MinimapCluster.BorderTop", "MinimapBorderTop" } },
+    -- 微型菜单那一排：零售 12.x 的按钮改名了（PlayerSpellsMicroButton 之类），整排只剩空格子，
+    -- 右键小地图弹出的菜单已经接管了这些入口，所以零售上把整排收起来；老客户端（和 Forever）
+    -- 保留那排经典按钮，只压美术（见 Modules/Skins/Forever.lua）。
+    { key = "hideMicroMenu",   label = "微型菜单", paths = { "MicroMenu" }, retailOnly = true },
 }
+
+-- 零售 12.x 的微型按钮改过名（PlayerSpellsMicroButton 而不是 SpellbookMicroButton）；
+-- 老客户端（和 Forever）上认这两个老名字。
+local RETAIL_MICRO = (_G.PlayerSpellsMicroButton ~= nil) and (_G.SpellbookMicroButton == nil)
 
 --- 走点号路径取对象（MinimapCluster.ZoneTextButton 这类 parentKey 路径）。
 --- 帧是 userdata，取子字段不会报错，但仍逐段 pcall，免得碰到没有 __index 的对象。
@@ -200,8 +228,11 @@ end
 local function ApplyButtons()
     local settings = Settings()
     for _, entry in ipairs(BUTTONS) do
+        -- 只在零售上生效的条目（比如微型菜单那一排），老客户端上跳过。
+        if entry.retailOnly and not RETAIL_MICRO then
+            -- 跳过
         -- 追踪 / 收纳按钮被搬进地图后，"藏起来"就归搬进去的那一路管
-        if entry.skipKey and settings[entry.skipKey] then
+        elseif entry.skipKey and settings[entry.skipKey] then
             -- 交给 mapTracking / mapCompartment 处理
         else
             local wanted = settings[entry.key] and true or false
@@ -221,31 +252,78 @@ end
 
 -- ------------------------------------------------------------------ 地图本体
 
---- 把集群挪到右下角。编辑模式也会给这个帧设锚点，所以 SetPoint 要防一手；
---- 每次套用都重做一遍。
+--- 把集群挪到右下角。编辑模式也会给这个帧设锚点，所以 SetPoint 要防一手；每次套用都重做一遍。
+---
+--- 对齐的是**眼睛看到的底边**，不是集群的底边：可见底边 = Minimap 帧底 + 遮罩下裁(MASK_CROP)，
+--- 面板再向下凸出 PANEL_PAD。而 Minimap 帧本身又不贴 MinimapCluster 的底（暴雪集群内部有偏移），
+--- 所以先用目标值锚一次、再按实测差值补一下 —— 否则"常量写 26、看着却是 47.5"那种失真会一直在。
+local clusterAnchor = { x = 0, y = 0 }   -- 集群当前的锚点（补差后的绝对值，单位 UI）
+local clusterTarget = { gap = MINIMAP_GAP, bottom = MINIMAP_GAP }
+
+--- 按实测的可见面板边补差；平移是线性的，量一次就差多少补多少。
+--- 返回是否还需要再看一眼（差值还没收敛）。
+local function AlignCluster()
+    local cluster = _G.MinimapCluster
+    local minimap = _G.Minimap
+    if not cluster or not minimap or type(minimap.GetRect) ~= "function" then return false end
+
+    local okRect, left, bottom, width = pcall(minimap.GetRect, minimap)
+    if not okRect or type(left) ~= "number" or type(bottom) ~= "number"
+        or type(width) ~= "number" then
+        return false
+    end
+    if Secrets.IsSecret(left) or Secrets.IsSecret(bottom) then return false end
+
+    local okParent, parentWidth = pcall(UIParent.GetWidth, UIParent)
+    if not okParent or type(parentWidth) ~= "number" or Secrets.IsSecret(parentWidth) then return false end
+
+    local gap, target = clusterTarget.gap, clusterTarget.bottom
+    local panelBottom = bottom + MASK_CROP - PANEL_PAD
+    local panelRight  = left + width + PANEL_PAD
+
+    local dx = (parentWidth - gap) - panelRight
+    local dy = target - panelBottom
+    if math.abs(dx) < 0.5 and math.abs(dy) < 0.5 then return false end
+
+    clusterAnchor.x = clusterAnchor.x + dx
+    clusterAnchor.y = clusterAnchor.y + dy
+    pcall(cluster.SetPoint, cluster, "BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", clusterAnchor.x, clusterAnchor.y)
+    return true
+end
+
 local function MoveCluster()
     local cluster = _G.MinimapCluster
     if not cluster then return end
 
     local gap = tonumber(Settings().gap) or MINIMAP_GAP
-    pcall(cluster.ClearAllPoints, cluster)
-    local ok = pcall(cluster.SetPoint, cluster, "BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -gap, gap)
-    if not ok and not warned.cluster then
-        warned.cluster = true
-        ns:Print("小地图定位失败，已保留暴雪默认位置。")
-    end
-end
+    local target = (ns.Layout and ns.Layout.bottom) or MINIMAP_GAP
+    clusterTarget.gap, clusterTarget.bottom = gap, target
+    clusterAnchor.x, clusterAnchor.y = -gap, target
 
---- 形状方案：
----   "resize" —— 画布直接设成 256×190，引擎按新视口重绘：没有被裁掉的带子，引擎
----                那层追踪点（blip）也就不会漏到地图外面。客户端自己的圆形遮罩要去
----                掉：正方遮罩套到矩形画布上会被拉成椭圆，把地图四角切掉，所以换成
----                一块什么都不裁的全白遮罩。
----   "mask"   —— 老方案：画布保持正方 256×256，用自己的遮罩裁掉上下两条。留作回退：
----                万一这个客户端重绘出来的地图变形了，就切回这一档。
-local function ShapeMode()
-    if Settings().shape == "mask" then return "mask" end
-    return "resize"
+    -- 暴雪给集群开了"夹在屏幕内"，锚到 -7 会被悄悄夹回 0（面板就停在 31）。
+    -- 集群下面的 7 个单位在画布透明区里，放出去看不见，必须放开夹取才能对齐基线。
+    pcall(cluster.SetClampedToScreen, cluster, false)
+
+    pcall(cluster.ClearAllPoints, cluster)
+    local ok = pcall(cluster.SetPoint, cluster, "BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", clusterAnchor.x, clusterAnchor.y)
+    if not ok then
+        if not warned.cluster then
+            warned.cluster = true
+            ns:Print("小地图定位失败，已保留暴雪默认位置。")
+        end
+        return
+    end
+
+    -- 暴雪在集群挪动之后还会重摆一次 Minimap 自己的锚点，晚一帧才生效（实测：补完差又自己下沉
+    -- 5.5，面板底边从 24 变成 31）。所以下一帧再量一次；量到收敛就停，最多补三遍。
+    AlignCluster()
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0, function()
+            for _ = 1, 3 do
+                if not AlignCluster() then break end
+            end
+        end)
+    end
 end
 
 --- 逼引擎按新尺寸重画地图。
@@ -261,18 +339,37 @@ local function NudgeZoom(minimap)
     pcall(minimap.SetZoom, minimap, zoom)
 end
 
+--- 告诉编辑模式：小地图集群已经不在它的"默认位置"了。
+---
+--- 编辑模式算右侧动作条（MultiBarRight / MultiBarLeft）的缩放时，用的是
+--- `topLimit = MinimapCluster:IsInDefaultPosition() and (MinimapCluster:GetBottom() - 10) or UIParent:GetTop()`
+--- 和 `bottomLimit = MicroButtonAndBagsBar:GetTop() + 24`，再 `newScale = availableSpace / multiBarHeight`。
+--- 暴雪假定小地图在右上角、在微型菜单**上方**；我们把集群搬到右下角（在微型菜单下方）之后
+--- availableSpace 变成负数（实测 -101.5），它就算出 -0.18 去 SetScale，直接报
+--- `MultiBarRight:SetScale(): Scale must be > 0`（打开法术书/天赋、换角色、改分辨率都会触发）。
+---
+--- `IsInDefaultPosition` 读的是编辑模式自己的 `systemInfo.isInDefaultPosition`，跟我们实际搬没搬
+--- 无关 —— 所以我们搬完就得把这句话改成"不在默认位置"，它才会退回 UIParent 的整屏高度、
+--- 把缩放按 1 处理（右侧那两条我们本来就 Park 成透明的）。
+local function MarkClusterMoved()
+    local cluster = _G.MinimapCluster
+    if not cluster then return end
+    if cluster.__monetMovedFlag then return end
+    if type(cluster.IsInDefaultPosition) ~= "function" then return end
+    cluster.__monetMovedFlag = true
+    cluster.IsInDefaultPosition = function() return false end
+end
+
 --- 把地图变成矩形。
 ---
---- 两种方案的差别在**画布和可见区是不是同一块**：
----   "resize" —— 画布直接设成 256×190，引擎按新视口重绘：没有被裁掉的带子，引擎
----                那层追踪点（blip）也就不会漏到地图外面。客户端自己的圆形遮罩要去
----                掉：正方遮罩套到矩形画布上会被拉成椭圆，把地图四角切掉，所以换成
----                一块什么都不裁的全白遮罩。命中区 0,0,0,0（整块都可见可点）。
----   "mask"   —— 老方案：画布保持正方 256×256，用自己的遮罩裁掉上下两条。留作回退：
----                万一这个客户端重绘出来的地图变形了，就切回这一档。
----                这时**必须**把命中区也裁成 0,0,33,33：上下那两条被遮罩挡着看不见，
----                却是"活的"（引擎仍按 256×256 的视口画，坐标换算也按那个视口），
----                不裁的话点在那两条上会打出一个看不见的标记。
+--- 做法是"正方画布 + 遮罩裁带"：画布保持 256×256，用 `minimap_rect_mask`（上 40 / 下 26 全透明）
+--- 裁出 190 高的可见带。地图画面**不重绘**，所以不会被拉伸 —— 这是相对"把画布直接设成
+--- 256×190"的关键区别：非正方形 SetSize 在 WoW 里是把正方渲染拉伸（纵向压扁约 26%），
+--- 那一档已经删掉（证据与决策见 TODO 2026-10-21 两条）。
+---
+--- 这时**必须**把命中区也裁成 0,0,40,26：上下那两条被遮罩挡着看不见，
+--- 却是"活的"（引擎仍按 256×256 的视口画，坐标换算也按那个视口），
+--- 不裁的话点在那两条上会打出一个看不见的标记。
 ---
 --- 注意：**SetHitRectInsets 不是"方形化的开关"**。这个客户端的暴雪 Minimap 一处都
 --- 没用它（整个 Blizzard_Minimap 包 0 处）—— 圆形小地图的限制是写在代码里的
@@ -296,17 +393,24 @@ local function ReshapeMinimap(minimap)
         if ok then beforeW, beforeH = w, h end
     end
 
-    if ShapeMode() == "mask" then
-        try(pcall(minimap.SetMaskTexture, minimap, ns.Media:Texture("minimapRect")))
-        try(pcall(minimap.SetSize, minimap, MASK_CANVAS, MASK_CANVAS))
-        try(pcall(minimap.SetHitRectInsets, minimap, 0, 0, MASK_CROP, MASK_CROP))
-    else
-        try(pcall(minimap.SetMaskTexture, minimap, ns.Media.texture.blank))
-        try(pcall(minimap.SetSize, minimap, MAP_WIDTH, MAP_HEIGHT))
-        try(pcall(minimap.SetHitRectInsets, minimap, 0, 0, 0, 0))
-    end
+    try(pcall(minimap.SetMaskTexture, minimap, ns.Media:Texture("minimapRect")))
+    try(pcall(minimap.SetSize, minimap, MASK_CANVAS, MASK_CANVAS))
+    try(pcall(minimap.SetHitRectInsets, minimap, 0, 0, MASK_CROP, MASK_CROP))
     try(pcall(minimap.SetClampRectInsets, minimap, 0, 0, 0, 0))
-    try(pcall(minimap.SetClampedToScreen, minimap, true))
+    -- 画布**必须整个留在屏幕里**：被屏幕切过时客户端会按可见高度重算遮罩（见文件头那段），
+    -- 可见带会缩水、下沿抬高，露出一条面板底色。现在画布底正好贴屏幕底(0)，不夹取也不会越界。
+    try(pcall(minimap.SetClampedToScreen, minimap, false))
+
+    -- 暴雪那圈 "blob ring"（任务区域 / 考古点的环）是按圆画的：套在矩形地图上，
+    -- 蓝色任务区域里会露出一圈圆形的"华夫饼"纹（BasicMinimap 的注释原话）。
+    -- scalar 归零把它收掉 —— Ellesmere 是 `isCircle and 1 or 0`，Andromeda 直接 0，
+    -- 两家都不碰 alpha（没必要：环的尺寸已经是 0）。
+    -- 没有 getter（手册里只有 Set*），所以还原时按默认值 1 放回。
+    for _, method in ipairs({ "SetArchBlobRingScalar", "SetQuestBlobRingScalar" }) do
+        if type(minimap[method]) == "function" then
+            try(pcall(minimap[method], minimap, 0))
+        end
+    end
 
     -- 只在尺寸**真的**变了才抖：Skin() 每次换区域都会重跑，无条件抖会看到缩放闪一下。
     -- 顺便让引擎按新视口重画一遍 blip（任务点 / 队友那些图标是引擎画在画布上的，
@@ -321,6 +425,8 @@ local function ReshapeMinimap(minimap)
     end
 
     if failed then Queue("skin") end
+
+    MarkClusterMoved()
 end
 
 --- ElvUI / NDui 约定：全局 GetMinimapShape 告诉第三方小地图按钮"现在的小地图是方的"，
@@ -334,8 +440,8 @@ end
 --- `GetMinimapShape = B.GetMinimapShape`，且只在自家小地图启用时才赋）。
 ---
 --- 按这个约定，**谁给小地图换皮，谁负责回答**。所以：
----   * 皮肤在的时候，保证这个全局存在，且答 "SQUARE"（我们的两种模式（mask 正方 / resize
----     矩形）都不是圆的，第三方按钮要的正是"别按圆摆"）；
+---   * 皮肤在的时候，保证这个全局存在，且答 "SQUARE"（可见区是 256×190 的矩形，
+---     第三方按钮要的正是"别按圆摆"）；
 ---   * 皮肤撤了，把接管前的值原样放回去；接管前本来没有，就删掉，别留一个过期的全局。
 ---     （之前只在全局已存在时才覆写，等于"皮肤在但没人回答"，第三方按钮拿到 nil 会直接报错。）
 ---
@@ -394,6 +500,11 @@ local function PingAtCursor(minimap)
 end
 
 --- 方形地图的命中区。
+-- 定义在本文件靠后的位置（~458 行），但 EnsureBlocker 的中键处理要调它：不先声明成 upvalue
+-- 的话那里看到的是全局 `OpenTrackingMenu`（零售服 nil，Forever 上是别人的），中键一点就报
+-- "attempt to call a nil value"。
+local OpenTrackingMenu
+
 --- 暴雪的 Minimap 命中区是圆的，方形皮肤下四角够不到；这层透明帧铺满**可见区**
 --- （不是整个 256×256 画布：上下那两条已经被遮罩裁掉了，落在那儿的位置地图上并不显示）：
 ---   * 滚轮 —— 缩放；
@@ -433,11 +544,12 @@ local function EnsureBlocker(minimap)
         blocker:HookScript("OnLeave", function() SetZoneTextVisible(false) end)
     end
     blocker:ClearAllPoints()
-    -- 遮罩方案里画布上下各有一条被裁掉的带子，覆盖层只铺**可见区**（落在那儿的位置
-    -- 地图上并不显示）；重绘方案里画布就是可见区，整块铺上。
-    local inset = (ShapeMode() == "mask") and MASK_CROP or 0
-    blocker:SetPoint("TOPLEFT", minimap, "TOPLEFT", 0, inset)
-    blocker:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMRIGHT", 0, -inset)
+    -- 画布上下各有一条被裁掉的带子，覆盖层只铺**可见区**（落在那儿的位置地图上并不显示）。
+    -- 偏移的符号：SetPoint 的 y 正值是**向上**。可见带是画布从上往下 33..223 行，
+    -- 所以顶边要往下 33（-33）、底边要往上 33（+33）。原来两个符号都写反了，
+    -- 覆盖层比可见带高出 66（322 单位），地图里那三个按钮也跟着跑到带子外面去了。
+    blocker:SetPoint("TOPLEFT", minimap, "TOPLEFT", 0, -MASK_CROP)
+    blocker:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMRIGHT", 0, MASK_CROP)
     blocker:SetShown(active)
 
     -- 滚轮归覆盖层管（缩放地图），暴雪小地图自己那条要关掉 ——
@@ -463,7 +575,7 @@ end
 --- （DropdownButtonMixin:OpenMenu → Menu.GetManager():OpenMenu），
 --- 所以中键直接调它即可，不用自己画菜单。
 --- 不同版本这个入口方法名不一样，逐个退路（OpenMenu → ToggleMenu → Click）。
-local function OpenTrackingMenu()
+function OpenTrackingMenu()
     local cluster = _G.MinimapCluster
     local btn = cluster and cluster.Tracking and cluster.Tracking.Button
     btn = btn or _G.MiniMapTrackingButton or _G.MiniMapTracking
@@ -494,6 +606,132 @@ local function SuppressClientPing(minimap)
     end)
     pingOriginal = original
     pingSuppressed = true
+end
+
+-- ------------------------------------------------------------------ 客户端重设遮罩
+
+-- Restore() 自己会调 UpdateMinimapConfig() 请客户端还原遮罩，钩子不能把皮肤又套回去
+local restoring    = false
+local configHooked = false
+local reskinQueued = false
+
+--- 客户端每次换小地图形态都会走 MinimapClusterMixin:UpdateMinimapConfig
+--- （Camelot/Minimap.lua:31：`rotateMinimap` 的 CVar 回调就注册在这里），它会：
+---   minimap:SetMaskTexture(圆形图集)、MinimapContainer / MinimapBackdrop /
+---   MinimapCompassTexture 全部 SetSize 回默认。
+--- 我们装的矩形遮罩因此会失效，要等下次换区域才恢复 ——
+--- 圆形图集套到 256×190 上就是椭圆 + 四角被切。
+--- 所以钩一次：把重套皮排到下一帧（别在客户端自己的调用栈里改它的帧），战斗中照旧排队。
+local function HookMinimapConfig()
+    if configHooked then return end
+    local cluster = _G.MinimapCluster
+    if not cluster or type(cluster.UpdateMinimapConfig) ~= "function" then return end
+    configHooked = true
+
+    hooksecurefunc(cluster, "UpdateMinimapConfig", function()
+        if restoring or not active or reskinQueued then return end
+        reskinQueued = true
+        local function reskin()
+            reskinQueued = false
+            if restoring or not active then return end
+            if InCombatLockdown() then
+                Queue("skin")
+            else
+                Skin()
+            end
+        end
+        if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+            C_Timer.After(0, reskin)
+        else
+            reskin()
+        end
+    end)
+end
+
+-- ------------------------------------------------------------------ HybridMinimap
+
+-- 客户端自带的 Blizzard_HybridMinimap（LoD）：在"没有小地图地表贴图"的地图里，小地图不再
+-- 用引擎渲染，改用世界地图的 MapCanvas 平铺（Blizzard_Minimap 在 PLAYER_ENTERING_WORLD 里按
+-- `C_Minimap.ShouldUseHybridMinimap()` 决定 LoadAddOn + `HybridMinimap:Enable()`；
+-- 源码见 Blizzard_HybridMinimap/Blizzard_HybridMinimap.lua）。
+--
+-- 它给画布套的是 XML 里的 `CircleMask`（`HybridMinimap.CircleMask`，帧内缩 3 的圆），
+-- 在矩形皮肤里会把地图四角啃成圆的。这里改的是**这块遮罩自己的贴图**，不另建一块：
+-- 同一个对象同时罩着 `HybridMinimap.Background`（黑底）和 `MapCanvas`（地图美术），
+-- 换一次两边一起变；自建一块只套得住画布，地图画到边界外时角上会露出面板。
+-- 做法同 BasicMinimap；差别是它接受"内缩 3"，我们把遮罩临时撑满整帧（可见带贴边），
+-- 还原时按快照把贴图和锚点都放回去。
+-- 它不是第三方插件，是客户端自己的机制，所以不提供开关：跟皮肤一起进退。
+
+--- 换完贴图抖一次 use-mask（false → true），让画布把遮罩重新挂到贴图上。
+--- BasicMinimap 同款：只 SetTexture 有客户端不刷新的记录；重复调用无副作用。
+local function RefreshHybridMask(mapCanvas)
+    pcall(mapCanvas.SetUseMaskTexture, mapCanvas, false)
+    pcall(mapCanvas.SetUseMaskTexture, mapCanvas, true)
+end
+
+local hybridSaved   = nil     -- CircleMask 的原始贴图与锚点（只记一次）
+local hybridApplied = false   -- 现在画布上装的是不是我们的遮罩（给 diagnose 用）
+
+local function SaveHybridMask(hybrid)
+    if hybridSaved or not hybrid.CircleMask then return end
+    local mask = hybrid.CircleMask
+
+    local points = {}
+    if type(mask.GetNumPoints) == "function" and type(mask.GetPoint) == "function" then
+        local ok, count = pcall(mask.GetNumPoints, mask)
+        if ok and type(count) == "number" then
+            for i = 1, count do
+                local okPt, point, relTo, relPoint, x, y = pcall(mask.GetPoint, mask, i)
+                if okPt then
+                    points[#points + 1] = { point, relTo, relPoint, x, y }
+                end
+            end
+        end
+    end
+
+    local okTex, texture = pcall(mask.GetTexture, mask)
+    hybridSaved = {
+        mask    = mask,
+        texture = (okTex and type(texture) == "string" and texture)
+                   or "Interface\\CharacterFrame\\TempPortraitAlphaMask",
+        points  = points,
+    }
+end
+
+local function ApplyHybrid()
+    local hybrid = _G.HybridMinimap
+    if not active or not hybrid or not hybrid.CircleMask or not hybrid.MapCanvas then return end
+    if hybridApplied then return end
+
+    SaveHybridMask(hybrid)
+    local mask = hybridSaved.mask
+    pcall(mask.SetTexture, mask, ns.Media:Texture("minimapRect"))
+    -- XML 里这块遮罩是"帧内缩 3"的；矩形皮肤要贴满可见带，先撑满整帧
+    pcall(mask.ClearAllPoints, mask)
+    pcall(mask.SetAllPoints, mask, hybrid)
+    RefreshHybridMask(hybrid.MapCanvas)
+
+    hybridApplied = true
+end
+
+local function RestoreHybrid()
+    local saved = hybridSaved
+    if not hybridApplied or not saved then return end
+
+    local mask = saved.mask
+    pcall(mask.SetTexture, mask, saved.texture)
+    if #saved.points > 0 then
+        pcall(mask.ClearAllPoints, mask)
+        for _, pt in ipairs(saved.points) do
+            pcall(mask.SetPoint, mask, pt[1], pt[2], pt[3], pt[4], pt[5])
+        end
+    end
+
+    local hybrid = _G.HybridMinimap
+    if hybrid and hybrid.MapCanvas then RefreshHybridMask(hybrid.MapCanvas) end
+
+    hybridApplied = false
 end
 
 -- ------------------------------------------------------------------ 区域名
@@ -572,27 +810,25 @@ end
 --- 主题面板。
 --- 底边维持原样（地图可见区下沿再往下 4）；区域名不再占标题条，它画在地图内部
 --- （悬停才出现），所以面板高度回到"地图 + 上下各 4"。
+---
+--- 面板画在**可见带**外面（每边 PANEL_PAD 个单位），边框固定 1 个物理像素：
+--- 边框的粗细由 Widget:Theme 的 thickness 决定（物理像素 → UI 单位由 Media:Mult 换算），
+--- 底色只露在地图与边框之间那一圈缝里。
 local function EnsurePanel(minimap)
     if not panel then
-        panel = Widget:CreateFrame("MonetUIMinimapPanel", UIParent, PANEL_WIDTH, PANEL_HEIGHT)
+        panel = Widget:CreateFrame("MonetUIMinimapPanel", UIParent,
+            MAP_WIDTH + PANEL_PAD * 2, MAP_HEIGHT + PANEL_PAD * 2)
         panel:SetFrameStrata("BACKGROUND")
         panel:SetFrameLevel(1)
         panel:EnableMouse(false)
-        -- 圆角边框走九宫格边纹；小地图自己的遮罩半径（Media.lua）刚好让地图的
-        -- 四个角藏进这道弧里，而不是把地图切成方的。
-        Widget:Theme(panel, { thickness = Settings().border or 2, bgAlpha = 0.35, round = true })
-    else
-        Widget:Theme(panel, { thickness = Settings().border or 2, bgAlpha = 0.35, round = true })
     end
 
+    -- 边框固定 1 物理像素（不再跟着设置走）；底色给足，不然地图外面那一圈是"空的"。
+    Widget:Theme(panel, { thickness = BORDER_PX, bgAlpha = 0.85, round = true })
+
     panel:ClearAllPoints()
-    if ShapeMode() == "mask" then
-        -- 遮罩方案：可见区是画布中间那条，面板要对齐可见区而不是画布
-        panel:SetPoint("BOTTOM", minimap, "BOTTOM", 0, MASK_CROP - 4)
-    else
-        -- 重绘方案：画布就是可见的地图，面板直接套在它外面
-        panel:SetPoint("CENTER", minimap, "CENTER", 0, 0)
-    end
+    -- 可见区是画布中间那条带子（上下各裁 33），面板要对齐可见区而不是画布
+    panel:SetPoint("BOTTOM", minimap, "BOTTOM", 0, MASK_CROP - PANEL_PAD)
     panel:SetShown(active)
     -- 发布出去，好让别的模块（任务追踪）对齐的是面板而不是画布：
     -- 画布每边比面板窄 4，人才看得见的那圈边框才是面板。
@@ -626,6 +862,11 @@ local function Remember(minimap)
             local point, relTo, relPoint, x, y = cluster:GetPoint(i)
             state.points[#state.points + 1] = { point, relTo, relPoint, x, y }
         end
+        -- 对齐基线要把它放开夹取（见 MoveCluster），还原时按原值放回
+        if cluster.IsClampedToScreen then
+            local ok, clamped = pcall(cluster.IsClampedToScreen, cluster)
+            if ok then state.clusterClamped = clamped end
+        end
     end
 
     original = state
@@ -652,12 +893,18 @@ function Restore()
             try(pcall(cluster.SetPoint, cluster, pt[1], pt[2], pt[3], pt[4], pt[5]))
         end
     end
+    if cluster and state.clusterClamped ~= nil and cluster.SetClampedToScreen then
+        try(pcall(cluster.SetClampedToScreen, cluster, state.clusterClamped))
+    end
 
     local minimap = _G.Minimap
     if minimap then
         -- 遮罩请客户端自己设回去：它知道自己的图集（也知道自己旋转模式下的底图）。
+        -- 钩子会在这之后重套皮肤，所以先立 restoring 旗：这一次是"还原"，不是"重设"。
         if cluster and type(cluster.UpdateMinimapConfig) == "function" then
+            restoring = true
             try(pcall(cluster.UpdateMinimapConfig, cluster))
+            restoring = false
         else
             try(pcall(minimap.SetMaskTexture, minimap, state.mask))
         end
@@ -678,10 +925,19 @@ function Restore()
         if state.wheel ~= nil and minimap.EnableMouseWheel then
             try(pcall(minimap.EnableMouseWheel, minimap, state.wheel))
         end
+        -- blob ring 的 scalar 没有 getter，按默认值 1 放回去（圆图时的取值）
+        for _, method in ipairs({ "SetArchBlobRingScalar", "SetQuestBlobRingScalar" }) do
+            if type(minimap[method]) == "function" then
+                try(pcall(minimap[method], minimap, 1))
+            end
+        end
     end
 
     -- 还原那次有意的全局接管（只有真的接管过才动它）。
     RestoreShape()
+
+    -- HybridMinimap 的矩形遮罩换回它自己的圆形遮罩
+    RestoreHybrid()
 
     -- 右键打标记那条路放回去
     if pingSuppressed and minimap then
@@ -692,6 +948,8 @@ function Restore()
 
     -- 暴雪按钮搬回原来的父级，我们画的底板藏起来
     if M.buttons then M.buttons:Restore() end
+    -- 被我们压掉的第三方 pin（遮罩档的带子裁剪）放回去
+    if M.pins then M.pins:Restore() end
     if M.microMenu then M.microMenu:Close() end
 
     if failed then
@@ -710,14 +968,20 @@ function Skin()
     if not minimap then return false end
 
     Remember(minimap)
-    MoveCluster()
+    -- 客户端每次改小地图形态（rotateMinimap 开关）都会把遮罩换回圆形图集，
+    -- 钩一次；集群晚于我们加载时这里会重试（HookMinimapConfig 自己幂等）。
+    HookMinimapConfig()
+    -- 先按目标尺寸重塑，再定位：MoveCluster 要实测 Minimap 的帧矩形，尺寸没设好量出来的是旧值。
     ReshapeMinimap(minimap)
+    MoveCluster()
     ApplyShape()
     ApplyButtons()
     EnsurePanel(minimap)
     EnsureBlocker(minimap)
     SuppressClientPing(minimap)
     if M.buttons then M.buttons:Apply(blocker) end
+    if M.pins then M.pins:Apply() end
+    ApplyHybrid()
     UpdateZoneText()
 
     -- 记住的缩放级别（-1 = 没记过；第一次滚轮之后才有值）。
@@ -747,6 +1011,12 @@ function M:Initialize()
     -- 战斗中受保护的方法被无声拒绝：脱战后按队列补做。
     EventBus:Register("PLAYER_REGEN_ENABLED", function()
         RunQueue()
+    end)
+
+    -- 客户端的 HybridMinimap 是按需 LoadAddOn 的：它一落地就把 MapCanvas 的遮罩
+    -- 换成矩形的（模块没开时 ApplyHybrid 自己跳过，客户端保留自己的圆形遮罩）。
+    EventBus:Register("ADDON_LOADED", function(_, addon)
+        if addon == "Blizzard_HybridMinimap" then ApplyHybrid() end
     end)
 
     active = true
@@ -783,6 +1053,13 @@ end
 --- 模块当前是不是开着（子模块问这个用）。
 function M:IsActive()
     return active
+end
+
+--- 可见带相对画布中心的上下边界（UI 单位，向上为正）。遮罩上下等宽，就是 ±MAP_HEIGHT/2（±95）。
+--- 第三方 pin 离中心超出这两条线就落在被裁掉的带子里（看不见却还挂在地图上）。
+function M:VisibleBand()
+    local half = MASK_CANVAS / 2
+    return half - MASK_CROP, MASK_CROP - half
 end
 
 --- 给配置面板用的按钮清单（key + 显示名），顺序即面板里的顺序。
@@ -829,7 +1106,7 @@ function M:HandleCommand(rest)
         if minimap.GetHitRectInsets then
             local ok, l, r, t, b = pcall(minimap.GetHitRectInsets, minimap)
             if ok then
-                ns:Print(string.format("  命中区内缩 左%d 右%d 上%d 下%d（遮罩方案裁掉看不见的带子）",
+                ns:Print(string.format("  命中区内缩 左%d 右%d 上%d 下%d（裁掉看不见的带子）",
                     l or 0, r or 0, t or 0, b or 0))
             end
         end
@@ -837,12 +1114,27 @@ function M:HandleCommand(rest)
         ns:Print("  |cffff6b6bMinimap 不存在|r")
     end
     ns:Print("  手势：左键打标记（四角也算）· 中键追踪菜单 · 右键微型菜单 · 滚轮缩放")
-    local mode = ShapeMode()
-    ns:Print(string.format("  形状方案 %s：%s",
-        mode == "mask" and "遮罩裁剪" or "引擎重绘",
-        mode == "mask"
-            and string.format("画布 %d×%d，上下各裁 %d，可见 %d×%d", MASK_CANVAS, MASK_CANVAS, MASK_CROP, MAP_WIDTH, MAP_HEIGHT)
-            or string.format("画布 %d×%d，可见区即整块", MAP_WIDTH, MAP_HEIGHT)))
+    ns:Print(string.format("  形状：遮罩裁剪（画布 %d×%d，上下各裁 %d，可见 %d×%d）",
+        MASK_CANVAS, MASK_CANVAS, MASK_CROP, MAP_WIDTH, MAP_HEIGHT))
+    ns:Print(string.format("  客户端重设遮罩的钩子 %s（切 rotateMinimap 后形状应保持不变）",
+        configHooked and "|cff00ff00已安装|r" or "|cffff6b6b未安装|r"))
+    if M.pins and M.pins.Status then
+        local found, hiding, pinsActive = M.pins:Status()
+        if found then
+            ns:Print(string.format("  第三方 pin：HBD 已接入，带子里压掉 %d / 活动 %d 个",
+                hiding, pinsActive))
+        else
+            ns:Print("  第三方 pin：未检测到 HereBeDragons-Pins-2.0（没有要处理的）")
+        end
+    end
+    local hybrid = _G.HybridMinimap
+    if hybrid and hybrid.MapCanvas then
+        ns:Print(string.format("  HybridMinimap：已加载（当前%s），画布遮罩 %s",
+            hybrid:IsShown() and "显示中" or "未显示",
+            hybridApplied and "已换成矩形" or "未接管（模块关着？）"))
+    else
+        ns:Print("  HybridMinimap：未加载（本区域不用它）")
+    end
     ns:Print(string.format("  面板 %s，区域名 %s",
         panel and panel:IsShown() and "已显示" or "未显示",
         zoneText and zoneText:GetText() ~= "" and zoneText:GetText() or "空"))
