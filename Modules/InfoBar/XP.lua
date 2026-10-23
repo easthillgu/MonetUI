@@ -445,7 +445,24 @@ local function Build(parentBar)
 
     root:Hide()
 
+    -- 暴雪自己的经验条：零售 12.x 把它挪到了屏幕最下方的"状态追踪条"
+    -- （MainStatusTrackingBarContainer，里面还有那行"经验值: x/y"）。我们的经验线就是进度本身，
+    -- 所以原来那条收起来 —— 客户端会自己把它 Show 回来，钩一次按回去。
+    local function HideBlizzardXP()
+        for _, name in ipairs({ "MainStatusTrackingBarContainer", "PlayerXPBar", "ExperienceBar", "MainStatusBar" }) do
+            local f = _G[name]
+            if f and type(f.Hide) == "function" then pcall(f.Hide, f) end
+        end
+        local container = _G.MainStatusTrackingBarContainer
+        if container and not container.__monetXpHidden and type(hooksecurefunc) == "function" then
+            container.__monetXpHidden = true
+            hooksecurefunc(container, "Show", function(self) pcall(self.Hide, self) end)
+        end
+    end
+    HideBlizzardXP()
+
     local function Refresh()
+        HideBlizzardXP()
         if M.active then Apply() end
     end
 
