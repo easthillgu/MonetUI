@@ -24,7 +24,7 @@ local setOffset        -- Build 里定义，Show/Toggle 打开面板时归零
 local MODULE_ORDER = {
     "UnitFrames", "Cooldown", "BuffFrame",
     "Minimap", "BagFrame", "Bags", "QuestTracker", "ActionBars", "Nameplates", "Skins",
-    "InfoBar", "Tooltip", "Cursor", "Toast",
+    "InfoBar", "Tooltip", "Cursor", "Toast", "Durability", "CombatText",
 }
 
 local MODULE_LABEL = {
@@ -42,6 +42,8 @@ local MODULE_LABEL = {
     Tooltip      = "鼠标提示 (Tooltip)",
     Cursor       = "光标拖尾 (Cursor)",
     Toast        = "通知横幅 (Toast)",
+    Durability   = "耐久警告 (Durability)",
+    CombatText   = "自身战斗文字 (CombatText)",
 }
 
 local function MakeCheckbox(parent, label, yOffset, getter, setter)
@@ -1204,6 +1206,88 @@ function SimpleConfig:Build()
         toastHint:SetWidth(328)
         toastHint:SetJustifyH("LEFT")
         toastHint:SetText("横幅在屏幕顶部居中，一次只显示一条，多的排队；底边一条细线随停留时间排空，点一下可提前关掉。")
+        y = y - 34
+        sec.bodyHeight = -y + 4
+    end
+
+    local durability = ns:GetModule("Durability")
+    if durability then
+        sec = BeginSection("耐久警告", false)
+        content = sec.body
+        y = 0
+
+        MakeCheckbox(content, "装备耐久过低时弹一条提示（修好 / 换装后才会再提醒）", y,
+            function() return durability:GetSetting("warn") end,
+            function(value)
+                durability:Settings().warn = value and true or false
+                durability:Apply()
+            end)
+        y = y - 28
+
+        MakeDropdown(content, y, "提醒阈值", {
+            { value = 20, text = "低于 20%" },
+            { value = 30, text = "低于 30%" },
+            { value = 50, text = "低于 50%" },
+        },
+            function() return durability:GetSetting("threshold") or 30 end,
+            function(value)
+                durability:Settings().threshold = value
+                durability:Apply()
+            end)
+        y = y - 26
+
+        local durHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
+        durHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
+        durHint:SetWidth(328)
+        durHint:SetJustifyH("LEFT")
+        durHint:SetText("只看身上穿着的 10 个部位（头肩胸腿脚腕手腰主副手），取最低的那件。")
+        y = y - 30
+        sec.bodyHeight = -y + 4
+    end
+
+    local combatText = ns:GetModule("CombatText")
+    if combatText then
+        sec = BeginSection("自身战斗文字", false)
+        content = sec.body
+        y = 0
+
+        MakeCheckbox(content, "受到伤害（暴击更大更亮）", y,
+            function() return combatText:GetSetting("damage") end,
+            function(value)
+                combatText:Settings().damage = value and true or false
+                combatText:Apply()
+            end)
+        y = y - 26
+
+        MakeCheckbox(content, "受到治疗", y,
+            function() return combatText:GetSetting("heal") end,
+            function(value)
+                combatText:Settings().heal = value and true or false
+                combatText:Apply()
+            end)
+        y = y - 26
+
+        MakeCheckbox(content, "闪避 / 招架 / 格挡 / 抵抗", y,
+            function() return combatText:GetSetting("avoid") end,
+            function(value)
+                combatText:Settings().avoid = value and true or false
+                combatText:Apply()
+            end)
+        y = y - 26
+
+        MakeCheckbox(content, "进入 / 离开战斗", y,
+            function() return combatText:GetSetting("combat") end,
+            function(value)
+                combatText:Settings().combat = value and true or false
+                combatText:Apply()
+            end)
+        y = y - 26
+
+        local ctHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
+        ctHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
+        ctHint:SetWidth(328)
+        ctHint:SetJustifyH("LEFT")
+        ctHint:SetText("文字浮在玩家框上方。打开哪一类，就接管暴雪对应的浮动战斗文字（关闭时还原原设置），所以不会出现两份数字。")
         y = y - 34
         sec.bodyHeight = -y + 4
     end

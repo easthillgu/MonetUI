@@ -1691,6 +1691,10 @@ local function CreateUnitFrame(unit, position)
     return frame
 end
 
+function M:GetFrame(unit)
+    return frames[unit]
+end
+
 function M:UpdateUnit(unit, kind, powerType)
     local frame = frames[unit]
     if not frame or not frame:IsShown() then return end

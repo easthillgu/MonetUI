@@ -241,6 +241,19 @@ local DEFAULTS = {
         bagFull = true,
         duration = 5,
     },
+    -- 装备耐久警告 (Modules/Durability)：跌破 threshold 时弹一条通知，修好/换装后才再次提醒。
+    durability = {
+        warn      = true,
+        threshold = 30,
+    },
+    -- 自身战斗文字 (Modules/CombatText)：玩家受到的伤害 / 治疗 / 闪避，外加可选的进出战斗。
+    -- 开哪一类就接管暴雪对应的浮动文字 CVar，关掉时还原。
+    combatText = {
+        damage = true,
+        heal   = true,
+        avoid  = true,
+        combat = false,
+    },
 }
 ns.DEFAULTS = DEFAULTS
 
