@@ -390,6 +390,69 @@ function ns:Marked(object, key)
     return t and t[key]
 end
 
+-- ------------------------------------------------------------------ 战斗延迟队列
+
+-- 战斗里对受保护对象的操作（属性 / 换父 / 显隐 / 建容器）会被无声拒绝。各模块以前
+-- 各自维护"战斗中置标记 → PLAYER_REGEN_ENABLED 排空"的小队列（review 2026-10-24
+-- 数出 ~8 处重复），现在统一走 ns:AfterCombat：
+--
+--   ns:AfterCombat(key, fn)
+--     key  字符串，模块内唯一。按 key 去重：同一个 key 只保留最新一次排入的动作。
+--     fn   无参函数。不当场完成的动作在脱战（PLAYER_REGEN_ENABLED）后逐个执行；
+--          单个动作失败就留在队列里，下一次脱战再试（失败每个 key 只提示一次）。
+--   ns:AfterCombat(key, fn, "regen")
+--     无论如何都等下一次脱战再执行，不当场跑。给"排空函数在自己执行中又往队列
+--     加东西"的场景用：当场跑会立刻重入，等下一轮才是正确的一次性重试
+--     （Minimap 的套用队列就是这种：Skin 在执行中失败会自己再排一次）。
+
+local afterCombatPending = {}   -- key -> fn
+local afterCombatOrder   = {}   -- 排队顺序（pairs 无序，这里保插入序）
+local afterCombatWarned  = {}   -- key -> true（该 key 的失败提示打过了）
+local afterCombatHooked  = false
+
+local function RunAfterCombat(key, fn)
+    local ok, err = pcall(fn)
+    if ok then
+        afterCombatWarned[key] = nil   -- 成跑一次就清提示位，之后再失败重新提示
+    elseif not afterCombatWarned[key] then
+        afterCombatWarned[key] = true
+        ns:Print("AfterCombat '" .. key .. "': " .. tostring(err))
+    end
+    return ok
+end
+
+local function FlushAfterCombat()
+    -- 动作执行中可能又往队列里加东西：先把整个队列摘走再跑，新排入的落在空表里
+    local order, pending = afterCombatOrder, afterCombatPending
+    afterCombatOrder, afterCombatPending = {}, {}
+    for i = 1, #order do
+        local key, fn = order[i], pending[order[i]]
+        if fn and not RunAfterCombat(key, fn) then
+            afterCombatPending[key] = fn        -- 失败：留队列，下次脱战重试
+            afterCombatOrder[#afterCombatOrder + 1] = key
+        end
+    end
+end
+
+function ns:AfterCombat(key, fn, mode)
+    if type(key) ~= "string" or type(fn) ~= "function" then return end
+
+    if not afterCombatHooked then
+        afterCombatHooked = true
+        ns.EventBus:Register("PLAYER_REGEN_ENABLED", FlushAfterCombat)
+    end
+
+    if mode ~= "regen" and not (InCombatLockdown and InCombatLockdown()) then
+        RunAfterCombat(key, fn)
+        return
+    end
+
+    if afterCombatPending[key] == nil then
+        afterCombatOrder[#afterCombatOrder + 1] = key
+    end
+    afterCombatPending[key] = fn
+end
+
 function ns:GetModuleOrder()
     return moduleOrder
 end
