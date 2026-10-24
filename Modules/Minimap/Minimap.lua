@@ -16,6 +16,11 @@
 
 local ADDON_NAME, ns = ...
 
+
+-- 旁表标记（见 Core.lua 的 ns:Mark）：不往暴雪的框体上写字段，
+-- 否则那个框体之后跑的暴雪代码会被判成“被 MonetUI 污染”。
+local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
+local Marked = function(o, k) return ns:Marked(o, k) end
 local Widget   = ns.Widget
 local EventBus = ns.EventBus
 local Secrets  = ns.Secrets
@@ -365,9 +370,9 @@ end
 local function MarkClusterMoved()
     local cluster = _G.MinimapCluster
     if not cluster then return end
-    if cluster.__monetMovedFlag then return end
+    if Marked(cluster, "movedFlag") then return end
     if type(cluster.IsInDefaultPosition) ~= "function" then return end
-    cluster.__monetMovedFlag = true
+    Mark(cluster, "movedFlag", true)
     cluster.IsInDefaultPosition = function() return false end
 end
 

@@ -5,6 +5,11 @@
 
 local ADDON_NAME, ns = ...
 
+
+-- 旁表标记（见 Core.lua 的 ns:Mark）：不往暴雪的框体上写字段，
+-- 否则那个框体之后跑的暴雪代码会被判成“被 MonetUI 污染”。
+local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
+local Marked = function(o, k) return ns:Marked(o, k) end
 local Widget   = ns.Widget
 local Color    = ns.Color
 local Math     = ns.Math
@@ -304,8 +309,8 @@ end
 
 local function SuppressBlizzard()
     local bt = _G.ObjectiveTrackerFrame
-    if not bt or bt.__monetHiddenHook then return end
-    bt.__monetHiddenHook = true
+    if not bt or Marked(bt, "hiddenHook") then return end
+    Mark(bt, "hiddenHook", true)
     if bt.HookScript then
         bt:HookScript("OnShow", function()
             if enabled then pcall(bt.Hide, bt) end

@@ -5,6 +5,11 @@
 
 local ADDON_NAME, ns = ...
 
+
+-- 旁表标记（见 Core.lua 的 ns:Mark）：不往暴雪的框体上写字段，
+-- 否则那个框体之后跑的暴雪代码会被判成“被 MonetUI 污染”。
+local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
+local Marked = function(o, k) return ns:Marked(o, k) end
 local Secrets = ns.Secrets
 local Widget  = ns.Widget
 local Color   = ns.Color
@@ -81,8 +86,8 @@ function M:SuppressBlizzard(enable)
     for _, globalName in pairs(BLIZZARD_FRAMES) do
         local blizzard = _G[globalName]
         if blizzard then
-            if enable and not blizzard.__monetSuppressed then
-                blizzard.__monetSuppressed = true
+            if enable and not Marked(blizzard, "suppressed") then
+                Mark(blizzard, "suppressed", true)
                 -- Read from the DB: Shared() is a local defined further down, out of scope here.
                 local units = ns:DB().unitFrames or {}
                 local borrow = globalName == "TargetFrame" and units.showTargetAuras ~= false
@@ -101,8 +106,8 @@ function M:SuppressBlizzard(enable)
                     end
                     blizzard:Hide()
                 end
-            elseif not enable and blizzard.__monetSuppressed then
-                blizzard.__monetSuppressed = nil
+            elseif not enable and Marked(blizzard, "suppressed") then
+                Mark(blizzard, "suppressed", nil)
                 pcall(blizzard.SetScript, blizzard, "OnShow", nil)
                 if type(blizzard.EnableMouse) == "function" then
                     pcall(blizzard.EnableMouse, blizzard, true)
@@ -146,21 +151,21 @@ function M:HideBlizzardCastBars(enable)
         local frame = _G[name]
         if frame then
             if enable then
-                if not frame.__monetCastHidden then
-                    frame.__monetCastHidden = true
+                if not Marked(frame, "castHidden") then
+                    Mark(frame, "castHidden", true)
                     if frame.SetScript then
                         pcall(frame.SetScript, frame, "OnShow", frame.Hide)
                     end
-                    if type(hooksecurefunc) == "function" and not frame.__monetCastHook then
-                        frame.__monetCastHook = true
+                    if type(hooksecurefunc) == "function" and not Marked(frame, "castHook") then
+                        Mark(frame, "castHook", true)
                         hooksecurefunc(frame, "Show", function(self)
-                            if self.__monetCastHidden then pcall(self.Hide, self) end
+                            if Marked(self, "castHidden") then pcall(self.Hide, self) end
                         end)
                     end
                 end
                 pcall(frame.Hide, frame)
-            elseif frame.__monetCastHidden then
-                frame.__monetCastHidden = nil
+            elseif Marked(frame, "castHidden") then
+                Mark(frame, "castHidden", nil)
                 if frame.SetScript then
                     pcall(frame.SetScript, frame, "OnShow", nil)
                 end
@@ -929,7 +934,7 @@ end
 
 -- 引擎按钮只在我们手里一次：之后光环变机密（战斗中），Post-creation 访问会被拒。
 local function TintAuraButton(button)
-    local host = button.__monetBorderHost
+    local host = Marked(button, "borderHost")
     if not host then return end
     -- 只写我们自己的子帧。写在按钮的 region 上会被 Bad self 拒掉（pcall 吞掉后边框就永远是
     -- 创建那一刻的颜色，换主题也不变）—— 子帧没有这个限制，重涂是幂等的。
@@ -1032,7 +1037,7 @@ local function AddDispelBorder(button, pad, expand)
             end
             if pcall(button.AddDispelTypeTexture, button, texture, opts) then
                 made = made + 1
-                button.__monetDispelBorder = texture
+                Mark(button, "dispelBorder", texture)
             else
                 pcall(texture.Hide, texture)
             end
@@ -1082,7 +1087,7 @@ local function StyleAuraButton(button, kind, spec)
         borderHost:SetFrameLevel(math.max(0, buttonLevel - 1))
         borderHost:EnableMouse(false)
         Widget:ApplyBorder(borderHost, 1)
-        button.__monetBorderHost = borderHost
+        Mark(button, "borderHost", borderHost)
     end
 
     local icon = button:CreateTexture(nil, "ARTWORK")
@@ -1247,11 +1252,11 @@ local function ApplyContainerLayout(container, frame)
     FlowCall(container, "SetFlowLayoutMaximumLineSize", "SetAuraLayoutRowWidth", lineSize)
 
     -- Store for potential refresh
-    container.__monetAuraLayout = {
+    Mark(container, "auraLayout", {
         iconsPerRow = iconsPerRow,
         spacing = actualSpacing,
         rowWidth = rowWidth,
-    }
+    })
     return iconsPerRow, actualSpacing, rowWidth
 end
 
@@ -1457,14 +1462,14 @@ local function BorrowTargetAuras(frame)
     end
 
     if #lists == 0 then
-        if not frame.__monetAuraWarned then
-            frame.__monetAuraWarned = true
+        if not Marked(frame, "auraWarned") then
+            Mark(frame, "auraWarned", true)
             print("|cffce3e2fMonetUI|r: 未在 TargetFrame 上找到光环子帧，目标框光环已跳过（帧名待实机核对）")
         end
         return
     end
 
-    frame.__monetAuraWarned = nil
+    Mark(frame, "auraWarned", nil)
     frame.blizzardAuras = lists
     StackTargetAuras(frame)
 end

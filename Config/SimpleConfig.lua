@@ -3,6 +3,11 @@
 
 local ADDON_NAME, ns = ...
 
+
+-- 旁表标记（见 Core.lua 的 ns:Mark）：不往暴雪的框体上写字段，
+-- 否则那个框体之后跑的暴雪代码会被判成“被 MonetUI 污染”。
+local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
+local Marked = function(o, k) return ns:Marked(o, k) end
 local Widget = ns.Widget
 local Color = ns.Color
 local Media = ns.Media
@@ -185,8 +190,8 @@ local function MakeDropdown(parent, y, caption, items, getter, setter)
         openList = list
     end)
 
-    if not parent.__monetHideHook then
-        parent.__monetHideHook = true
+    if not Marked(parent, "hideHook") then
+        Mark(parent, "hideHook", true)
         parent:HookScript("OnHide", CloseDropdown)
     end
 

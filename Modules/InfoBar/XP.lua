@@ -13,6 +13,11 @@
 
 local ADDON_NAME, ns = ...
 
+
+-- 旁表标记（见 Core.lua 的 ns:Mark）：不往暴雪的框体上写字段，
+-- 否则那个框体之后跑的暴雪代码会被判成“被 MonetUI 污染”。
+local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
+local Marked = function(o, k) return ns:Marked(o, k) end
 local M = ns.InfoBar
 if not M then return end
 
@@ -477,8 +482,8 @@ local function Build(parentBar)
             if f and type(f.Hide) == "function" then pcall(f.Hide, f) end
         end
         local container = _G.MainStatusTrackingBarContainer
-        if container and not container.__monetXpHidden and type(hooksecurefunc) == "function" then
-            container.__monetXpHidden = true
+        if container and not Marked(container, "xpHidden") and type(hooksecurefunc) == "function" then
+            Mark(container, "xpHidden", true)
             hooksecurefunc(container, "Show", function(self) pcall(self.Hide, self) end)
         end
     end

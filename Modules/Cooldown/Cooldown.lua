@@ -4,6 +4,11 @@
 
 local ADDON_NAME, ns = ...
 
+
+-- 旁表标记（见 Core.lua 的 ns:Mark）：不往暴雪的框体上写字段，
+-- 否则那个框体之后跑的暴雪代码会被判成“被 MonetUI 污染”。
+local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
+local Marked = function(o, k) return ns:Marked(o, k) end
 local Widget = ns.Widget
 local Secrets = ns.Secrets
 local EventBus = ns.EventBus
@@ -449,8 +454,8 @@ function M:ApplyDisplay()
 end
 
 local function StyleButton(button)
-    if not button or button.__monetStyled then return end
-    button.__monetStyled = true
+    if not button or Marked(button, "styled") then return end
+    Mark(button, "styled", true)
 
     -- Blizzard already drives the swipe (its start time may be secret), so only re-style the widgets it owns; never create our own.
     local cd = button.Cooldown or button.cooldown

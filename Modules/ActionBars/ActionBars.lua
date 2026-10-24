@@ -23,6 +23,11 @@
 
 local ADDON_NAME, ns = ...
 
+
+-- 旁表标记（见 Core.lua 的 ns:Mark）：不往暴雪的框体上写字段，
+-- 否则那个框体之后跑的暴雪代码会被判成“被 MonetUI 污染”。
+local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
+local Marked = function(o, k) return ns:Marked(o, k) end
 local Widget   = ns.Widget
 local Color    = ns.Color
 local Media    = ns.Media
@@ -238,10 +243,10 @@ local function LeaveManagedFrameSystem(frame)
         end
     end
 
-    if type(hooksecurefunc) == "function" and not frame.__monetLeftManager then
-        frame.__monetLeftManager = true
+    if type(hooksecurefunc) == "function" and not Marked(frame, "leftManager") then
+        Mark(frame, "leftManager", true)
         pcall(hooksecurefunc, frame, "ApplySystemAnchor", function(self)
-            if self.__monetParked then self.ignoreFramePositionManager = true end
+            if Marked(self, "parked") then self.ignoreFramePositionManager = true end
         end)
     end
     return true
@@ -391,10 +396,10 @@ end
 --- 现在：所有暴雪动作条（含 MainActionBar）都换到常隐框体，按钮交给暴雪自己按 statehidden 藏。
 local function Park(name)
     local frame = _G[name]
-    if not frame or frame.__monetParked then return false end
-    frame.__monetParked = true
-    frame.__monetAlpha  = frame:GetAlpha()
-    frame.__monetParent = frame:GetParent()
+    if not frame or Marked(frame, "parked") then return false end
+    Mark(frame, "parked", true)
+    Mark(frame, "alpha", frame:GetAlpha())
+    Mark(frame, "parent", frame:GetParent())
 
     -- **全部换父到常隐框体，包括 MainActionBar。**
     -- 之前 MainActionBar 留在原地只 alpha 0（Ellesmere 的做法），但实测 12.1.5 上它仍然把
@@ -420,14 +425,14 @@ end
 --- 背包条不是动作条那种"被 SetShownBase 复活"的框体，Hide 之后不会再自己冒出来。
 local function ParkBag(name)
     local frame = _G[name]
-    if not frame or frame.__monetParked then return false end
-    frame.__monetParked = true
-    frame.__monetHidden = true
-    frame.__monetAlpha  = frame:GetAlpha()
-    if type(hooksecurefunc) == "function" and not frame.__monetParkHook then
-        frame.__monetParkHook = true
+    if not frame or Marked(frame, "parked") then return false end
+    Mark(frame, "parked", true)
+    Mark(frame, "hidden", true)
+    Mark(frame, "alpha", frame:GetAlpha())
+    if type(hooksecurefunc) == "function" and not Marked(frame, "parkHook") then
+        Mark(frame, "parkHook", true)
         hooksecurefunc(frame, "Show", function(self)
-            if self.__monetParked and self.__monetHidden then pcall(self.Hide, self) end
+            if Marked(self, "parked") and Marked(self, "hidden") then pcall(self.Hide, self) end
         end)
     end
     pcall(frame.Hide, frame)
@@ -436,20 +441,20 @@ end
 
 local function Restore(name)
     local frame = _G[name]
-    if not frame or not frame.__monetParked then return false end
-    frame.__monetParked = nil
-    if frame.__monetHidden then
-        frame.__monetHidden = nil
+    if not frame or not Marked(frame, "parked") then return false end
+    Mark(frame, "parked", nil)
+    if Marked(frame, "hidden") then
+        Mark(frame, "hidden", nil)
         pcall(frame.Show, frame)
-        pcall(frame.SetAlpha, frame, frame.__monetAlpha or 1)
+        pcall(frame.SetAlpha, frame, Marked(frame, "alpha") or 1)
         return true
     end
-    pcall(frame.SetAlpha, frame, frame.__monetAlpha or 1)
+    pcall(frame.SetAlpha, frame, Marked(frame, "alpha") or 1)
     frame.ignoreFramePositionManager = nil    -- 交还：让编辑模式的托管系统重新接管它
-    if frame.__monetParent and frame.__monetParent ~= hiddenParent then
-        pcall(frame.SetParent, frame, frame.__monetParent)
+    if Marked(frame, "parent") and Marked(frame, "parent") ~= hiddenParent then
+        pcall(frame.SetParent, frame, Marked(frame, "parent"))
     end
-    frame.__monetParent = nil
+    Mark(frame, "parent", nil)
     if type(frame.actionButtons) == "table" then
         for _, button in pairs(frame.actionButtons) do
             pcall(button.SetAttributeNoHandler, button, "statehidden", nil)
@@ -541,8 +546,8 @@ end
 
 --- 给按钮装翻页子片段（幂等）：客户端换页时由 ChildUpdate 触发，跑在安全环境里。
 local function InstallPageChild(button, index)
-    if button.__monetPageChild then return end
-    button.__monetPageChild = true
+    if Marked(button, "pageChild") then return end
+    Mark(button, "pageChild", true)
     pcall(button.SetAttributeNoHandler, button, "_childupdate-" .. PAGE_CHILD, PageChildSnippet(index))
 end
 
@@ -733,8 +738,8 @@ end
 
 --- 画一个按钮的自绘部分（底板、图标、数字、宏名、热键、冷却）。
 local function SkinButton(button)
-    if button.__monetSkinned then return end
-    button.__monetSkinned = true
+    if Marked(button, "skinned") then return end
+    Mark(button, "skinned", true)
 
     -- 图标往后缩 1 像素，露出来的底色就是描边；空槽时 well 顶上（见 RefreshRing）。
     local ring = button:CreateTexture(nil, "BACKGROUND", nil, 0)
@@ -935,8 +940,8 @@ local function BuildButton(bar, index)
     end
     -- 条隐藏 / 换页 / 上载具时按钮会被藏起来：托盘不能留在我们身上，
     -- 否则下一次别人（包括暴雪自己的 ActionButton）要弹托盘就撞断言。
-    if not button.__monetFlyoutHooked then
-        button.__monetFlyoutHooked = true
+    if not Marked(button, "flyoutHooked") then
+        Mark(button, "flyoutHooked", true)
         button:HookScript("OnHide", function(self)
             local popup = _G.SpellFlyout
             if popup and popup.flyoutButton == self then
@@ -1417,7 +1422,7 @@ end
 --- 之下，所以按钮在的时候被完全盖住、按钮藏起来时正好露出来 —— 和自绘动作条的空槽是
 --- 同一套材质，纯美术，不 Show/Hide 受保护的按钮、也不动层级，没有污染风险。
 local function BuildEmptySlot(button)
-    local slot = button.__monetEmptySlot
+    local slot = Marked(button, "emptySlot")
     if slot then return slot end
 
     local holder = button.GetParent and button:GetParent()
@@ -1441,13 +1446,13 @@ local function BuildEmptySlot(button)
         weave = material and material.weave,
         sheen = material and material.sheen,
     }
-    button.__monetEmptySlot = slot
+    Mark(button, "emptySlot", slot)
     return slot
 end
 
 --- 这一格空着（暴雪把按钮藏了）时空槽顶上，有按钮时让开。
 local function SyncEmptySlot(button)
-    local slot = button and button.__monetEmptySlot
+    local slot = button and Marked(button, "emptySlot")
     if not slot then return end
     local empty = not button:IsShown()
     if slot.ring  then slot.ring:SetShown(empty)  end
@@ -1521,8 +1526,8 @@ local function AdoptBar(def)
 
     -- 暴雪改按钮显隐时不发事件，直接后钩条自己的 UpdateShownButtons（Lua 方法，安全钩）：
     -- 每次它刷新完，把空槽美术同步一遍。
-    if not bar.__monetSlotHook then
-        bar.__monetSlotHook = true
+    if not Marked(bar, "slotHook") then
+        Mark(bar, "slotHook", true)
         if type(hooksecurefunc) == "function" and type(bar.UpdateShownButtons) == "function" then
             hooksecurefunc(bar, "UpdateShownButtons", function()
                 for index = 1, def.count do
