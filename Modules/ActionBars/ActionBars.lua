@@ -318,6 +318,7 @@ local CONTAINER_TEMPLATES = {
 
 -- 按钮模板：只要 SecureActionButtonTemplate。
 -- **绝对不要再拼 QuickKeybindButtonTemplate**：它在 QuickKeybind.xml:13 里写了
+
 -- <OnClick method="QuickKeybindButtonOnClick"/>，而模板串里后写的覆盖先写的 ——
 -- 安全点击处理器 SecureActionButton_OnClick 会被整个顶掉。那个 OnClick 只在
 -- 快速按键模式（KeybindFrames_InQuickKeybindMode）下干活，平时一次点击什么都不做：
@@ -1028,8 +1029,8 @@ local function UpdateButtonContent(button, slot)
 end
 
 -- CreateFrame 的第 5 个参数（id）只有直接调用才能给，所以按钮不走 NewFrame。
-local function CreateSecureButton(name, parent, id)
-    for _, template in ipairs(BUTTON_TEMPLATES) do
+local function CreateSecureButton(name, parent, id, templates)
+    for _, template in ipairs(templates or BUTTON_TEMPLATES) do
         local ok, frame
         if template == "" then
             ok, frame = pcall(CreateFrame, "CheckButton", name, parent, nil, id)
@@ -1076,7 +1077,14 @@ local function BuildButton(bar, index)
     local def  = bar.def
     local name = "MonetUI" .. def.key .. "Button" .. index
 
-    local button = CreateSecureButton(name, bar.frame, index)
+    -- 宠物条的按钮要能吃 _onclick 片段（SecureHandlerClickTemplate）；
+    -- 带不上就退回原来的安全按钮模板（那时点击不会生效，但不会崩）。
+    local templates = def.pet
+        and { "SecureHandlerClickTemplate, SecureActionButtonTemplate",
+              "SecureHandlerClickTemplate",
+              "SecureActionButtonTemplate" }
+        or nil
+    local button = CreateSecureButton(name, bar.frame, index, templates)
     if not button then return nil end
 
     -- 安全按钮契约（和 Ellesmere 在 12.x 上验证过的写法一致）：
@@ -1092,15 +1100,23 @@ local function BuildButton(bar, index)
     pcall(button.RegisterForClicks, button, "AnyDown", "AnyUp")
 
     if def.pet then
-        -- 宠物技能：SecureActionButtonTemplate 的 type="pet"。
-        -- **type / action 都不能由 Lua 写**（脏值）：type 走安全片段，action 由翻页子片段写。
-        InstallSecureInit(button)
+        -- 宠物条：**不在我们自己身上施法**（这个客户端没有通用安全按钮的 type="pet"，
+        -- 属性写对了点下去也没反应）。改成"点击片段去点暴雪自己的宠物按钮"：
+        --   * 按钮用 SecureHandlerClickTemplate；
+        --   * 每个按钮用 SetFrameRef 指向对应的 PetActionButtonN；
+        --   * _onclick 片段在安全环境里 GetFrameRef(...):Click() —— 受保护按钮允许被安全代码点。
+        -- 这样施法、冷却、自动施法提示全部由暴雪负责，我们只管外观和位置。
+        local blizz = _G["PetActionButton" .. index]
+        if blizz and type(button.SetFrameRef) == "function" then
+            pcall(button.SetFrameRef, button, "petbutton", blizz)
+            pcall(button.SetAttributeNoHandler, button, "_onclick",
+                'local b = self:GetFrameRef("petbutton"); if b then b:Click("LeftButton") end')
+        end
         InstallPageChild(button, index)
         button.bindName = def.bind .. index
         button.bar      = bar.frame
         SkinButton(button)
         SetHotkey(button)
-        -- 宠物技能也支持拖出（PickupPetAction）；OnDragStart 在下面统一装。
         InstallDrag(bar, button, index, true)
         return button
     end
