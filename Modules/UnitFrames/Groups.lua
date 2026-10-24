@@ -79,12 +79,12 @@ end
 --- 按钮模板没带 BackdropTemplate 时的退路：四边各一条 1px 贴图，颜色跟主题走。
 -- 正常路径是 Widget:Theme（安全头用逗号模板串，BackdropTemplate 会一起合进来）；
 -- 这里只是兜底 —— 万一模板串没合上，也不能让"没边框"成为唯一结果。
-local function PlainBorder(button)
-    if button.monetEdges then return button.monetEdges end
-
+-- 四边发丝线的公共骨架（review 2026-10-24 #4）：plain / select 两条构建路径原来各复制了一遍
+-- "建 4 条贴图 + 锚四边"，只差宿主与绘制层级；现在共用 BuildEdges，粗细 / 颜色由各自的 Size* 填。
+local function BuildEdges(host, drawLayer, subLevel)
     local edges = {}
     for i = 1, 4 do
-        local tex = button:CreateTexture(nil, "BORDER")
+        local tex = host:CreateTexture(nil, drawLayer, nil, subLevel)
         tex:SetTexture(Media.texture.blank)
         edges[i] = tex
     end
@@ -96,21 +96,31 @@ local function PlainBorder(button)
     edges[3]:SetPoint("BOTTOMLEFT")
     edges[4]:SetPoint("TOPRIGHT")
     edges[4]:SetPoint("BOTTOMRIGHT")
-
-    button.monetEdges = edges
     return edges
 end
 
---- 退路边框的粗细与颜色：粗细是物理像素（换 UI 缩放不变粗），颜色跟主题的 borderKey 走。
-local function SizePlainBorder(button)
-    local edges = button.monetEdges
-    if not edges then return end
+local function PlainBorder(button)
+    if button.monetEdges then return button.monetEdges end
 
-    local thickness = BORDER * Media:Mult()
+    button.monetEdges = BuildEdges(button, "BORDER", 0)
+    return button.monetEdges
+end
+
+--- 退路边框的粗细与颜色：粗细是物理像素（换 UI 缩放不变粗），颜色跟主题的 borderKey 走。
+--- 物理像素粗细（换 UI 缩放不变粗）：两条横边 SetHeight、两条竖边 SetWidth。
+local function SizeEdges(edges, thickness)
+    if not edges then return end
     edges[1]:SetHeight(thickness)
     edges[2]:SetHeight(thickness)
     edges[3]:SetWidth(thickness)
     edges[4]:SetWidth(thickness)
+end
+
+local function SizePlainBorder(button)
+    local edges = button.monetEdges
+    if not edges then return end
+
+    SizeEdges(edges, BORDER * Media:Mult())
 
     local r, g, b = Color:GetBorder()
     for i = 1, 4 do edges[i]:SetVertexColor(r, g, b, 1) end
@@ -130,36 +140,13 @@ local SELECT_BORDER = 2   -- 物理像素：1px 和按钮自己的边框糊在�
 local function EnsureSelectBorder(button)
     if button.selectEdges then return button.selectEdges end
 
-    local host = button.overlay or button
-    local edges = {}
-    for i = 1, 4 do
-        local tex = host:CreateTexture(nil, "OVERLAY", nil, 7)
-        tex:SetTexture(Media.texture.blank)
-        edges[i] = tex
-    end
-    edges[1]:SetPoint("TOPLEFT")
-    edges[1]:SetPoint("TOPRIGHT")
-    edges[2]:SetPoint("BOTTOMLEFT")
-    edges[2]:SetPoint("BOTTOMRIGHT")
-    edges[3]:SetPoint("TOPLEFT")
-    edges[3]:SetPoint("BOTTOMLEFT")
-    edges[4]:SetPoint("TOPRIGHT")
-    edges[4]:SetPoint("BOTTOMRIGHT")
-
-    button.selectEdges = edges
-    return edges
+    button.selectEdges = BuildEdges(button.overlay or button, "OVERLAY", 7)
+    return button.selectEdges
 end
 
 --- 粗细按物理像素走（换 UI 缩放不变粗）。
 local function SizeSelectBorder(button)
-    local edges = button.selectEdges
-    if not edges then return end
-
-    local thickness = SELECT_BORDER * Media:Mult()
-    edges[1]:SetHeight(thickness)
-    edges[2]:SetHeight(thickness)
-    edges[3]:SetWidth(thickness)
-    edges[4]:SetWidth(thickness)
+    SizeEdges(button.selectEdges, SELECT_BORDER * Media:Mult())
 end
 
 --- 点亮 / 熄灭。颜色是主题的 highlight，主题一换由 RefreshAll 重刷。
