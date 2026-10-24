@@ -1441,10 +1441,10 @@ local function CreateBar(def)
             pcall(shell.SetAlpha, shell, 0)
             pcall(shell.EnableMouse, shell, false)
             pcall(shell.EnableMouseMotion, shell, false)
-            -- 卸载外壳事件：它的 Update → UpdateShownButtons 会对这 10 个（已经被我们搬走的）
-            -- 受保护按钮 SetShown，每次都被判 BLOCKED（就是那 10 条拦截的来源）。
-            -- 按钮自己的图标/冷却由它们各自的 UpdateAction / 冷却事件负责，不依赖外壳。
-            pcall(shell.UnregisterAllEvents, shell)
+            -- **事件不能卸载**：实测卸载之后没人再更新这套按钮的图标/冷却（冷却圈直接不转），
+            -- 也没人再 Show 它们。代价就是壳的 Update → UpdateShownButtons 会对这 10 个已经
+            -- 搬家的受保护按钮 SetShown，日志里出现 10 条 BLOCKED（只进日志、不弹窗）。
+            -- 功能优先，接受这个代价。
         end
         if RegisterStateDriver then
             pcall(RegisterStateDriver, frame, "visibility", "[pet] show; hide")
