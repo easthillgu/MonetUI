@@ -1550,57 +1550,18 @@ local function AdoptBar(def)
         end
     end
 
-    -- 暴雪改按钮显隐时不发事件，直接后钩条自己的 UpdateShownButtons（Lua 方法，安全钩）：
-    -- 每次它刷新完，把空槽美术同步一遍。
-    if not Marked(bar, "slotHook") then
-        Mark(bar, "slotHook", true)
-        if type(hooksecurefunc) == "function" and type(bar.UpdateShownButtons) == "function" then
-            hooksecurefunc(bar, "UpdateShownButtons", function()
-                for index = 1, def.count do
-                    local b = _G[def.pattern:format(index)]
-                    if b then SyncEmptySlot(b) end
-                end
-            end)
-        end
-    end
-
-    for index = 1, def.count do
-        local button = _G[def.pattern:format(index)]
-        if not button then break end
-        if BuildEmptySlot(button) then SyncEmptySlot(button) end
-        local icon = button.icon
-        if icon then Skin:CropIcon(icon, CROP, 1 - CROP, CROP, 1 - CROP) end
-        -- 暴雪的按钮是受保护的（改它自己的美术会把框体弄脏），所以外观由我们垫在它下面的一块
-        -- Monet 底板来做：底色和描边换成主题的，图标、键位数字照旧。
-        Skin:ControlBg(button, { thickness = 1, bgAlpha = 0.55 })
-        -- 暴雪自己的按钮美术（外框 / 按下 / 高亮）收掉，只留图标 —— 和自绘动作条一个样子。
-        Skin:FadeButtonArt(button)
-        -- 织理 + 顶亮底沉的高光，和自绘动作条同一套材质。
-        -- 但收养按钮的图标在 **BACKGROUND/0**（实测 StanceButton1.icon = BACKGROUND/0，
-        -- 自绘按钮的图标在 ARTWORK），BACKGROUND/2、3 是同层更高的 sublevel，会画到图标
-        -- 上面 —— 姿态条图标上叠着斜纹就是这么来的。CreateTexture 的 sublevel 允许 -8..7，
-        -- 所以这里把织理/光泽压到负 sublevel（-2、-1），垫在暴雪图标之下、我们自己的
-        -- ControlBg 底板之上。
-        Widget:ButtonMaterial(button, {
-            alpha = 0, weaveAlpha = 0.25,
-            weaveLayer = "BACKGROUND", weaveSublevel = -2,
-            layer = "BACKGROUND",      sublevel = -1,
-        })
-        -- 热键用白色（主题的 edge 色在图标上看不清）。
-        Widget:SetFont(button.HotKey, HOTKEY_SIZE, "pixel")
-        Widget:SetFont(button.Count, COUNT_SIZE, "pixel")
-        if button.HotKey then
-            Widget:ColorText(button.HotKey, { r = 1, g = 1, b = 1 })
-        end
-
-        -- 我们自己给这些受保护按钮套了美术，暴雪自己的 UpdateShownButtons 就可能被拒
-        -- （日志里 PetActionButton7:SetShown() 那一串），结果按钮停在"藏起来"的状态 ——
-        -- 表现就是宠物条只显示几个、格子被吃掉。脱战时我们直接把整排显示出来：
-        -- 空槽也显示（空格子的美术由 BuildEmptySlot 补），和"10 个按钮"的预期一致。
-        if not InCombatLockdown() then
-            pcall(button.Show, button)
-        end
-    end
+    -- **不再碰暴雪的按钮**（这里原本会给它们套 ControlBg / 渐隐边框 / ButtonMaterial /
+    -- 像素字体，还会替它们 Show）。
+    --
+    -- taint.log 实测：这些写入会把**受保护的**动作按钮/按钮容器弄脏。脏了之后：
+    --   * 暴雪自己的 UpdateShownButtons → SetShown 在战斗中被拒
+    --     （"An action was blocked in combat because of taint from MonetUI - PetActionButton9:SetShown()"）；
+    --   * 按钮卡在错误状态，暴雪只能反复重试 → 每次进战斗刷一屏，并连带把
+    --     PetActionBar / MainActionBar 的整体重排也拒掉（ClearAllPointsBase / SetPointBase）；
+    --   * 连带 UpdateShownButtons 的后钩也失去意义。
+    -- 所以这里只保留"容器摆位置"（容器不是受保护按钮），外观交回暴雪自己。
+    -- 代价：宠物/姿态条是暴雪原生外观。要自绘就得像 Bar1..8 那样建自己的安全按钮
+    -- （宠物用 type="pet"），那是另一件事，记进 AGENTS 待办。
 
     if def.glow == "autoCast" then
         SyncPetGlow(def, entry)
