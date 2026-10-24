@@ -722,32 +722,26 @@ end
 
 local parked = setmetatable({}, { __mode = "k" })
 
+--- 藏掉暴雪的团队/小队框。
+--- **不写字段、不挂 OnShow 钩子**：这两个动作会把 CompactPartyFrame 标脏，之后它自己的
+--- `CompactUnitFrame_UpdateHealthColor` 比较机密颜色分量就抛
+--- "attempt to compare local 'oldR' (a secret number value, while execution tainted by 'MonetUI')"
+--- （实机：打开编辑模式时必现）。重新藏的工作交给 Widget:ShowWatch（轮询"变显示了"）。
 local function Park(frame)
     if not frame or parked[frame] then return end
     parked[frame] = true
-    local ok, parent = pcall(frame.GetParent, frame)
-    frame.monetParent = ok and parent or UIParent
-    pcall(function()
-        frame:Hide()
-        frame:SetAlpha(0)
-        frame:SetParent(UIParent)
-        -- 它自己会 OnShow 回来（比如玩家点开了团队管理器）：还归我们管时才再藏一次
-        if not frame.monetRehooked then
-            frame.monetRehooked = true
-            frame:HookScript("OnShow", function(self)
-                if parked[self] and not InCombat() then self:Hide() end
-            end)
-        end
+    pcall(frame.Hide, frame)
+    pcall(frame.SetAlpha, frame, 0)
+    ns.Widget:ShowWatch(frame, function(self)
+        if parked[self] and not InCombat() then pcall(self.Hide, self) end
     end)
 end
 
 local function Unpark(frame)
     if not frame or not parked[frame] then return end
     parked[frame] = nil
-    pcall(function()
-        frame:SetAlpha(1)
-        frame:SetParent(frame.monetParent or UIParent)
-    end)
+    pcall(frame.SetAlpha, frame, 1)
+    pcall(frame.Show, frame)
 end
 
 local BLIZZARD_GROUPS = {
