@@ -702,10 +702,13 @@ function SimpleConfig:Build()
         { value = "highlight", text = "高亮色（Monet）" },
         { value = "class",     text = "职业 / 阵营色" },
         { value = "health",    text = "生命绿" },
+        { value = "dark",      text = "深色（反相）" },
     }
     local LOST_ITEMS = {
-        { value = "danger", text = "高亮红" },
-        { value = "black",  text = "黑色（背景）" },
+        { value = "danger",  text = "高亮红" },
+        { value = "black",   text = "黑色（背景）" },
+        { value = "light",   text = "浅灰（反相）" },
+        { value = "theme25", text = "主题色 25%" },
     }
     local POWER_ITEMS = {
         { value = "type",  text = "按能量类型" },

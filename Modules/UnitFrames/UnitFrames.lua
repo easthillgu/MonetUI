@@ -226,6 +226,10 @@ local function FillColor(unit)
         end
     elseif style == "health" then
         return Color:GetHealth()
+    elseif style == "dark" then
+        -- 反相风（Andromeda 默认的 style 1）：填充近黑，剩下的血量靠"暗块面积"读。
+        -- 要配 lostColor 的 "light" / "theme25" 才有意义，否则暗填充压在黑底上什么都看不到。
+        return 0.10, 0.10, 0.10, 1
     end
     -- highlight（player / pet）是 Monet 招牌奶油色，但原色 {0.95,0.93,0.84} 太接近白，
     -- 铺满整条血条会发灰发白、看不出"血量"。压暗 20% 变成有分量的暖奶油，仍读得出来是 highlight。
@@ -235,8 +239,16 @@ end
 
 --- The *missing* part of a health bar: pure background, needs no unit value.
 local function LostColor(unit)
-    if Setting(unit, "lostColor") == "danger" then
+    local style = Setting(unit, "lostColor")
+    if style == "danger" then
         return Color:GetDanger()
+    elseif style == "light" then
+        -- 反相风的"亮底"：填充压暗（fillColor = dark）之后，空血这边提亮才读得出血量。
+        return 0.60, 0.60, 0.60, 1
+    elseif style == "theme25" then
+        -- Andromeda 的 bg.multiplier = 0.25：空血带一点同色系的暗调，比纯黑 / 纯红柔和。
+        local r, g, b = Color:GetPrimary()
+        return r * 0.25, g * 0.25, b * 0.25, 1
     end
     return 0, 0, 0, 1
 end
