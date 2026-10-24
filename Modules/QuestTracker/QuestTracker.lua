@@ -38,7 +38,6 @@ local YELLOW  = { r = 0.85, g = 0.75, b = 0.35 }
 local GREY    = { r = 0.55, g = 0.55, b = 0.55 }
 
 local enabled = true       -- Core only calls SetEnabled on runtime toggles
-local waitingForBlizzard = false   -- 正在等 LoD 的 ObjectiveTrackerFrame 出现
 local tracker
 local LINE_H  = 12         -- measured line pitch of the pixel font
 
@@ -47,6 +46,7 @@ local entries = {}         -- per-quest records for the current render pass
 local renderPending = false
 
 local Render, QueueRender
+local SuppressBlizzard          -- 前置声明：Render 每次刷新都要补一刀（定义在下面）
 
 local function SavePosition()
     if not tracker then return end
@@ -173,6 +173,9 @@ end
 
 Render = function(settle)
     if not tracker then return end
+
+    -- 每次刷新都顺手核对一眼暴雪的追踪框（它可能刚被换成新对象 / 又被显示）。
+    if SuppressBlizzard then SuppressBlizzard() end
 
     for _, e in ipairs(entries) do
         ReleaseFont(titlePool, e.title)
@@ -322,31 +325,33 @@ end
 
 --- 藏掉暴雪的任务 / 目标追踪框。
 ---
---- 注意：暴雪的追踪框在 **LoD 包**（Blizzard_ObjectiveTracker）里，登录瞬间
---- `_G.ObjectiveTrackerFrame` 还不存在。以前只在 Skin() 里试一次，包晚到就永远不藏 ——
---- 实机症状就是"自绘的追踪框和默认的追踪框同时挂在屏幕上"。
---- 所以：没到就轮询等它（最多 12 秒），到了再挂 ShowWatch。
-local function SuppressBlizzard()
+--- 两条实机教训：
+---   1. 它在 **LoD 包**（Blizzard_ObjectiveTracker）里，登录瞬间 `_G.ObjectiveTrackerFrame`
+---      还不存在；只在 Skin() 里试一次就永远藏不住（症状：自绘的和默认的同时挂着）。
+---   2. LoD 包加载时会把它**换成一个新对象** —— 我们藏过的那块已经不是屏幕上那块，
+---      所以"藏一次 + ShowWatch"也不够（新对象没被登记过，`marked` 永远是 nil）。
+--- 因此改成多时机补做：ADDON_LOADED / PLAYER_ENTERING_WORLD / 换区域 / 每次任务刷新，
+--- 外加一个 1 秒的低频兜底。带 Marked 守卫，重复调用只是一次表查询。
+function SuppressBlizzard()
     local bt = _G.ObjectiveTrackerFrame
-    if not bt then
-        if not waitingForBlizzard and ns.Widget then
-            waitingForBlizzard = true
-            local tries = 0
-            ns.Widget:PollWatch(_G.UIParent, function()
-                tries = tries + 1
-                if tries > 60 then return end
-                if _G.ObjectiveTrackerFrame then
-                    tries = 61
-                    SuppressBlizzard()
-                end
-            end)
-        end
-        return
-    end
-
+    if not bt then return end
     WatchBlizzard(bt)
     -- 每次调用都补一次隐藏：关掉再打开模块时，它可能正显示着（不会再有 OnShow 变化）。
     if enabled and bt.IsShown and bt:IsShown() then pcall(bt.Hide, bt) end
+end
+
+--- 1 秒一次的低频兜底：上面那些时机都没赶上（或者框被谁重新显示）时补一刀。
+local ticker
+local function EnsureTicker()
+    if ticker then return end
+    ticker = CreateFrame("Frame")
+    local acc = 0
+    ticker:SetScript("OnUpdate", function(_, elapsed)
+        acc = acc + (elapsed or 0)
+        if acc < 1 then return end
+        acc = 0
+        if enabled then SuppressBlizzard() end
+    end)
 end
 
 function M:Skin()
@@ -395,6 +400,14 @@ function M:Initialize()
     EventBus:Register("QUEST_LOG_UPDATE", QueueRender)
     EventBus:Register("QUEST_WATCH_UPDATE", QueueRender)
     EventBus:Register("QUEST_ACCEPTED", QueueRender)
+
+    -- 暴雪的追踪框会晚到、还会被换成新对象（见 SuppressBlizzard 的注释），这几个时机都补一次。
+    EventBus:Register("PLAYER_ENTERING_WORLD", function() SuppressBlizzard() end)
+    EventBus:Register("ZONE_CHANGED_NEW_AREA", function() SuppressBlizzard() end)
+    EventBus:Register("ADDON_LOADED", function(_, name)
+        if name == "Blizzard_ObjectiveTracker" then SuppressBlizzard() end
+    end)
+    EnsureTicker()
 end
 
 function M:SetEnabled(value)
