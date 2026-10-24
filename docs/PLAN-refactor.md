@@ -101,10 +101,27 @@ UpdateMaxHealth / UpdateHealPrediction` → 秘值比较被拦 → 整条 compac
 - `ns:AfterCombat` 附加语义:队内 fn 返回 false = "未就绪、留队重试、不提示,error
   语义不变"(Core.lua:403-407)。
 
+**AuraContainer 生产波案(2026-10-25 02:12–02:45, 实机探针定性)**:
+- 症状:`MathUtil.lua:24 / Backdrop.lua:342 "index a table that cannot be accessed while
+  tainted"` 1+9 成簇、每几分钟一对;本地 FOUR 个引擎 AuraContainer(UF target buffs/debuffs
+  + BuffFrame 战斗 `MonetUICombat{Buff,Debuff}Frame`)池生产中止。
+- 取证:池审计 `MonetUICombatBuffFrame kids=20 styled=10 missing=11..20`(整批 batchSize=10
+  失格)、`MonetUICombatDebuffFrame styled=0`(唯一批全灭);失格按钮连 `GetChildren` 都被拒
+  (ApplyAccessRestrictions 落地)。triggers:第一脱战窗生产的批 OK,受限窗生产的批全挂;
+  `:AddAuraGroup(` 全客户端仅我们调用 → 出错池四舍五入就是这四个。
+- 根因:我们的 `initializeFrame` 回调(StyleAuraButton / BuffFrame lambda)里 **六处未包
+  pcall 的 Create**(`button:CreateTexture` / `CreateFrame("Frame",…,"BackdropTemplate")` /
+  `CreateFrame("Cooldown",…)` / `cd:CreateFontString`×2)在受限窗被引擎整体拒绝 → 抛出穿出
+  securecall → 生产批次连锁死亡(每带 10 个按钮 × 若干重试 = 错误波);池永远凑不满,战斗
+  buff/debuff 行退化。
+- 修(3453b10):StyleAuraButton 六处 Create 全 pcall + 失败早退,batch 回调整体 pcall;
+  受限窗按钮样式失格(引擎外观兜底),脱战窗照常整样式。
+- 关联改判:UF注释"战斗中建容器=空容器"与"引擎按钮之后写region被拒"现象重新归类为
+  本案同源(受限窗平台行为一致)。
+
 **本轮回归第二波(2026-10-25 01:51–02:30, c2abb3e reload 后续查)**:
-- `MathUtil.lua:24 "index a table that cannot be accessed while tainted"` ×10 成簇红字:
-  零售源 :24 = `CreateCounter` 计数器闭包(用户: ScriptErrorsFrame/CallbackRegistry/TimerUtil
-  共用),待用户贴[详情]全栈定位我们→暴雪的路径。
+- 早期 `MathUtil.lua:24` ×10 成簇红字:当时判"CauseCounter 闭包族、待[详情]全栈"——
+  后续已并入上面的 AuraContainer 生产波案(同一 secure 委托链的另一种 C 封印读失败)。
 - `UnitFrames.lua:734 boolean test on field '?'` 红字: `CastInfo` 里
   `channel and result[8] or result[9]` 的 and/or 真值链 —— channel=true 时 Lua 会**真值测试
   result[8]**(受限时是秘布尔),必抛。NP 同款(:709)。修=显式 if 选槽(96c7482)。
