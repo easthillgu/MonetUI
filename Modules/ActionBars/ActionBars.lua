@@ -1348,19 +1348,25 @@ local function SkinAdoptedPetButton(btn)
     -- 所以底板/边框不能垫在下面（会被图标完全盖住）——改成在按钮**上方**画一圈 1px 的边框。
     -- 必须带 BackdropTemplate：Widget:Theme 走的是 SetBackdrop，没有该模板的面板画不出边。
     local border = CreateFrame("Frame", nil, btn, "BackdropTemplate")
-    border:SetPoint("TOPLEFT", btn, "TOPLEFT", -1, 1)
-    border:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 1, -1)
+    border:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, 0)
+    border:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 0, 0)
     border:SetFrameLevel(btn:GetFrameLevel() + 1)
     border:EnableMouse(false)
     Widget:Theme(border, { thickness = 1, bgAlpha = 0 })
     Mark(btn, "petBorder", border)
 
+    -- 图标内缩 1px，和我们自绘按钮完全一致（露出来的那 1px 就是边框）。
     local icon = btn.icon
     if not icon and btn.GetName and type(btn.GetName) == "function" then
         local name = btn:GetName()
         icon = name and _G[name .. "Icon"]
     end
-    if icon then pcall(Skin.CropIcon, Skin, icon, CROP, 1 - CROP, CROP, 1 - CROP) end
+    if icon and icon.ClearAllPoints and icon.SetPoint then
+        pcall(icon.ClearAllPoints, icon)
+        pcall(icon.SetPoint, icon, "TOPLEFT", btn, "TOPLEFT", 1, -1)
+        pcall(icon.SetPoint, icon, "BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
+        pcall(Skin.CropIcon, Skin, icon, CROP, 1 - CROP, CROP, 1 - CROP)
+    end
 
     if btn.HotKey then pcall(Widget.SetFont, Widget, btn.HotKey, HOTKEY_SIZE, "pixel") end
     if btn.Count then pcall(Widget.SetFont, Widget, btn.Count, COUNT_SIZE, "pixel") end
@@ -1432,6 +1438,10 @@ local function CreateBar(def)
             pcall(shell.SetAlpha, shell, 0)
             pcall(shell.EnableMouse, shell, false)
             pcall(shell.EnableMouseMotion, shell, false)
+            -- 卸载外壳事件：它的 Update → UpdateShownButtons 会对这 10 个（已经被我们搬走的）
+            -- 受保护按钮 SetShown，每次都被判 BLOCKED（就是那 10 条拦截的来源）。
+            -- 按钮自己的图标/冷却由它们各自的 UpdateAction / 冷却事件负责，不依赖外壳。
+            pcall(shell.UnregisterAllEvents, shell)
         end
         if RegisterStateDriver then
             pcall(RegisterStateDriver, frame, "visibility", "[pet] show; hide")
