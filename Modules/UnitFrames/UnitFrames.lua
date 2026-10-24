@@ -27,6 +27,25 @@ local UNIT_LABEL = {
 -- Build order matters: every frame anchors to one earlier in the list.
 local UNITS = { "player", "target", "targettarget", "focus", "pet" }
 
+-- 可见性交给安全环境：这些框是 SecureUnitButtonTemplate，战斗中不能由我们 Show/Hide
+-- （日志里 MonetUITargetFrame:Show()/Hide() 攒了两百多次的根因）。用 state driver 描述
+-- "有这个单位就显示"，由客户端的受限环境在战斗中自己切换，我们只负责内容。
+-- player 永远存在，所以是无条件 show；其余按 @unit 判断。
+local VISIBILITY = {
+    player       = "show",
+    target       = "[@target,exists] show; hide",
+    targettarget = "[@targettarget,exists] show; hide",
+    focus        = "[@focus,exists] show; hide",
+    pet          = "[@pet,exists] show; hide",
+}
+
+--- 换驱动，而不是写显隐：enabled=false 时整块收起。
+local function ApplyVisibility(frame, enabled)
+    if not frame or type(_G.RegisterStateDriver) ~= "function" then return end
+    local condition = enabled and VISIBILITY[frame.unit] or "hide"
+    pcall(_G.RegisterStateDriver, frame, "visibility", condition or "hide")
+end
+
 -- Name caps, in CHARACTERS and per locale: a Chinese glyph is about twice as
 -- wide as a Latin one at the same size, so the same line holds roughly half as many.
 local ZH          = GetLocale() == "zhCN"
@@ -1697,7 +1716,8 @@ end
 
 function M:UpdateUnit(unit, kind, powerType)
     local frame = frames[unit]
-    if not frame or not frame:IsShown() then return end
+    -- IsShown 在 1.60 标了 SecretReturnsForAspect（Shown），受限时会是机密值：用 Secrets.Bool 兜。
+    if not frame or not Secrets.Bool(frame:IsShown(), false) then return end
     if kind == "health" then
         UpdateHealth(frame)
     elseif kind == "power" then
@@ -1714,22 +1734,19 @@ function M:UpdateUnit(unit, kind, powerType)
 end
 
 --- Show / hide a frame for the unit and refresh all of its parts.
+--- 显隐本身不在这里做：visibility 驱动负责（战斗中 Show/Hide 是受保护的），
+--- 这里只把内容刷成当前单位的值。
 local function RefreshUnit(unit)
     local frame = frames[unit]
-    if not frame then return end
-    if UnitExists(unit) then
-        frame:Show()
-        UpdateHealth(frame)
-        UpdatePower(frame)
-        UpdateClassPower(frame)
-        UpdateName(frame)
-        UpdateThreat(frame)
-        -- A fresh target means a fresh aura list; lift (or re-stack) it above our bar.
-        if unit == "target" then EnsureTargetAuras(frame) end
-    else
-        -- B 方案：容器是 target 帧的子帧，frame:Hide() 会连带隐藏，无需归还
-        frame:Hide()
-    end
+    if not frame or not UnitExists(unit) then return end
+
+    UpdateHealth(frame)
+    UpdatePower(frame)
+    UpdateClassPower(frame)
+    UpdateName(frame)
+    UpdateThreat(frame)
+    -- A fresh target means a fresh aura list; lift (or re-stack) it above our bar.
+    if unit == "target" then EnsureTargetAuras(frame) end
 end
 
 function M:UpdateAll()
@@ -1828,6 +1845,7 @@ function M:Initialize()
         local default = ns.DEFAULTS.unitFrames[unit]
         frames[unit] = CreateUnitFrame(unit, default)
         PositionFrame(frames[unit])
+        ApplyVisibility(frames[unit], true)
     end
 
     if ns:DB().unitFrames.hideBlizzard then
@@ -1844,14 +1862,13 @@ function M:Initialize()
     self:UpdateAll()
 end
 
---- 安全单位按钮的显示/隐藏。**战斗中不能调**（SecureUnitButtonTemplate 的 SetShown 受保护，
---- 日志里 MonetUITargetFrame:Hide()/Show() 攒了两百多次），脱战再补。
+--- 安全单位按钮的显隐：走 visibility 驱动（战斗中不能由我们 SetShown ——
+--- 日志里 MonetUITargetFrame:Hide()/Show() 攒了两百多次就是这条路径）。
 local pendingEnabled
 
 local function ApplyEnabled(enabled)
     for _, frame in pairs(frames) do
-        local show = enabled and UnitExists(frame.unit)
-        pcall(frame.SetShown, frame, show and true or false)
+        ApplyVisibility(frame, enabled)
         -- A hidden module must not keep the state layer's ticker running.
         if frame.monetBorder and frame.monetBorder.SetEnabled then
             frame.monetBorder:SetEnabled(enabled and true or false)
