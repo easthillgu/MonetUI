@@ -204,10 +204,7 @@ end
 
 local function Tick(cd, elapsed)
     local state = attached[cd]
-    if not state then
-        cd:SetScript("OnUpdate", nil)
-        return
-    end
+    if not state then return end
 
     state.accum = (state.accum or 0) + elapsed
     if state.accum < (state.next or 0) then return end
@@ -366,6 +363,27 @@ local function EnsureHooks()
     -- 精度差半个轮询周期，但不再污染任何暴雪调用链。
 end
 
+--- 所有冷却文字共用一个**我们自己的**驱动帧。
+--- 绝不 `cd:SetScript("OnUpdate", Tick)`：那等于改写暴雪冷却框的脚本 —— 写字段本身就是污染，
+--- 而且我们的代码会夹在暴雪的更新链里执行，链上后续的安全调用全被拒
+--- （实机：PetActionButton*:SetShown / PetActionBar:ClearAllPointsBase，就是这条链）。
+local driver
+local driverAcc = 0
+
+local function EnsureDriver()
+    if driver then return end
+    driver = CreateFrame("Frame")
+    driver:SetScript("OnUpdate", function(_, elapsed)
+        driverAcc = driverAcc + (elapsed or 0)
+        if driverAcc < 0.05 then return end
+        local dt = driverAcc
+        driverAcc = 0
+        for cd, state in pairs(attached) do
+            if state then Tick(cd, dt) end
+        end
+    end)
+end
+
 --- Register a cooldown frame with the auto-scaling text renderer.
 -- Safe to call repeatedly (theme refresh, size change): it only re-styles and asks for an immediate re-render.
 -- compact = true：不用 mm:ss 那种宽格式（"1:05"），退回紧凑的 "59m"/"23h"/"3d"。
@@ -419,7 +437,7 @@ function M:Attach(cd, size, compact, font)
     end
 
     EnsureHooks()
-    cd:SetScript("OnUpdate", Tick)
+    EnsureDriver()
     return state
 end
 
