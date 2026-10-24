@@ -254,11 +254,15 @@ local function SetupTracking()
     HideArt(btn, "PushedTexture")
     HideArt(btn, "HighlightTexture")
 
-    if not btn.monetBadge then
-        btn.monetBadge = AddBadge(btn, "monet_map_tracking", "border")
-        HookHover(btn, btn.monetBadge)
+    -- 徽章存在旁表里（ns:Mark）：btn 是暴雪的框体，往它上面写字段就等于把它标脏，
+    -- 它之后跑的暴雪代码会全部算成"被 MonetUI 污染"。
+    local badge = Marked(btn, "badge")
+    if not badge then
+        badge = AddBadge(btn, "monet_map_tracking", "border")
+        Mark(btn, "badge", badge)
+        HookHover(btn, badge)
     end
-    btn.monetBadge:Show()
+    badge:Show()
     -- 客户端的 Show 覆写会转去显隐 Tracking 框，所以用 SetShown 直接定显隐。
     pcall(btn.SetShown, btn, true)
 end
@@ -281,11 +285,13 @@ local function SetupCompartment()
     HideArt(btn, "PushedTexture")
     HideArt(btn, "HighlightTexture")
 
-    if not btn.monetBadge then
-        btn.monetBadge = AddBadge(btn, "monet_map_compartment", "border")
-        HookHover(btn, btn.monetBadge)
+    local badge = Marked(btn, "badge")
+    if not badge then
+        badge = AddBadge(btn, "monet_map_compartment", "border")
+        Mark(btn, "badge", badge)
+        HookHover(btn, badge)
     end
-    btn.monetBadge:Show()
+    badge:Show()
     pcall(btn.SetShown, btn, true)
 end
 
@@ -427,7 +433,8 @@ function B:Restore()
             for _, info in ipairs(saved.art) do
                 pcall(info.region.SetAlpha, info.region, info.alpha)
             end
-            if frame.monetBadge then pcall(frame.monetBadge.Hide, frame.monetBadge) end
+            local badge = Marked(frame, "badge")
+            if badge then pcall(badge.Hide, badge) end
         end
     end
     savedParents = setmetatable({}, { __mode = "k" })
@@ -442,12 +449,14 @@ end
 --- 主题换了，三个图标重新染色。
 function B:RefreshTints()
     local tracking = Resolve("MinimapCluster.Tracking.Button")
-    if tracking and tracking.monetBadge then
-        TintIcon(tracking.monetBadge, tracking.monetBadge.tintKey)
+    local trackingBadge = tracking and Marked(tracking, "badge")
+    if trackingBadge then
+        TintIcon(trackingBadge, trackingBadge.tintKey)
     end
     local compartment = Resolve("AddonCompartmentFrame")
-    if compartment and compartment.monetBadge then
-        TintIcon(compartment.monetBadge, compartment.monetBadge.tintKey)
+    local compartmentBadge = compartment and Marked(compartment, "badge")
+    if compartmentBadge then
+        TintIcon(compartmentBadge, compartmentBadge.tintKey)
     end
     -- 难度图标的颜色跟着当前难度走，重算一次
     UpdateDifficulty()

@@ -260,26 +260,42 @@ end
 
 -- ------------------------------------------------------------------ 地图本体
 
---- 把集群挪到右下角。编辑模式也会给这个帧设锚点，所以 SetPoint 要防一手；每次套用都重做一遍。
+--- 地图自己的容器：把 `Minimap` 从 `MinimapCluster` 里搬出来，再摆到右下角。
 ---
---- 对齐的是**眼睛看到的底边**，不是集群的底边：可见底边 = Minimap 帧底 + 遮罩下裁(MASK_CROP)，
---- 面板再向下凸出 PANEL_PAD。而 Minimap 帧本身又不贴 MinimapCluster 的底（暴雪集群内部有偏移），
---- 所以先用目标值锚一次、再按实测差值补一下 —— 否则"常量写 26、看着却是 47.5"那种失真会一直在。
-local clusterAnchor = { x = 0, y = 0 }   -- 集群当前的锚点（补差后的绝对值，单位 UI）
-local clusterTarget = { gap = MINIMAP_GAP, bottom = MINIMAP_GAP }
+--- **不再动 `MinimapCluster`**（不挪、不改尺寸、也不覆写它的方法）。原因：编辑模式算右侧
+--- 动作条缩放上限时读 `MinimapCluster:IsInDefaultPosition()` 和 `MinimapCluster:GetBottom()`
+--- （Blizzard_EditMode/Mainline/EditModeManagerOverrides.lua:61 `GetRightActionBarTopLimit`）。
+--- 集群被搬到屏幕底部之后那个上限变成负数（实测 availableSpace = -101.5 → `SetScale(-0.18)` 报错），
+--- 早先的补丁是**覆写这个方法去骗它** —— 而覆写等于"把这个方法槽写成 MonetUI 的东西"，
+--- 于是 `EnterEditMode → EditModeFrameSetup` 整条调用链都被记成我们的执行环境，暴雪自己在
+--- `RefreshPartyFrames → CompactUnitFrame_UpdateHealthColor` 里比较机密血量颜色时就抛
+--- "attempt to compare local 'oldR' (a secret number value, while execution tainted by 'MonetUI')"。
+--- 结论：**只要编辑模式还读我们的值，进编辑模式就必炸**。
+--- 所以集群原地不动（编辑模式看到的永远是暴雪默认布局，算式是正的），只搬地图帧本身 ——
+--- 它在别处照样渲染、照样收鼠标（实机：搬到屏幕中央也正常，父框体不裁剪它）。
+local holder                                        -- 地图的父框体（我们自己的）
+local mapAnchor = { x = 0, y = 0 }                  -- 地图当前的锚点（补差后的绝对值，单位 UI）
+local mapTarget = { gap = MINIMAP_GAP, bottom = MINIMAP_GAP }
+
+local function EnsureHolder()
+    if holder then return holder end
+    holder = Widget:CreateFrame("MonetUIMinimapHolder", UIParent, MASK_CANVAS, MASK_CANVAS)
+    holder:SetFrameStrata("LOW")
+    holder:SetClampedToScreen(false)
+    return holder
+end
 
 --- 按实测的可见面板边补差；平移是线性的，量一次就差多少补多少。
 --- 返回是否还需要再看一眼（差值还没收敛）。
-local function AlignCluster()
-    -- 集群是编辑模式管理的受保护框体：战斗中 SetPoint 会被判越权。本函数还会从
-    -- C_Timer.After 的回调里跑（见 MoveCluster），所以守卫必须放在最前面。
+local function AlignMap()
+    -- 地图和它的父框体不是受保护框，但战斗中 SetPoint 仍可能被拒（本函数会从
+    -- C_Timer.After 的回调里跑，见 PlaceMinimap），所以守卫放在最前面。
     if InCombatLockdown() then
         Queue("skin")
         return false
     end
-    local cluster = _G.MinimapCluster
     local minimap = _G.Minimap
-    if not cluster or not minimap or type(minimap.GetRect) ~= "function" then return false end
+    if not minimap or type(minimap.GetRect) ~= "function" then return false end
 
     local okRect, left, bottom, width = pcall(minimap.GetRect, minimap)
     if not okRect or type(left) ~= "number" or type(bottom) ~= "number"
@@ -291,7 +307,7 @@ local function AlignCluster()
     local okParent, parentWidth = pcall(UIParent.GetWidth, UIParent)
     if not okParent or type(parentWidth) ~= "number" or Secrets.IsSecret(parentWidth) then return false end
 
-    local gap, target = clusterTarget.gap, clusterTarget.bottom
+    local gap, target = mapTarget.gap, mapTarget.bottom
     local panelBottom = bottom + MASK_CROP - PANEL_PAD
     local panelRight  = left + width + PANEL_PAD
 
@@ -299,31 +315,38 @@ local function AlignCluster()
     local dy = target - panelBottom
     if math.abs(dx) < 0.5 and math.abs(dy) < 0.5 then return false end
 
-    clusterAnchor.x = clusterAnchor.x + dx
-    clusterAnchor.y = clusterAnchor.y + dy
-    pcall(cluster.SetPoint, cluster, "BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", clusterAnchor.x, clusterAnchor.y)
+    mapAnchor.x = mapAnchor.x + dx
+    mapAnchor.y = mapAnchor.y + dy
+    pcall(minimap.SetPoint, minimap, "BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", mapAnchor.x, mapAnchor.y)
     return true
 end
 
-local function MoveCluster()
+local function PlaceMinimap()
     if InCombatLockdown() then
         Queue("skin")
         return
     end
+    local minimap = _G.Minimap
+    if not minimap then return end
+
+    local h = EnsureHolder()
+    if minimap:GetParent() ~= h then pcall(minimap.SetParent, minimap, h) end
+
+    -- 集群留在暴雪的默认位置：里面的装饰（圆框、罗盘环、备用底色）整体压成透明。
+    -- 地图已经搬到我们自己的父框体里，不受这个 alpha 影响。
     local cluster = _G.MinimapCluster
-    if not cluster then return end
+    if cluster then
+        pcall(cluster.SetAlpha, cluster, 0)
+        pcall(cluster.EnableMouse, cluster, false)
+    end
 
     local gap = tonumber(Settings().gap) or MINIMAP_GAP
     local target = (ns.Layout and ns.Layout.bottom) or MINIMAP_GAP
-    clusterTarget.gap, clusterTarget.bottom = gap, target
-    clusterAnchor.x, clusterAnchor.y = -gap, target
+    mapTarget.gap, mapTarget.bottom = gap, target
+    mapAnchor.x, mapAnchor.y = -gap, target
 
-    -- 暴雪给集群开了"夹在屏幕内"，锚到 -7 会被悄悄夹回 0（面板就停在 31）。
-    -- 集群下面的 7 个单位在画布透明区里，放出去看不见，必须放开夹取才能对齐基线。
-    pcall(cluster.SetClampedToScreen, cluster, false)
-
-    pcall(cluster.ClearAllPoints, cluster)
-    local ok = pcall(cluster.SetPoint, cluster, "BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", clusterAnchor.x, clusterAnchor.y)
+    pcall(minimap.ClearAllPoints, minimap)
+    local ok = pcall(minimap.SetPoint, minimap, "BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", mapAnchor.x, mapAnchor.y)
     if not ok then
         if not warned.cluster then
             warned.cluster = true
@@ -332,14 +355,14 @@ local function MoveCluster()
         return
     end
 
-    -- 暴雪在集群挪动之后还会重摆一次 Minimap 自己的锚点，晚一帧才生效（实测：补完差又自己下沉
-    -- 5.5，面板底边从 24 变成 31）。所以下一帧再量一次；量到收敛就停，最多补三遍。
-    AlignCluster()
+    -- 客户端在换形态 / 重新布局之后还会自己给 Minimap 设一次锚点，晚一帧才生效（实测：补完差
+    -- 又自己下沉 5.5，面板底边从 24 变成 31）。所以下一帧再量一次；量到收敛就停，最多补三遍。
+    AlignMap()
     if C_Timer and C_Timer.After then
         C_Timer.After(0, function()
             if InCombatLockdown() then Queue("skin") return end
             for _ = 1, 3 do
-                if not AlignCluster() then break end
+                if not AlignMap() then break end
             end
         end)
     end
@@ -358,26 +381,9 @@ local function NudgeZoom(minimap)
     pcall(minimap.SetZoom, minimap, zoom)
 end
 
---- 告诉编辑模式：小地图集群已经不在它的"默认位置"了。
----
---- 编辑模式算右侧动作条（MultiBarRight / MultiBarLeft）的缩放时，用的是
---- `topLimit = MinimapCluster:IsInDefaultPosition() and (MinimapCluster:GetBottom() - 10) or UIParent:GetTop()`
---- 和 `bottomLimit = MicroButtonAndBagsBar:GetTop() + 24`，再 `newScale = availableSpace / multiBarHeight`。
---- 暴雪假定小地图在右上角、在微型菜单**上方**；我们把集群搬到右下角（在微型菜单下方）之后
---- availableSpace 变成负数（实测 -101.5），它就算出 -0.18 去 SetScale，直接报
---- `MultiBarRight:SetScale(): Scale must be > 0`（打开法术书/天赋、换角色、改分辨率都会触发）。
----
---- `IsInDefaultPosition` 读的是编辑模式自己的 `systemInfo.isInDefaultPosition`，跟我们实际搬没搬
---- 无关 —— 所以我们搬完就得把这句话改成"不在默认位置"，它才会退回 UIParent 的整屏高度、
---- 把缩放按 1 处理（右侧那两条我们本来就 Park 成透明的）。
-local function MarkClusterMoved()
-    local cluster = _G.MinimapCluster
-    if not cluster then return end
-    if Marked(cluster, "movedFlag") then return end
-    if type(cluster.IsInDefaultPosition) ~= "function" then return end
-    Mark(cluster, "movedFlag", true)
-    cluster.IsInDefaultPosition = function() return false end
-end
+-- 曾经这里有一个 MarkClusterMoved()：覆写 `MinimapCluster.IsInDefaultPosition` 来骗编辑模式。
+-- 那正是"进编辑模式必报 oldR"的根源（理由见上面 PlaceMinimap 的注释），已彻底删除 ——
+-- 现在集群一直在暴雪的默认位置，编辑模式不需要我们说任何话。
 
 --- 把地图变成矩形。
 ---
@@ -444,8 +450,6 @@ local function ReshapeMinimap(minimap)
     end
 
     if failed then Queue("skin") end
-
-    MarkClusterMoved()
 end
 
 --- ElvUI / NDui 约定：全局 GetMinimapShape 告诉第三方小地图按钮"现在的小地图是方的"，
@@ -651,9 +655,19 @@ local function HookMinimapConfig()
     -- 改成轮询：小地图尺寸/形状被客户端改回默认时（256→默认），把重套皮排到下一帧。
     local lastW
     ns.Widget:PollWatch(cluster, function(self)
-        local w = self.MinimapContainer and self.MinimapContainer.Minimap and self.MinimapContainer.Minimap:GetWidth()
-        w = tonumber(w) or nil
-        if w and lastW and w ~= lastW and not restoring and active and not reskinQueued then
+        local map = (self.MinimapContainer and self.MinimapContainer.Minimap) or _G.Minimap
+        local w = tonumber(map and map:GetWidth()) or nil
+        -- 编辑模式会把这个集群的 alpha 恢复成 1（它要显示自己的选中框）。装饰重新露出来就再压回去；
+        -- 只改 alpha，不跑整套 Skin()，免编辑模式里每半秒重贴一次。
+        if active and not restoring then
+            local okAlpha, alpha = pcall(self.GetAlpha, self)
+            if okAlpha and type(alpha) == "number" and alpha > 0 and not InCombatLockdown() then
+                pcall(self.SetAlpha, self, 0)
+            end
+        end
+        -- 客户端重新布局时可能把地图搬回集群里（我们的 PlaceMinimap 把它搬进了自己的框体）。
+        local moved = holder and map and map:GetParent() ~= holder
+        if (moved or (w and lastW and w ~= lastW)) and not restoring and active and not reskinQueued then
             reskinQueued = true
             local function reskin()
                 reskinQueued = false
@@ -877,17 +891,25 @@ local function Remember(minimap)
         if ok then state.wheel = wheel end
     end
 
-    local cluster = _G.MinimapCluster
-    if cluster and cluster.GetNumPoints then
-        state.points = {}
-        for i = 1, cluster:GetNumPoints() do
-            local point, relTo, relPoint, x, y = cluster:GetPoint(i)
-            state.points[#state.points + 1] = { point, relTo, relPoint, x, y }
+    -- 地图的父级与锚点：我们现在会把 Minimap 搬进自己的框体（见 PlaceMinimap），
+    -- 还原时必须原样搬回去，否则关掉模块后地图会留在右下角。
+    state.mapParent = minimap:GetParent()
+    if minimap.GetNumPoints then
+        state.mapPoints = {}
+        for i = 1, minimap:GetNumPoints() do
+            local point, relTo, relPoint, x, y = minimap:GetPoint(i)
+            state.mapPoints[#state.mapPoints + 1] = { point, relTo, relPoint, x, y }
         end
-        -- 对齐基线要把它放开夹取（见 MoveCluster），还原时按原值放回
-        if cluster.IsClampedToScreen then
-            local ok, clamped = pcall(cluster.IsClampedToScreen, cluster)
-            if ok then state.clusterClamped = clamped end
+    end
+
+    -- 集群我们一个字节都不改（位置/尺寸/方法），只压 alpha —— 记下原值。
+    local cluster = _G.MinimapCluster
+    if cluster then
+        local ok, alpha = pcall(cluster.GetAlpha, cluster)
+        if ok then state.clusterAlpha = alpha end
+        if cluster.IsMouseEnabled then
+            local okMouse, mouse = pcall(cluster.IsMouseEnabled, cluster)
+            if okMouse then state.clusterMouse = mouse end
         end
     end
 
@@ -909,18 +931,25 @@ function Restore()
     end
 
     local cluster = _G.MinimapCluster
-    if cluster and state.points and #state.points > 0 then
-        pcall(cluster.ClearAllPoints, cluster)
-        for _, pt in ipairs(state.points) do
-            try(pcall(cluster.SetPoint, cluster, pt[1], pt[2], pt[3], pt[4], pt[5]))
-        end
+    if cluster and state.clusterAlpha ~= nil then
+        try(pcall(cluster.SetAlpha, cluster, state.clusterAlpha))
     end
-    if cluster and state.clusterClamped ~= nil and cluster.SetClampedToScreen then
-        try(pcall(cluster.SetClampedToScreen, cluster, state.clusterClamped))
+    if cluster and state.clusterMouse ~= nil and cluster.EnableMouse then
+        try(pcall(cluster.EnableMouse, cluster, state.clusterMouse))
     end
 
     local minimap = _G.Minimap
     if minimap then
+        -- 把地图搬回原来的父级与锚点（我们把它搬进自己的框体了，见 PlaceMinimap）
+        if state.mapParent then
+            try(pcall(minimap.SetParent, minimap, state.mapParent))
+        end
+        if state.mapPoints and #state.mapPoints > 0 then
+            pcall(minimap.ClearAllPoints, minimap)
+            for _, pt in ipairs(state.mapPoints) do
+                try(pcall(minimap.SetPoint, minimap, pt[1], pt[2], pt[3], pt[4], pt[5]))
+            end
+        end
         -- 遮罩请客户端自己设回去：它知道自己的图集（也知道自己旋转模式下的底图）。
         -- 钩子会在这之后重套皮肤，所以先立 restoring 旗：这一次是"还原"，不是"重设"。
         if cluster and type(cluster.UpdateMinimapConfig) == "function" then
@@ -993,9 +1022,9 @@ function Skin()
     -- 客户端每次改小地图形态（rotateMinimap 开关）都会把遮罩换回圆形图集，
     -- 钩一次；集群晚于我们加载时这里会重试（HookMinimapConfig 自己幂等）。
     HookMinimapConfig()
-    -- 先按目标尺寸重塑，再定位：MoveCluster 要实测 Minimap 的帧矩形，尺寸没设好量出来的是旧值。
+    -- 先按目标尺寸重塑，再定位：PlaceMinimap 要实测 Minimap 的帧矩形，尺寸没设好量出来的是旧值。
     ReshapeMinimap(minimap)
-    MoveCluster()
+    PlaceMinimap()
     ApplyShape()
     ApplyButtons()
     EnsurePanel(minimap)
