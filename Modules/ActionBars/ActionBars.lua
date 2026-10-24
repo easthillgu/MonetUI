@@ -1371,8 +1371,11 @@ local function SkinAdoptedPetButton(btn)
     if btn.HotKey then pcall(Widget.SetFont, Widget, btn.HotKey, HOTKEY_SIZE, "pixel") end
     if btn.Count then pcall(Widget.SetFont, Widget, btn.Count, COUNT_SIZE, "pixel") end
 
-    local cd = btn.cooldown or btn.Cooldown
-    if cd then pcall(StyleCooldownFrame, cd) end
+    -- 冷却**交给暴雪自己**：我们那套渲染会给它的冷却框 SetHideCountdownNumbers(true) 再自己画字，
+    -- 而暴雪冷却框在本客户端受限（SetCooldown 参数可能是机密值、调用被拒），
+    -- 结果两层都没显示 —— 实机表现就是"冷却看不到"。收养来的按钮直接用原生冷却。
+    -- local cd = btn.cooldown or btn.Cooldown
+    -- if cd then pcall(StyleCooldownFrame, cd) end
 end
 
 local function CreateBar(def)
