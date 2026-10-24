@@ -745,30 +745,48 @@ end
 -- 图标拉成一条竖缝（12.1.5 实测：先裁剪再换贴图 = 竖缝；先换贴图再裁剪 = 正常）。所以这里统一按
 -- "换贴图 -> 写裁剪"的顺序落一次，并给图标挂一个钩子：以后每次换贴图都补一遍裁剪（动作条的图标
 -- 每刷新一次就会换贴图，不补就会一直保持竖缝）。
+--- 图标裁剪（0.08 一圈）。
+--- **不再 hooksecurefunc(icon, "SetTexture")**：那是插在暴雪贴图更新链里的钩子 ——
+--- 暴雪每次给图标换贴图都会跑一段我们的代码，整条链就被记成 "tainted by MonetUI"。
+--- 实机后果（taint.log 原文）：
+---   Tainted value written to global ON_BAR_HIGHLIGHT_MARKS by MonetUI
+---     ActionButton.lua:66 ClearOnBarHighlightMarks()
+---     ← SpellBookItem.lua:521 OnIconEnter()
+--- 这个全局表一旦变脏，**所有动作按钮的施法高亮更新**都会被拒，
+--- 连带 PetActionButton*:SetShown / PetActionBar:ClearAllPointsBase 刷屏。
+--- 改成：只记下裁剪参数，由我们自己的驱动帧每 0.5 秒重压一遍 texcoord。
+local cropped = setmetatable({}, { __mode = "k" })
+local cropDriver, cropAcc
+
+local function EnsureCropDriver()
+    if cropDriver then return end
+    cropDriver = CreateFrame("Frame")
+    cropDriver:SetScript("OnUpdate", function(_, elapsed)
+        cropAcc = (cropAcc or 0) + (elapsed or 0)
+        if cropAcc < 0.5 then return end
+        cropAcc = 0
+        for icon, c in pairs(cropped) do
+            if type(icon.SetTexCoord) == "function" then
+                pcall(icon.SetTexCoord, icon, c[1], c[2], c[3], c[4])
+            end
+        end
+    end)
+end
+
 function Skin:CropIcon(icon, x0, x1, y0, y1)
     if not icon or type(icon.SetTexCoord) ~= "function" then return icon end
     x0, x1 = x0 or 0, x1 or 1
     y0, y1 = y0 or 0, y1 or 1
 
-    local function apply(target)
-        local t = target
-        if type(t) ~= "table" then t = icon end
-        if t and type(t.SetTexCoord) == "function" then
-            pcall(t.SetTexCoord, t, x0, x1, y0, y1)
-        end
-    end
-
-    if not Marked(icon, "cropHook") and type(icon.SetTexture) == "function" and type(hooksecurefunc) == "function" then
-        Mark(icon, "cropHook", true)
-        hooksecurefunc(icon, "SetTexture", function(self) apply(self) end)
-    end
+    cropped[icon] = { x0, x1, y0, y1 }
+    EnsureCropDriver()
 
     -- 先把贴图重写一遍，裁剪必须跟在它后面
     if type(icon.SetTexture) == "function" and type(icon.GetTexture) == "function" then
         local tex = icon:GetTexture()
         if tex then pcall(icon.SetTexture, icon, tex) end
     end
-    apply()
+    pcall(icon.SetTexCoord, icon, x0, x1, y0, y1)
     return icon
 end
 
