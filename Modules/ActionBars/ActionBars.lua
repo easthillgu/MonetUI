@@ -224,16 +224,18 @@ local function HiddenParent()
     return hiddenParent
 end
 
---- 退出暴雪的"托管框体"系统（ManagedFrameSystem）。
---- ignoreFramePositionManager 是官方开关：ManagedFrameContainer:AddManagedFrame 见到它就返回。
---- 但**已经进过** showingFrames 的还得摘出来 —— 那个表就是托管容器定期重排（ClearAllPoints /
---- SetParent / SetPointBase）的对象，每 10 秒一轮，全部被拒 → 日志刷 BLOCKED。
+--- 退出暴雪的"托管框体"系统（ManagedFrameSystem）：只把条目从 showingFrames 里摘掉。
+--- **绝不写 frame.ignoreFramePositionManager。** 那个字段一写，这个受保护的条就成了
+--- "被 MonetUI 写过的框"（issecurevariable 实测为 false），它的 OnEvent 脚本随之以我们的名义
+--- 执行 —— 而 OnEvent 里（PLAYER_REGEN_ENABLED/DISABLED → UpdateVisibility）会调用暴雪的
+--- 安全函数，于是整条链全被拒，连**别人的**干净框也一起遭殃：
+---   MultiBar*/PetActionBar:OnEvent → UpdateVisibility → SetShownBase        BLOCKED
+---     → EditModeManagerFrame:UpdateActionBarLayout → SetPointBase(MainActionBar) BLOCKED
+--- 表现就是"一进战斗就弹：插件导致界面行为失效"。
 --- 不走 container:RemoveManagedFrame()：它末尾会 container:Layout()，从我们的脏栈里去挪别的
 --- 受保护框，一样被拒。直接把条目从表里摘掉即可。
---- ApplySystemAnchor 在"默认位置"时会把开关清掉并重新接管，所以再挂一个后钩把开关按回去。
 local function LeaveManagedFrameSystem(frame)
     if not frame then return false end
-    frame.ignoreFramePositionManager = true
 
     local getContainer = frame.GetManagedFrameContainer
     if type(getContainer) == "function" then
@@ -241,13 +243,6 @@ local function LeaveManagedFrameSystem(frame)
         if ok and type(container) == "table" and type(container.showingFrames) == "table" then
             container.showingFrames[frame] = nil
         end
-    end
-
-    if type(hooksecurefunc) == "function" and not Marked(frame, "leftManager") then
-        Mark(frame, "leftManager", true)
-        pcall(hooksecurefunc, frame, "ApplySystemAnchor", function(self)
-            if Marked(self, "parked") then self.ignoreFramePositionManager = true end
-        end)
     end
     return true
 end
@@ -443,6 +438,13 @@ local function Park(name)
     -- 且被藏着时 IsShown() 为假，安全重排不会碰它们）。
     pcall(frame.SetParent, frame, HiddenParent())
     LeaveManagedFrameSystem(frame)
+
+    -- 事件也摘掉：暴雪在这些条自己的 OnEvent 里做 PLAYER_REGEN_* → UpdateVisibility → 重排，
+    -- 而这些脚本正是"被我们的字段污染过的框"跑起来的。不摘的话，进战斗时它会拖着整条链
+    -- （包括对别的条的安全调用）一起被拒。载具条/接管条要保留事件，暴雪靠它切显隐。
+    if name ~= "OverrideActionBar" and name ~= "PossessActionBar" then
+        pcall(frame.UnregisterAllEvents, frame)
+    end
 
     if name == "MainMenuBar" then
         KillPagerMouse(frame)
@@ -1734,6 +1736,7 @@ function M:RegisterEvents()
     end)
 
     EventBus:Register("PLAYER_REGEN_ENABLED", function()
+        M:ReparkBlizzard()
         if bindingsDirty then ReassignBindings() end
         if adoptedDirty then AdoptAll() end
         if refreshDirty then
@@ -1862,6 +1865,22 @@ function M:RestoreBlizzard()
     end
     for _, name in ipairs(BAG_BAR_FRAMES) do
         Restore(name)
+    end
+end
+
+--- 编辑模式偶尔会把我们换过父的条重新塞回它的托管容器（ApplySystemAnchor → AddManagedFrame），
+--- 那些条就会重新出现在屏幕上并吃掉鼠标。脱战后再确认一遍父级，不对就搬回去
+--- （战斗中 SetParent 是受保护操作，留给下一次 PLAYER_REGEN_ENABLED）。
+function M:ReparkBlizzard()
+    if InCombatLockdown() then return end
+    local hidden = HiddenParent()
+    for _, name in ipairs(ACTION_BAR_FRAMES) do
+        local frame = _G[name]
+        if frame and name ~= "MainActionBar" and Marked(frame, "parked") then
+            if frame:GetParent() ~= hidden then
+                pcall(frame.SetParent, frame, hidden)
+            end
+        end
     end
 end
 
