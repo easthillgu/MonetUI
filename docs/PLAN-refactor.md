@@ -130,6 +130,16 @@ UpdateMaxHealth / UpdateHealPrediction` → 秘值比较被拦 → 整条 compac
   经 GROUP_ROSTER_UPDATE 全量刷 ×16 按钮 ×2 处)的**设计内 pcall 拦截**逐次记栈放大;
   功能无损,关 taintLog 即归零。候选优化:RefreshAll 限流。
 
+**收工交接(2026-10-25 深夜)**:taintLog 已关回 0、哨兵已停。下回接手清单:
+1. 部署已到位但 **3453b10 尚未 reload 验证**:先点 reload,再正常玩一轮,验收 = MathUtil/Backdrop
+   ×10 错误波绝迹 + 池审计(buffs styled=20/debuffs styled=10)恢复 + 战斗 buff/debuff 行正常出图。
+   池审计探针:`MonetUICombatBuffFrame` / `MonetUICombatDebuffFrame` kids × `ns:Marked(k,"borderHost")`。
+2. **白板 NPC 名牌**仍是未结尾巴(df9efb6 会话首发):复现瞬间跑名牌探针
+   (C_NamePlate.GetNamePlates → ours/uf alpha、blizzardHidden、name/level 文本状态) + snap。
+3. 回归全结后按 P3.3 遗留目检 → P4(StyleAuraButton 最先)→ P5 → P6。
+4. taintLog 哨兵法(需要时重启):`%TEMP%\opencode\taint-sentinel.ps1` 直拷
+   `Logs/taint.log`,600ms 一次,分析用 `%TEMP%\opencode\taint.log`。
+
 **本轮遗留(不属回归案情,独立已知代价项)**:
 - `TargetFrameToT:Show()` 家族 AOAB(reload 后 13 条 / 7 分钟,每 2-3 分钟一条,只进日志):
   根因是 UnitFrames:SuppressBlizzard 用 `Hide()` + `SetScript("OnShow", Hide)` 挂槽——
