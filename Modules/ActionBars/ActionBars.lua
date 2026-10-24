@@ -1356,7 +1356,9 @@ local function CreateBar(def)
         end
         LayoutBar(bar)
         PositionBar(bar)
-        EnsureDropCatcher(bar)
+        -- 宠物条**不装拖放接住器**：它的槽位是宠物技能 1..10，不是动作条槽位；
+        -- PlaceAction 会把这些序号当成"动作条第 N 格"，表现就是"拖到宠物条上错位/乱放"。
+        -- 宠物条本来也不允许自定义（暴雪自己的宠物条同样不接受放技能）。
         bar.page = 1
         PushPageToChildren(bar)
         PushSecureInit(bar, "pet")
