@@ -219,6 +219,34 @@ local function HiddenParent()
     return hiddenParent
 end
 
+--- 退出暴雪的"托管框体"系统（ManagedFrameSystem）。
+--- ignoreFramePositionManager 是官方开关：ManagedFrameContainer:AddManagedFrame 见到它就返回。
+--- 但**已经进过** showingFrames 的还得摘出来 —— 那个表就是托管容器定期重排（ClearAllPoints /
+--- SetParent / SetPointBase）的对象，每 10 秒一轮，全部被拒 → 日志刷 BLOCKED。
+--- 不走 container:RemoveManagedFrame()：它末尾会 container:Layout()，从我们的脏栈里去挪别的
+--- 受保护框，一样被拒。直接把条目从表里摘掉即可。
+--- ApplySystemAnchor 在"默认位置"时会把开关清掉并重新接管，所以再挂一个后钩把开关按回去。
+local function LeaveManagedFrameSystem(frame)
+    if not frame then return false end
+    frame.ignoreFramePositionManager = true
+
+    local getContainer = frame.GetManagedFrameContainer
+    if type(getContainer) == "function" then
+        local ok, container = pcall(getContainer, frame)
+        if ok and type(container) == "table" and type(container.showingFrames) == "table" then
+            container.showingFrames[frame] = nil
+        end
+    end
+
+    if type(hooksecurefunc) == "function" and not frame.__monetLeftManager then
+        frame.__monetLeftManager = true
+        pcall(hooksecurefunc, frame, "ApplySystemAnchor", function(self)
+            if self.__monetParked then self.ignoreFramePositionManager = true end
+        end)
+    end
+    return true
+end
+
 --- 让暴雪自己把按钮藏起来：不碰受保护的 Hide/SetShown，只写 statehidden。
 local function QuietHideButton(button)
     if not button then return end
@@ -374,6 +402,7 @@ local function Park(name)
     -- 拖放和点击都到不了任何上层框体（把 bar2 临时搬到 y=200 立刻正常）。换父之后它
     -- vis=false，不再占那片屏幕区域，接住器与按钮都能正常收到事件。
     pcall(frame.SetParent, frame, HiddenParent())
+    LeaveManagedFrameSystem(frame)
 
     if name == "MainActionBar" or name == "MainMenuBar" then
         KillPagerMouse(frame)
@@ -416,6 +445,7 @@ local function Restore(name)
         return true
     end
     pcall(frame.SetAlpha, frame, frame.__monetAlpha or 1)
+    frame.ignoreFramePositionManager = nil    -- 交还：让编辑模式的托管系统重新接管它
     if frame.__monetParent and frame.__monetParent ~= hiddenParent then
         pcall(frame.SetParent, frame, frame.__monetParent)
     end
@@ -1544,6 +1574,10 @@ local function AdoptBar(def)
     if def.glow == "autoCast" then
         SyncPetGlow(def, entry)
     end
+
+    -- 宠物 / 姿态条的外壳也是编辑模式的托管框体：我们给它写过 SetScale / EnableMouse，
+    -- 托管容器之后每 10 秒还想重排它一次（SetShownBase / SetPointBase 被拒）。索性退托管。
+    LeaveManagedFrameSystem(bar)
 
     return entry
 end

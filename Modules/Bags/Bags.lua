@@ -9,6 +9,7 @@ local Widget   = ns.Widget
 local Math     = ns.Math
 local Color    = ns.Color
 local EventBus = ns.EventBus
+local Secrets  = ns.Secrets
 
 local M = { name = "Bags" }
 
@@ -271,12 +272,15 @@ local function UpdateButton(btn, rec)
     if qc then Widget:SetBorderState(btn, qc.r, qc.g, qc.b, 1)
     else Widget:SetBorderState(btn, nil) end
 
-    -- GetItemCooldown returns plain numbers, safe to hand straight to the Cooldown widget.
+    -- GetItemCooldown 的返回值在受限环境里**可能是机密值**（实测报 "bad argument ... SetCooldown:
+    -- Secret values are only allowed during untainted execution"）。一律过 Secrets.Number：
+    -- 拿不到明文就不画冷却，绝不把机密值拿去比较或塞进 SetCooldown。
     if rec.itemID and C_Container.GetItemCooldown then
         local ok, start, duration, enable = pcall(C_Container.GetItemCooldown, rec.itemID)
+        start, duration, enable = Secrets.Number(start), Secrets.Number(duration), Secrets.Number(enable)
         if ok and start and duration and duration > 0 and enable ~= 0 then
             btn.cd:Show()
-            btn.cd:SetCooldown(start, duration)
+            if not pcall(btn.cd.SetCooldown, btn.cd, start, duration) then btn.cd:Hide() end
         else
             btn.cd:Hide()
         end
