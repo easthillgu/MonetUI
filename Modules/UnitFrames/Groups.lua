@@ -723,18 +723,19 @@ end
 local parked = setmetatable({}, { __mode = "k" })
 
 --- 藏掉暴雪的团队/小队框。
---- **不写字段、不挂 OnShow 钩子**：这两个动作会把 CompactPartyFrame 标脏，之后它自己的
---- `CompactUnitFrame_UpdateHealthColor` 比较机密颜色分量就抛
---- "attempt to compare local 'oldR' (a secret number value, while execution tainted by 'MonetUI')"
---- （实机：打开编辑模式时必现）。重新藏的工作交给 Widget:ShowWatch（轮询"变显示了"）。
+--- **不写字段、不挂 OnShow 钩子、也不 Hide()**：
+---   * 写字段 / HookScript 会把框标脏；
+---   * `Hide()` 同样会被算成"插件动过这个受保护框"，之后它自己的
+---     `CompactUnitFrame_UpdateHealthColor` 比较机密颜色分量就会抛
+---     "attempt to compare local 'oldR' (a secret number value, while execution tainted by 'MonetUI')"。
+--- 所以只做 **alpha 0 + 关鼠标**（和 MainActionBar 同一套，那一套实测是干净的），
+--- 框体本身保持在显示状态，它的更新逻辑照常跑，不会进"受保护被拒"的分支。
 local function Park(frame)
     if not frame or parked[frame] then return end
     parked[frame] = true
-    pcall(frame.Hide, frame)
     pcall(frame.SetAlpha, frame, 0)
-    ns.Widget:ShowWatch(frame, function(self)
-        if parked[self] and not InCombat() then pcall(self.Hide, self) end
-    end)
+    pcall(frame.EnableMouse, frame, false)
+    if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, false) end
 end
 
 local function Unpark(frame)
