@@ -1527,9 +1527,14 @@ end
 local function UpdateThreat(frame)
     if not Shared("threatGlow") then return end
 
-    -- nil means both "no threat API answer" and "value hidden by the client".
-    local status = Secrets.Number(UnitThreatSituation(frame.unit))
-    if status == nil then return end
+    -- UnitThreatSituation 返回 nil 有两种完全不同的含义：
+    --   * 机密值（受限环境下）-> 保留上次状态，等 PLAYER_REGEN_ENABLED 再判；
+    --   * 普通的 nil -> 客户端压根没有威胁信息（脱战后就是这样），此时必须**清掉**红边。
+    -- 以前把两者当一回事（`if status == nil then return end`），于是脱战后 threatStatus 停在 3、
+    -- monetBorderOverride 一直是 true，红边就再也不会消失。
+    local raw = UnitThreatSituation(frame.unit)
+    if raw ~= nil and Secrets.IsSecret(raw) then return end
+    local status = Secrets.Number(raw) or 0
 
     frame.threatStatus = status
     if status > 0 then
@@ -1738,7 +1743,16 @@ end
 --- 这里只把内容刷成当前单位的值。
 local function RefreshUnit(unit)
     local frame = frames[unit]
-    if not frame or not UnitExists(unit) then return end
+    if not frame then return end
+    if not UnitExists(unit) then
+        -- 单位没了：顺手把威胁状态清掉，否则下次显形会先亮一圈旧红边（targettarget 尤其常见）。
+        frame.threatStatus = nil
+        if frame.monetBorderOverride then
+            frame.monetBorderOverride = false
+            RestoreDynamicBorder(frame)
+        end
+        return
+    end
 
     UpdateHealth(frame)
     UpdatePower(frame)
@@ -1785,7 +1799,7 @@ end
 local function MakeThreatHandler()
     return function(_, changedUnit)
         local frame = frames[changedUnit]
-        if frame and frame:IsShown() then UpdateThreat(frame) end
+        if frame and Secrets.Bool(frame:IsShown(), false) then UpdateThreat(frame) end
     end
 end
 
