@@ -1325,6 +1325,41 @@ local function WatchPages(show)
     if show then pageWatcher:Show() else pageWatcher:Hide() end
 end
 
+--- 给收养来的暴雪宠物按钮"换皮"（ElvUI 的 StyleButton 同一思路，但只做最必要的几层）：
+---   * 藏掉它自己的美术（NormalTexture / Border / SlotBackground / Flash）—— 只调它们的方法；
+---   * 垫一块**我们自己的**底板 + 1px 边框（子框体属于我们，不会污染暴雪对象）；
+---   * 图标裁外圈 8%（CropIcon 现在是轮询实现，不挂钩子）；
+---   * 热键/数量换像素字体；冷却文字接我们那套渲染。
+--- 全部 pcall：这个客户端对受保护按钮的某些方法会拒绝，失败就保持原生样子，不能崩。
+local function SkinAdoptedPetButton(btn)
+    if not btn or Marked(btn, "petSkinned") then return end
+    Mark(btn, "petSkinned", true)
+
+    local function fade(region)
+        if region and type(region.SetAlpha) == "function" then pcall(region.SetAlpha, region, 0) end
+    end
+    fade(btn.NormalTexture)
+    fade(btn.Border)
+    fade(btn.SlotBackground)
+    fade(btn.Flash)
+    fade(btn.AutoCastShine)
+
+    pcall(Skin.ControlBg, Skin, btn, { thickness = 1, bgAlpha = 0.55 })
+
+    local icon = btn.icon
+    if not icon and btn.GetName and type(btn.GetName) == "function" then
+        local name = btn:GetName()
+        icon = name and _G[name .. "Icon"]
+    end
+    if icon then pcall(Skin.CropIcon, Skin, icon, CROP, 1 - CROP, CROP, 1 - CROP) end
+
+    if btn.HotKey then pcall(Widget.SetFont, Widget, btn.HotKey, HOTKEY_SIZE, "pixel") end
+    if btn.Count then pcall(Widget.SetFont, Widget, btn.Count, COUNT_SIZE, "pixel") end
+
+    local cd = btn.cooldown or btn.Cooldown
+    if cd then pcall(StyleCooldownFrame, cd) end
+end
+
 local function CreateBar(def)
     if buildFailure then return nil end
 
@@ -1374,6 +1409,7 @@ local function CreateBar(def)
             pcall(btn.SetSize, btn, size, size)
             pcall(btn.SetScale, btn, 1)
             pcall(btn.SetPoint, btn, "TOPLEFT", frame, "TOPLEFT", (i - 1) * (size + spacing), 0)
+            SkinAdoptedPetButton(btn)
             bar.buttons[#bar.buttons + 1] = btn
         end
         if #bar.buttons == 0 then
