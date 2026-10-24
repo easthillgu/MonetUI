@@ -275,12 +275,14 @@ function M:SkinSlidersIn(frame)
     end
 end
 
---- Re-run a skin whenever a Blizzard frame is shown (some content is built lazily).  HookScript only, never SetScript, and idempotent: one OnShow handler per frame, ever, so refresh paths cannot stack duplicates.
+--- Re-run a skin whenever a Blizzard frame is shown (some content is built lazily).
+--- **不再 HookScript("OnShow")**：那是往暴雪框体的脚本槽里写我们的函数（污染源）。
+--- 改用 Widget:ShowWatch 轮询"从隐藏变显示"这一个瞬间。
 function M:HookShow(frame, fn)
-    if not frame or type(frame.HookScript) ~= "function" or type(fn) ~= "function" then return end
+    if not frame or type(fn) ~= "function" then return end
     if Marked(frame, "showHook") then return end
     Mark(frame, "showHook", true)
-    frame:HookScript("OnShow", function()
+    ns.Widget:ShowWatch(frame, function()
         if M.active then pcall(fn) end
     end)
 end

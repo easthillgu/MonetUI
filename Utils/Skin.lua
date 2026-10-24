@@ -285,9 +285,11 @@ function Skin:ControlBg(frame, opts)
     return bg
 end
 
---- Hover feedback on a Blizzard control: tint its Monet border to the highlight colour.  HookScript (never SetScript) so existing scripts survive, installed once.
+--- Hover feedback on a Blizzard control: tint its Monet border to the highlight colour.
+--- **不再 HookScript**：那会往暴雪框体的脚本槽里写我们的函数，把它标脏。
+--- 改用轮询（Widget:HoverWatch），不写字段、不铺遮挡层、也不吃点击。
 function Skin:HoverHighlight(control, opts)
-    if not control or type(control.HookScript) ~= "function" then return end
+    if not control or type(control) ~= "table" then return end
     if Marked(control, "hover") then return end
     Mark(control, "hover", true)
     opts = opts or {}
@@ -296,14 +298,13 @@ function Skin:HoverHighlight(control, opts)
         return bg or Marked(control, "skinBg") or Marked(control, "controlBg")
     end
 
-    control:HookScript("OnEnter", function()
+    Widget:HoverWatch(control, function()
         local bg = border()
         if bg and bg.SetBackdropBorderColor then
             local r, g, b = Color:GetHighlight()
             bg:SetBackdropBorderColor(r, g, b, opts.alpha or 1)
         end
-    end)
-    control:HookScript("OnLeave", function()
+    end, function()
         local bg = border()
         if bg then Widget:Refresh(bg) end
     end)
@@ -316,7 +317,7 @@ end
 -- dims it.  HoverHighlight owns the hover look; apply() reproduces the highlight colour itself after a
 -- press so releasing while still hovered does not drop the hover tint.
 function Skin:ControlState(control, opts)
-    if not control or type(control.HookScript) ~= "function" then return end
+    if not control or type(control) ~= "table" then return end
     if Marked(control, "state") then return end
     Mark(control, "state", true)
     opts = opts or {}
@@ -360,22 +361,26 @@ function Skin:ControlState(control, opts)
         Widget:Refresh(bg)
     end
 
-    -- OnDown / OnUp are hooked, not set: a Blizzard button usually already has a click script.
-    -- The script names differ between clients: the old ones (and Forever) know OnDown / OnUp,
-    -- retail (12.x) only knows OnMouseDown / OnMouseUp -- HookScript("OnDown") there raises
-    -- "bad argument #2" and killed the whole skin pass.  Try both and keep the one that sticks.
-    local function hookPress(names, fn)
-        for i = 1, #names do
-            if pcall(control.HookScript, control, names[i], fn) then return true end
+    -- **不再 HookScript / hooksecurefunc**：两个都会往暴雪框体的脚本/方法槽里写东西，
+    -- 把框体标脏（法术书图标那条 OnIconEnter → ClearOnBarHighlightMarks 就是这么被污染的）。
+    -- 改用轮询：hover/down/up 由 Widget:HoverWatch 提供，enabled 状态每 0.2 秒比一次。
+    local lastEnabled = nil
+    Widget:HoverWatch(control, apply, apply, function()
+        pressed = true; apply()
+    end, function()
+        pressed = false; apply()
+    end)
+    Widget:PollWatch(control, function()
+        local enabled = true
+        if type(control.IsEnabled) == "function" then
+            local ok, value = pcall(control.IsEnabled, control)
+            if ok then enabled = value and true or false end
         end
-        return false
-    end
-
-    hookPress({ "OnDown", "OnMouseDown" }, function() pressed = true; apply() end)
-    hookPress({ "OnUp", "OnMouseUp" }, function() pressed = false; apply() end)
-    -- Blizzard flips enabled state without any script we can see, so hook the setters themselves.
-    if type(control.Enable) == "function" then hooksecurefunc(control, "Enable", apply) end
-    if type(control.Disable) == "function" then hooksecurefunc(control, "Disable", apply) end
+        if enabled ~= lastEnabled then
+            lastEnabled = enabled
+            apply()
+        end
+    end)
 
     apply()
 end

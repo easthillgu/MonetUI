@@ -13,7 +13,127 @@ local Color = ns.Color
 local Media = ns.Media
 local EventBus = ns.EventBus
 
+-- ---------------------------------------------------------------------------
+-- 轮询式 hover / 显隐观察（见 AGENTS.md 的「界面美化原则」）
+--
+-- **绝不在暴雪的框体上 HookScript**：HookScript 会往这个框体的脚本槽里写我们的函数，
+-- 等于给框体打上"被插件写过"的标记；它自己的脚本（例如法术书图标的 OnIconEnter →
+-- ClearOnBarHighlightMarks）之后就跑在"被 MonetUI 污染"的执行里，进而把
+-- ON_BAR_HIGHLIGHT_MARKS 这种全局表写脏 —— 所有动作按钮的高亮/显隐更新随之被拒。
+--
+-- 这里改成轮询：鼠标位置用 MouseIsOver / GetMouseFocus 查，按键状态用轮询，
+-- 不写任何字段、不铺遮挡层，因此也不会吃掉点击。
+
 local Widget = {}
+
+local hoverWatch, hoverDriver, hoverAcc = {}, nil, 0
+
+local function MouseOver(frame)
+    if _G.MouseIsOver then
+        local ok, over = pcall(_G.MouseIsOver, frame)
+        return ok and over
+    end
+    local focus = _G.GetMouseFocus and _G.GetMouseFocus()
+    local guard = 0
+    while focus and guard < 32 do
+        if focus == frame then return true end
+        focus = focus.GetParent and focus:GetParent()
+        guard = guard + 1
+    end
+    return false
+end
+
+local function EnsureHoverDriver()
+    if hoverDriver then return end
+    hoverDriver = CreateFrame("Frame")
+    hoverDriver:SetScript("OnUpdate", function(_, elapsed)
+        hoverAcc = hoverAcc + (elapsed or 0)
+        if hoverAcc < 0.1 then return end
+        hoverAcc = 0
+        local down = _G.IsMouseButtonDown and _G.IsMouseButtonDown("LeftButton")
+        for frame, st in pairs(hoverWatch) do
+            local inside = frame:IsVisible() and MouseOver(frame)
+            if inside and not st.inside then
+                st.inside = true
+                if st.enter then pcall(st.enter, frame) end
+            elseif not inside and st.inside then
+                st.inside = false
+                if st.pressed then st.pressed = false; if st.up then pcall(st.up, frame) end end
+                if st.leave then pcall(st.leave, frame) end
+            end
+            if inside and st.down then
+                if down and not st.pressed then
+                    st.pressed = true
+                    if st.down then pcall(st.down, frame) end
+                elseif not down and st.pressed then
+                    st.pressed = false
+                    if st.up then pcall(st.up, frame) end
+                end
+            end
+        end
+    end)
+end
+
+--- 轮询式 hover。onEnter/onLeave/onDown/onUp 都只收到 frame。
+--- 同一帧只登记一次（后来的回调覆盖旧的）。
+function Widget:HoverWatch(frame, onEnter, onLeave, onDown, onUp)
+    if not frame then return end
+    local st = hoverWatch[frame]
+    if st then
+        st.enter, st.leave, st.down, st.up = onEnter, onLeave, onDown, onUp
+        return
+    end
+    hoverWatch[frame] = { enter = onEnter, leave = onLeave, down = onDown, up = onUp, inside = false }
+    EnsureHoverDriver()
+end
+
+--- 同样的轮询思路，观察"从隐藏变成显示"这一个瞬间（替掉 HookScript("OnShow")）。
+local showWatch, showDriver, showAcc = {}, nil, 0
+
+local function EnsureShowDriver()
+    if showDriver then return end
+    showDriver = CreateFrame("Frame")
+    showDriver:SetScript("OnUpdate", function(_, elapsed)
+        showAcc = showAcc + (elapsed or 0)
+        if showAcc < 0.2 then return end
+        showAcc = 0
+        for frame, st in pairs(showWatch) do
+            local shown = frame:IsVisible()
+            if shown and not st.shown then pcall(st.fn, frame) end
+            st.shown = shown
+        end
+    end)
+end
+
+function Widget:ShowWatch(frame, fn)
+    if not frame or type(fn) ~= "function" then return end
+    local st = showWatch[frame]
+    if st then st.fn = fn; return end
+    showWatch[frame] = { fn = fn, shown = frame:IsVisible() }
+    EnsureShowDriver()
+end
+
+--- 通用轮询：每 0.2 秒对登记的框体调一次 fn(frame)。
+--- 用在"暴雪改了状态但没有任何 Lua 钩子"的场合（按钮 enabled、皮肤需要复检的东西…）。
+local pollWatch, pollDriver, pollAcc = {}, nil, 0
+
+function Widget:PollWatch(frame, fn)
+    if not frame or type(fn) ~= "function" then return end
+    pollWatch[frame] = fn
+    if pollDriver then return end
+    pollDriver = CreateFrame("Frame")
+    pollDriver:SetScript("OnUpdate", function(_, elapsed)
+        pollAcc = pollAcc + (elapsed or 0)
+        if pollAcc < 0.2 then return end
+        pollAcc = 0
+        for f, cb in pairs(pollWatch) do
+            if type(f) == "table" and f.IsVisible and f:IsVisible() then
+                pcall(cb, f)
+            end
+        end
+    end)
+end
+
 ns.Widget = Widget
 
 -- weak keys so hidden / discarded widgets do not leak

@@ -402,8 +402,12 @@ local function DressDebuffButton(button)
         Mark(button, "debuff", d)
         dressedDebuffs = dressedDebuffs + 1
 
+        -- 宽度在受限环境里可能是**机密值**：`type(x)=="number"` 挡不住（机密值也报 number），
+        -- 直接比较会抛 "attempt to compare ... (a secret number value, while execution tainted by 'MonetUI')"。
+        -- 一律先过 Secrets.Number：拿不到明文就当"不知道宽度"，跳过这条几何判据。
         local okW, bw = pcall(button.GetWidth, button)
-        if not (okW and type(bw) == "number" and bw > 0) then bw = nil end
+        bw = okW and Secrets.Number(bw) or nil
+        if not (type(bw) == "number" and bw > 0) then bw = nil end
 
         local okR, regions = pcall(function() return { button:GetRegions() } end)
         if not okR or not regions then regions = {} end
@@ -414,7 +418,8 @@ local function DressDebuffButton(button)
             for i = 1, #regions do
                 local r = regions[i]
                 local okRW, rw = pcall(r.GetWidth, r)
-                if okRW and type(rw) == "number" and rw > bw + 0.5 then stock = r; break end
+                rw = okRW and Secrets.Number(rw) or nil
+                if type(rw) == "number" and rw > bw + 0.5 then stock = r; break end
             end
         end
 
@@ -425,7 +430,8 @@ local function DressDebuffButton(button)
                 local r = regions[i]
                 if r ~= stock and type(r.SetTexCoord) == "function" then
                     local okRW, rw = pcall(r.GetWidth, r)
-                    if okRW and type(rw) == "number" and rw >= bw - 0.5 then icon = r; break end
+                    rw = okRW and Secrets.Number(rw) or nil
+                    if type(rw) == "number" and rw >= bw - 0.5 then icon = r; break end
                 end
             end
         end

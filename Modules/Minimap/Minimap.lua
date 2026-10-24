@@ -193,10 +193,13 @@ local hooked = setmetatable({}, { __mode = "k" })
 
 --- 暴雪在换区域、过场、载入之后会重新 Show 这些按钮，钩一次 Show 把它们按回去。
 --- 钩子里只做「按回去」的动作，不碰暴雪的逻辑，所以它自己的状态机不会错乱。
+--- 集群按钮被暴雪重新 Show 时再藏一次。
+--- **不再 hooksecurefunc(obj, "Show")**：那会往暴雪的按钮上写方法槽（污染），
+--- 而且常驻的 MinimapMixin:OnEnter 等脚本链会被一起拖脏。改用轮询"变显示了"。
 local function HookShow(obj, entry)
     if hooked[obj] then return end
     hooked[obj] = true
-    hooksecurefunc(obj, "Show", function(self)
+    Widget:ShowWatch(obj, function(self)
         if not active then return end
         if not Settings()[entry.key] then return end
         if InCombatLockdown() then

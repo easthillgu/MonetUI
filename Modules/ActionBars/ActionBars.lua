@@ -431,7 +431,6 @@ local function KeepParked()
                 if frame:IsShown() then pcall(frame.Hide, frame) end
             elseif frame:GetAlpha() > 0 then
                 pcall(frame.SetAlpha, frame, 0)
-                pcall(frame.EnableMouse, frame, false)
                 KillPagerMouse(frame)
             end
         end
@@ -1745,17 +1744,18 @@ local function AdoptBar(def)
     return entry
 end
 
---- 只把一条暴雪条"变透明 + 关鼠标"（不换父、不写字段、不卸载事件）。
+--- 只把一条暴雪条"变透明"（**只 SetAlpha，不动鼠标、不换父、不写字段**）。
 --- 用在我们自己已经接管显示（自绘宠物条/姿态条）的时候：暴雪那条留着但它看不见。
 --- ParkWatch 会在脱战后把 alpha 压回去（战斗中不碰受保护框体）。
+--- 实测记录：连 EnableMouse(false) 都会让这条受保护的条变脏（flyoutDirection / 按钮的
+--- popupDirection 被写成脏值），之后暴雪自己的 SetShown / ClearAllPoints 就全被拒 ——
+--- 所以这里只保留 alpha 这一项（它只需要"看不见"，鼠标在更上层由我们自己的按钮接住）。
 local function GhostBar(name)
     local frame = _G[name]
     if not frame or Marked(frame, "parked") then return end
     Mark(frame, "parked", true)
     Mark(frame, "alpha", frame:GetAlpha())
     pcall(frame.SetAlpha, frame, 0)
-    pcall(frame.EnableMouse, frame, false)
-    if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, false) end
     ParkWatch(frame)
 end
 
