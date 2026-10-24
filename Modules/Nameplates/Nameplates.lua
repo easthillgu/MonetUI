@@ -20,20 +20,10 @@ local driverHooked = false
 --- 唯一为 false 的键就是 `__monetAuraHook`，紧接着暴雪自己的 `CompactUnitFrame_OnUpdate`
 --- 就报 "attempt to compare local 'maxHealth' (a secret number value, while execution tainted
 --- by 'MonetUI')"，而且 10 秒一次刷屏；同族的报错还有 SetPoint 被拒的
---- "anchor family connection"。所以姓名板的所有簿记一律放进这张**以框体为弱键的旁表**，
+--- "anchor family connection"。所以姓名板的所有簿记一律走 Core 的旁表（ns:Mark / ns:Marked），
 --- 绝不往暴雪的框体（base / UnitFrame / AurasFrame / 它的 debuff 按钮）上写字段。
-local marks = setmetatable({}, { __mode = "k" })
-
-local function Mark(frame, key, value)
-    local t = marks[frame]
-    if not t then t = {}; marks[frame] = t end
-    t[key] = value
-end
-
-local function Marked(frame, key)
-    local t = marks[frame]
-    return t and t[key]
-end
+local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
+local Marked = function(o, k) return ns:Marked(o, k) end
 
 local BORDER   = 1
 local TEXT_GAP = 3     -- the gap the unit frames keep above their bars
