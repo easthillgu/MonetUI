@@ -1344,7 +1344,14 @@ local function SkinAdoptedPetButton(btn)
     fade(btn.Flash)
     fade(btn.AutoCastShine)
 
-    pcall(Skin.ControlBg, Skin, btn, { thickness = 1, bgAlpha = 0.55 })
+    -- 边框：收养来的按钮**图标是铺满整格的**（我们不能像自绘那样把图标内缩 1px），
+    -- 所以底板/边框不能垫在下面（会被图标完全盖住）——改成在按钮**上方**画一圈 1px 的边框。
+    local border = CreateFrame("Frame", nil, btn)
+    border:SetPoint("TOPLEFT", btn, "TOPLEFT", -1, 1)
+    border:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 1, -1)
+    border:SetFrameLevel(btn:GetFrameLevel() + 1)
+    Widget:Theme(border, { thickness = 1, bgAlpha = 0 })
+    Mark(btn, "petBorder", border)
 
     local icon = btn.icon
     if not icon and btn.GetName and type(btn.GetName) == "function" then
