@@ -179,7 +179,7 @@ function Widget:Icon(parent, size, layer, sublevel)
 end
 
 --- A FontString using the addon fonts.
--- @param key font key in Media.font ("pixel", "cooldown", "pingfang"); @param colorKey "edge" | "neutral" | "highlight" | "health" | "danger" | {r,g,b}
+-- @param key font key in Media.font ("pixel", "cooldown", "pingfang"); @param colorKey "edge" | "neutral" | "highlight" | "border" | "health" | "danger" | {r,g,b}
 -- @param flags optional render flags (default Media.fontFlags = "MONOCHROME"); pass Media.outlineFlags ("OUTLINE, MONOCHROME") for a hard-edged outline.
 function Widget:Font(parent, size, key, colorKey, justify, layer, flags)
     local fs = parent:CreateFontString(nil, layer or "OVERLAY")
@@ -214,6 +214,10 @@ function Widget:ColorText(fs, colorKey)
         r, g, b, a = Color:GetEdge()
     elseif colorKey == "highlight" then
         r, g, b, a = Color:GetHighlight()
+    elseif colorKey == "border" then
+        -- 跟随用户的边框槽（edge / ambient / highlight / neutral）：文字和描边用同一套主题色。
+        r, g, b, a = Color:GetBorder()
+        a = 1
     elseif colorKey == "health" then
         r, g, b, a = Color:GetHealth()
     elseif colorKey == "danger" then

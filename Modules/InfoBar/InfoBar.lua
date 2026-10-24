@@ -84,6 +84,16 @@ local function ApplyColors()
     end
 end
 
+--- 信息栏的文字跟着主题的边框槽走（Color:GetBorderKey()）：highlight 洗色在每套主题里都接近
+--- 白色，读数和条子自己的边框 / 分隔线看着像两套配色。换主题时 Widget:RefreshThemes 会按
+--- 登记的颜色槽重涂；这里再显式刷一遍，免得依赖注册顺序。
+local function PaintTexts()
+    for i = 1, #blocks do
+        local text = blocks[i].text
+        if text then Widget:ColorText(text, "border") end
+    end
+end
+
 local function Kick()
     if not bar then return end
     if blockAlpha ~= targetBlockAlpha or barAlpha ~= targetBarAlpha or pulseColor then
@@ -363,7 +373,7 @@ local function BuildBlockFrame(block)
         end)
     end
 
-    local text = Widget:Font(frame, 12, "pingfang", "highlight", "CENTER", nil, Media.outlineFlags)
+    local text = Widget:Font(frame, 12, "pingfang", "border", "CENTER", nil, Media.outlineFlags)
     text:SetPoint("CENTER", frame, "CENTER", 0, 0)
     frame.text = text
 
@@ -513,6 +523,8 @@ function M:Initialize()
     EventBus:Register("MONETUI_THEME_CHANGED", function()
         if M.active then
             ApplyColors()
+            -- 读数用主题的边框槽，主题一换跟着重涂（不靠注册顺序）。
+            PaintTexts()
             -- 装饰件自己上色（经验线用的是 resource 色），主题一换要重涂。
             M:ApplyDecorations()
         end
