@@ -1401,7 +1401,12 @@ local function EnsurePetCooldownDriver()
         acc = 0
         local bar = bars and bars.BarPet
         if not bar or not bar.frame:IsShown() then return end
-        if _G.PetActionBar_UpdateCooldowns then
+        -- 本客户端没有全局 PetActionBar_UpdateCooldowns（实测 nil），但有方法
+        -- PetActionBar:UpdateCooldowns()。只刷冷却，不碰 Update（那会连带 UpdateShownButtons）。
+        local shell = _G.PetActionBar
+        if shell and type(shell.UpdateCooldowns) == "function" then
+            pcall(shell.UpdateCooldowns, shell)
+        elseif _G.PetActionBar_UpdateCooldowns then
             pcall(_G.PetActionBar_UpdateCooldowns)
         end
     end)
