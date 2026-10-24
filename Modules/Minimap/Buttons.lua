@@ -138,12 +138,18 @@ local function Reassert(frame)
     PlaceButton(frame, saved.layout)
 end
 
+--- 暴雪有时会把按钮搬回去（换区域 / 集群 Relayout / UpdateMinimapConfig 之后）。
+--- 以前用 hooksecurefunc 钩 SetParent/SetPoint/SetScale（写方法槽 = 污染，见 AGENTS）；
+--- 改成每 0.5 秒轮询一次"父级还是不是 container"，不是就 Reassert 按回去。
 local function HookReassert(frame)
-    if frame.monetReassertHooked then return end
-    frame.monetReassertHooked = true
-    hooksecurefunc(frame, "SetParent", function(self) Reassert(self) end)
-    hooksecurefunc(frame, "SetPoint",  function(self) Reassert(self) end)
-    hooksecurefunc(frame, "SetScale",  function(self) Reassert(self) end)
+    if Marked(frame, "reassertHooked") then return end
+    Mark(frame, "reassertHooked", true)
+    Widget:PollWatch(frame, function(self)
+        if InCombatLockdown() then return end
+        if self:GetParent() ~= container then
+            pcall(Reassert, self)
+        end
+    end)
 end
 
 --- 把暴雪按钮的某张贴图压掉（只压 alpha，不隐藏 —— 隐藏父帧会停掉它的状态更新）。

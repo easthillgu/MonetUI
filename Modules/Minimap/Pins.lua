@@ -26,7 +26,6 @@ local hidden = setmetatable({}, { __mode = "k" })   -- pin -> 压掉之前的 al
 
 local writing    = false   -- 我们自己正在 SetAlpha，别让 SetAlpha 钩子再进来
 local lib                  -- HBD Pins 库
-local addHooked  = false
 local module               -- ns:GetModule("Minimap")
 
 local function Module()
@@ -97,8 +96,9 @@ local function Refresh(pin)
     ApplyAlpha(pin, y > top or y < bottom)
 end
 
---- 给一个 pin 装钩子。HBD 每次更新都是先 Show 再 SetPoint，两个钩子都把
---- "该不该压"按最新位置重算；SetAlpha 钩子挡住别的插件在带子里把它淡回来。
+--- 给一个 pin 登记（不挂任何钩子）：位置/显隐由 0.5 秒的驱动重算。
+--- 以前这里 hooksecurefunc(SetPoint/Show/SetAlpha)，写的是第三方库帧的方法槽，
+--- 同样属于"污染"（见 AGENTS 的皮肤原则），而且这些帧每次更新都会跑我们的代码。
 local function HookPin(pin)
     if not pin or seen[pin] then return end
     seen[pin] = true
@@ -109,15 +109,6 @@ local function HookPin(pin)
     elseif type(pin.SetAlpha) ~= "function" then
         return
     end
-
-    hooksecurefunc(pin, "SetPoint", function(self) Refresh(self) end)
-    hooksecurefunc(pin, "Show", function(self) Refresh(self) end)
-    hooksecurefunc(pin, "SetAlpha", function(self)
-        if writing or hidden[self] == nil then return end
-        writing = true
-        pcall(self.SetAlpha, self, 0)
-        writing = false
-    end)
 end
 
 --- 扫一遍 HBD 的 pin 表：给所有见过的 pin 装钩子，只对"当前活动的"重算位置。
@@ -149,29 +140,26 @@ local function FindLib()
     return found
 end
 
---- HBD 的公开入口：新 pin 一登记就把钩子装上，不用等下一次列表扫描。
---- 签名是 `方法(self, ref, icon, ...)`，icon 固定在第 3 个参数；版本对不上时
---- 拿到的不是 frame，这一次就不管（下一次列表扫描还会兜住）。
-local function HookAdd()
-    if addHooked or not lib then return end
-    addHooked = true
-    for _, name in ipairs({ "AddMinimapIconWorld", "AddMinimapIconMap", "AddMinimapIcon" }) do
-        if type(lib[name]) == "function" then
-            hooksecurefunc(lib, name, function(...)
-                local icon = select(3, ...)
-                if type(icon) ~= "userdata" then return end
-                HookPin(icon)
-                Refresh(icon)
-            end)
-        end
-    end
+
+--- 0.5 秒一次的驱动：扫 pin 表（新 pin 会被登记）+ 重算位置。代替原来的 Add 钩子。
+local driver
+local function EnsureDriver()
+    if driver then return end
+    driver = CreateFrame("Frame")
+    local acc = 0
+    driver:SetScript("OnUpdate", function(_, elapsed)
+        acc = acc + (elapsed or 0)
+        if acc < 0.5 then return end
+        acc = 0
+        Sweep()
+    end)
 end
 
---- 每次套皮都调（幂等）：找库、装 Add 钩子、把现有 pin 扫一遍。
+--- 每次套皮都调（幂等）：找库、启动驱动、把现有 pin 扫一遍。
 function P:Apply()
     lib = lib or FindLib()
     if not lib then return end
-    HookAdd()
+    EnsureDriver()
     RefreshAll()
 end
 

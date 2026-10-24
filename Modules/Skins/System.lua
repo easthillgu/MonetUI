@@ -258,13 +258,19 @@ local function TintPanel(frame)
 end
 
 local function SkinMenus()
-    local create = _G.UIDropDownMenu_CreateFrames
-    if type(create) ~= "function" or Marked(create, "hooked") then return end
-    Mark(create, "hooked", true)
-
-    hooksecurefunc("UIDropDownMenu_CreateFrames", function(level, menuIndex)
-        TintPanel(_G["DropDownList" .. tostring(level)])
-        TintPanel(_G["DropDownList" .. tostring(level) .. "Menu" .. tostring(menuIndex)])
+    if Marked(_G.UIParent, "menuPoll") then return end
+    Mark(_G.UIParent, "menuPoll", true)
+    -- 不再 hooksecurefunc("UIDropDownMenu_CreateFrames")（全局函数钩子 = 污染，见 AGENTS）。
+    -- 改成轮询：每 0.5 秒把可见的下拉列表重新染一遍（只染显示中的，成本可忽略）。
+    ns.Widget:PollWatch(_G.UIParent, function()
+        for level = 1, 8 do
+            local list = _G["DropDownList" .. level]
+            if list and list.IsShown and list:IsShown() then TintPanel(list) end
+            for menu = 1, 8 do
+                local sub = _G["DropDownList" .. level .. "Menu" .. menu]
+                if sub and sub.IsShown and sub:IsShown() then TintPanel(sub) end
+            end
+        end
     end)
 end
 
@@ -276,10 +282,17 @@ local function WatchTooltipStyle()
     if tooltipStyleWatched or type(_G.SharedTooltip_SetBackdropStyle) ~= "function" then return end
     tooltipStyleWatched = true
 
-    hooksecurefunc("SharedTooltip_SetBackdropStyle", function(frame, style)
-        if style or not frame or not Marked(frame, "nineTint") then return end
-        TintNineSlice(frame)
-    end)
+    -- 不再 hooksecurefunc("SharedTooltip_SetBackdropStyle")（全局函数钩子 = 污染）：
+    -- 改成轮询——提示框显示期间每 0.5 秒补一次九宫格染色。暴雪自己换特殊样式
+    -- （符文锻造金 / 腐化紫 / Azerite）时，Mark 里的 nineTint 仍在，但颜色会被它覆盖，
+    -- 所以这里只在"还是我们标记过的那个框"时补色。
+    local tip = _G.GameTooltip
+    if tip then
+        ns.Widget:PollWatch(tip, function(self)
+            if not self:IsShown() then return end
+            if Marked(self, "nineTint") then TintNineSlice(self) end
+        end)
+    end
 end
 
 local function SkinTooltip()

@@ -647,23 +647,26 @@ local function HookMinimapConfig()
     if not cluster or type(cluster.UpdateMinimapConfig) ~= "function" then return end
     configHooked = true
 
-    hooksecurefunc(cluster, "UpdateMinimapConfig", function()
-        if restoring or not active or reskinQueued then return end
-        reskinQueued = true
-        local function reskin()
-            reskinQueued = false
-            if restoring or not active then return end
-            if InCombatLockdown() then
-                Queue("skin")
+    -- 不再 hooksecurefunc(cluster, "UpdateMinimapConfig")（写方法槽 = 污染，见 AGENTS）。
+    -- 改成轮询：小地图尺寸/形状被客户端改回默认时（256→默认），把重套皮排到下一帧。
+    local lastW
+    ns.Widget:PollWatch(cluster, function(self)
+        local w = self.MinimapContainer and self.MinimapContainer.Minimap and self.MinimapContainer.Minimap:GetWidth()
+        w = tonumber(w) or nil
+        if w and lastW and w ~= lastW and not restoring and active and not reskinQueued then
+            reskinQueued = true
+            local function reskin()
+                reskinQueued = false
+                if restoring or not active then return end
+                if InCombatLockdown() then Queue("skin") else Skin() end
+            end
+            if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+                C_Timer.After(0, reskin)
             else
-                Skin()
+                reskin()
             end
         end
-        if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
-            C_Timer.After(0, reskin)
-        else
-            reskin()
-        end
+        lastW = w
     end)
 end
 
