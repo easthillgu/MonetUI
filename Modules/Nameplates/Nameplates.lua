@@ -25,8 +25,8 @@ local driverHooked = false
 local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
 local Marked = function(o, k) return ns:Marked(o, k) end
 
-local BORDER   = 1
-local TEXT_GAP = 3     -- the gap the unit frames keep above their bars
+local BORDER   = Widget.BORDER   -- 1px Monet 发丝边（单一来源见 Utils/Widget.lua）
+local TEXT_GAP = Widget.TEXT_GAP -- the gap the unit frames keep above their bars
 local CAST_GAP = 4
 
 local function DB()

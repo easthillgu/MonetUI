@@ -67,7 +67,7 @@ local TEXT_LAYOUT = {
     pet          = {},
 }
 
-local TEXT_GAP   = 3   -- gap between the frame's top edge and the text row
+local TEXT_GAP   = Widget.TEXT_GAP   -- gap between the frame's top edge and the text row
 local NAME_SIZE  = 10
 local SMALL_SIZE = 10
 

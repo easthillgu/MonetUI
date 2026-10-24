@@ -23,7 +23,7 @@ local M = { name = "GroupFrames" }
 local PARTY_UNITS    = 5   -- 自己 + 小队 1..4
 local RAID_GROUPS    = 8
 local RAID_PER_GROUP = 5
-local BORDER         = 1
+local BORDER         = Widget.BORDER   -- 1px Monet 发丝边（单一来源见 Utils/Widget.lua）
 
 local RANGE_ALPHA    = 0.45
 local RANGE_INTERVAL = 0.25

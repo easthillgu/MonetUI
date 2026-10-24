@@ -80,7 +80,7 @@ local function Call(fn, ...)
     return a, b, c
 end
 
-local BORDER      = 1     -- 1px Monet edge, used as the icon inset everywhere
+local BORDER      = Widget.BORDER     -- 1px Monet edge, used as the icon inset everywhere
 local CROP        = 0.08  -- icon crop that hides Blizzard's own icon border
 local HOTKEY_SIZE = 12
 local COUNT_SIZE  = 12

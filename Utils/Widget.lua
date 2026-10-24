@@ -26,6 +26,12 @@ local EventBus = ns.EventBus
 
 local Widget = {}
 
+-- 主题参数常量：各模块以前各自复制一份（review 2026-10-24 第 6 条），现在单点定义。
+-- bgAlpha **不**收进来：0.9 / 0.92 / 0.85 / 0.55 / 0.6 / 0.25 各处是按表面语义挑的
+-- （面板 bg、施法条 bg、条底、按钮底），合并会悄悄改视觉。
+Widget.BORDER   = 1   -- 1px Monet 发丝边（框 / 条 / 牌 / 按钮的内嵌边）
+Widget.TEXT_GAP = 3   -- 文字行与条顶边之间的空隙
+
 local hoverWatch, hoverDriver, hoverAcc = {}, nil, 0
 
 local function MouseOver(frame)
