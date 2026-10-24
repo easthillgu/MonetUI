@@ -203,11 +203,38 @@ local function Brighten(r, g, b, factor)
     return bump(r), bump(g), bump(b)
 end
 
+--- 玩家单位血条里职业色占多少（0 = 完全是主题奶油色，1 = 完全是职业色）。
+--- 调大一点职业暗示更明显、但越接近"整条蓝"，调小则更像玩家自己的条。
+local CLASS_TINT = 0.35
+
 --- The "current" part of a health bar: "highlight" (player, pet), "class" (target,
---- focus) or "health".  UnitSelectionColor is never secret, so no identity guard.
+--- focus) or "health".
 local function FillColor(unit)
     local style = Setting(unit, "fillColor")
     if style == "class" then
+        -- 玩家单位：职业色只做"淡染"。本客户端的 UnitSelectionColor 对玩家一律返回纯蓝
+        -- (0,0,1) —— 选中谁都变成同一条蓝血条，这正是"颜色突兀"的来源，而且它根本不是职业色。
+        -- 真职业色走 Color:ClassColor（C_ClassColor）；认职业主要看提亮过的能量条
+        -- （UpdatePowerColor 里 player / target / targettarget 的 1.25）。
+        if UnitIsPlayer(unit) then
+            local hr, hg, hb = Color:GetHighlight()
+            hr, hg, hb = hr * 0.8, hg * 0.8, hb * 0.8
+
+            local classFile = UnitClassBase(unit)
+            local cr, cg, cb
+            if type(classFile) == "string" and not Secrets.IsSecret(classFile) then
+                cr, cg, cb = Color:ClassColor(classFile)
+            end
+            if cr then
+                return hr + (cr - hr) * CLASS_TINT,
+                       hg + (cg - hg) * CLASS_TINT,
+                       hb + (cb - hb) * CLASS_TINT, 1
+            end
+            -- 职业色拿不到（身份受限 / 客户端没有这张表）：就当普通血条，不硬塞颜色。
+            return hr, hg, hb, 1
+        end
+
+        -- NPC：保留敌我色（敌对红 / 友善绿），那是信号，不能洗淡。
         local ok, r, g, b = pcall(UnitSelectionColor, unit)
         if ok and r then
             -- target / targettarget 比 player 的暗 highlight 稍亮，层次感更清楚。

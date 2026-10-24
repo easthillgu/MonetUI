@@ -729,6 +729,13 @@ function SimpleConfig:Build()
         end)
     y = y - 28
 
+    local fillHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
+    fillHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
+    fillHint:SetWidth(328)
+    fillHint:SetJustifyH("LEFT")
+    fillHint:SetText("「职业 / 阵营色」对玩家单位只给一点色相（血条仍是奶油基调），认职业主要看提亮过的能量条；NPC 保留敌对红 / 友善绿。")
+    y = y - 44
+
     -- One row for two settings: 0 means "off", anything else is the pip height.
     local CLASS_ITEMS = {
         { value = 0, text = "关闭" },
