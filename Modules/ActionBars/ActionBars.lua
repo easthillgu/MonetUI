@@ -639,6 +639,58 @@ local function InstallPageChild(button, index)
     pcall(button.SetAttributeNoHandler, button, "_childupdate-" .. PAGE_CHILD, PageChildSnippet(index))
 end
 
+-- ---------------------------------------------------------------------------
+-- **点击用到的属性必须由安全片段写。**
+--
+-- 客户端点击安全按钮时，`SecureTemplates.lua` 会读 type / typerelease / checkselfcast /
+-- useOnKeyDown 这些属性来决定怎么执行。**Lua 写进去的值是"脏值"**，客户端照用，但整条执行
+-- 会被记成"被 MonetUI 污染"，于是同一次点击里暴雪自己的安全调用（例如 CastPetAction →
+-- PetActionBar:UpdateShownButtons → SetShown、UseAction → MainActionBar:ClearAllPoints）
+-- 全部被判 ADDON_ACTION_BLOCKED —— 实机 taint.log 的链就是：
+--   OnActionButtonClick → PerformAction → handler → CastPetAction
+--     → PetActionBar:UpdateShownButtons → PetActionButton10:SetShown()  BLOCKED
+--
+-- 所以这些属性改由 ChildUpdate 片段在**安全环境**里写（和 action 同一个套路）。
+local KIND_CHILD   = "mui-kind"
+local KEYDOWN_CHILD = "mui-keydown"
+
+local KIND_SNIPPET = [[
+    self:SetAttribute("type", message)
+    if message == "pet" then
+        self:SetAttribute("typerelease", nil)
+    else
+        self:SetAttribute("typerelease", "actionrelease")
+    end
+    self:SetAttribute("checkselfcast", true)
+    self:SetAttribute("checkfocuscast", true)
+    self:SetAttribute("checkmouseovercast", true)
+]]
+
+local KEYDOWN_SNIPPET = [[
+    self:SetAttribute("useOnKeyDown", message == "true")
+]]
+
+--- 给一个按钮装上"类型 / 按下抬起"两条子片段（幂等）。
+local function InstallSecureInit(button)
+    if Marked(button, "secureInit") then return end
+    Mark(button, "secureInit", true)
+    pcall(button.SetAttributeNoHandler, button, "_childupdate-" .. KIND_CHILD, KIND_SNIPPET)
+    pcall(button.SetAttributeNoHandler, button, "_childupdate-" .. KEYDOWN_CHILD, KEYDOWN_SNIPPET)
+end
+
+--- 在安全环境里把类型 / useOnKeyDown 下发一遍（不经过 Lua 的脏值）。
+local function PushSecureInit(bar, kind)
+    local down = true
+    if _G.GetCVarBool then
+        local ok, value = pcall(_G.GetCVarBool, "ActionButtonUseKeyDown")
+        if ok then down = value ~= false end
+    end
+    pcall(bar.frame.Execute, bar.frame,
+        ("self:ChildUpdate(%q, %q)"):format(KIND_CHILD, kind or "action"))
+    pcall(bar.frame.Execute, bar.frame,
+        ("self:ChildUpdate(%q, %q)"):format(KEYDOWN_CHILD, tostring(down)))
+end
+
 --- 让条把当前页下发给所有按钮一次（片段跑，安全环境）。
 local function PushPageToChildren(bar)
     local page = tonumber(bar.frame:GetAttribute("actionpage")) or bar.def.page
@@ -655,10 +707,19 @@ local function SlotOf(button, bar, index)
     return SlotFor(bar, index)
 end
 
---- useOnKeyDown 跟着玩家的 cvar 走（按下 / 抬起施法）。cvar 变化时由 SetClickOptions 重写。
+--- useOnKeyDown 跟着玩家的 cvar 走（按下 / 抬起施法）。
+--- **必须走安全片段**：Lua 写进去的是脏值，客户端点一下就会被判越权，
+--- 并连带把同一次点击里暴雪的安全调用全部拒掉（见 InstallSecureInit 的注释）。
 local function SetUseOnKeyDown(button)
-    local cvar = _G.GetCVarBool and GetCVarBool("ActionButtonUseKeyDown")
-    pcall(button.SetAttribute, button, "useOnKeyDown", cvar ~= false)
+    local barFrame = button and button.bar
+    if not barFrame or type(barFrame.Execute) ~= "function" then return end
+    local down = true
+    if _G.GetCVarBool then
+        local ok, value = pcall(_G.GetCVarBool, "ActionButtonUseKeyDown")
+        if ok then down = value ~= false end
+    end
+    pcall(barFrame.Execute, barFrame,
+        ("self:ChildUpdate(%q, %q)"):format(KEYDOWN_CHILD, tostring(down)))
 end
 
 --- 冷却：**自己画，但绝不读机密数字**。
@@ -708,23 +769,27 @@ local function CursorUI()
     return x / scale, y / scale
 end
 
---- 光标落在这一条的第几格（1..12），不在条上返回 nil。
+--- 光标落在这一条的第几格（1..n），不在条上返回 nil。
+--- **按每个按钮自己的矩形判断**，不再用"条的左下角 + 格子间距"推算：
+---   * GetLeft/GetBottom 已经是屏幕（UIParent 缩放后）坐标，再乘一次缩放会整体偏移；
+---   * 间距/内边距一旦和 LayoutBar 不一致，推算出来的格子就会错位。
+--- 逐格命中不存在这两个问题，而且天然支持将来每条不同的格子尺寸。
 local function IndexAtCursor(bar)
     local cx, cy = CursorUI()
     if not cx or not cy then return nil end
-    local frame = bar.frame
-    local left, bottom = frame:GetLeft(), frame:GetBottom()
-    if not left or not bottom then return nil end
-    local s = (frame:GetEffectiveScale() or 1) / (UIParent:GetEffectiveScale() or 1)
-    local x0, y0 = left * s, bottom * s
-    local w, h = (frame:GetWidth() or 0) * s, (frame:GetHeight() or 0) * s
-    if cx < x0 or cx > x0 + w or cy < y0 or cy > y0 + h then return nil end
-    local pitch = (ButtonSize() + Spacing()) * s
-    if pitch <= 0 then return nil end
-    local index = math.floor((cx - x0) / pitch) + 1
-    if index < 1 then index = 1 end
-    if index > #bar.buttons then index = #bar.buttons end
-    return index
+    local upScale = UIParent:GetEffectiveScale() or 1
+    for index, button in ipairs(bar.buttons) do
+        local left, bottom = button:GetLeft(), button:GetBottom()
+        if left and bottom then
+            local s = (button:GetEffectiveScale() or upScale) / upScale
+            local w = (button:GetWidth() or 0) * s
+            local h = (button:GetHeight() or 0) * s
+            if cx >= left and cx <= left + w and cy >= bottom and cy <= bottom + h then
+                return index
+            end
+        end
+    end
+    return nil
 end
 
 local function EnsureDropCatcher(bar)
@@ -979,6 +1044,34 @@ end
 -- 托盘提示只打印一次（每个会话），不刷屏。
 local hintedFlyout
 
+--- 拖出 / 拖入。动作条走 PickupAction/PlaceAction；宠物条走 PickupPetAction（拖不进去）。
+--- 这些全是受保护全局，战斗中会被客户端拒，所以一律先看 InCombatLockdown。
+local function InstallDrag(bar, button, index, isPet)
+    pcall(button.RegisterForDrag, button, "LeftButton", "RightButton")
+    button:SetScript("OnDragStart", function(self)
+        if InCombatLockdown() then return end
+        if isPet then
+            if _G.PickupPetAction then pcall(_G.PickupPetAction, index) end
+            return
+        end
+        local slot = SlotOf(self, bar, index)
+        if slot and not IsModifiedClick("PICKUPACTION") then
+            local locked = true
+            if Settings and Settings.GetValue then
+                local ok, value = pcall(Settings.GetValue, "lockActionBars")
+                if ok then locked = value end
+            end
+            if locked then return end
+        end
+        if slot and PickupAction then pcall(PickupAction, slot) end
+    end)
+    button:SetScript("OnReceiveDrag", function(self)
+        if InCombatLockdown() or isPet then return end
+        local slot = SlotOf(self, bar, index)
+        if slot and PlaceAction then pcall(PlaceAction, slot) end
+    end)
+end
+
 local function BuildButton(bar, index)
     local def  = bar.def
     local name = "MonetUI" .. def.key .. "Button" .. index
@@ -1000,18 +1093,15 @@ local function BuildButton(bar, index)
 
     if def.pet then
         -- 宠物技能：SecureActionButtonTemplate 的 type="pet"。
-        -- **槽位（action）不能由 Lua 写** —— 和 Bar1..8 同理：Lua 写的属性是脏值，客户端
-        -- 点击时拿它去 CastPetAction 会被判越权（并连带把整条宠物链弄脏）。
-        -- 这里复用翻页子片段：常量页 1 → action = 本格序号。
-        pcall(button.SetAttribute, button, "type", "pet")
-        pcall(button.SetAttribute, button, "checkselfcast", true)
-        pcall(button.SetAttribute, button, "checkfocuscast", true)
-        pcall(button.SetAttribute, button, "checkmouseovercast", true)
+        -- **type / action 都不能由 Lua 写**（脏值）：type 走安全片段，action 由翻页子片段写。
+        InstallSecureInit(button)
         InstallPageChild(button, index)
         button.bindName = def.bind .. index
         button.bar      = bar.frame
         SkinButton(button)
         SetHotkey(button)
+        -- 宠物技能也支持拖出（PickupPetAction）；OnDragStart 在下面统一装。
+        InstallDrag(bar, button, index, true)
         return button
     end
 
@@ -1067,34 +1157,12 @@ local function BuildButton(bar, index)
             end
         end)
     end
-    pcall(button.SetAttribute, button, "type", "action")
-    pcall(button.SetAttribute, button, "typerelease", "actionrelease")
-    pcall(button.SetAttribute, button, "checkselfcast", true)
-    pcall(button.SetAttribute, button, "checkfocuscast", true)
-    pcall(button.SetAttribute, button, "checkmouseovercast", true)
-    SetUseOnKeyDown(button)
+    -- 类型 / 按下抬起 / 槽位全部由安全片段写（见 InstallSecureInit 的注释）。
+    InstallSecureInit(button)
     InstallPageChild(button, index)
 
-    -- 拖出 / 拖入：PickupAction / PlaceAction 同样是受保护全局，战斗外可以用（战斗中客户端会拒）。
-    pcall(button.RegisterForDrag, button, "LeftButton", "RightButton")
-    button:SetScript("OnDragStart", function(self)
-        if InCombatLockdown() then return end
-        local slot = SlotOf(self, bar, index)
-        if slot and not IsModifiedClick("PICKUPACTION") then
-            local locked = true
-            if Settings and Settings.GetValue then
-                local ok, value = pcall(Settings.GetValue, "lockActionBars")
-                if ok then locked = value end
-            end
-            if locked then return end
-        end
-        if slot and PickupAction then pcall(PickupAction, slot) end
-    end)
-    button:SetScript("OnReceiveDrag", function(self)
-        if InCombatLockdown() then return end
-        local slot = SlotOf(self, bar, index)
-        if slot and PlaceAction then pcall(PlaceAction, slot) end
-    end)
+    -- 拖出 / 拖入
+    InstallDrag(bar, button, index, false)
 
     button.bindName = def.bind .. index
     -- bar 必须是**框体**（SetHotkey 之类还会用到）。
@@ -1291,6 +1359,7 @@ local function CreateBar(def)
         EnsureDropCatcher(bar)
         bar.page = 1
         PushPageToChildren(bar)
+        PushSecureInit(bar, "pet")
         RefreshBar(bar)
         return bar
     end
@@ -1304,6 +1373,7 @@ local function CreateBar(def)
     PositionBar(bar)
     -- 按钮建好、位置定好后，把当前页下发给它们一次（片段跑，安全环境里写 action）
     PushPageToChildren(bar)
+    PushSecureInit(bar, "action")
     EnsureDropCatcher(bar)
     bar.page = tonumber(frame:GetAttribute("actionpage")) or def.page
     RefreshBar(bar)
