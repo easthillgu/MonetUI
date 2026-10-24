@@ -358,17 +358,19 @@ local function CreateCombatAura(frameName, key, filter, size, kind)
         -- crop 必须和自绘那套一模一样（砍掉法术图标自带的 8% 描边），边框 1px、图标内缩
         -- 同样的 1 个物理像素、时长 12px，否则战斗中一看就是"另一套皮肤"。
         initializeFrame = function(button)
-            if type(ns.AuraButtonStyle) == "function" then
-                local pad = ns.Media and ns.Media:Mult() or 1
-                if type(pad) ~= "number" or pad <= 0 then pad = 1 end
-                ns.AuraButtonStyle(button, kind, {
-                    width = size, height = size,
-                    crop = { 0.08, 0.92, 0.08, 0.92 },
-                    iconInset = pad,
-                    textSize = 12,
-                    borderInside = true,   -- 自绘那套的边框画在按钮内侧，引擎默认向外扩，必须统一
-                })
-            end
+            pcall(function()
+                if type(ns.AuraButtonStyle) == "function" then
+                    local pad = ns.Media and ns.Media:Mult() or 1
+                    if type(pad) ~= "number" or pad <= 0 then pad = 1 end
+                    ns.AuraButtonStyle(button, kind, {
+                        width = size, height = size,
+                        crop = { 0.08, 0.92, 0.08, 0.92 },
+                        iconInset = pad,
+                        textSize = 12,
+                        borderInside = true,   -- 自绘那套的边框画在按钮内侧，引擎默认向外扩，必须统一
+                    })
+                end
+            end)
         end,
     }
     local sortMethod = _G.AuraContainerSortMethod

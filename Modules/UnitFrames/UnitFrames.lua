@@ -1029,8 +1029,11 @@ local function AddDispelBorder(button, pad, expand)
     local made = 0
     for i = 1, #edges do
         local from, to, off, offY, axis = edges[i][1], edges[i][2], edges[i][3], edges[i][4], edges[i][5]
-        local texture = button:CreateTexture(nil, "OVERLAY")
-        if texture then
+        -- 引擎按钮在受限窗口里生产时，对它的 Create* 会连本带拒绝（ обслуживания实测：同一容器的
+        -- 第一批按钮 style 完整、之后的批次全部失格）。Create* 不包 pcall 会把整个批次炸掉
+        -- （错误面板的 Backdrop.lua:342 / MathUtil.lua:24 波），所以每一次创建都要及早退出。
+        local okTex, texture = pcall(button.CreateTexture, button, nil, "OVERLAY")
+        if okTex and texture then
             -- 先定白色（引擎随后把顶点色改成解魔法类型色），再定几何，最后才交给引擎。
             pcall(texture.SetColorTexture, texture, 1, 1, 1, 1)
             if axis == "h" then
@@ -1084,7 +1087,12 @@ local function StyleAuraButton(button, kind, spec)
         -- 几何：默认比图标外扩 1 个**物理像素**（Media:Mult 就是那个换算），层级压到按钮之下，所以环
         -- 只在图标外沿露出来；用 ApplyBorder（只有边、无底色）而不是整块色贴图 —— 万一层级没压住，
         -- 也只有那 1px 的环会盖到图标，不会把图标糊成一块色。
-        local borderHost = CreateFrame("Frame", nil, button, "BackdropTemplate")
+        -- Create* 的早退守卫：受限窗口里生产时引擎直接拒绝，样式就此作罢（剩下的交给引擎外观），
+        -- 不允许从我们的 initializeFrame 里抛出 —— 抛了会把整个批次连同其它 9 个按钮一起带走。
+        local okHost, borderHost = pcall(CreateFrame, "Frame", nil, button, "BackdropTemplate")
+        if not okHost or not borderHost then
+            return
+        end
         if borderInside then
             borderHost:SetAllPoints(button)
         else
@@ -1097,7 +1105,8 @@ local function StyleAuraButton(button, kind, spec)
         Mark(button, "borderHost", borderHost)
     end
 
-    local icon = button:CreateTexture(nil, "ARTWORK")
+    local okIcon, icon = pcall(button.CreateTexture, button, "ARTWORK")
+    if not okIcon or not icon then return end
     -- spec.iconInset：图标从按钮四边内缩多少（要和边框宽度一致，否则边框会被图标压住）。
     local iconInset = (type(spec) == "table" and spec.iconInset) or 0
     if type(iconInset) == "number" and iconInset > 0 then
@@ -1118,7 +1127,8 @@ local function StyleAuraButton(button, kind, spec)
         ns.Skin:CropIcon(icon, crop[1], crop[2], crop[3], crop[4])
     end
 
-    local cd = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
+    local okCd, cd = pcall(CreateFrame, "Cooldown", nil, button, "CooldownFrameTemplate")
+    if not okCd or not cd then return end
     -- 冷却覆盖图标本身（不是整颗按钮），这样扫过的底色不会染到边框那一圈。
     cd:SetAllPoints(icon)
     pcall(cd.SetDrawEdge, cd, false)
@@ -1165,7 +1175,8 @@ local function StyleAuraButton(button, kind, spec)
     -- （textColor.curve + RemainingDuration，引擎按剩余时长求值，机密值也有效）。
     -- 建在冷却帧上（作为它的 region）—— 实测引擎自己那行数字就是这样画的、位于图标之上；
     -- 挂在按钮的子帧里会被图标盖住。
-    local duration = cd:CreateFontString(nil, "OVERLAY")
+    local okDur, duration = pcall(cd.CreateFontString, cd, nil, "OVERLAY")
+    if not okDur or not duration then return end
     -- 时长数字用 PingFangPixel + 硬描边：这套字号是跟着图标尺寸算的（目标框光环 14-20px，
     -- 算出来 4-8px），像素字体在这个尺寸下认不出来。
     Widget:SetFont(duration, textSize, "pingfang", Media.outlineFlags, true)
@@ -1173,7 +1184,8 @@ local function StyleAuraButton(button, kind, spec)
     duration:SetJustifyH("CENTER")
 
     -- 层数：同样画在冷却帧上（在图标之上），锚在右上角，和左下角的时长错开。
-    local stack = cd:CreateFontString(nil, "OVERLAY")
+    local okStack, stack = pcall(cd.CreateFontString, cd, nil, "OVERLAY")
+    if not okStack or not stack then return end
     Widget:SetFont(stack, textSize, "pixel", nil, true)
     stack:SetPoint("TOPRIGHT", button, "TOPRIGHT", -1, -1)
     stack:SetJustifyH("RIGHT")
@@ -1295,7 +1307,11 @@ local function CreateAuraContainer(parent, key, filterString, kind)
             layoutIndex    = 1,
         },
         -- 闭包把"这是 debuff 组"带进 init：debuff 走引擎的解魔法类型色边框。
-        initializeFrame = function(button) StyleAuraButton(button, kind) end,
+        -- 整个回调套 pcall：这里是 securecall 进来的引擎生产链，我们的任何异常会把
+        -- 整个批次（连同其它 9 个按钮）一起带走（Backdrop.lua:342 / MathUtil.lua:24 波）。
+        initializeFrame = function(button)
+            pcall(StyleAuraButton, button, kind)
+        end,
     }
     -- 这两个是枚举**表**（AuraContainerSortMethod.Default = 0、SortDirection.Normal = 0），
     -- 直接把表当参数传会被引擎拒绝（"sortMethod must be a valid AuraContainerSortMethod"，
