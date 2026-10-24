@@ -609,6 +609,21 @@ local function HideBlizzardPlate(base, plate)
 end
 
 --- Hand the plate back as found (module off or unit filtered out): box shown, aura list returned.
+--- 生产者禁令（实机取证见 taint.log 01:15:42）：ApplyFrameOptions 内部会跑
+--- CompactUnitFrame_SetUpFrame → 逐项更新（SetMinMaxValues / UpdateHealPrediction...）。
+--- 秘值还活着的时候从我们的上下文直呼它，接下来暴雪那条 UI 代码全被记成 "tainted by
+--- MonetUI"，一个秘值比较被拦就把 compact 单位帧的整条生产链标脏，之后暴雪自己的
+--- 事件处理逐条爆（CompactUnitFrame:1211 / CastingBarFrame:331 / NamePlateAuras:247）。
+--- 所以受限状态（战斗中，或脱战瞬间秘值尚未死亡的窗口）里只把这一步排进 ns:AfterCombat
+--- 队列；SetParent / SetAlpha / Show 是普通受保护调用，被拒也只进 BLOCKED 日志，当场还。
+--- @param base Blizzard's nameplate base frame
+--- @param plate our plate frame that borrowed `base`'s unit frame (may be nil)
+local function SecretsLive()
+    if InCombatLockdown and InCombatLockdown() then return true end
+    local ok, live = pcall(Secrets.HealthSecret, "player")
+    return ok and live and true or false
+end
+
 local function RestoreBlizzardPlate(base, plate)
     local uf = BlizzardUnitFrame(base)
     if uf then
@@ -620,7 +635,17 @@ local function RestoreBlizzardPlate(base, plate)
         -- 真正会重排暴雪那套锚点的是 Base 的 ApplyFrameOptions（它自己带 NamePlateSetupOptions）；
         -- uf:ApplyFrameOptions() 缺这两个参数，进函数第一行就抛，以前的 pcall 把这条静默吞了。
         if base and type(base.ApplyFrameOptions) == "function" then
-            pcall(base.ApplyFrameOptions, base)   -- the game re-anchors its own list
+            if SecretsLive() then
+                -- 受限期不直呼生产者："regen" 模式必等下一次脱战排空再跑，排空时秘值
+                -- 已死亡，调用无污染。闭包里每次都重新做类型检查：牌可能已被回收。
+                ns:AfterCombat("nameplates-apply-frame-options", function()
+                    if type(base) == "table" and type(base.ApplyFrameOptions) == "function" then
+                        pcall(base.ApplyFrameOptions, base)
+                    end
+                end, "regen")
+            else
+                pcall(base.ApplyFrameOptions, base)   -- the game re-anchors its own list
+            end
         end
         if uf.SetAlpha then pcall(uf.SetAlpha, uf, 1) end
         pcall(uf.Show, uf)
