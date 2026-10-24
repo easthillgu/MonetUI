@@ -986,13 +986,15 @@ local function BuildButton(bar, index)
     pcall(button.RegisterForClicks, button, "AnyDown", "AnyUp")
 
     if def.pet then
-        -- 宠物技能：SecureActionButtonTemplate 的 type="pet" + action=槽位 1..10。
-        -- 属性写的是**我们自己的**按钮，不受污染限制；宠物条没有翻页，常量即可。
+        -- 宠物技能：SecureActionButtonTemplate 的 type="pet"。
+        -- **槽位（action）不能由 Lua 写** —— 和 Bar1..8 同理：Lua 写的属性是脏值，客户端
+        -- 点击时拿它去 CastPetAction 会被判越权（并连带把整条宠物链弄脏）。
+        -- 这里复用翻页子片段：常量页 1 → action = 本格序号。
         pcall(button.SetAttribute, button, "type", "pet")
-        pcall(button.SetAttribute, button, "action", index)
         pcall(button.SetAttribute, button, "checkselfcast", true)
         pcall(button.SetAttribute, button, "checkfocuscast", true)
         pcall(button.SetAttribute, button, "checkmouseovercast", true)
+        InstallPageChild(button, index)
         button.bindName = def.bind .. index
         button.bar      = bar.frame
         SkinButton(button)
@@ -1262,14 +1264,17 @@ local function CreateBar(def)
     end
 
     if def.pet then
-        -- 宠物条不翻页：只在"有宠物"时显示。显隐同样交给 state driver（安全环境）。
+        -- 宠物条不翻页：显隐只由"有宠物"决定；页号恒为 1，用来让翻页子片段把
+        -- action = 本格序号 写进安全环境（见 BuildButton 的宠物分支）。
         if RegisterStateDriver then
             pcall(RegisterStateDriver, frame, "visibility", "[pet] show; hide")
+            pcall(RegisterStateDriver, frame, "page", "1")
         end
         LayoutBar(bar)
         PositionBar(bar)
         EnsureDropCatcher(bar)
-        bar.page = def.page
+        bar.page = 1
+        PushPageToChildren(bar)
         RefreshBar(bar)
         return bar
     end
