@@ -28,25 +28,22 @@
 
 ---
 
-## P1 · AfterCombat 战斗延迟队列(review #1)
+## P1 · AfterCombat 战斗延迟队列(review #1)—— ✅ 完成(e912caa / 085df1a)
 
-**目标**:消灭 ~8 处重复的"战斗中置标记 → PLAYER_REGEN_ENABLED 排空"骨架,~80 行。
-
-1. commit `refactor(core): ns:AfterCombat 战斗延迟队列`
-   - 位置:Core.lua,`ns:Marked` 旁。
-   - API:`ns:AfterCombat(key, fn)`
-     - `key` 字符串,模块内唯一(按 key 去重:同一 key 只保留最新一次排入的动作);
-     - `fn` 无参函数;不在战斗 → pcall 立即执行;战斗中 → `pending[key]=fn`,
-       `PLAYER_REGEN_ENABLED` 排空:按插入顺序 pcall,**失败者留在队列等下次脱战重试**
-       (一次性 print,成功后清提示位)。
-2. commit `refactor: 8 个模块迁到 ns:AfterCombat`
-   - UnitFrames.lua pendingEnabled/FlushPendingEnabled(1936-1970)
-   - Groups.lua pending "apply"/"disable"(1002-1019)
-   - Nameplates.lua sizePending(124-131)
-   - Minimap.lua queued/Queue/RunQueue(65-91)—— restore 优先、失败重排语义由 AfterCombat
-     的重试机制承接,wants 表在 fn 内部消化
-   - BuffFrame.lua:574、ActionBars.lua:2133、InfoBar.lua:516、Forever.lua:138-142
-     (Forever 是一次性注册再反注册,改为 AfterCombat 一次性动作)
+**实际结果**:
+- `ns:AfterCombat(key, fn, mode?)`:Core.lua。不在战斗当场 pcall 执行;战斗中 `pending[key]=fn`
+  (按 key 去重、最新者胜);`PLAYER_REGEN_ENABLED` 排空,pcall 失败者留队列等下次脱战重试,
+  每 key 失败只提示一次(成功后清提示位)。`mode="regen"` = 无论如何等下一次脱战才执行,
+  供"排空函数执行中又自排"的场景防立即重入(Minimap 的 Skin 失败自重排)。
+- 已迁移 7 模块:UnitFrames(enabled + auras 两路)、Groups(groupframes-state,DesiredState
+  读实时开关)、Nameplates(plate-size)、Minimap(自有 wants 表保留,注册改走 regen 模式)、
+  BuffFrame(auras)、ActionBars(apply/bindings/adopt/layout 五标记,freshDirty 为死代码一并删,
+  PLAYER_REGEN_ENABLED 处理器整个删除)、Forever(skins-micromenu)。
+- **核实后不迁**(原计划 8 处,两处实为纯状态刷新而非延迟队列):InfoBar:516(战斗脉冲色)、
+  CombatText:273(战斗进出场状态)。
+- 净变化 126+/109−;离线 check 0 错误,warning 与原仓基线完全一致(4 条既有 PlaceAction/
+  PickupAction 设计警告 + toc-interface 为目标路径未注册导致的误报)。
+- 待实机验证(见下方验证清单):进/出战斗各模块补做是否生效、无 ADDON_ACTION_BLOCKED 新增。
 
 ## P2 · 热身小改动(review #6 #7 + #8,各自独立 commit)
 
