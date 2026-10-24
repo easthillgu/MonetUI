@@ -396,6 +396,48 @@ end
 ---     之后暴雪自己更新它们就变成 ADDON_ACTION_FORBIDDEN，每次点击动作条都弹
 ---     "MonetUI 已被禁用，因为该功能只对暴雪的 UI 开放"。
 --- 现在：普通动作条换到常隐框体；**MainActionBar 例外，必须留在暴雪的父链上**（见下）。
+--- 被收起的暴雪条清单 + 驱动：暴雪会在变形 / 载具 / 召唤宠物 / 翻页时重新 Show 它们，
+--- 我们每 0.5 秒把 alpha 压回 0（顺带再关一次翻页箭头）。
+--- **为什么不用 `hooksecurefunc(frame, "Show")`**：secure hook 插在暴雪调用链中间，
+--- 我们的代码一跑，同一条链后面暴雪的安全调用（Show → UpdateVisibility →
+--- UpdateShownButtons → SetShown）就会整片被拒 —— taint.log 里宠物条那一串
+--- `PetActionButton*:SetShown()` 正是这么来的。定时驱动属于独立的一次执行，不夹在链里。
+local parkedList = {}
+local parkDriver
+
+local function KeepParked()
+    for i = 1, #parkedList do
+        local frame = parkedList[i]
+        if Marked(frame, "parked") then
+            if Marked(frame, "hidden") then
+                -- ParkBag 那条路：暴雪把它 Show 回来就再藏一次。
+                if frame:IsShown() then pcall(frame.Hide, frame) end
+            elseif frame:GetAlpha() > 0 then
+                pcall(frame.SetAlpha, frame, 0)
+                pcall(frame.EnableMouse, frame, false)
+                KillPagerMouse(frame)
+            end
+        end
+    end
+end
+
+local function ParkWatch(frame)
+    for i = 1, #parkedList do
+        if parkedList[i] == frame then return end
+    end
+    parkedList[#parkedList + 1] = frame
+
+    if parkDriver then return end
+    parkDriver = CreateFrame("Frame")
+    local acc = 0
+    parkDriver:SetScript("OnUpdate", function(_, elapsed)
+        acc = acc + (elapsed or 0)
+        if acc < 0.5 then return end
+        acc = 0
+        KeepParked()
+    end)
+end
+
 local function Park(name)
     local frame = _G[name]
     if not frame or Marked(frame, "parked") then return false end
@@ -427,15 +469,14 @@ local function Park(name)
     KillMouse(frame, 2)
     KillPagerMouse(frame)
 
-    -- 变形 / 载具 / 翻页 / 骑乘时暴雪会重新 Show 它：Show 本身是安全的（父链没被改过），
-    -- 只要把 alpha 压回去。SetAlpha 不受保护、战斗中也能写。
-    if type(hooksecurefunc) == "function" and not Marked(frame, "showHook") then
-        Mark(frame, "showHook", true)
-        pcall(hooksecurefunc, frame, "Show", function(self)
-            pcall(self.SetAlpha, self, 0)
-            KillPagerMouse(self)
-        end)
-    end
+    -- 变形 / 载具 / 翻页 / 骑乘 / 召唤宠物时，暴雪会重新 Show 这些条。**不能用
+    -- hooksecurefunc(frame, "Show") 在里面压 alpha**：secure hook 是插在暴雪调用链中间的，
+    -- 我们的代码一跑，这条链后续的暴雪安全调用（Show → UpdateVisibility → UpdateShownButtons
+    -- → SetShown）就全被判 BLOCKED —— taint.log 里宠物条那一串 PetActionButton*:SetShown
+    -- 就是这么来的。改成我们自己的驱动帧定时把 alpha 压回去：那属于独立的一次执行，
+    -- 不夹在暴雪的调用链里。
+    ParkWatch(frame)
+
     if frame.Selection and frame.Selection.SetAlpha then
         pcall(frame.Selection.SetAlpha, frame.Selection, 0)
     end
@@ -459,12 +500,8 @@ local function ParkBag(name)
     Mark(frame, "parked", true)
     Mark(frame, "hidden", true)
     Mark(frame, "alpha", frame:GetAlpha())
-    if type(hooksecurefunc) == "function" and not Marked(frame, "parkHook") then
-        Mark(frame, "parkHook", true)
-        hooksecurefunc(frame, "Show", function(self)
-            if Marked(self, "parked") and Marked(self, "hidden") then pcall(self.Hide, self) end
-        end)
-    end
+    -- 同样不挂 Show 后钩（会夹在暴雪调用链里）：交给 0.5s 的驱动再藏一次。
+    ParkWatch(frame)
     pcall(frame.Hide, frame)
     return true
 end
