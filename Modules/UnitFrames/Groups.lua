@@ -180,10 +180,7 @@ local function StyleButton(button, cfg, small)
     if not button.health then
         button.health = Widget:Bar(button, inner, healthHeight)
         -- 空的那一半：一层平涂，血条才有体积
-        local lost = button.health:CreateTexture(nil, "BACKGROUND", nil, 1)
-        lost:SetAllPoints(button.health)
-        lost:SetColorTexture(1, 1, 1, 1)
-        button.lost = lost
+        button.lost = Widget:LostBarBG(button.health, 1, 1, 1, 1)
     end
     button.health:SetSize(inner, healthHeight)
     button.health:ClearAllPoints()

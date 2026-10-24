@@ -292,9 +292,7 @@ local function Build(base)
 
     -- The *missing* health, drawn under the fill: a plain texture (never a
     -- secret), so it gives the bar a dark "lost" body without reading a value.
-    local lost = health:CreateTexture(nil, "BACKGROUND")
-    lost:SetAllPoints(health)
-    lost:SetVertexColor(0, 0, 0, 1)
+    local lost = Widget:LostBarBG(health, 0, 0, 0)
 
     plate.health = health
     plate.healthLost = lost

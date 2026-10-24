@@ -252,6 +252,20 @@ function Widget:Bar(parent, width, height, textureKey)
     return bar
 end
 
+--- 血条的"损失部分"底（review 2026-10-24 #4）：UnitFrames / Groups / Nameplates 三处原本
+--- 各自复制 CreateTexture + SetAllPoints + 底色，这里统一。底色走 SetVertexColor 而不是
+--- SetColorTexture 烧 texel —— 底面还要被顶点色动态改（UF / Groups 血量换色、Nameplates
+--- 死亡灰化），烧死 texel 会堵死那条路（黑 texel × 灰顶点色 = 永远黑）。
+--- UF / Groups 白底（之后按血量染色），Nameplates 黑底（死亡时贴中性灰）；Groups 需要
+--- subLevel 1（垫在 weave 织纹之下），另两处默认 0。
+--- @return the just-created "lost health" underlay texture
+function Widget:LostBarBG(bar, r, g, b, subLevel)
+    local lost = bar:CreateTexture(nil, "BACKGROUND", nil, subLevel)
+    lost:SetAllPoints(bar)
+    lost:SetVertexColor(r, g, b, 1)
+    return lost
+end
+
 -- The bar ground (Assets/Textures/monet_stripe_weave.tga, drawn by tools/regen-textures.js):
 -- 64x64, one-direction 45° hairlines on a 4px period.  The number is the texture's, not a
 -- taste call -- the texcoord window below is measured in it.

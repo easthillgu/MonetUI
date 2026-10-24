@@ -1659,9 +1659,7 @@ local function CreateUnitFrame(unit, position)
     health:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -border, -border)
 
     -- The *missing* part: a plain texture behind the fill, tinted by UpdateHealthColor.
-    local lost = health:CreateTexture(nil, "BACKGROUND")
-    lost:SetAllPoints(health)
-    lost:SetColorTexture(1, 1, 1, 1)
+    local lost = Widget:LostBarBG(health, 1, 1, 1)
 
     -- The ground the bar sits on: the Monet canvas weave, so the empty part of the bar reads
     -- as cloth instead of a flat hole.  Created after `lost` (so it draws over it) and still
