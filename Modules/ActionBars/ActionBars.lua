@@ -37,6 +37,15 @@ local Skin     = ns.Skin
 
 local M = { name = "ActionBars" }
 
+--- 收养暴雪宠物/姿态条的开关（声明必须在最前面：SyncPetGlowNow 等早于 AdoptAll 定义）。
+--- **保持 false**：那条路径必然要写暴雪的 SetPoint / SetScale / 换容器父级，
+--- 本客户端会因此把这些受保护框标脏，之后暴雪自己的
+--- PetActionButton…:SetShown / PetActionBar:ClearAllPoints 战斗中被拒
+--- （taint.log: "tainted from MonetUI"），一进战斗就弹「插件导致界面行为失效」。
+--- 关掉后宠物/姿态条按普通动作条处理：alpha 0 + 关鼠标。
+--- 要真正显示它们，得像 Bar1..8 那样建自己的安全按钮（宠物 type="pet"），见 AGENTS 待办。
+local ADOPT_BLIZZARD_BARS = false
+
 local ActionBar        = _G.C_ActionBar
 local RegisterStateDriver   = _G.RegisterStateDriver
 local UnregisterStateDriver = _G.UnregisterStateDriver
@@ -1322,6 +1331,9 @@ end
 
 --- 宠物条的像素环跟一遍当前状态。自绘动作条关着时这条条没被接管，得自己去拿容器。
 local function SyncPetGlowNow()
+    -- 不收养暴雪宠物条时不画环：环是画在**暴雪的**宠物按钮上的，而我们现在
+    -- 一碰它们就会把受保护按钮弄脏（见 ADOPT_BLIZZARD_BARS 的注释）。
+    if not ADOPT_BLIZZARD_BARS then return end
     local def = PET_DEF
     if not def then return end
 
@@ -1581,8 +1593,20 @@ local function AdoptBar(def)
     return entry
 end
 
+--- 收养暴雪宠物/姿态条的开关。**保持 false**：这条路径必然要写它自己的位置/缩放
+--- （SetPoint / SetScale / 换容器父级），本客户端会因此把这些受保护框标脏，
+--- 之后暴雪自己的 PetActionButton…:SetShown / PetActionBar:ClearAllPoints 战斗中被拒
+--- （taint.log 里成片的 "tainted from MonetUI"），一进战斗就弹「插件导致界面行为失效」。
+--- 关掉之后宠物/姿态条按普通动作条处理：alpha 0 + 关鼠标（玩家看不到，但不再污染）。
+--- 要真正显示宠物/姿态条，得像 Bar1..8 那样建**自己的**安全按钮（宠物 type="pet"），
+--- 见 AGENTS 待办。
 local function AdoptAll()
     if not M.own then return end
+    if not ADOPT_BLIZZARD_BARS then
+        Park("PetActionBar")
+        Park("StanceBar")
+        return
+    end
     if Locked() then
         adoptedDirty = true
         return
