@@ -731,8 +731,14 @@ local function CastInfo(channel, unit)
     local texture   = result[4]
     local startMS   = result[5]
     local endMS     = result[6]
-    local notInt    = channel and result[8] or result[9]
-    local spellID   = channel and result[9] or result[10]
+    -- `channel and A or B` truth-tests A before selecting; A is a secret under
+    -- restriction and the mere test throws ("boolean test on field '?'").  Pick explicitly.
+    local notInt, spellID
+    if channel then
+        notInt, spellID = result[8], result[9]
+    else
+        notInt, spellID = result[9], result[10]
+    end
     return name, texture, startMS, endMS, notInt, spellID
 end
 

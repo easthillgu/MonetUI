@@ -705,8 +705,15 @@ local function CastInfo(channel, unit)
     local result = { pcall(fn, unit) }
     if not result[1] then return nil end
 
-    return result[2], result[4], result[5], result[6],
-        (channel and result[7] or result[8])
+    -- `channel and A or B` would truth-test A before selecting; A is a secret under
+    -- restriction and the mere test throws.  Pick the slots explicitly.
+    local notInterruptible
+    if channel then
+        notInterruptible = result[7]
+    else
+        notInterruptible = result[8]
+    end
+    return result[2], result[4], result[5], result[6], notInterruptible
 end
 
 local function UpdateCast(plate)
