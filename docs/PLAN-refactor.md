@@ -47,8 +47,10 @@
 
 ## P2 · 热身小改动(review #6 #7 + #8,各自独立 commit)
 
-1. commit `refactor(widget): BORDER/TEXT_GAP/bgAlpha 收进常量表`
-   - BORDER×2、TEXT_GAP×2、bgAlpha 0.9/0.92×3 → Widget(或 Media)常量表;Minimap 的 BORDER_PX 不并。
+1. commit `refactor(widget): BORDER/TEXT_GAP 收进常量表` —— ✅ 完成(385387e)
+   - Widget.BORDER=1 / Widget.TEXT_GAP=3;Groups/Nameplates/UnitFrames/ActionBars 改引。
+   - **bgAlpha 不并入**:实查 0.9/0.92/0.85/0.55/0.6/0.25 是按表面语义各异的值,合并会改视觉。
+   - 实机验证通过:reload 后探针 Widget.BORDER=1/TEXT_GAP=3,日志 0 ERR/0 BLOCKED/0 WARN。
 2. commit `refactor(unitframes): FrameChrome 单返回值`(UnitFrames:196,唯调用点 :1636)
 3. commit `refactor(simpleconfig): LayoutCursor 光标式布局`
    - `local row = LayoutCursor(yStart)`;107 处 `y = y - N` 机械替换,增删行不再手工记账。
