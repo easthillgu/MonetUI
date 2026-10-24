@@ -752,22 +752,18 @@ local BLIZZARD_GROUPS = {
     "PartyFrame",
 }
 
---- 谁被藏，取决于我们自己有没有真的建出来：建失败（模板不在）时暴雪的框必须留着。
+--- 暴雪的团队/小队框：**我们完全不动**。
+---
+--- 实测：只要碰这个容器（写字段、HookScript、Hide()、甚至 SetAlpha），它和它的成员框
+--- 就会被记成"被 MonetUI 动过"，之后 `EditModeManagerFrame:ResetPartyFrames →
+--- CompactPartyFrame:RefreshMembers → CompactUnitFrame_UpdateHealthColor` 比较机密颜色
+--- 分量就抛 "attempt to compare local 'oldR' (a secret number value, while execution tainted
+--- by 'MonetUI')"（退出编辑模式必现）。
+--- 所以这里彻底放手：玩家要藏暴雪的小队/团队框，用 `Esc → 编辑模式 → 小队/团队框 → 可见性 隐藏`，
+--- 那是玩家操作，不产生任何污染。我们自己的小队/团队框照常工作（两者同时存在时会有重复，
+--- 由玩家那一项设置决定）。
 local function SetBlizzardHidden(cfg, partyActive, raidActive)
-    for i = 1, #BLIZZARD_GROUPS do
-        local name = BLIZZARD_GROUPS[i]
-        local frame = _G[name]
-        if frame then
-            local ours
-            if name == "CompactRaidFrameContainer" or name == "CompactRaidFrameManager" then
-                ours = raidActive
-            else
-                ours = partyActive
-            end
-            local hide = cfg.hideBlizzard ~= false and ours
-            if hide then Park(frame) else Unpark(frame) end
-        end
-    end
+    return
 end
 
 -- ============================================================================
