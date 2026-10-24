@@ -101,6 +101,18 @@ UpdateMaxHealth / UpdateHealPrediction` → 秘值比较被拦 → 整条 compac
 - `ns:AfterCombat` 附加语义:队内 fn 返回 false = "未就绪、留队重试、不提示,error
   语义不变"(Core.lua:403-407)。
 
+**本轮回归第二波(2026-10-25 01:51–02:30, c2abb3e reload 后续查)**:
+- `MathUtil.lua:24 "index a table that cannot be accessed while tainted"` ×10 成簇红字:
+  零售源 :24 = `CreateCounter` 计数器闭包(用户: ScriptErrorsFrame/CallbackRegistry/TimerUtil
+  共用),待用户贴[详情]全栈定位我们→暴雪的路径。
+- `UnitFrames.lua:734 boolean test on field '?'` 红字: `CastInfo` 里
+  `channel and result[8] or result[9]` 的 and/or 真值链 —— channel=true 时 Lua 会**真值测试
+  result[8]**(受限时是秘布尔),必抛。NP 同款(:709)。修=显式 if 选槽(96c7482)。
+  教训: **秘值参与的取值选择禁止 `and/or` 真值链**,哪怕值不会被自己消费。
+- taint.log 02:01–02:05 ~4.5万行 = taintLog=2 详细模式把 `Secrets.Bool`(Groups UpdateRange
+  经 GROUP_ROSTER_UPDATE 全量刷 ×16 按钮 ×2 处)的**设计内 pcall 拦截**逐次记栈放大;
+  功能无损,关 taintLog 即归零。候选优化:RefreshAll 限流。
+
 **本轮遗留(不属回归案情,独立已知代价项)**:
 - `TargetFrameToT:Show()` 家族 AOAB(reload 后 13 条 / 7 分钟,每 2-3 分钟一条,只进日志):
   根因是 UnitFrames:SuppressBlizzard 用 `Hide()` + `SetScript("OnShow", Hide)` 挂槽——
