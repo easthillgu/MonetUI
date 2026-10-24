@@ -523,21 +523,15 @@ local function DressDebuffButton(button)
 end
 
 --- 遍历一整个 debuff 列表，把还没打扮过的按钮补上。
--- 池化按钮第一次显示时可能还没进 GetChildren()，所以每个按钮额外挂一次 OnShow：
--- 回收复用后再次显示时把字体重新压一遍（边框只建一次，靠旁表标记记住）。
+--- 池化按钮第一次显示时可能还没进 GetChildren()；以前给每个按钮挂 OnShow 补一次，
+--- 现在不挂了（HookScript 写脚本槽 = 污染，见 AGENTS）。AnchorDebuffs 在每次
+--- UpdatePlate 里都会重跑，池化按钮下一次刷新自然会被补上。
 local function DressDebuffList(list)
     if not list or type(list.GetChildren) ~= "function" then return end
     local ok, children = pcall(function() return { list:GetChildren() } end)
     if not ok or not children then return end
     for i = 1, #children do
-        local child = children[i]
-        DressDebuffButton(child)
-        if child and type(child.HookScript) == "function" and not Marked(child, "debuffHook") then
-            Mark(child, "debuffHook", true)
-            pcall(child.HookScript, child, "OnShow", function(self)
-                DressDebuffButton(self)
-            end)
-        end
+        DressDebuffButton(children[i])
     end
 end
 

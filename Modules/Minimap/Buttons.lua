@@ -16,6 +16,10 @@ local Media    = ns.Media
 local Secrets  = ns.Secrets
 local EventBus = ns.EventBus
 
+-- 旁表标记（见 Core.lua 的 ns:Mark）
+local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
+local Marked = function(o, k) return ns:Marked(o, k) end
+
 local B = {}
 
 B.WIDTH  = 20      -- 4:3 矩形（宽:高 = 4:3，横长）
@@ -205,12 +209,13 @@ function BadgeColor(key)
     return r, g, b
 end
 
---- 悬停状态：点亮底板。
+--- 悬停状态：点亮底板。轮询（Widget:HoverWatch），不挂脚本钩子。
 local function HookHover(frame, tex)
-    if frame.monetHoverHooked then return end
-    frame.monetHoverHooked = true
-    frame:HookScript("OnEnter", function() SetHover(tex, true) end)
-    frame:HookScript("OnLeave", function() SetHover(tex, false) end)
+    if Marked(frame, "hoverHooked") then return end
+    Mark(frame, "hoverHooked", true)
+    ns.Widget:HoverWatch(frame,
+        function() SetHover(tex, true) end,
+        function() SetHover(tex, false) end)
 end
 
 -- ------------------------------------------------------------------ 三个按钮

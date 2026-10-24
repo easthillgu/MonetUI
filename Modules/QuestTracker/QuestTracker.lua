@@ -311,8 +311,9 @@ local function SuppressBlizzard()
     local bt = _G.ObjectiveTrackerFrame
     if not bt or Marked(bt, "hiddenHook") then return end
     Mark(bt, "hiddenHook", true)
-    if bt.HookScript then
-        bt:HookScript("OnShow", function()
+    -- 不再 HookScript("OnShow")（写脚本槽 = 污染，见 AGENTS）；轮询"变显示了"再藏。
+    if ns.Widget then
+        ns.Widget:ShowWatch(bt, function()
             if enabled then pcall(bt.Hide, bt) end
         end)
     end

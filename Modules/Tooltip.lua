@@ -73,9 +73,15 @@ local function InstallHooks()
     if not tip then return end
     installed = true
 
-    -- HookScript 而不是 SetScript：暴雪自己的脚本照跑，我们只是加一条。
-    pcall(tip.HookScript, tip, "OnShow", OnShow)
-    pcall(tip.HookScript, tip, "OnUpdate", OnUpdate)
+    -- 不 HookScript（写脚本槽 = 污染，见 AGENTS）：用轮询。
+    -- OnShow → Widget:ShowWatch；OnUpdate（跟随光标）→ Widget:PollWatch（0.2 秒一次，够顺滑）。
+    ns.Widget:ShowWatch(tip, function(self)
+        lastX, lastY = nil, nil
+        if follow then Place(self) end
+    end)
+    ns.Widget:PollWatch(tip, function(self)
+        if follow then Place(self) end
+    end)
 end
 
 --- 设置改动后立刻对齐：打开就当场摆到光标旁，关掉先收起（下一次悬停走暴雪自己的位置）。

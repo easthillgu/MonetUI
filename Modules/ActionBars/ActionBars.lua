@@ -1183,6 +1183,23 @@ local function BuildButton(bar, index)
     -- 热键文字（跟着玩家的按键设置走）
     SetHotkey(button)
 
+    -- 鼠标提示：走轮询（Widget:HoverWatch），**不挂任何脚本钩子**（见 AGENTS 的皮肤原则）。
+    -- GameTooltip:SetAction 在本客户端可用（实测 function）。
+    if not Marked(button, "tooltip") then
+        Mark(button, "tooltip", true)
+        Widget:HoverWatch(button, function(self)
+            local slot = SlotOf(self, bar, index)
+            if not slot then return end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            if not pcall(GameTooltip.SetAction, GameTooltip, slot) then
+                GameTooltip:SetText("")
+            end
+            GameTooltip:Show()
+        end, function()
+            GameTooltip:Hide()
+        end)
+    end
+
     return button
 end
 
@@ -1276,8 +1293,7 @@ local function RefreshPetContent(button, index)
 end
 
 local function RefreshBar(bar)
-    -- 宠物条用的是暴雪自己的 PetActionButton（收养），图标/冷却/自动施法提示由暴雪刷新，
-    -- 我们不能也不该去改它们的内容。
+    -- 宠物条是收养来的暴雪按钮：图标/冷却/自动施法提示由暴雪自己刷新，我们不碰。
     if bar.def and bar.def.pet then return end
     for index, button in ipairs(bar.buttons) do
         UpdateButtonContent(button, SlotOf(button, bar, index))
@@ -1343,11 +1359,12 @@ local function CreateBar(def)
         visibility = def.paged and VISIBILITY_MAIN or VISIBILITY_OTHER,
     }
 
+    -- **宠物条只能收养暴雪的 PetActionButton1..10**：实测这个客户端没有通用安全按钮的
+    -- `type="pet"`（属性全对、层级也压过所有条，点了照样没反应，而且没有任何拦截 —— 是
+    -- 客户端根本不处理这个 type）。收养之后施法 / 右键切自动施法 / 冷却 / 自动施法提示全原生。
+    -- 代价：SetParent/SetSize 会把受保护按钮标脏，暴雪自己的 SetShown 会被拒（日志里 10 条
+    -- BLOCKED，只进日志、不弹窗）。功能优先，接受这个代价。
     if def.pet then
-        -- **直接收养暴雪的 PetActionButton1..10**（Ellesmere 在同一客户端就是这么做的）：
-        -- 这个客户端没有通用安全按钮的 type="pet"，也没有 SecureHandlerClickTemplate，
-        -- 自建宠物按钮无论怎么点都不会施法。把暴雪那 10 个按钮 SetParent 到我们的框里、
-        -- 摆成我们的格子，施法 / 冷却 / 自动施法提示 / 右键切自动施法全都天然可用。
         local size, spacing = ButtonSize(), Spacing()
         for i = 1, 10 do
             local btn = _G["PetActionButton" .. i]
@@ -1359,23 +1376,18 @@ local function CreateBar(def)
             pcall(btn.SetPoint, btn, "TOPLEFT", frame, "TOPLEFT", (i - 1) * (size + spacing), 0)
             bar.buttons[#bar.buttons + 1] = btn
         end
-
         if #bar.buttons == 0 then
             pcall(frame.Hide, frame)
             return nil
         end
-
         pcall(frame.SetSize, frame, #bar.buttons * size + math.max(#bar.buttons - 1, 0) * spacing, size)
 
-        -- 暴雪那条外壳：藏起来（不卸载事件 —— 它的 Update 还要负责刷新这 10 个按钮的
-        -- 图标/冷却/可用状态；按钮已经搬到我们这边，外壳自己的位置无所谓）。
         local shell = _G.PetActionBar
         if shell then
             pcall(shell.SetAlpha, shell, 0)
             pcall(shell.EnableMouse, shell, false)
             pcall(shell.EnableMouseMotion, shell, false)
         end
-
         if RegisterStateDriver then
             pcall(RegisterStateDriver, frame, "visibility", "[pet] show; hide")
         end
@@ -1397,10 +1409,18 @@ local function CreateBar(def)
     end
 
     if def.pet then
-        -- 走不到这里（宠物条在上面已经 return 了），留作保险：按普通布局摆一遍即可。
+        -- 自绘宠物条：显隐只由"有宠物"决定；页号恒为 1（子片段据此写 action = 本格序号）；
+        -- 不装拖放接住器（宠物槽不是动作条槽位）。
+        if RegisterStateDriver then
+            pcall(RegisterStateDriver, frame, "visibility", "[pet] show; hide")
+            pcall(RegisterStateDriver, frame, "page", "1")
+        end
         LayoutBar(bar)
         PositionBar(bar)
         bar.page = 1
+        PushPageToChildren(bar)
+        PushSecureInit(bar, "pet")
+        RefreshBar(bar)
         return bar
     end
 
@@ -1897,6 +1917,9 @@ end
 local function AdoptAll()
     if not M.own then return end
     if not ADOPT_BLIZZARD_BARS then
+        -- 宠物条是"收养"暴雪按钮做的（见 CreateBar），外壳在 CreateBar 里已经 alpha 0；
+        -- 姿态条暂时不接管（同样只透明）。
+        GhostBar("StanceBar")
         return
     end
     if Locked() then

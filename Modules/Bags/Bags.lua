@@ -513,8 +513,9 @@ local function HookBlizzardBags()
                     defer()
                 end
             end
-            hooksecurefunc(frame, "Show", Intercept)
-            hooksecurefunc(frame, "SetShown", Intercept)
+            -- 不再 hooksecurefunc(frame, "Show"/"SetShown")（写方法槽 = 污染源，见 AGENTS）。
+            -- 改成轮询"从隐藏变显示"：暴雪把合并背包 Show 出来时我们接管并立刻开自己的窗口。
+            ns.Widget:ShowWatch(frame, Intercept)
         end
     end
     blizzardHooked = true

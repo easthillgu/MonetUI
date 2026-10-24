@@ -156,9 +156,10 @@ function M:HideBlizzardCastBars(enable)
                     if frame.SetScript then
                         pcall(frame.SetScript, frame, "OnShow", frame.Hide)
                     end
-                    if type(hooksecurefunc) == "function" and not Marked(frame, "castHook") then
+                    -- 不再 hooksecurefunc(Show)（写方法槽 = 污染）：轮询"变显示了"再藏。
+                    if ns.Widget then
                         Mark(frame, "castHook", true)
-                        hooksecurefunc(frame, "Show", function(self)
+                        ns.Widget:ShowWatch(frame, function(self)
                             if Marked(self, "castHidden") then pcall(self.Hide, self) end
                         end)
                     end

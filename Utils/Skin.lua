@@ -507,10 +507,8 @@ function Skin:ScrollBar(scrollbar)
             end
             tint(1)
             self:OnTheme(function() tint(1) end)
-            if type(thumb.HookScript) == "function" then
-                thumb:HookScript("OnEnter", function() tint(1.35) end)
-                thumb:HookScript("OnLeave", function() tint(1) end)
-            end
+            -- 轮询代替 HookScript（滑块手柄是暴雪的贴图，写脚本槽会污染）。
+            Widget:HoverWatch(thumb, function() tint(1.35) end, function() tint(1) end)
         end
     end
     return scrollbar

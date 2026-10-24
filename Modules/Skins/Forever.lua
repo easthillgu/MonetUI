@@ -149,6 +149,8 @@ local function SkinMicroMenu()
 
     -- UpdateMicroButtons can fire several times per frame; one debounced repaint absorbs each burst.
     if not microHooked and _G.UpdateMicroButtons then
+        -- 不 hooksecurefunc("UpdateMicroButtons")（全局函数钩子，会污染调用链）：
+        -- 改成每 1 秒轮询一次（Debounce 内部本来就合并）。
         microHooked = true
         local repaint = M:Debounce(function()
             if InCombatLockdown() then return end
@@ -156,9 +158,10 @@ local function SkinMicroMenu()
                 SkinOneMicroButton(MICRO_BUTTONS[i])
             end
         end)
-        hooksecurefunc("UpdateMicroButtons", function()
-            repaint()
-        end)
+        if ns.Widget and ns.Widget.PollWatch then
+            local driver = _G.UIParent
+            ns.Widget:PollWatch(driver, repaint)
+        end
     end
 end
 

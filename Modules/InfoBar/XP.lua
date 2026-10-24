@@ -482,9 +482,10 @@ local function Build(parentBar)
             if f and type(f.Hide) == "function" then pcall(f.Hide, f) end
         end
         local container = _G.MainStatusTrackingBarContainer
-        if container and not Marked(container, "xpHidden") and type(hooksecurefunc) == "function" then
+        if container and not Marked(container, "xpHidden") and ns.Widget then
             Mark(container, "xpHidden", true)
-            hooksecurefunc(container, "Show", function(self) pcall(self.Hide, self) end)
+            -- 轮询代替 hooksecurefunc(Show)：写方法槽会把框体标脏（见 AGENTS）。
+            ns.Widget:ShowWatch(container, function(self) pcall(self.Hide, self) end)
         end
     end
     HideBlizzardXP()
