@@ -120,11 +120,13 @@ UpdateMaxHealth / UpdateHealPrediction` → 秘值比较被拦 → 整条 compac
    - 三处(UF/Groups/NP)血条损失底统一;底色走 `SetVertexColor` 保顶点色语义
      (UF/Groups 血量换色、NP 死亡灰化都要动态改,烧死 texel 会堵死 —— 黑 texel × 灰 = 黑)。
    - Note: 这两步部署后未及 reload,回归案情爆发(见上案情),验证顺延到案情后一起过。
-3. commit `refactor(widget/math): Widget:TintIconBorder + Math:Shorten 名字截断收敛` —— 待做
-   - UF TintAuraButton 已走 `Widget:ApplyBorder(host,1)`;共用点在 NP DressDebuffButton
-     主题路。Groups 的字节切 `Truncate` 是 CJK 坏字形 bug,改 `Math:Shorten(raw, cap, true)`
-     顺带修正;省略号 `…`→`...` 的视觉差记 PLAN,实机目检确认。
-   - (回归期间实机定制:`RestoreBlizzardPlate` 去掉 ApplyFrameOptions,df9efb6)
+3. commit `refactor(widget/math): Widget:TintIconBorder + Math:Shorten 名字截断收敛` —— ✅ 完成(c2abb3e)
+   - helper:Backdrop 目标 → ApplyBorder(几何一起重建);纯贴图 → 白 texel + SetVertexColor
+     (NP 色带从 SetColorTexture 烧色改顶点色,之后主题_changed 可重复重涂,初始仍带驱散色)。
+   - UF TintAuraButton / NP DressDebuffButton 已接入。
+   - Groups 删字节切 Truncate,`Math:Shorten(raw, cap, true)`(**顺手修 CJK 坏字形 bug**);
+     省略号 `…`→`...` 的视觉差接受(与 UF 同源),实机目检确认。
+   - 实机目检:团队框名字截断、名牌 debuff 边框颜色(驱散色/主题色)、光环按钮边框。
 4. 事件注册骨架不单开:与 P1 迁移一起消化(评估后如仍有大块重复再说)。
 
 ## P4 · 长函数拆分(review #5,一个函数一个 commit)
