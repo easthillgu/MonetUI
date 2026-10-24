@@ -24,7 +24,7 @@ local setOffset        -- Build 里定义，Show/Toggle 打开面板时归零
 local MODULE_ORDER = {
     "UnitFrames", "Cooldown", "BuffFrame",
     "Minimap", "BagFrame", "Bags", "QuestTracker", "ActionBars", "Nameplates", "Skins",
-    "InfoBar", "Tooltip", "Cursor",
+    "InfoBar", "Tooltip", "Cursor", "Toast",
 }
 
 local MODULE_LABEL = {
@@ -41,6 +41,7 @@ local MODULE_LABEL = {
     InfoBar      = "信息栏 (InfoBar)",
     Tooltip      = "鼠标提示 (Tooltip)",
     Cursor       = "光标拖尾 (Cursor)",
+    Toast        = "通知横幅 (Toast)",
 }
 
 local function MakeCheckbox(parent, label, yOffset, getter, setter)
@@ -1164,6 +1165,46 @@ function SimpleConfig:Build()
             y = y - 26
         end
 
+        sec.bodyHeight = -y + 4
+    end
+
+    local toast = ns:GetModule("Toast")
+    if toast then
+        sec = BeginSection("通知", false)
+        content = sec.body
+        y = 0
+
+        MakeCheckbox(content, "收到新邮件时弹一条提示（小地图邮件图标已隐藏）", y,
+            function() return toast:GetSetting("mail") end,
+            function(value)
+                toast:Settings().mail = value and true or false
+            end)
+        y = y - 26
+
+        MakeCheckbox(content, "背包满时弹一条提示（腾出空间后可再次提示）", y,
+            function() return toast:GetSetting("bagFull") end,
+            function(value)
+                toast:Settings().bagFull = value and true or false
+            end)
+        y = y - 28
+
+        MakeDropdown(content, y, "停留时长", {
+            { value = 3, text = "3 秒" },
+            { value = 5, text = "5 秒" },
+            { value = 8, text = "8 秒" },
+        },
+            function() return toast:GetSetting("duration") or 5 end,
+            function(value)
+                toast:Settings().duration = value
+            end)
+        y = y - 26
+
+        local toastHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
+        toastHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
+        toastHint:SetWidth(328)
+        toastHint:SetJustifyH("LEFT")
+        toastHint:SetText("横幅在屏幕顶部居中，一次只显示一条，多的排队；底边一条细线随停留时间排空，点一下可提前关掉。")
+        y = y - 34
         sec.bodyHeight = -y + 4
     end
 

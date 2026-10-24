@@ -234,6 +234,13 @@ local DEFAULTS = {
         trail = true,
         glow  = true,
     },
+    -- 通知横幅 (Modules/Toast)：只做本项目真的缺的两件事 —— 新邮件（小地图邮件图标被藏掉了）
+    -- 和背包满。duration = 每条停留秒数。
+    toast = {
+        mail    = true,
+        bagFull = true,
+        duration = 5,
+    },
 }
 ns.DEFAULTS = DEFAULTS
 
