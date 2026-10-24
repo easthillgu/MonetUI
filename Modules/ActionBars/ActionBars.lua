@@ -1346,10 +1346,12 @@ local function SkinAdoptedPetButton(btn)
 
     -- 边框：收养来的按钮**图标是铺满整格的**（我们不能像自绘那样把图标内缩 1px），
     -- 所以底板/边框不能垫在下面（会被图标完全盖住）——改成在按钮**上方**画一圈 1px 的边框。
-    local border = CreateFrame("Frame", nil, btn)
+    -- 必须带 BackdropTemplate：Widget:Theme 走的是 SetBackdrop，没有该模板的面板画不出边。
+    local border = CreateFrame("Frame", nil, btn, "BackdropTemplate")
     border:SetPoint("TOPLEFT", btn, "TOPLEFT", -1, 1)
     border:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 1, -1)
     border:SetFrameLevel(btn:GetFrameLevel() + 1)
+    border:EnableMouse(false)
     Widget:Theme(border, { thickness = 1, bgAlpha = 0 })
     Mark(btn, "petBorder", border)
 
