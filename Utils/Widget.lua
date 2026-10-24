@@ -29,9 +29,13 @@ local Widget = {}
 local hoverWatch, hoverDriver, hoverAcc = {}, nil, 0
 
 local function MouseOver(frame)
+    -- 本客户端没有 MouseIsOver / GetMouseFocus（实测都是 nil），但有 frame:IsMouseOver()。
+    -- 顺序：先按最可靠的 frame 方法，再退到全局函数。
+    local okFrame, over = pcall(frame.IsMouseOver, frame)
+    if okFrame then return over and true or false end
     if _G.MouseIsOver then
-        local ok, over = pcall(_G.MouseIsOver, frame)
-        return ok and over
+        local ok, value = pcall(_G.MouseIsOver, frame)
+        return ok and value
     end
     local focus = _G.GetMouseFocus and _G.GetMouseFocus()
     local guard = 0

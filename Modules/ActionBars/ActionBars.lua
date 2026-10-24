@@ -1175,7 +1175,10 @@ local function RefreshPetContent(button, index)
         if r[1] then enabled = Secrets.Bool(r[7], false) end
     end
     if enabled then
-        Widget:PixelGlow(button, { side = ButtonSize(), static = true })
+        -- 显式给像素/点距：默认值在本客户端换算出 1.0 单位（≈1 物理像素），肉眼看不见。
+        -- pixel/pitch 都是"物理像素"语义，会再乘 Media:Mult()。
+        Widget:PixelGlow(button, { side = ButtonSize(), static = true,
+            pixel = 5, pitch = 12, ringAlpha = 1 })
     else
         Widget:StopPixelGlow(button)
     end
@@ -1764,13 +1767,13 @@ local function GhostBar(name)
     ParkWatch(frame)
 end
 
---- 收养暴雪宠物/姿态条：现在整条路径都不走（见文件开头 ADOPT_BLIZZARD_BARS 的注释）。
---- 宠物/姿态条已经由我们**自绘**（type="pet" 的安全按钮），所以这里只把暴雪那条变透明。
+--- 暴雪的宠物/姿态条现在**完全交给玩家自己的编辑模式设置**：想藏就在
+--- 编辑模式里把「宠物栏 / 姿态栏」的可见性设成隐藏（那是玩家操作，不算插件污染）。
+--- 我们不再碰它：实测连 SetAlpha(0) 都会让它变脏，之后暴雪自己的
+--- PetActionBar:ClearAllPoints / PetActionButton:SetShown 全被拒（就是那串拦截）。
 local function AdoptAll()
     if not M.own then return end
     if not ADOPT_BLIZZARD_BARS then
-        GhostBar("PetActionBar")
-        GhostBar("StanceBar")
         return
     end
     if Locked() then
