@@ -553,8 +553,59 @@ function M:CollectButtons()
     end
 end
 
+-- ------------------------------------------------------------------ 暴雪的「冷却管理器」
+-- 12.x 的冷却管理器（编辑模式里那一项）会在玩家框附近自己画一排技能图标 + 冷却扫描 ——
+-- 实机就是"player 框架下面一堆带冷却的技能图标，查不到来源"。它是 Blizzard_CooldownViewer
+-- 这个 **LoD 包**里的独立帧（不是动作按钮、也不是动作条），既不在我们的条上，也不受我们的
+-- 冷却接管影响，所以看起来像幽灵。这里把这几块收掉（模块关掉时再放回来）。
+--
+-- 它们在登录时还不一定存在（LoD），所以：先轮询等包加载（最多 12 秒），
+-- 出现后用 ShowWatch 盯着"又被显示"（编辑模式应用布局时会 Show 一次）。
+local VIEWER_FRAMES = {
+    "EssentialCooldownViewer",   -- 主要技能
+    "UtilityCooldownViewer",     -- 功能技能
+    "BuffIconCooldownViewer",    -- 图标式增益
+    "BuffBarCooldownViewer",     -- 条式增益
+}
+
+local function ParkViewer(frame)
+    if not frame then return end
+    if not Marked(frame, "viewerParked") then return end
+    if InCombatLockdown and InCombatLockdown() then return end
+    pcall(frame.Hide, frame)
+end
+
+function M:HideBlizzardViewer()
+    for i = 1, #VIEWER_FRAMES do
+        local frame = _G[VIEWER_FRAMES[i]]
+        if frame and not Marked(frame, "viewerParked") then
+            Mark(frame, "viewerParked", true)
+            Widget:ShowWatch(frame, ParkViewer)
+            ParkViewer(frame)
+        end
+    end
+end
+
+local function RestoreBlizzardViewer()
+    for i = 1, #VIEWER_FRAMES do
+        local frame = _G[VIEWER_FRAMES[i]]
+        if frame and Marked(frame, "viewerParked") then
+            Mark(frame, "viewerParked", nil)
+            pcall(frame.Show, frame)
+        end
+    end
+end
+
 function M:Initialize()
     self:CollectButtons()
+
+    self:HideBlizzardViewer()
+    local tries = 0
+    Widget:PollWatch(_G.UIParent, function()
+        tries = tries + 1
+        if tries > 60 then return end   -- 12 秒还没出现：这个客户端没有这套东西
+        self:HideBlizzardViewer()
+    end)
 
     EventBus:Register("ACTIONBAR_UPDATE_COOLDOWN", RefreshAll)
     EventBus:Register("ACTIONBAR_UPDATE_USABLE", RefreshAll)
@@ -571,9 +622,11 @@ end
 
 function M:SetEnabled(enabled)
     if enabled then
+        self:HideBlizzardViewer()
         self:CollectButtons()
         RefreshAll()
     else
+        RestoreBlizzardViewer()
         -- restore the icons
         local normal = TINT.normal
         for i = 1, #buttons do

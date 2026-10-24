@@ -38,6 +38,7 @@ local YELLOW  = { r = 0.85, g = 0.75, b = 0.35 }
 local GREY    = { r = 0.55, g = 0.55, b = 0.55 }
 
 local enabled = true       -- Core only calls SetEnabled on runtime toggles
+local waitingForBlizzard = false   -- 正在等 LoD 的 ObjectiveTrackerFrame 出现
 local tracker
 local LINE_H  = 12         -- measured line pitch of the pixel font
 
@@ -307,16 +308,44 @@ Render = function(settle)
     if not settle then QueueRender() end
 end
 
-local function SuppressBlizzard()
-    local bt = _G.ObjectiveTrackerFrame
-    if not bt or Marked(bt, "hiddenHook") then return end
+--- 盯"又被显示"的那一路（只挂一次）。
+local function WatchBlizzard(bt)
+    if Marked(bt, "hiddenHook") then return end
     Mark(bt, "hiddenHook", true)
     -- 不再 HookScript("OnShow")（写脚本槽 = 污染，见 AGENTS）；轮询"变显示了"再藏。
     if ns.Widget then
-        ns.Widget:ShowWatch(bt, function()
-            if enabled then pcall(bt.Hide, bt) end
+        ns.Widget:ShowWatch(bt, function(self)
+            if enabled then pcall(self.Hide, self) end
         end)
     end
+end
+
+--- 藏掉暴雪的任务 / 目标追踪框。
+---
+--- 注意：暴雪的追踪框在 **LoD 包**（Blizzard_ObjectiveTracker）里，登录瞬间
+--- `_G.ObjectiveTrackerFrame` 还不存在。以前只在 Skin() 里试一次，包晚到就永远不藏 ——
+--- 实机症状就是"自绘的追踪框和默认的追踪框同时挂在屏幕上"。
+--- 所以：没到就轮询等它（最多 12 秒），到了再挂 ShowWatch。
+local function SuppressBlizzard()
+    local bt = _G.ObjectiveTrackerFrame
+    if not bt then
+        if not waitingForBlizzard and ns.Widget then
+            waitingForBlizzard = true
+            local tries = 0
+            ns.Widget:PollWatch(_G.UIParent, function()
+                tries = tries + 1
+                if tries > 60 then return end
+                if _G.ObjectiveTrackerFrame then
+                    tries = 61
+                    SuppressBlizzard()
+                end
+            end)
+        end
+        return
+    end
+
+    WatchBlizzard(bt)
+    -- 每次调用都补一次隐藏：关掉再打开模块时，它可能正显示着（不会再有 OnShow 变化）。
     if enabled and bt.IsShown and bt:IsShown() then pcall(bt.Hide, bt) end
 end
 

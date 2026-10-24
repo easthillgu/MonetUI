@@ -121,18 +121,29 @@ end
 --- 用在"暴雪改了状态但没有任何 Lua 钩子"的场合（按钮 enabled、皮肤需要复检的东西…）。
 local pollWatch, pollDriver, pollAcc = {}, nil, 0
 
+--- 一个框体可以挂**多个**回调：早先这里是 `pollWatch[frame] = fn`（一个框只能一个回调），
+--- 而四个模块都拿 UIParent 当锚点（Skins/System、Nameplates、Cooldown、QuestTracker）——
+--- 后注册的会把先注册的**静默顶掉**，那些轮询就等于没装（"藏不掉、对不齐"的怪现象就出在这）。
 function Widget:PollWatch(frame, fn)
     if not frame or type(fn) ~= "function" then return end
-    pollWatch[frame] = fn
+    local list = pollWatch[frame]
+    if not list then
+        list = {}
+        pollWatch[frame] = list
+    end
+    for i = 1, #list do
+        if list[i] == fn then return end
+    end
+    list[#list + 1] = fn
     if pollDriver then return end
     pollDriver = CreateFrame("Frame")
     pollDriver:SetScript("OnUpdate", function(_, elapsed)
         pollAcc = pollAcc + (elapsed or 0)
         if pollAcc < 0.2 then return end
         pollAcc = 0
-        for f, cb in pairs(pollWatch) do
+        for f, cbs in pairs(pollWatch) do
             if type(f) == "table" and f.IsVisible and f:IsVisible() then
-                pcall(cb, f)
+                for i = 1, #cbs do pcall(cbs[i], f) end
             end
         end
     end)
