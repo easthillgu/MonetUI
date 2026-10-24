@@ -1243,32 +1243,34 @@ local GetPetActionInfo = _G.GetPetActionInfo
 
 --- 摁掉暴雪的旋转蚂蚁。暴雪每次刷新按钮状态都会把它再点亮，所以这里把方法本身换掉，
 -- 顺带把已经点亮的旧动画停掉。
+--- 关掉暴雪的自动施法旋转蚂蚁。
+--- **只调方法，不写字段。** 以前这里做的是
+---   overlay.monetShineSuppressed = true
+---   overlay.monetShineUpdate = overlay.UpdateShineAnim
+---   overlay.UpdateShineAnim = function() end
+--- —— 三行都是往暴雪的 AutoCastOverlay 上写字段。本客户端按"键"判污染：写过就脏，
+--- 之后暴雪自己的 PetActionButton:UpdateShownButtons → SetShown 在战斗中全被拒
+--- （taint.log: "blocked in combat because of taint from MonetUI - PetActionButton5:SetShown()"），
+--- 连带 PetActionBar/MainActionBar 的整体重排也被拒。停动画 + 藏起来就够了，不需要改它的函数。
 local function SuppressAutoCastShine(button)
     local overlay = button.AutoCastOverlay
     if not overlay then return end
-    if not overlay.monetShineSuppressed then
-        overlay.monetShineSuppressed = true
-        if type(overlay.UpdateShineAnim) == "function" then
-            overlay.monetShineUpdate = overlay.UpdateShineAnim
-            overlay.UpdateShineAnim = function() end
-        end
-    end
     local shine = overlay.Shine
     if shine then
         if shine.Anim then pcall(shine.Anim.Stop, shine.Anim) end
-        shine:Hide()
+        pcall(shine.Hide, shine)
+        pcall(shine.SetAlpha, shine, 0)
     end
 end
 
---- 还原成暴雪原样（只在模块整个停用时走这条，否则玩家会永久失去原版提示）。
--- 只是关掉「自绘动作条」不算：那时宠物条归暴雪管，但提示换成一圈静态像素环。
+--- 还原成暴雪原样（只在模块整个停用时走这条）。
 local function RestoreAutoCastShine(button)
     local overlay = button.AutoCastOverlay
-    if not overlay or not overlay.monetShineUpdate then return end
-    overlay.UpdateShineAnim = overlay.monetShineUpdate
-    overlay.monetShineUpdate = nil
-    overlay.monetShineSuppressed = nil
-    overlay:UpdateShineAnim()
+    local shine = overlay and overlay.Shine
+    if not shine then return end
+    pcall(shine.SetAlpha, shine, 1)
+    pcall(shine.Show, shine)
+    if shine.Anim then pcall(shine.Anim.Play, shine.Anim) end
 end
 
 --- 这个槽位开没开自动施法。返回顺序：name, texture, isToken, isActive, autoCastAllowed,
