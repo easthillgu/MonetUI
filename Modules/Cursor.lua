@@ -83,7 +83,7 @@ local function Build()
     local ui = _G.UIParent
     if not ui or not ui.CreateLine then return false end
 
-    host = CreateFrame("Frame", nil, ui)
+    host = CreateFrame("Frame", "MonetUICursor", ui)
     host:SetAllPoints(ui)
     -- TOOLTIP 层：压在面板与动作条之上、暴雪的光标贴图之下，拖尾不会钻进窗口里。
     host:SetFrameStrata("TOOLTIP")

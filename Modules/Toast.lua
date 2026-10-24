@@ -50,12 +50,13 @@ function M:GetSetting(key)
     return value
 end
 
---- 主题色：竖条与排空线跟边框槽走，和 InfoBar 的分隔线同一套。
+--- 主题色：竖条与排空线用**高光槽**（奶白），不用边框槽 —— 边框本来就是边框色，
+--- 同色又贴着边框画，肉眼完全分不出来。
 local function Paint()
     if not frame then return end
-    local r, g, b = Color:GetBorder()
+    local r, g, b = Color:GetHighlight()
     accent:SetColorTexture(r, g, b, 1)
-    drain:SetColorTexture(r, g, b, 0.55)
+    drain:SetColorTexture(r, g, b, 0.85)
 end
 
 local function Fill(entry)
@@ -137,7 +138,7 @@ local function Build()
     accent:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
     accent:SetWidth(ACCENT)
 
-    title = Widget:Font(frame, 12, "pingfang", "border", "LEFT", nil, Media.outlineFlags)
+    title = Widget:Font(frame, 12, "pingfang", "highlight", "LEFT", nil, Media.outlineFlags)
     title:SetWordWrap(false)
     title:SetPoint("TOPLEFT", frame, "TOPLEFT", ACCENT + PAD, -8)
     title:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -PAD, -8)
