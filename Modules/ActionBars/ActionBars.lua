@@ -181,6 +181,11 @@ local BAR_DEFS = {
     { key = "Bar8", index = 8, page = 15, bind = "MULTIACTIONBAR7BUTTON",
       blizzard = "MultiBar7",
       point = "BOTTOM", relativeTo = "Bar7",     relativePoint = "TOP",    x = 0,   y = 2 },
+
+    -- 自绘宠物条：type="pet" 的安全按钮，**完全不碰爆雪的宠物框体**（那边一动就污染）。
+    -- 槽位是常量 1..10，写在我们自己的按钮属性上，不需要安全片段。
+    { key = "BarPet", index = 9, page = 0, count = 10, pet = true, bind = "BONUSACTIONBUTTON",
+      point = "BOTTOMRIGHT", relativeTo = "Bar3", relativePoint = "TOPRIGHT", x = 0, y = 2 },
 }
 
 -- 接管的那几条暴雪动作条：不重画，只搬最外层容器（只搬内层的话，暴雪一 Hide 外层，我们的条就留在
@@ -981,6 +986,21 @@ local function BuildButton(bar, index)
     pcall(button.SetID, button, 0)
     pcall(button.RegisterForClicks, button, "AnyDown", "AnyUp")
 
+    if def.pet then
+        -- 宠物技能：SecureActionButtonTemplate 的 type="pet" + action=槽位 1..10。
+        -- 属性写的是**我们自己的**按钮，不受污染限制；宠物条没有翻页，常量即可。
+        pcall(button.SetAttribute, button, "type", "pet")
+        pcall(button.SetAttribute, button, "action", index)
+        pcall(button.SetAttribute, button, "checkselfcast", true)
+        pcall(button.SetAttribute, button, "checkfocuscast", true)
+        pcall(button.SetAttribute, button, "checkmouseovercast", true)
+        button.bindName = def.bind .. index
+        button.bar      = bar.frame
+        SkinButton(button)
+        SetHotkey(button)
+        return button
+    end
+
     -- 暴雪的 SpellFlyout（多阶法术 / 宠物技能那种"弹出托盘"）要求按钮实现
     -- FlyoutButtonMixin 的最小一份（Blizzard_Flyout/Flyout.lua:72-116）：
     --   GetPopupDirection()  托盘朝哪边展开（SpellFlyout.lua:260 要用）
@@ -1105,7 +1125,68 @@ local function PositionBar(bar)
 end
 
 --- 把一条上所有按钮的内容刷新一遍（槽位变了才需要）。
+--- 宠物条的一格：图标 / 冷却 / 自动施法提示。
+--- 全部读宠物 API（受限状态下可能是机密值），所以一律 pcall + Secrets 兜底；
+--- 像素环画在**我们自己的**按钮上，不碰暴雪的任何宠物框体。
+local function RefreshPetContent(button, index)
+    if not button then return end
+
+    local texture, isToken
+    if _G.GetPetActionInfo then
+        local r = { pcall(_G.GetPetActionInfo, index) }
+        if r[1] then
+            texture, isToken = r[3], r[4]
+        end
+    end
+    -- 宠物条的"基础命令"（攻击/跟随/停留/被动…）返回的是一张**全局变量名**
+    -- （"PET_ATTACK_TEXTURE" 这种），不是贴图路径 —— 直接塞给 SetTexture 什么也画不出来。
+    -- 实测：只有带数字 fileID 的两个自动施法技能有图标，其余全空。
+    if isToken and type(texture) == "string" then
+        texture = _G[texture] or texture
+    end
+
+    if texture ~= nil then
+        pcall(button.icon.SetTexture, button.icon, texture)
+        pcall(button.icon.Show, button.icon)
+    else
+        pcall(button.icon.SetTexture, button.icon, nil)
+        pcall(button.icon.Hide, button.icon)
+    end
+
+    pcall(button.count.SetText, button.count, "")
+    pcall(button.count.Hide, button.count)
+    pcall(button.macro.SetText, button.macro, "")
+
+    local cooldown = button.cooldown
+    if cooldown then
+        local ok, start, duration, enable = pcall(_G.GetPetActionCooldown, index)
+        start, duration, enable = Secrets.Number(start), Secrets.Number(duration), Secrets.Number(enable)
+        if ok and start and duration and duration > 0 and enable ~= 0 then
+            pcall(cooldown.SetCooldown, cooldown, start, duration)
+        else
+            pcall(cooldown.Clear, cooldown)
+        end
+    end
+
+    local enabled
+    if _G.GetPetActionInfo then
+        local r = { pcall(_G.GetPetActionInfo, index) }
+        if r[1] then enabled = Secrets.Bool(r[7], false) end
+    end
+    if enabled then
+        Widget:PixelGlow(button, { side = ButtonSize(), static = true })
+    else
+        Widget:StopPixelGlow(button)
+    end
+end
+
 local function RefreshBar(bar)
+    if bar.def and bar.def.pet then
+        for index, button in ipairs(bar.buttons) do
+            RefreshPetContent(button, index)
+        end
+        return
+    end
     for index, button in ipairs(bar.buttons) do
         UpdateButtonContent(button, SlotOf(button, bar, index))
     end
@@ -1169,7 +1250,7 @@ local function CreateBar(def)
         visibility = def.paged and VISIBILITY_MAIN or VISIBILITY_OTHER,
     }
 
-    for index = 1, BUTTONS_PER_BAR do
+    for index = 1, (def.count or BUTTONS_PER_BAR) do
         local button = BuildButton(bar, index)
         if not button then break end
         bar.buttons[#bar.buttons + 1] = button
@@ -1179,6 +1260,19 @@ local function CreateBar(def)
         pcall(frame.Hide, frame)
         buildFailure = buildFailure or "button"
         return nil
+    end
+
+    if def.pet then
+        -- 宠物条不翻页：只在"有宠物"时显示。显隐同样交给 state driver（安全环境）。
+        if RegisterStateDriver then
+            pcall(RegisterStateDriver, frame, "visibility", "[pet] show; hide")
+        end
+        LayoutBar(bar)
+        PositionBar(bar)
+        EnsureDropCatcher(bar)
+        bar.page = def.page
+        RefreshBar(bar)
+        return bar
     end
 
     -- 翻页驱动：1 号条按客户端状态换页，其余条固定在自己那一页。
@@ -1651,12 +1745,27 @@ local function AdoptBar(def)
     return entry
 end
 
+--- 只把一条暴雪条"变透明 + 关鼠标"（不换父、不写字段、不卸载事件）。
+--- 用在我们自己已经接管显示（自绘宠物条/姿态条）的时候：暴雪那条留着但它看不见。
+--- ParkWatch 会在脱战后把 alpha 压回去（战斗中不碰受保护框体）。
+local function GhostBar(name)
+    local frame = _G[name]
+    if not frame or Marked(frame, "parked") then return end
+    Mark(frame, "parked", true)
+    Mark(frame, "alpha", frame:GetAlpha())
+    pcall(frame.SetAlpha, frame, 0)
+    pcall(frame.EnableMouse, frame, false)
+    if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, false) end
+    ParkWatch(frame)
+end
+
 --- 收养暴雪宠物/姿态条：现在整条路径都不走（见文件开头 ADOPT_BLIZZARD_BARS 的注释）。
---- 关键：**也不要把它们收起来** —— 收起要写 alpha / 关鼠标，同样会脏。
---- 交给暴雪自己按默认位置显示，玩家能用就行；要挪位置/换外观得自绘。
+--- 宠物/姿态条已经由我们**自绘**（type="pet" 的安全按钮），所以这里只把暴雪那条变透明。
 local function AdoptAll()
     if not M.own then return end
     if not ADOPT_BLIZZARD_BARS then
+        GhostBar("PetActionBar")
+        GhostBar("StanceBar")
         return
     end
     if Locked() then
@@ -1703,12 +1812,19 @@ local function ReassignBindings()
     bindingsDirty = false
 
     for _, bar in pairs(bars) do
-        pcall(ClearOverrideBindings, bar.frame)
-        for _, button in ipairs(bar.buttons) do
-            local key = BindingFor(button.bindName)
-            if key then
-                -- bindName 就是暴雪的动作命令名（ACTIONBUTTON1 / MULTIACTIONBAR1BUTTON1…）
-                pcall(SetOverrideBinding, bar.frame, false, key, button.bindName)
+        -- 宠物条不走 override binding：宠物技能的键位本来就绑在暴雪的动作命令上
+        -- （BONUSACTIONBUTTON1..10），再包一层会让客户端把整条 `PetActionBar:Show →
+        -- UpdateVisibility → 重排` 的链记成我们的（taint.log 里 19:12:41 那一串：
+        -- BONUSACTIONBUTTON2 → PetActionButtonDown → PetActionBar:Show →
+        -- ClearAllPointsBase BLOCKED）。鼠标点击用我们自己的按钮，键盘交给暴雪。
+        if not (bar.def and bar.def.pet) then
+            pcall(ClearOverrideBindings, bar.frame)
+            for _, button in ipairs(bar.buttons) do
+                local key = BindingFor(button.bindName)
+                if key then
+                    -- bindName 就是暴雪的动作命令名（ACTIONBUTTON1 / MULTIACTIONBAR1BUTTON1…）
+                    pcall(SetOverrideBinding, bar.frame, false, key, button.bindName)
+                end
             end
         end
     end
@@ -1721,7 +1837,9 @@ local function ClearBindings()
     end
     if not ClearOverrideBindings then return end
     for _, bar in pairs(bars) do
-        pcall(ClearOverrideBindings, bar.frame)
+        if not (bar.def and bar.def.pet) then
+            pcall(ClearOverrideBindings, bar.frame)
+        end
     end
 end
 
@@ -1745,12 +1863,16 @@ local SLOT_EVENTS = {
     "ACTIONBAR_SLOT_CHANGED", "ACTIONBAR_PAGE_CHANGED",
     "UPDATE_SHAPESHIFT_FORM", "UPDATE_VEHICLE_ACTIONBAR", "PLAYER_ENTERING_WORLD",
     "SPELLS_CHANGED", "ACTIONBAR_UPDATE_USABLE",
+    -- 宠物条（自绘）：图标/槽位变化
+    "PET_BAR_UPDATE", "PET_BAR_UPDATE_USABLE", "PET_UI_UPDATE", "UNIT_PET",
 }
 
 -- 冷却事件单独一条轻量路径：只重画冷却框，不重扫 96 个按钮的图标/文字。
 local COOLDOWN_EVENTS = {
     "ACTIONBAR_UPDATE_COOLDOWN", "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_CHARGES",
     "SPELL_UPDATE_ICON", "ACTIONBAR_UPDATE_USABLE", "SPELLS_CHANGED",
+    -- 宠物技能冷却
+    "PET_BAR_UPDATE_COOLDOWN", "PET_BAR_UPDATE",
 }
 
 function M:RegisterEvents()
@@ -1941,7 +2063,13 @@ function M:Apply()
     for _, def in ipairs(BAR_DEFS) do
         local bar = bars[def.key]
         if bar then
-            SetBarShown(bar, own and def.index <= count)
+            if def.pet then
+                -- 宠物条不走"第几条开着"那套：它的显隐只由 [pet] 状态驱动决定
+                -- （CreateBar 里已注册）。自绘动作条关掉时直接藏起来，暴雪那条保持原样。
+                if not own then pcall(bar.frame.Hide, bar.frame) end
+            else
+                SetBarShown(bar, own and def.index <= count)
+            end
         end
     end
     WatchPages(own)
