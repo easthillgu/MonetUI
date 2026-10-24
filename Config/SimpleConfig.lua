@@ -320,12 +320,25 @@ function SimpleConfig:Build()
 
     -- ---- 可折叠分组 ------------------------------------------------------------
     -- 每个分组 = 一个容器（常显的标题带 + 可隐藏的 body）。行代码不用改：
-    -- 它们照旧以 `content`（= 当前分组的 body）左上角为原点、`y` 为行偏移。
+    -- 它们照旧以 `content`（= 当前分组的 body）左上角为原点、行偏移由 `row` 光标给出。
     -- 展开状态变了只做一件事：relayout() 把各组重新摞一遍、面板跟着内容缩放。
     local SECTIONS = {}
     local HEADER_H = 24
     local relayout          -- 定义在滚动逻辑里（要用到 SetOffset）
-    local content, y, sec   -- 每个分组重新赋值，不能声明成分组内的 local
+    local content, row, sec   -- row = 行布局光标(每个分组 LayoutCursor(0) 重新赋值)
+
+    -- 光标式行布局(review 2026-10-24 #8):设置面板是纯垂直流,以前每行手写
+    -- "y = y - 28" 记账、增删一行要重算一片偏移;现在 row(h) 取"当前行的 y"并
+    -- 前进 h —— 取用即记账。row.y 为纯读(分组结算 bodyHeight 用)。
+    local function LayoutCursor(yStart)
+        return setmetatable({ y = yStart }, {
+            __call = function(self, step)
+                local at = self.y
+                self.y = self.y - step
+                return at
+            end,
+        })
+    end
 
     local function BeginSection(caption, expanded)
         local holder = CreateFrame("Frame", nil, root)
@@ -411,9 +424,9 @@ function SimpleConfig:Build()
     -- 主题 / 模块：默认展开（其余收起，一屏就能看完，点标题带展开）
     sec = BeginSection("主题", true)
     content = sec.body
-    y = 0
+    row = LayoutCursor(0)
 
-    MakeCheckbox(content, "使用 MonetColor 动态主题", y,
+    MakeCheckbox(content, "使用 MonetColor 动态主题", row(28),
         function()
             local db = ns:DB()
             return db.theme.useMonetColor
@@ -424,13 +437,11 @@ function SimpleConfig:Build()
             ns.RefreshTheme("config")
             if refreshStatus then refreshStatus() end
         end)
-    y = y - 28
 
     local statusText = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-    statusText:SetPoint("TOPLEFT", content, "TOPLEFT", 46, y)
+    statusText:SetPoint("TOPLEFT", content, "TOPLEFT", 46, row(20))
     statusText:SetWidth(300)
     statusText:SetJustifyH("LEFT")
-    y = y - 20
 
     refreshStatus = function()
         local source, profile = Color:GetSource()
@@ -451,13 +462,12 @@ function SimpleConfig:Build()
         { value = "highlight", text = "高亮色" },
         { value = "neutral",   text = "中性灰" },
     }
-    MakeDropdown(content, y, "边框颜色", BORDER_ITEMS,
+    MakeDropdown(content, row(28), "边框颜色", BORDER_ITEMS,
         function() return Color:GetBorderKey() end,
         function(value)
             ns:DB().theme.borderKey = value
             ns.RefreshTheme("config")
         end)
-    y = y - 28
 
     -- UI scale: the addon's sizes are authored in UI units, so the scale decides whether
     -- they land on whole physical pixels.  "auto" pins it per resolution (see
@@ -466,7 +476,7 @@ function SimpleConfig:Build()
         { value = "auto", text = "自动（按分辨率固定）" },
         { value = "game", text = "跟随游戏设置" },
     }
-    MakeDropdown(content, y, "UI 缩放", SCALE_ITEMS,
+    MakeDropdown(content, row(28), "UI 缩放", SCALE_ITEMS,
         function() return (ns:DB().theme or {}).uiScaleMode or "auto" end,
         function(value)
             ns:DB().theme.uiScaleMode = value
@@ -475,13 +485,12 @@ function SimpleConfig:Build()
             end
             ns:Print("UI 缩放模式：" .. (value == "auto" and "自动（下次 /reload 生效）" or "跟随游戏设置") .. "。")
         end)
-    y = y - 28
 
-    sec.bodyHeight = -y + 4
+    sec.bodyHeight = -row.y + 4
 
     sec = BeginSection("模块", true)
     content = sec.body
-    y = 0
+    row = LayoutCursor(0)
 
     local function moduleGetter(name)
         return function() return ns:IsModuleEnabled(name) end
@@ -494,16 +503,15 @@ function SimpleConfig:Build()
     end
 
     for _, name in ipairs(MODULE_ORDER) do
-        moduleCheckboxes[name] = MakeCheckbox(content, MODULE_LABEL[name] or name, y,
+        moduleCheckboxes[name] = MakeCheckbox(content, MODULE_LABEL[name] or name, row(28),
             moduleGetter(name), moduleSetter(name))
-        y = y - 28
     end
 
-    sec.bodyHeight = -y + 4
+    sec.bodyHeight = -row.y + 4
 
     sec = BeginSection("冷却计时", false)
     content = sec.body
-    y = 0
+    row = LayoutCursor(0)
 
     local function CooldownSaved()
         local db = ns:DB()
@@ -526,21 +534,19 @@ function SimpleConfig:Build()
         end
     end
 
-    MakeCheckbox(content, "单位自动缩放（秒 → 分钟 → 小时 → 天）", y,
+    MakeCheckbox(content, "单位自动缩放（秒 → 分钟 → 小时 → 天）", row(28),
         CooldownSetting("scale"),
         function(value)
             CooldownSaved().scale = value
             CooldownRefresh()
         end)
-    y = y - 28
 
-    MakeCheckbox(content, "剩余时间紧张时变红 + 放大字体", y,
+    MakeCheckbox(content, "剩余时间紧张时变红 + 放大字体", row(28),
         CooldownSetting("alert"),
         function(value)
             CooldownSaved().alert = value
             CooldownRefresh()
         end)
-    y = y - 28
 
     local ALERT_ITEMS = {
         { value = 3,  text = "3 秒" },
@@ -548,13 +554,12 @@ function SimpleConfig:Build()
         { value = 8,  text = "8 秒" },
         { value = 10, text = "10 秒" },
     }
-    MakeDropdown(content, y, "紧张阈值（秒）", ALERT_ITEMS,
+    MakeDropdown(content, row(30), "紧张阈值（秒）", ALERT_ITEMS,
         CooldownSetting("alertSeconds"),
         function(value)
             CooldownSaved().alertSeconds = value
             CooldownRefresh()
         end)
-    y = y - 30
 
     -- TenthTH: below this many seconds show one decimal ("4.3").
     local TENTH_ITEMS = {
@@ -564,13 +569,12 @@ function SimpleConfig:Build()
         { value = 10, text = "10 秒" },
         { value = 20, text = "20 秒" },
     }
-    MakeDropdown(content, y, "小数秒阈值（低于则显示 0.1s）", TENTH_ITEMS,
+    MakeDropdown(content, row(30), "小数秒阈值（低于则显示 0.1s）", TENTH_ITEMS,
         CooldownSetting("tenthsTH"),
         function(value)
             CooldownSaved().tenthsTH = value
             CooldownRefresh()
         end)
-    y = y - 30
 
     -- MmssTH: at/above this many seconds use mm:ss ("1:05").
     local MMSS_ITEMS = {
@@ -579,21 +583,20 @@ function SimpleConfig:Build()
         { value = 60,  text = "60 秒" },
         { value = 120, text = "120 秒" },
     }
-    MakeDropdown(content, y, "m:ss 阈值（达到则显示 1:05）", MMSS_ITEMS,
+    MakeDropdown(content, row(30), "m:ss 阈值（达到则显示 1:05）", MMSS_ITEMS,
         CooldownSetting("mmssTH"),
         function(value)
             CooldownSaved().mmssTH = value
             CooldownRefresh()
         end)
-    y = y - 30
 
-    sec.bodyHeight = -y + 4
+    sec.bodyHeight = -row.y + 4
 
     local minimap = ns:GetModule("Minimap")
     if minimap then
         sec = BeginSection("小地图", false)
         content = sec.body
-        y = 0
+        row = LayoutCursor(0)
 
         local function MapSetting(key)
             return function() return minimap:GetSettings()[key] end
@@ -605,93 +608,80 @@ function SimpleConfig:Build()
             end
         end
 
-        MakeCheckbox(content, "悬停小地图时显示区域名", y,
+        MakeCheckbox(content, "悬停小地图时显示区域名", row(26),
             MapSetting("zoneText"), MapSetter("zoneText"))
-        y = y - 26
 
-        MakeCheckbox(content, "战区时区域名染成危险色", y,
+        MakeCheckbox(content, "战区时区域名染成危险色", row(26),
             MapSetting("zonePvPColor"), MapSetter("zonePvPColor"))
-        y = y - 26
 
-        MakeCheckbox(content, "滚轮缩放（方形地图四角也够得到）", y,
+        MakeCheckbox(content, "滚轮缩放（方形地图四角也够得到）", row(26),
             MapSetting("scrollZoom"), MapSetter("scrollZoom"))
-        y = y - 26
 
-        MakeCheckbox(content, "右键小地图弹出微型游戏菜单", y,
+        MakeCheckbox(content, "右键小地图弹出微型游戏菜单", row(28),
             MapSetting("microMenu"), MapSetter("microMenu"))
-        y = y - 28
 
         -- 地图形状只有一套（正方画布 + 遮罩裁带），不再提供切换
 
         -- 地图内的三个独立按钮（3:4 矩形图标）
         local mapCaption = Widget:Font(content, 12, "pixel", "edge", "LEFT")
-        mapCaption:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
+        mapCaption:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(22))
         mapCaption:SetText("· 地图内的按钮")
-        y = y - 22
 
-        MakeCheckbox(content, "追踪（左下）", y,
+        MakeCheckbox(content, "追踪（左下）", row(26),
             MapSetting("mapTracking"), MapSetter("mapTracking"))
-        y = y - 26
 
-        MakeCheckbox(content, "难度（左上）", y,
+        MakeCheckbox(content, "难度（左上）", row(26),
             MapSetting("mapDifficulty"), MapSetter("mapDifficulty"))
-        y = y - 26
 
-        MakeCheckbox(content, "插件收纳（右上）", y,
+        MakeCheckbox(content, "插件收纳（右上）", row(24),
             MapSetting("mapCompartment"), MapSetter("mapCompartment"))
-        y = y - 24
 
         local mapHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-        mapHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
+        mapHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(38))
         mapHint:SetWidth(328)
         mapHint:SetJustifyH("LEFT")
         mapHint:SetText("追踪 / 插件收纳开着时，暴雪原来那一个被搬进地图，不再单独隐藏。")
         -- 上面这句在 328 宽里折成两行，行距要给到 38 才不压下一行。
-        y = y - 38
 
         -- 手势速查（写在面板里，免得翻文档）
         local gestureHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-        gestureHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
+        gestureHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(38))
         gestureHint:SetWidth(328)
         gestureHint:SetJustifyH("LEFT")
         gestureHint:SetText("左键打标记（四个角也算）· 中键开追踪菜单 · 右键微型菜单 · 滚轮缩放")
-        y = y - 38
 
         -- 底边高度是统一的（Utils/Layout.lua 的基线，和第一动作条同一条线），
         -- 这个下拉只管**右边缘**离屏幕右边多远。
-        MakeDropdown(content, y, "右边缘间距", {
+        MakeDropdown(content, row(30), "右边缘间距", {
             { value = 0,  text = "0（贴边）" },
             { value = 16, text = "16" },
             { value = 33, text = "33（默认）" },
             { value = 50, text = "50" },
             { value = 66, text = "66" },
         }, MapSetting("gap"), MapSetter("gap"))
-        y = y - 30
 
         -- 暴雪的集群按钮：勾选＝藏起来（方形面板和暴雪原样按钮混在一起最难看），
         -- 取消勾选＝把暴雪那个按钮原样放回来。
         local caption = Widget:Font(content, 12, "pixel", "edge", "LEFT")
-        caption:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
+        caption:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(22))
         caption:SetText("· 暴雪集群按钮（勾选＝藏起来）")
-        y = y - 22
 
         for _, entry in ipairs(minimap:ButtonList()) do
             -- 追踪 / 插件收纳由"地图内的按钮"那一组管，这里不重复列
             if not entry.skipKey then
-                MakeCheckbox(content, entry.label, y, MapSetting(entry.key), MapSetter(entry.key))
-                y = y - 26
+                MakeCheckbox(content, entry.label, row(26), MapSetting(entry.key), MapSetter(entry.key))
             end
         end
 
-        y = y - 4
-        sec.bodyHeight = -y + 4
+        row(4)                -- 行尾留白：纯前进，不取位置
+        sec.bodyHeight = -row.y + 4
     end
 
     sec = BeginSection("单位框架", false)
     content = sec.body
-    y = 0
+    row = LayoutCursor(0)
 
-    MakeCheckbox(content, "隐藏暴雪默认的玩家/目标框架（需重载恢复）", y,
+    MakeCheckbox(content, "隐藏暴雪默认的玩家/目标框架（需重载恢复）", row(30),
         function() return ns:DB().unitFrames.hideBlizzard end,
         function(value)
             ns:DB().unitFrames.hideBlizzard = value
@@ -704,7 +694,6 @@ function SimpleConfig:Build()
                 ns:Print("取消隐藏需要 /reload 才能恢复暴雪框架。")
             end
         end)
-    y = y - 30
 
     local SELF  = { "player", "pet" }
     local OTHER = { "target", "focus", "targettarget" }
@@ -726,29 +715,24 @@ function SimpleConfig:Build()
         { value = "theme", text = "统一主题色" },
     }
 
-    MakeDropdown(content, y, "玩家 / 宠物 血条",
+    MakeDropdown(content, row(28), "玩家 / 宠物 血条",
         FILL_ITEMS, UnitSetting(SELF, "fillColor", "highlight"))
-    y = y - 28
-    MakeDropdown(content, y, "目标 / 焦点 血条",
+    MakeDropdown(content, row(28), "目标 / 焦点 血条",
         FILL_ITEMS, UnitSetting(OTHER, "fillColor", "class"))
-    y = y - 28
-    MakeDropdown(content, y, "目标 / 焦点 损失部分",
+    MakeDropdown(content, row(28), "目标 / 焦点 损失部分",
         LOST_ITEMS, UnitSetting(OTHER, "lostColor", "danger"))
-    y = y - 28
-    MakeDropdown(content, y, "能量条颜色", POWER_ITEMS,
+    MakeDropdown(content, row(28), "能量条颜色", POWER_ITEMS,
         function() return ns:DB().unitFrames.powerColor end,
         function(value)
             ns:DB().unitFrames.powerColor = value
             RefreshUnitFrames()
         end)
-    y = y - 28
 
     local fillHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-    fillHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
+    fillHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(44))
     fillHint:SetWidth(328)
     fillHint:SetJustifyH("LEFT")
     fillHint:SetText("玩家单位统一用主题血条色，职业看能量条——选中玩家时能量条直接用它的职业色；NPC 血条保留敌对红 / 友善绿。")
-    y = y - 44
 
     -- One row for two settings: 0 means "off", anything else is the pip height.
     local CLASS_ITEMS = {
@@ -759,7 +743,7 @@ function SimpleConfig:Build()
         { value = 5, text = "5 px" },
     }
 
-    MakeDropdown(content, y, "连击点（盗贼 / 德鲁伊）", CLASS_ITEMS,
+    MakeDropdown(content, row(28), "连击点（盗贼 / 德鲁伊）", CLASS_ITEMS,
         function()
             local db = ns:DB().unitFrames
             if db.classPower == false then return 0 end
@@ -771,50 +755,45 @@ function SimpleConfig:Build()
             if value > 0 then db.classPowerHeight = value end
             RefreshUnitFrames()
         end)
-    y = y - 28
 
-    MakeCheckbox(content, "血量数字按百分比着色", y,
+    MakeCheckbox(content, "血量数字按百分比着色", row(28),
         function() return ns:DB().unitFrames.textColorByPercent end,
         function(value)
             ns:DB().unitFrames.textColorByPercent = value
             RefreshUnitFrames()
         end)
-    y = y - 28
 
-    MakeCheckbox(content, "血条数值平滑过渡", y,
+    MakeCheckbox(content, "血条数值平滑过渡", row(28),
         function() return ns:DB().unitFrames.smoothBars end,
         function(value)
             ns:DB().unitFrames.smoothBars = value
             RefreshUnitFrames()
         end)
-    y = y - 28
 
     local NUMBER_ITEMS = {
         { value = "auto", text = "自动 (K / M / B)" },
         { value = "cn",   text = "中文 (万 / 亿)" },
     }
-    MakeDropdown(content, y, "大数字格式", NUMBER_ITEMS,
+    MakeDropdown(content, row(30), "大数字格式", NUMBER_ITEMS,
         function() return ns:DB().numberFormat end,
         function(value)
             ns:DB().numberFormat = value
             RefreshUnitFrames()
         end)
-    y = y - 30
 
     -- The borrowed list's on/off is decided when Blizzard's TargetFrame is first suppressed, so -- like "hideBlizzard" above -- this applies on the next load: a runtime switch cannot re-register what a full-kill removed.
-    MakeCheckbox(content, "显示目标框光环（借用暴雪，需重载）", y,
+    MakeCheckbox(content, "显示目标框光环（借用暴雪，需重载）", row(30),
         function() return ns:DB().unitFrames.showTargetAuras end,
         function(value)
             ns:DB().unitFrames.showTargetAuras = value
             RefreshUnitFrames()
         end)
-    y = y - 30
 
-    sec.bodyHeight = -y + 4
+    sec.bodyHeight = -row.y + 4
 
     sec = BeginSection("小队 / 团队框架", false)
     content = sec.body
-    y = 0
+    row = LayoutCursor(0)
 
     local function GroupGetter(section, key, fallback)
         return function()
@@ -832,25 +811,21 @@ function SimpleConfig:Build()
         end
     end
 
-    MakeCheckbox(content, "小队框架（自己 + 小队 1-4）", y,
+    MakeCheckbox(content, "小队框架（自己 + 小队 1-4）", row(26),
         GroupGetter("party", "enabled", true), GroupSetter("party", "enabled"))
-    y = y - 26
 
-    MakeCheckbox(content, "团队框架（8 组 × 5 人）", y,
+    MakeCheckbox(content, "团队框架（8 组 × 5 人）", row(26),
         GroupGetter("raid", "enabled", true), GroupSetter("raid", "enabled"))
-    y = y - 26
 
-    MakeCheckbox(content, "小队框里显示自己", y,
+    MakeCheckbox(content, "小队框里显示自己", row(26),
         GroupGetter("party", "showPlayer", true), GroupSetter("party", "showPlayer"))
-    y = y - 26
 
-    MakeCheckbox(content, "隐藏暴雪自带的小队 / 团队框", y,
+    MakeCheckbox(content, "隐藏暴雪自带的小队 / 团队框", row(30),
         function() return ns:DB().groupFrames.hideBlizzard end,
         function(value)
             ns:DB().groupFrames.hideBlizzard = value
             RefreshGroups()
         end)
-    y = y - 30
 
     local PARTY_WIDTHS = {
         { value = 100, text = "100 px" },
@@ -858,9 +833,8 @@ function SimpleConfig:Build()
         { value = 120, text = "120 px" },
         { value = 140, text = "140 px" },
     }
-    MakeDropdown(content, y, "小队框宽度", PARTY_WIDTHS,
+    MakeDropdown(content, row(28), "小队框宽度", PARTY_WIDTHS,
         GroupGetter("party", "width", 110), GroupSetter("party", "width"))
-    y = y - 28
 
     local RAID_WIDTHS = {
         { value = 60, text = "60 px" },
@@ -868,76 +842,67 @@ function SimpleConfig:Build()
         { value = 84, text = "84 px" },
         { value = 96, text = "96 px" },
     }
-    MakeDropdown(content, y, "团队框宽度", RAID_WIDTHS,
+    MakeDropdown(content, row(28), "团队框宽度", RAID_WIDTHS,
         GroupGetter("raid", "width", 72), GroupSetter("raid", "width"))
-    y = y - 28
 
     local HEALTH_TEXT_MODES = {
         { value = "none", text = "不显示" },
         { value = "percent", text = "百分比" },
         { value = "value", text = "当前值" },
     }
-    MakeDropdown(content, y, "小队血量文字", HEALTH_TEXT_MODES,
+    MakeDropdown(content, row(28), "小队血量文字", HEALTH_TEXT_MODES,
         GroupGetter("party", "healthText", "none"), GroupSetter("party", "healthText"))
-    y = y - 28
 
-    MakeDropdown(content, y, "团队血量文字", HEALTH_TEXT_MODES,
+    MakeDropdown(content, row(26), "团队血量文字", HEALTH_TEXT_MODES,
         GroupGetter("raid", "healthText", "none"), GroupSetter("raid", "healthText"))
-    y = y - 26
 
-    MakeCheckbox(content, "血条上显示治疗预估（主题色的浅色延伸段）", y,
+    MakeCheckbox(content, "血条上显示治疗预估（主题色的浅色延伸段）", row(26),
         function() return ns:DB().groupFrames.showIncomingHeals ~= false end,
         function(value)
             ns:DB().groupFrames.showIncomingHeals = value
             RefreshGroups()
         end)
-    y = y - 26
 
-    MakeCheckbox(content, "血条上显示吸收盾（白色叠层）", y,
+    MakeCheckbox(content, "血条上显示吸收盾（白色叠层）", row(30),
         function() return ns:DB().groupFrames.showAbsorbs ~= false end,
         function(value)
             ns:DB().groupFrames.showAbsorbs = value
             RefreshGroups()
         end)
-    y = y - 30
 
-    MakeCheckbox(content, "锁定所有可移动框（网格吸附与拖动）", y,
+    MakeCheckbox(content, "锁定所有可移动框（网格吸附与拖动）", row(30),
         function() return ns:DB().mover.locked end,
         function(value)
             ns:DB().mover.locked = value
             -- 锁是即时判断的（拖动时才读），不需要重贴：下一帧拖动就按新状态走
         end)
-    y = y - 30
 
-    sec.bodyHeight = -y + 4
+    sec.bodyHeight = -row.y + 4
 
     sec = BeginSection("动作条", false)
     content = sec.body
-    y = 0
+    row = LayoutCursor(0)
 
-    MakeCheckbox(content, "自绘动作条（LibActionButton）", y,
+    MakeCheckbox(content, "自绘动作条（LibActionButton）", row(28),
         function() return ns:DB().actionBars.ownBars end,
         function(value)
             ns:DB().actionBars.ownBars = value
             RefreshActionBars()
         end)
-    y = y - 28
 
-    MakeCheckbox(content, "隐藏暴雪默认动作条", y,
+    MakeCheckbox(content, "隐藏暴雪默认动作条", row(28),
         function() return ns:DB().actionBars.hideBlizzard end,
         function(value)
             ns:DB().actionBars.hideBlizzard = value
             RefreshActionBars()
         end)
-    y = y - 28
 
-    MakeCheckbox(content, "隐藏暴雪默认背包条", y,
+    MakeCheckbox(content, "隐藏暴雪默认背包条", row(28),
         function() return ns:DB().actionBars.hideBagBar end,
         function(value)
             ns:DB().actionBars.hideBagBar = value
             RefreshActionBars()
         end)
-    y = y - 28
 
     local SIZE_ITEMS = {}
     for _, size in ipairs({ 20, 24, 28, 32, 36 }) do
@@ -954,98 +919,74 @@ function SimpleConfig:Build()
         COUNT_ITEMS[#COUNT_ITEMS + 1] = { value = count, text = count .. " 组" }
     end
 
-    MakeDropdown(content, y, "按钮尺寸", SIZE_ITEMS,
+    MakeDropdown(content, row(28), "按钮尺寸", SIZE_ITEMS,
         function() return ns:DB().actionBars.buttonSize end,
         function(value)
             ns:DB().actionBars.buttonSize = value
             RefreshActionBars()
         end)
-    y = y - 28
 
-    MakeDropdown(content, y, "按钮间距", SPACING_ITEMS,
+    MakeDropdown(content, row(28), "按钮间距", SPACING_ITEMS,
         function() return ns:DB().actionBars.spacing end,
         function(value)
             ns:DB().actionBars.spacing = value
             RefreshActionBars()
         end)
-    y = y - 28
 
-    MakeDropdown(content, y, "显示动作条数量", COUNT_ITEMS,
+    MakeDropdown(content, row(28), "显示动作条数量", COUNT_ITEMS,
         function() return ns:DB().actionBars.barCount end,
         function(value)
             ns:DB().actionBars.barCount = value
             RefreshActionBars()
         end)
-    y = y - 28
 
-    MakeCheckbox(content, "显示快捷键", y,
+    MakeCheckbox(content, "显示快捷键", row(28),
         function() return ns:DB().actionBars.showHotkey end,
         function(value)
             ns:DB().actionBars.showHotkey = value
             RefreshActionBars()
         end)
-    y = y - 28
 
-    MakeCheckbox(content, "显示堆叠数量", y,
+    MakeCheckbox(content, "显示堆叠数量", row(28),
         function() return ns:DB().actionBars.showCount end,
         function(value)
             ns:DB().actionBars.showCount = value
             RefreshActionBars()
         end)
-    y = y - 28
 
-    MakeCheckbox(content, "显示宏名", y,
+    MakeCheckbox(content, "显示宏名", row(30),
         function() return ns:DB().actionBars.showMacro end,
         function(value)
             ns:DB().actionBars.showMacro = value
             RefreshActionBars()
         end)
-    y = y - 30
 
-    sec.bodyHeight = -y + 4
+    sec.bodyHeight = -row.y + 4
 
     sec = BeginSection("姓名板", false)
     content = sec.body
-    y = 0
+    row = LayoutCursor(0)
 
     -- Which units get a plate at all (CVars; see Modules/Nameplates).
-    MakeCheckbox(content, "显示敌方姓名板", y, NameplateCheckbox("showEnemy"))
-    y = y - 28
-    MakeCheckbox(content, "显示友方玩家姓名板", y, NameplateCheckbox("showFriendly"))
-    y = y - 28
-    MakeCheckbox(content, "显示友方 NPC 姓名板", y, NameplateCheckbox("showNPC"))
-    y = y - 28
-    MakeCheckbox(content, "显示低等级（minus）敌人", y, NameplateCheckbox("showMinor"))
-    y = y - 28
-    MakeCheckbox(content, "显示图腾", y, NameplateCheckbox("showTotems"))
-    y = y - 28
-    MakeCheckbox(content, "显示自己的姓名板", y, NameplateCheckbox("showSelf"))
-    y = y - 28
-    MakeCheckbox(content, "过滤小动物", y, NameplateCheckbox("hideCritters"))
-    y = y - 28
-    MakeCheckbox(content, "过滤死亡单位", y, NameplateCheckbox("hideDead"))
-    y = y - 30
+    MakeCheckbox(content, "显示敌方姓名板", row(28), NameplateCheckbox("showEnemy"))
+    MakeCheckbox(content, "显示友方玩家姓名板", row(28), NameplateCheckbox("showFriendly"))
+    MakeCheckbox(content, "显示友方 NPC 姓名板", row(28), NameplateCheckbox("showNPC"))
+    MakeCheckbox(content, "显示低等级（minus）敌人", row(28), NameplateCheckbox("showMinor"))
+    MakeCheckbox(content, "显示图腾", row(28), NameplateCheckbox("showTotems"))
+    MakeCheckbox(content, "显示自己的姓名板", row(28), NameplateCheckbox("showSelf"))
+    MakeCheckbox(content, "过滤小动物", row(28), NameplateCheckbox("hideCritters"))
+    MakeCheckbox(content, "过滤死亡单位", row(30), NameplateCheckbox("hideDead"))
 
-    MakeCheckbox(content, "显示名称", y, NameplateCheckbox("showName"))
-    y = y - 28
-    MakeCheckbox(content, "显示等级 / 精英标记", y, NameplateCheckbox("showLevel"))
-    y = y - 28
-    MakeCheckbox(content, "显示血量百分比", y, NameplateCheckbox("showPercent"))
-    y = y - 28
-    MakeCheckbox(content, "显示施法条", y, NameplateCheckbox("showCast"))
-    y = y - 28
-    MakeCheckbox(content, "显示减益光环（借用暴雪）", y, NameplateCheckbox("showDebuffs"))
-    y = y - 28
-    MakeCheckbox(content, "职业 / 阵营着色", y, NameplateCheckbox("classColor"))
-    y = y - 28
-    MakeCheckbox(content, "仇恨描边", y, NameplateCheckbox("showThreat"))
-    y = y - 28
-    MakeCheckbox(content, "当前目标描边高亮", y, NameplateCheckbox("highlightTarget"))
-    y = y - 28
-    MakeCheckbox(content, "数值平滑过渡", y, NameplateCheckbox("smooth"))
-    y = y - 28
-    MakeCheckbox(content, "同步暴雪点击区域", y, NameplateCheckbox("forcePlateSize"))
-    y = y - 30
+    MakeCheckbox(content, "显示名称", row(28), NameplateCheckbox("showName"))
+    MakeCheckbox(content, "显示等级 / 精英标记", row(28), NameplateCheckbox("showLevel"))
+    MakeCheckbox(content, "显示血量百分比", row(28), NameplateCheckbox("showPercent"))
+    MakeCheckbox(content, "显示施法条", row(28), NameplateCheckbox("showCast"))
+    MakeCheckbox(content, "显示减益光环（借用暴雪）", row(28), NameplateCheckbox("showDebuffs"))
+    MakeCheckbox(content, "职业 / 阵营着色", row(28), NameplateCheckbox("classColor"))
+    MakeCheckbox(content, "仇恨描边", row(28), NameplateCheckbox("showThreat"))
+    MakeCheckbox(content, "当前目标描边高亮", row(28), NameplateCheckbox("highlightTarget"))
+    MakeCheckbox(content, "数值平滑过渡", row(28), NameplateCheckbox("smooth"))
+    MakeCheckbox(content, "同步暴雪点击区域", row(30), NameplateCheckbox("forcePlateSize"))
 
     local NP_WIDTH = {}
     for _, w in ipairs({ 90, 100, 110, 120, 130, 140, 160 }) do
@@ -1068,37 +1009,32 @@ function SimpleConfig:Build()
         NP_DISTANCE[#NP_DISTANCE + 1] = { value = d, text = d .. " 码" }
     end
 
-    MakeDropdown(content, y, "姓名板宽度", NP_WIDTH,
+    MakeDropdown(content, row(28), "姓名板宽度", NP_WIDTH,
         function() return NameplateSetting("width") end, NameplateSetter("width"))
-    y = y - 28
-    MakeDropdown(content, y, "姓名板高度", NP_HEIGHT,
+    MakeDropdown(content, row(28), "姓名板高度", NP_HEIGHT,
         function() return NameplateSetting("height") end, NameplateSetter("height"))
-    y = y - 28
     -- Name/level font size is fixed on the 12px pixel grid (Media:SnapSize), so there is no size picker any more -- every choice would render as 12.
-    MakeDropdown(content, y, "施法条高度", NP_CAST,
+    MakeDropdown(content, row(28), "施法条高度", NP_CAST,
         function() return NameplateSetting("castHeight") end, NameplateSetter("castHeight"))
-    y = y - 28
-    MakeDropdown(content, y, "名称截断长度", NP_LENGTH,
+    MakeDropdown(content, row(28), "名称截断长度", NP_LENGTH,
         function() return NameplateSetting("nameLength") end, NameplateSetter("nameLength"))
-    y = y - 28
-    MakeDropdown(content, y, "显示距离", NP_DISTANCE,
+    MakeDropdown(content, row(30), "显示距离", NP_DISTANCE,
         function() return NameplateSetting("viewDistance") end, NameplateSetter("viewDistance"))
-    y = y - 30
 
-    sec.bodyHeight = -y + 4
+    sec.bodyHeight = -row.y + 4
 
     local skins = ns:GetModule("Skins")
     if skins then
         sec = BeginSection("界面美化", false)
         content = sec.body
-        y = 0
+        row = LayoutCursor(0)
 
         local FONT_ITEMS = {
             { value = "off",   text = "关闭（原生字体）" },
             { value = "pixel", text = "像素字体（推荐）" },
         }
         -- Legacy saved values ("roadway", "number", ...) normalize through GetFontKey, so the row always shows one of the two entries above.
-        MakeDropdown(content, y, "统一字体（全局）", FONT_ITEMS,
+        MakeDropdown(content, row(24), "统一字体（全局）", FONT_ITEMS,
             function() return skins:GetFontKey() or "off" end,
             function(value)
                 ns:DB().skins.font = value
@@ -1107,14 +1043,12 @@ function SimpleConfig:Build()
                     ns:Print("切换字体：重启界面可完全恢复原生字体。")
                 end
             end)
-        y = y - 24
 
         local fontHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-        fontHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
+        fontHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(34))
         fontHint:SetWidth(328)
         fontHint:SetJustifyH("LEFT")
         fontHint:SetText("统一字体影响所有暴雪窗口文字；关闭需重载界面恢复。")
-        y = y - 34
 
         -- Group the windows by section, in registration order.
         local groups, seen = {}, {}
@@ -1127,91 +1061,83 @@ function SimpleConfig:Build()
 
         for _, group in ipairs(groups) do
             local caption = Widget:Font(content, 12, "pixel", "edge", "LEFT")
-            caption:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
+            caption:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(20))
             caption:SetText("· " .. group)
-            y = y - 20
 
             for _, entry in ipairs(skins.registry) do
                 if entry.group == group then
-                    MakeCheckbox(content, entry.label, y,
+                    MakeCheckbox(content, entry.label, row(26),
                         function() return skins:IsEnabled(entry.key) end,
                         function(value) skins:SetPanelEnabled(entry.key, value) end)
-                    y = y - 26
                 end
             end
         end
 
-        y = y - 4
-        sec.bodyHeight = -y + 4
+        row(4)                -- 行尾留白：纯前进，不取位置
+        sec.bodyHeight = -row.y + 4
     end
 
     local tooltip = ns:GetModule("Tooltip")
     if tooltip then
         sec = BeginSection("鼠标提示", false)
         content = sec.body
-        y = 0
+        row = LayoutCursor(0)
 
         -- 位置是全局行为：一个开关管所有 GameTooltip（物品 / 技能 / 角色 / 光环 / 动作条……），
         -- 和信息栏自己的悬停提示也共用。
-        MakeCheckbox(content, "提示框跟随鼠标（物品 / 技能 / 角色…）", y,
+        MakeCheckbox(content, "提示框跟随鼠标（物品 / 技能 / 角色…）", row(26),
             function() return tooltip:GetSetting("follow") end,
             function(value)
                 tooltip:Settings().follow = value and true or false
                 tooltip:Apply()
             end)
-        y = y - 26
 
         local tipHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-        tipHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
+        tipHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(44))
         tipHint:SetWidth(328)
         tipHint:SetJustifyH("LEFT")
         tipHint:SetText("关＝停在暴雪默认位置（右下角锚点，编辑模式可移动）。边框与底色在上方「界面美化 → 系统 → 鼠标提示边框」。")
-        y = y - 44
 
         -- 光标装饰（Modules/Cursor）：纯视觉，跟着主题色走；用模块开关整体关掉。
         local cursor = ns:GetModule("Cursor")
         if cursor then
-            MakeCheckbox(content, "光标拖尾（快速移动时拖出一条主题色笔迹）", y,
+            MakeCheckbox(content, "光标拖尾（快速移动时拖出一条主题色笔迹）", row(26),
                 function() return cursor:GetSetting("trail") end,
                 function(value)
                     cursor:Settings().trail = value and true or false
                     cursor:Apply()
                 end)
-            y = y - 26
 
-            MakeCheckbox(content, "光标速度星芒（快速甩动时出现十字光）", y,
+            MakeCheckbox(content, "光标速度星芒（快速甩动时出现十字光）", row(26),
                 function() return cursor:GetSetting("glow") end,
                 function(value)
                     cursor:Settings().glow = value and true or false
                     cursor:Apply()
                 end)
-            y = y - 26
         end
 
-        sec.bodyHeight = -y + 4
+        sec.bodyHeight = -row.y + 4
     end
 
     local toast = ns:GetModule("Toast")
     if toast then
         sec = BeginSection("通知", false)
         content = sec.body
-        y = 0
+        row = LayoutCursor(0)
 
-        MakeCheckbox(content, "收到新邮件时弹一条提示（小地图邮件图标已隐藏）", y,
+        MakeCheckbox(content, "收到新邮件时弹一条提示（小地图邮件图标已隐藏）", row(26),
             function() return toast:GetSetting("mail") end,
             function(value)
                 toast:Settings().mail = value and true or false
             end)
-        y = y - 26
 
-        MakeCheckbox(content, "背包满时弹一条提示（腾出空间后可再次提示）", y,
+        MakeCheckbox(content, "背包满时弹一条提示（腾出空间后可再次提示）", row(28),
             function() return toast:GetSetting("bagFull") end,
             function(value)
                 toast:Settings().bagFull = value and true or false
             end)
-        y = y - 28
 
-        MakeDropdown(content, y, "停留时长", {
+        MakeDropdown(content, row(26), "停留时长", {
             { value = 3, text = "3 秒" },
             { value = 5, text = "5 秒" },
             { value = 8, text = "8 秒" },
@@ -1220,32 +1146,29 @@ function SimpleConfig:Build()
             function(value)
                 toast:Settings().duration = value
             end)
-        y = y - 26
 
         local toastHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-        toastHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
+        toastHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(34))
         toastHint:SetWidth(328)
         toastHint:SetJustifyH("LEFT")
         toastHint:SetText("横幅在屏幕顶部居中，一次只显示一条，多的排队；底边一条细线随停留时间排空，点一下可提前关掉。")
-        y = y - 34
-        sec.bodyHeight = -y + 4
+        sec.bodyHeight = -row.y + 4
     end
 
     local durability = ns:GetModule("Durability")
     if durability then
         sec = BeginSection("耐久警告", false)
         content = sec.body
-        y = 0
+        row = LayoutCursor(0)
 
-        MakeCheckbox(content, "装备耐久过低时弹一条提示（修好 / 换装后才会再提醒）", y,
+        MakeCheckbox(content, "装备耐久过低时弹一条提示（修好 / 换装后才会再提醒）", row(28),
             function() return durability:GetSetting("warn") end,
             function(value)
                 durability:Settings().warn = value and true or false
                 durability:Apply()
             end)
-        y = y - 28
 
-        MakeDropdown(content, y, "提醒阈值", {
+        MakeDropdown(content, row(26), "提醒阈值", {
             { value = 20, text = "低于 20%" },
             { value = 30, text = "低于 30%" },
             { value = 50, text = "低于 50%" },
@@ -1255,69 +1178,62 @@ function SimpleConfig:Build()
                 durability:Settings().threshold = value
                 durability:Apply()
             end)
-        y = y - 26
 
         local durHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-        durHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
+        durHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(30))
         durHint:SetWidth(328)
         durHint:SetJustifyH("LEFT")
         durHint:SetText("只看身上穿着的 10 个部位（头肩胸腿脚腕手腰主副手），取最低的那件。")
-        y = y - 30
-        sec.bodyHeight = -y + 4
+        sec.bodyHeight = -row.y + 4
     end
 
     local combatText = ns:GetModule("CombatText")
     if combatText then
         sec = BeginSection("自身战斗文字", false)
         content = sec.body
-        y = 0
+        row = LayoutCursor(0)
 
-        MakeCheckbox(content, "受到伤害（暴击更大更亮）", y,
+        MakeCheckbox(content, "受到伤害（暴击更大更亮）", row(26),
             function() return combatText:GetSetting("damage") end,
             function(value)
                 combatText:Settings().damage = value and true or false
                 combatText:Apply()
             end)
-        y = y - 26
 
-        MakeCheckbox(content, "受到治疗", y,
+        MakeCheckbox(content, "受到治疗", row(26),
             function() return combatText:GetSetting("heal") end,
             function(value)
                 combatText:Settings().heal = value and true or false
                 combatText:Apply()
             end)
-        y = y - 26
 
-        MakeCheckbox(content, "闪避 / 招架 / 格挡 / 抵抗", y,
+        MakeCheckbox(content, "闪避 / 招架 / 格挡 / 抵抗", row(26),
             function() return combatText:GetSetting("avoid") end,
             function(value)
                 combatText:Settings().avoid = value and true or false
                 combatText:Apply()
             end)
-        y = y - 26
 
-        MakeCheckbox(content, "进入 / 离开战斗", y,
+        MakeCheckbox(content, "进入 / 离开战斗", row(26),
             function() return combatText:GetSetting("combat") end,
             function(value)
                 combatText:Settings().combat = value and true or false
                 combatText:Apply()
             end)
-        y = y - 26
 
         local ctHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-        ctHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
+        ctHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(34))
         ctHint:SetWidth(328)
         ctHint:SetJustifyH("LEFT")
         ctHint:SetText("文字浮在玩家框上方。打开哪一类，就接管暴雪对应的浮动战斗文字（关闭时还原原设置），所以不会出现两份数字。")
-        y = y - 34
-        sec.bodyHeight = -y + 4
+        sec.bodyHeight = -row.y + 4
     end
 
     local infobar = ns:GetModule("InfoBar")
     if infobar then
         sec = BeginSection("信息栏", false)
         content = sec.body
-        y = 0
+        row = LayoutCursor(0)
 
         -- Rebuild nothing on a settings change: the strip is re-anchored and the blocks re-measured in place.
         local function ApplyBar()
@@ -1325,7 +1241,7 @@ function SimpleConfig:Build()
             else infobar:ApplyLayout() end
         end
 
-        MakeDropdown(content, y, "贴边", {
+        MakeDropdown(content, row(28), "贴边", {
             { value = true,  text = "顶边" },
             { value = false, text = "底边" },
         },
@@ -1334,9 +1250,8 @@ function SimpleConfig:Build()
                 infobar:Settings().anchorTop = value
                 ApplyBar()
             end)
-        y = y - 28
 
-        MakeDropdown(content, y, "高度", {
+        MakeDropdown(content, row(28), "高度", {
             { value = 12, text = "12 px" },
             { value = 14, text = "14 px" },
             { value = 16, text = "16 px" },
@@ -1347,43 +1262,38 @@ function SimpleConfig:Build()
                 infobar:Settings().height = value
                 ApplyBar()
             end)
-        y = y - 28
 
-        MakeCheckbox(content, "悬停淡入（平时只露底板）", y,
+        MakeCheckbox(content, "悬停淡入（平时只露底板）", row(26),
             function() return infobar:Settings().mouseover end,
             function(value)
                 infobar:Settings().mouseover = value and true or false
                 ApplyBar()
             end)
-        y = y - 26
 
-        MakeCheckbox(content, "战斗时边缘呼吸闪烁", y,
+        MakeCheckbox(content, "战斗时边缘呼吸闪烁", row(26),
             function() return infobar:Settings().combatPulse end,
             function(value)
                 infobar:Settings().combatPulse = value and true or false
                 if infobar.RefreshPulse then infobar.RefreshPulse() end
             end)
-        y = y - 26
 
-        MakeCheckbox(content, "底部经验线（悬停三角看数值）", y,
+        MakeCheckbox(content, "底部经验线（悬停三角看数值）", row(26),
             function() return infobar:GetSetting("xp") end,
             function(value)
                 infobar:Settings().xp = value and true or false
                 ApplyBar()
             end)
-        y = y - 26
 
-        MakeCheckbox(content, "满级后这条线改显示声望", y,
+        MakeCheckbox(content, "满级后这条线改显示声望", row(26),
             function() return infobar:GetSetting("xpFaction") end,
             function(value)
                 infobar:Settings().xpFaction = value and true or false
                 ApplyBar()
             end)
-        y = y - 26
 
         -- One switch per block, in registration order.
         for _, block in ipairs(infobar.blocks) do
-            MakeCheckbox(content, block.label, y,
+            MakeCheckbox(content, block.label, row(26),
                 function() return infobar:BlockEnabled(block.key) end,
                 function(value)
                     local settings = infobar:Settings()
@@ -1391,11 +1301,10 @@ function SimpleConfig:Build()
                     settings.blocks[block.key] = value and true or false
                     ApplyBar()
                 end)
-            y = y - 26
         end
 
-        y = y - 4
-        sec.bodyHeight = -y + 4
+        row(4)                -- 行尾留白：纯前进，不取位置
+        sec.bodyHeight = -row.y + 4
     end
 
     -- 面板最高只到屏幕 - 40，正文在里面滚；提示行和「重载界面」按钮固定在最下面那条带子里。
