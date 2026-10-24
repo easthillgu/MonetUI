@@ -1080,9 +1080,7 @@ local function BuildButton(bar, index)
     -- 宠物条的按钮要能吃 _onclick 片段（SecureHandlerClickTemplate）；
     -- 带不上就退回原来的安全按钮模板（那时点击不会生效，但不会崩）。
     local templates = def.pet
-        and { "SecureHandlerClickTemplate, SecureActionButtonTemplate",
-              "SecureHandlerClickTemplate",
-              "SecureActionButtonTemplate" }
+        and { "", "CheckButton" }   -- 宠物条：普通 CheckButton，点击走 WrapScript 的安全片段
         or nil
     local button = CreateSecureButton(name, bar.frame, index, templates)
     if not button then return nil end
@@ -1100,18 +1098,12 @@ local function BuildButton(bar, index)
     pcall(button.RegisterForClicks, button, "AnyDown", "AnyUp")
 
     if def.pet then
-        -- 宠物条：**不在我们自己身上施法**（这个客户端没有通用安全按钮的 type="pet"，
-        -- 属性写对了点下去也没反应）。改成"点击片段去点暴雪自己的宠物按钮"：
-        --   * 按钮用 SecureHandlerClickTemplate；
-        --   * 每个按钮用 SetFrameRef 指向对应的 PetActionButtonN；
-        --   * _onclick 片段在安全环境里 GetFrameRef(...):Click() —— 受保护按钮允许被安全代码点。
-        -- 这样施法、冷却、自动施法提示全部由暴雪负责，我们只管外观和位置。
-        local blizz = _G["PetActionButton" .. index]
-        if blizz and type(button.SetFrameRef) == "function" then
-            pcall(button.SetFrameRef, button, "petbutton", blizz)
-            pcall(button.SetAttributeNoHandler, button, "_onclick",
-                'local b = self:GetFrameRef("petbutton"); if b then b:Click("LeftButton") end')
-        end
+        -- 宠物条：**不在我们自己身上施法**（本客户端没有通用安全按钮的 type="pet"）。
+        -- 改成"点击片段去点暴雪自己的 PetActionButton"：
+        --   条（SecureHandlerStateTemplate）用 SetFrameRef 指向 PetActionButtonN，
+        --   按钮的 OnClick 用 WrapScript 包成安全片段，片段里 owner:GetFrameRef(...):Click()。
+        -- 施法 / 冷却 / 自动施法提示全部由暴雪负责，我们只管外观和位置。
+        pcall(button.RegisterForClicks, button, "AnyUp")
         InstallPageChild(button, index)
         button.bindName = def.bind .. index
         button.bar      = bar.frame
@@ -1375,6 +1367,18 @@ local function CreateBar(def)
         -- 宠物条**不装拖放接住器**：它的槽位是宠物技能 1..10，不是动作条槽位；
         -- PlaceAction 会把这些序号当成"动作条第 N 格"，表现就是"拖到宠物条上错位/乱放"。
         -- 宠物条本来也不允许自定义（暴雪自己的宠物条同样不接受放技能）。
+        -- 点击转发：条的 frame ref 指向暴雪按钮，按钮的 OnClick 包成安全片段。
+        for i, button in ipairs(bar.buttons) do
+            local blizz = _G["PetActionButton" .. i]
+            if blizz then
+                pcall(frame.SetFrameRef, frame, "pet" .. i, blizz)
+                local snippet = ([[
+                    local b = owner and owner:GetFrameRef("pet%d") or self:GetFrameRef("pet%d")
+                    if b then b:Click("LeftButton") end
+                ]]):format(i, i)
+                pcall(frame.WrapScript, frame, button, "OnClick", snippet)
+            end
+        end
         bar.page = 1
         PushPageToChildren(bar)
         PushSecureInit(bar, "pet")
