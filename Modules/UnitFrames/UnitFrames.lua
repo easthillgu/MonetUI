@@ -203,38 +203,19 @@ local function Brighten(r, g, b, factor)
     return bump(r), bump(g), bump(b)
 end
 
---- 玩家单位血条里职业色占多少（0 = 完全是主题奶油色，1 = 完全是职业色）。
---- 调大一点职业暗示更明显、但越接近"整条蓝"，调小则更像玩家自己的条。
-local CLASS_TINT = 0.35
-
 --- The "current" part of a health bar: "highlight" (player, pet), "class" (target,
 --- focus) or "health".
+--- 玩家单位一律用主题血条色（和玩家自己同一条奶油色）：职业辨认交给能量条
+--- （UpdatePowerColor 给 target / focus / targettarget 上职业色），血条不再染职业色。
+--- NPC 仍用 UnitSelectionColor 的敌我色（敌对红 / 友善绿）——那是"敌我"信号。
 local function FillColor(unit)
     local style = Setting(unit, "fillColor")
     if style == "class" then
-        -- 玩家单位：职业色只做"淡染"。本客户端的 UnitSelectionColor 对玩家一律返回纯蓝
-        -- (0,0,1) —— 选中谁都变成同一条蓝血条，这正是"颜色突兀"的来源，而且它根本不是职业色。
-        -- 真职业色走 Color:ClassColor（C_ClassColor）；认职业主要看提亮过的能量条
-        -- （UpdatePowerColor 里 player / target / targettarget 的 1.25）。
         if UnitIsPlayer(unit) then
             local hr, hg, hb = Color:GetHighlight()
-            hr, hg, hb = hr * 0.8, hg * 0.8, hb * 0.8
-
-            local classFile = UnitClassBase(unit)
-            local cr, cg, cb
-            if type(classFile) == "string" and not Secrets.IsSecret(classFile) then
-                cr, cg, cb = Color:ClassColor(classFile)
-            end
-            if cr then
-                return hr + (cr - hr) * CLASS_TINT,
-                       hg + (cg - hg) * CLASS_TINT,
-                       hb + (cb - hb) * CLASS_TINT, 1
-            end
-            -- 职业色拿不到（身份受限 / 客户端没有这张表）：就当普通血条，不硬塞颜色。
-            return hr, hg, hb, 1
+            return hr * 0.8, hg * 0.8, hb * 0.8, 1
         end
 
-        -- NPC：保留敌我色（敌对红 / 友善绿），那是信号，不能洗淡。
         local ok, r, g, b = pcall(UnitSelectionColor, unit)
         if ok and r then
             -- target / targettarget 比 player 的暗 highlight 稍亮，层次感更清楚。
@@ -355,6 +336,21 @@ local function UpdatePowerColor(frame)
         r, g, b = Brighten(r, g, b, brighten)
         frame.power:SetStatusBarColor(r, g, b)
         return
+    end
+
+    -- 对方是玩家：能量条直接上它的**职业色**（血条已经是统一色，职业就靠这一条认）。
+    -- 自己的条不这么干 —— 自己的职业自己知道，保持按能量类型更直观。
+    -- UnitClassBase 标着 SecretWhenUnitIdentityRestricted，机密时退回能量类型色。
+    if unit ~= "player" and UnitIsPlayer(unit) then
+        local classFile = UnitClassBase(unit)
+        if type(classFile) == "string" and not Secrets.IsSecret(classFile) then
+            local cr, cg, cb = Color:ClassColor(classFile)
+            if cr then
+                cr, cg, cb = Brighten(cr, cg, cb, brighten)
+                frame.power:SetStatusBarColor(cr, cg, cb)
+                return
+            end
+        end
     end
 
     -- Guard so a client that hides the token never hands us a secret table key.

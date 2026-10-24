@@ -733,7 +733,7 @@ function SimpleConfig:Build()
     fillHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y)
     fillHint:SetWidth(328)
     fillHint:SetJustifyH("LEFT")
-    fillHint:SetText("「职业 / 阵营色」对玩家单位只给一点色相（血条仍是奶油基调），认职业主要看提亮过的能量条；NPC 保留敌对红 / 友善绿。")
+    fillHint:SetText("玩家单位统一用主题血条色，职业看能量条——选中玩家时能量条直接用它的职业色；NPC 血条保留敌对红 / 友善绿。")
     y = y - 44
 
     -- One row for two settings: 0 means "off", anything else is the pip height.
