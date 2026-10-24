@@ -194,8 +194,8 @@ local function UnitGeometry(unit)
 end
 
 local function FrameChrome()
-    local b = Shared("border") or 1
-    return b, 0  -- split removed: using 1px separator line instead
+    -- 血条与能量条之间用 1px 独立分隔线（早先的双段拆分已删，不再需要第二个返回值）。
+    return Shared("border") or 1
 end
 
 --- 把颜色向白提亮（factor>1）。对每个分量独立 pcall：秘密值乘法会抛错，失败就原样返回，
