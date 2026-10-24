@@ -311,33 +311,43 @@ Render = function(settle)
     if not settle then QueueRender() end
 end
 
---- 盯"又被显示"的那一路（只挂一次）。
-local function WatchBlizzard(bt)
-    if Marked(bt, "hiddenHook") then return end
-    Mark(bt, "hiddenHook", true)
-    -- 不再 HookScript("OnShow")（写脚本槽 = 污染，见 AGENTS）；轮询"变显示了"再藏。
-    if ns.Widget then
-        ns.Widget:ShowWatch(bt, function(self)
-            if enabled then pcall(self.Hide, self) end
-        end)
-    end
-end
-
---- 藏掉暴雪的任务 / 目标追踪框。
+--- 把暴雪的追踪框"静音"：**不 Hide()，只压 alpha + 关鼠标**。
 ---
---- 两条实机教训：
+--- 三条实机教训：
 ---   1. 它在 **LoD 包**（Blizzard_ObjectiveTracker）里，登录瞬间 `_G.ObjectiveTrackerFrame`
 ---      还不存在；只在 Skin() 里试一次就永远藏不住（症状：自绘的和默认的同时挂着）。
 ---   2. LoD 包加载时会把它**换成一个新对象** —— 我们藏过的那块已经不是屏幕上那块，
----      所以"藏一次 + ShowWatch"也不够（新对象没被登记过，`marked` 永远是 nil）。
---- 因此改成多时机补做：ADDON_LOADED / PLAYER_ENTERING_WORLD / 换区域 / 每次任务刷新，
---- 外加一个 1 秒的低频兜底。带 Marked 守卫，重复调用只是一次表查询。
+---      所以"藏一次 + ShowWatch"不够（新对象没被登记过）。
+---   3. **Hide() 会和暴雪打架**：它一有任务更新就自己 Show 回来，我们 1 秒补一刀，
+---      屏幕上就是"一闪一闪、时而可见"。alpha 0 不会触发它的 Show 逻辑（框一直"显示着"），
+---      也就不再有拉锯 —— 和收起暴雪动作条用的是同一套（MainActionBar 的结论）。
+--- 待机成本为零：alpha 只在第一次登记时写，之后每次调用最多两次 SetAlpha（幂等）。
 function SuppressBlizzard()
     local bt = _G.ObjectiveTrackerFrame
     if not bt then return end
-    WatchBlizzard(bt)
-    -- 每次调用都补一次隐藏：关掉再打开模块时，它可能正显示着（不会再有 OnShow 变化）。
-    if enabled and bt.IsShown and bt:IsShown() then pcall(bt.Hide, bt) end
+
+    if not Marked(bt, "muted") then
+        Mark(bt, "muted", true)
+        local okA, alpha = pcall(bt.GetAlpha, bt)
+        if okA then Mark(bt, "alpha", alpha) end
+        if bt.IsMouseEnabled then
+            local okM, mouse = pcall(bt.IsMouseEnabled, bt)
+            if okM then Mark(bt, "mouse", mouse) end
+        end
+    end
+
+    if not enabled then return end
+    pcall(bt.SetAlpha, bt, 0)
+    if bt.EnableMouse then pcall(bt.EnableMouse, bt, false) end
+end
+
+--- 模块关掉时把透明度 / 鼠标还回去。
+local function UnmuteBlizzard()
+    local bt = _G.ObjectiveTrackerFrame
+    if not bt or not Marked(bt, "muted") then return end
+    pcall(bt.SetAlpha, bt, Marked(bt, "alpha") or 1)
+    if bt.EnableMouse then pcall(bt.EnableMouse, bt, Marked(bt, "mouse") ~= false) end
+    Mark(bt, "muted", nil)
 end
 
 --- 1 秒一次的低频兜底：上面那些时机都没赶上（或者框被谁重新显示）时补一刀。
@@ -413,13 +423,10 @@ end
 function M:SetEnabled(value)
     enabled = value and true or false
 
-    local bt = _G.ObjectiveTrackerFrame
-    if bt then
-        if enabled then
-            SuppressBlizzard()
-        elseif bt.Show and (not bt.IsShown or not bt:IsShown()) then
-            pcall(bt.Show, bt)
-        end
+    if enabled then
+        SuppressBlizzard()
+    else
+        UnmuteBlizzard()
     end
 
     if tracker then
