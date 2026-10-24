@@ -599,6 +599,26 @@ function Widget:ApplyBorder(frame, thickness, borderKey)
     return frame
 end
 
+--- 光环类小按钮的 1px 主题边框重涂(共用点,review 2026-10-24 #4):
+--- UnitFrames 的 AuraContainer 按钮(TintAuraButton)与 Nameplates 的 debuff 按钮色带
+--- 原来各写一套。两类目标分叉:
+--- - 带 Backdrop 的框体 → 交给 Widget:ApplyBorder(顺带重建几何,主题换色/缩放两用),
+---   颜色忽略传参,恒走主题边框色(与 UF 现状一致);
+--- - 纯 Texture(暴雪按钮的色带)→ 先垫白 texel 再 SetVertexColor:染色走顶点色,
+---   主题_changed 之后可以重复重涂(沿用 LostBarBG 的那套道理,texel 不烧死)。
+--- r/g/b 缺省 = 当前主题边框色;pcall 全程兜底(受限环境这些目标可能暂时拿不到)。
+--- @return the target (for chaining), ok=nil when the target was unusable
+function Widget:TintIconBorder(target, r, g, b, a)
+    if not target or type(target) ~= "table" then return target end
+    if type(target.SetBackdropBorderColor) == "function" then
+        return self:ApplyBorder(target, 1)
+    end
+    if r == nil then r, g, b = Color:GetBorder() end
+    pcall(target.SetColorTexture, target, 1, 1, 1, 1)   -- white stencil, tint by vertex colour
+    pcall(target.SetVertexColor, target, r, g, b, a or 1)
+    return target
+end
+
 --- Subtle hover highlight used by the modules: one shared driver breathes the border alpha every ~1.2 s between 40% and full while hovered -- the Andromeda "button hover animation" idea, run against our border slot so it reads as the Monet edge quietly pulsing.
 local pulsing = setmetatable({}, { __mode = "k" })
 local PULSE_PERIOD = 1.2

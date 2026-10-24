@@ -939,7 +939,7 @@ local function TintAuraButton(button)
     if not host then return end
     -- 只写我们自己的子帧。写在按钮的 region 上会被 Bad self 拒掉（pcall 吞掉后边框就永远是
     -- 创建那一刻的颜色，换主题也不变）—— 子帧没有这个限制，重涂是幂等的。
-    Widget:ApplyBorder(host, 1)
+    Widget:TintIconBorder(host)   -- 与 NP 的 debuff 色带共用一点(review #4)
 end
 
 -- 时长文本的染色曲线：配色和动作条冷却（Modules/Cooldown）同一套 ——

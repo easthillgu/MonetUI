@@ -484,7 +484,9 @@ local function DressDebuffButton(button)
         local bd = button:CreateTexture(nil, "OVERLAY")
         bd:SetPoint("TOPLEFT", button, "TOPLEFT", -1, 1)
         bd:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 1, -1)
-        pcall(bd.SetColorTexture, bd, sr, sg, sb, 1)
+        -- 白 texel + 顶点色(review #4 与 UF 的 TintAuraButton 共用):初始可以带驱散色,
+        -- 之后主题换色还能重复重涂(以前 SetColorTexture 烧死颜色,重不了)。
+        Widget:TintIconBorder(bd, sr, sg, sb)
         d.border = bd
 
         -- 4) 冷却：关描边，保留扫圈。

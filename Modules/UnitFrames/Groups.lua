@@ -15,6 +15,7 @@ local Secrets  = ns.Secrets
 local Widget   = ns.Widget
 local Color    = ns.Color
 local Media    = ns.Media
+local Math     = ns.Math
 local EventBus = ns.EventBus
 local Mover    = ns.Mover
 
@@ -64,10 +65,8 @@ end
 -- 按钮外观
 -- ============================================================================
 
-local function Truncate(text, cap)
-    if not text or #text <= cap then return text end
-    return string.sub(text, 1, cap) .. "…"
-end
+-- 名字截断走 Math:Shorten(单一来源,review 2026-10-24 #4):以前这里的本地 Truncate 按字节切,
+-- 会切进汉字中间画出坏字形 —— Shorten 按字符边界走,还统一了省略号(UF 同源)。
 
 --- 名字最多几个字：中文一个字顶两个拉丁字宽，团队框只放得下三四个。
 local function NameCap(cfg)
@@ -315,7 +314,7 @@ local function DisplayName(button)
     local raw = button.unitName or ""
     local dash = string.find(raw, "-", 1, true)
     if dash then raw = string.sub(raw, 1, dash - 1) end
-    return Truncate(raw, button.nameCap or 7)
+    return Math:Shorten(raw, button.nameCap or 7, true)
 end
 
 local function UpdateHealth(button)
