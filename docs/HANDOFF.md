@@ -265,6 +265,10 @@ end
 | `tools/` | 部署、API 审计、材质生成、像素审计 | 材质改完必须 `node tools/audit-pixels.js` |
 | `docs/api/` | 本客户端 API 快照（**效力高于 hated-wow MCP**） | `node tools/api-lookup.js <名字>` |
 
+> 另：宠物动作条"自动施法"像素环的完整实现要点（参数、`Widget:PixelGlow`、为什么要替掉暴雪的
+> `AutoCastOverlay.Shine`）在 **`.opencode/skill/wow-petbar-autocast-pixel-glow/SKILL.md`**。
+> Codex 不会自动加载它，需要时直接读这个文件。
+
 ---
 
 ## 8. 约定（作者定的，别自作主张）
