@@ -51,7 +51,26 @@
    - Widget.BORDER=1 / Widget.TEXT_GAP=3;Groups/Nameplates/UnitFrames/ActionBars 改引。
    - **bgAlpha 不并入**:实查 0.9/0.92/0.85/0.55/0.6/0.25 是按表面语义各异的值,合并会改视觉。
    - 实机验证通过:reload 后探针 Widget.BORDER=1/TEXT_GAP=3,日志 0 ERR/0 BLOCKED/0 WARN。
-2. commit `refactor(unitframes): FrameChrome 单返回值`(UnitFrames:196,唯调用点 :1636)
+2. commit `refactor(unitframes): FrameChrome 单返回值` —— ✅ 完成(48544dc)
+   - UnitFrames.lua FrameChrome() 返回 `Shared("border") or 1` 单值(第二个返回值 0 早已无人用)。
+3. commit `refactor(simpleconfig): LayoutCursor 光标式布局` —— ✅ 完成(23d2996)
+   - 机械变换(配对分析验证):104 处合并 `row(N)` + 3 处行尾留白独立 `row(4)` +
+     14 处分组起点 `row = LayoutCursor(0)` + 14 处结算读 `-row.y + 4`。
+   - helper = setmetatable + `__call`(Lua 5.1),`row.h` 取当前行 y 并前进;`row.y` 纯读。
+   - 全区零裸 y 残留;行尾 LF 保持;离线 check 0 错误。
+   - 变换脚本 bug 两处(独立前进行误删 / 带结算读的重置漏记)在断言层拦下,恢复后重跑。
+
+### BLOCKED 调查记录(2026-10-25 收案)
+
+reload 后出现每 ~10s 一条的 `ADDON_ACTION_BLOCKED MonetUI UNKNOWN()`(共 16 条记录≈25 次,
+分布在战斗 / 面板操作 / reload 前后,空闲 56s×2 观察窗 + 复现窗内均 0 新增,自停)。
+定性三件套:
+- **taint.log 零字节**(在 taintLog=2 开着时复现)→ 不是污染链,是直接受保护调用拒绝;
+- 0 ERR / 0 弹窗 / 功能正常(用户打了一场、面板照常开);
+- git 基线 cb7d932→HEAD 全 diff **零条**受保护调用新增(脚本扫描 SetShown/SetAttribute/
+  SetParent/EnableMouse/SetScale/HookScript/SetPoint/Hook)。
+结论:与 AGENTS.md"换父 / 宠物条收养"已知代价的性质一致(只进日志),非本轮重构引入,
+不再追。实机目检设置面板布局已通过(用户逐页翻过)。
 3. commit `refactor(simpleconfig): LayoutCursor 光标式布局`
    - `local row = LayoutCursor(yStart)`;107 处 `y = y - N` 机械替换,增删行不再手工记账。
    - 逻辑风险 0,diff 大;验证:实机打开设置面板逐页目检(位置应逐像素不变)。
