@@ -436,16 +436,31 @@ function Skin:UpdateTabState(tab)
     underline:Show()
 end
 
-local tabStateHooked = false
-local function HookTabState(Skin)
-    if tabStateHooked then return end
-    tabStateHooked = true
-    local function onChanged(tab)
-        if type(tab) == "table" and Marked(tab, "tab") then Skin:UpdateTabState(tab) end
-    end
-    for _, fn in ipairs({ "PanelTemplates_SelectTab", "PanelTemplates_DeselectTab" }) do
-        if type(_G[fn]) == "function" then pcall(hooksecurefunc, fn, onChanged) end
-    end
+--- 页签选中态的跟随：**不再 hooksecurefunc(PanelTemplates_SelectTab/DeselectTab)**。
+--- 那是全局函数钩子 —— 任何面板切页签时都会在我们的代码里跑一段，整条调用链被记成
+--- "tainted by MonetUI"（实机：进入编辑模式时 Blizzard 自己的小队框 setup 因此抛
+--- "compare 'oldR' (secret ...)"）。改成 0.5 秒轮询所有装饰过的页签，重算选中态。
+local tabWatch = setmetatable({}, { __mode = "k" })
+local tabDriver
+
+local function EnsureTabDriver(Skin)
+    if tabDriver then return end
+    tabDriver = CreateFrame("Frame")
+    local acc = 0
+    tabDriver:SetScript("OnUpdate", function(_, elapsed)
+        acc = acc + (elapsed or 0)
+        if acc < 0.5 then return end
+        acc = 0
+        for tab in pairs(tabWatch) do
+            pcall(Skin.UpdateTabState, Skin, tab)
+        end
+    end)
+end
+
+local function WatchTab(Skin, tab)
+    if not tab then return end
+    tabWatch[tab] = true
+    EnsureTabDriver(Skin)
 end
 
 --- Restyle a tab button (square, themed, accent underline that follows the selection state).
@@ -464,8 +479,7 @@ function Skin:Tab(tab, opts)
         underline:SetHeight(Media:SnapUnit(2))
         Mark(tab, "tabBar", underline)
         self:Track(underline)
-        HookTabState(self)
-        self:OnTheme(function()
+        WatchTab(self, tab)        self:OnTheme(function()
             local r, g, b = Color:GetBorder()
             underline:SetColorTexture(r, g, b, 1)
             Skin:UpdateTabState(tab)
