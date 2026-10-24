@@ -154,19 +154,37 @@ function M:RestorePlateSize()
     savedPlateSize = nil
 end
 
--- Blizzard's own driver recomputes plate sizes on CVar/settings change and would put its
--- default back; re-apply ours afterwards (the pattern Andromeda uses).  Optional everywhere.
+-- Blizzard's own driver recomputes plate sizes on CVar/settings change and would put its default
+-- back; we want ours to win.
+--
+-- **绝不能 hooksecurefunc(driver, "UpdateNamePlateOptions")**（以前就是这么写的）：那是往暴雪的
+-- 方法槽挂我们的函数，驱动框从此被标脏，而它建出来的每一块姓名板都在"MonetUI 的执行环境"里
+-- setup —— 暴雪自己随后的更新就会炸，实机全是 `tainted by 'MonetUI'`：
+--   CompactUnitFrame.lua:1211  attempt to compare local 'maxHealth' (a secret number value)
+--   CompactUnitFrame.lua:668   attempted to index a table that cannot be indexed with secret keys
+--   CastingBarFrame.lua:344    boolean test on local 'notInterruptible' (a secret boolean value)
+--   Blizzard_NamePlateAuras.lua:366  boolean test on field 'isFullUpdate' (a secret boolean value)
+-- 改成轮询：读客户端当前的牌子尺寸，和我们要的不一致就重设一次（尺寸只在改设置 / 换 CVar 时变，
+-- 2 秒限一次，不会刷屏）。
 function M:HookDriver()
     if driverHooked then return end
-    local driver = _G.NamePlateDriverFrame
-    if not driver or type(driver.UpdateNamePlateOptions) ~= "function"
-        or type(hooksecurefunc) ~= "function" then
-        return   -- not created yet: retried from PLAYER_ENTERING_WORLD
-    end
-    hooksecurefunc(driver, "UpdateNamePlateOptions", function()
+    driverHooked = true
+
+    local lastTry = 0
+    Widget:PollWatch(_G.UIParent, function()
+        if Setting("forcePlateSize") == false then return end
+        if InCombatLockdown and InCombatLockdown() then return end
+        if not C_NamePlate or type(C_NamePlate.GetNamePlateSize) ~= "function" then return end
+        local ok, w, h = pcall(C_NamePlate.GetNamePlateSize)
+        if not ok or type(w) ~= "number" or type(h) ~= "number" then return end
+        if Secrets.IsSecret(w) or Secrets.IsSecret(h) then return end
+        local wantW, wantH = VisualSize()
+        if math.abs(w - wantW) < 0.5 and math.abs(h - wantH) < 0.5 then return end
+        local now = _G.GetTime and _G.GetTime() or 0
+        if now - lastTry < 2 then return end
+        lastTry = now
         M:ApplyPlateSize()
     end)
-    driverHooked = true
 end
 
 -- Every query is pcall'd: on this client a unit call can be refused outright in
