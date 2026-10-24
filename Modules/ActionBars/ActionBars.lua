@@ -743,6 +743,19 @@ local function EnsureDropCatcher(bar)
         if ok and made then catcher = made break end
     end
     if not catcher then return nil end
+    -- **它只是接住拖放，绝不能施法、也不该有提示框。**
+    -- ActionBarButtonTemplate 会带来暴雪 ActionButton 的 OnClick / OnEnter：
+    --   * OnClick 在它没有 action 属性时会按 CalculateAction(id=0) 算成"动作条第 1 格"，
+    --     于是点在它上面会放出 1 号格的法术（实机：宠物条 10 格全放"奥术射击"，
+    --     提示框也写着"奥术射击"—— 因为鼠标其实落在它身上，它在 level 70，压着我们的按钮）；
+    --   * OnEnter/OnLeave 会挂一个跟我们按钮无关的提示框。
+    -- 我们只要它的 OnReceiveDrag / OnMouseUp（下面自己设），所以把模板带来的脚本全摘掉。
+    pcall(catcher.SetScript, catcher, "OnClick", nil)
+    pcall(catcher.SetScript, catcher, "OnEnter", nil)
+    pcall(catcher.SetScript, catcher, "OnLeave", nil)
+    pcall(catcher.SetAttribute, catcher, "type", nil)
+    pcall(catcher.SetAttribute, catcher, "action", nil)
+    if catcher.RegisterForClicks then pcall(catcher.RegisterForClicks, catcher) end
     catcher:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
     catcher:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
     catcher:SetFrameStrata("MEDIUM")
