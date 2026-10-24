@@ -37,12 +37,14 @@ local Skin     = ns.Skin
 
 local M = { name = "ActionBars" }
 
---- 收养暴雪宠物/姿态条的开关。开着 = 让它们**原样显示**（原位置、原大小），玩家能用。
---- 但**不再替它们排版**（见 STYLE_ADOPTED_BARS）。
---- 背景：在这两个受保护的条上写 SetScale / SetPoint 会把它们标脏，之后暴雪自己的
---- PetActionButton…:SetShown / PetActionBar:ClearAllPoints 战斗中被拒
---- （taint.log: "tainted from MonetUI"），一进战斗就弹「插件导致界面行为失效」。
-local ADOPT_BLIZZARD_BARS = true
+--- 收养暴雪宠物/姿态条的开关。**保持 false，而且现在连"收起"都不做** ——
+--- 这两个受保护的条我们**一个字段都不写、一个方法都不调**，完全交给暴雪：
+--- 它就按自己的默认位置/大小显示，玩家能用。
+--- 为什么连 EnableMouse(false) 都不能留：实测这一下也会让 PetActionBar 的
+--- flyoutDirection 变脏，之后暴雪自己的 PetActionButton*:SetShown /
+--- PetActionBar:ClearAllPoints 战斗中被拒（taint.log: "tainted from MonetUI"）。
+--- 想要"挪到我们的位置 + 自绘外观"，只能像 Bar1..8 那样建自己的安全按钮（宠物 type="pet"）。
+local ADOPT_BLIZZARD_BARS = false
 
 --- 收养之后要不要再排版（SetScale / SetPoint 到我们的位置）。
 --- **保持 false**：排版写的每一个 SetScale/SetPoint 都会把这些受保护框标脏。
@@ -1649,18 +1651,12 @@ local function AdoptBar(def)
     return entry
 end
 
---- 收养暴雪宠物/姿态条的开关。**保持 false**：这条路径必然要写它自己的位置/缩放
---- （SetPoint / SetScale / 换容器父级），本客户端会因此把这些受保护框标脏，
---- 之后暴雪自己的 PetActionButton…:SetShown / PetActionBar:ClearAllPoints 战斗中被拒
---- （taint.log 里成片的 "tainted from MonetUI"），一进战斗就弹「插件导致界面行为失效」。
---- 关掉之后宠物/姿态条按普通动作条处理：alpha 0 + 关鼠标（玩家看不到，但不再污染）。
---- 要真正显示宠物/姿态条，得像 Bar1..8 那样建**自己的**安全按钮（宠物 type="pet"），
---- 见 AGENTS 待办。
+--- 收养暴雪宠物/姿态条：现在整条路径都不走（见文件开头 ADOPT_BLIZZARD_BARS 的注释）。
+--- 关键：**也不要把它们收起来** —— 收起要写 alpha / 关鼠标，同样会脏。
+--- 交给暴雪自己按默认位置显示，玩家能用就行；要挪位置/换外观得自绘。
 local function AdoptAll()
     if not M.own then return end
     if not ADOPT_BLIZZARD_BARS then
-        Park("PetActionBar")
-        Park("StanceBar")
         return
     end
     if Locked() then
