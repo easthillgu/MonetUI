@@ -366,6 +366,30 @@ function ns:GetModule(name)
     return modules[name]
 end
 
+--- 给任意对象（框体、贴图、字体串）挂"我们做过了"的标记，**不写进对象本身**。
+--- 本客户端的污染判定是按键算的：插件往暴雪的框体上写一个字段，这个框体随后的暴雪代码
+--- 就会以我们的名义跑（实机证据：`issecurevariable` 在 NamePlate1UnitFrame 上唯一为 false
+--- 的键就是 `__monetAuraHook`，随后 `CompactUnitFrame_OnUpdate` 报
+--- "compare 'maxHealth' (secret number) ... tainted by 'MonetUI'"；同一原因还让暴雪自己的
+--- SetPoint 被判 "anchor family connection"）。所以所有簿记走这张以对象为弱键的旁表。
+local marks = setmetatable({}, { __mode = "k" })
+
+function ns:Mark(object, key, value)
+    if object == nil then return value end
+    local t = marks[object]
+    if not t then
+        t = {}
+        marks[object] = t
+    end
+    t[key] = value
+    return value
+end
+
+function ns:Marked(object, key)
+    local t = marks[object]
+    return t and t[key]
+end
+
 function ns:GetModuleOrder()
     return moduleOrder
 end

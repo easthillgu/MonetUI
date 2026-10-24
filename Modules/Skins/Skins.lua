@@ -9,6 +9,14 @@ local Media    = ns.Media
 local EventBus = ns.EventBus
 local Widget   = ns.Widget
 
+
+-- 旁表标记：**绝不往暴雪的框体 / 贴图 / 字体串上写字段**。
+-- 本客户端把“插件写过字段的对象”判成脏的（实机：issecurevariable 在 NamePlate1UnitFrame 上唯一为 false 的键就是我们的
+-- 标记，随后暴雪自己的 OnUpdate 就报 secret value / anchor family），所以标记一律走
+-- Core.lua 的 ns:Mark / ns:Marked（以对象为弱键的旁表）。
+local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
+local Marked = function(o, k) return ns:Marked(o, k) end
+
 local M = { name = "Skins" }
 ns.Skins = M
 
@@ -270,8 +278,8 @@ end
 --- Re-run a skin whenever a Blizzard frame is shown (some content is built lazily).  HookScript only, never SetScript, and idempotent: one OnShow handler per frame, ever, so refresh paths cannot stack duplicates.
 function M:HookShow(frame, fn)
     if not frame or type(frame.HookScript) ~= "function" or type(fn) ~= "function" then return end
-    if frame.__monetShowHook then return end
-    frame.__monetShowHook = true
+    if Marked(frame, "showHook") then return end
+    Mark(frame, "showHook", true)
     frame:HookScript("OnShow", function()
         if M.active then pcall(fn) end
     end)
@@ -313,13 +321,13 @@ function M:ApplyFont()
     for i = 1, #FONT_OBJECTS do
         local fs = _G[FONT_OBJECTS[i]]
         if fs and type(fs.SetFont) == "function" then
-            if not fs.__monetGlobalFont then
-                fs.__monetGlobalFont = true
+            if not Marked(fs, "globalFont") then
+                Mark(fs, "globalFont", true)
                 local oldPath, oldSize, oldFlags = fs:GetFont()
                 if oldPath then
                     Skin:Record(function()
                         if fs.SetFont then fs:SetFont(oldPath, oldSize, oldFlags) end
-                        fs.__monetGlobalFont = nil
+                        Mark(fs, "globalFont", nil)
                     end)
                 end
             end

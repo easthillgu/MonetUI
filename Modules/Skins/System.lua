@@ -4,6 +4,14 @@
 local ADDON_NAME, ns = ...
 
 local M    = ns.Skins
+
+-- 旁表标记：**绝不往暴雪的框体 / 贴图 / 字体串上写字段**。
+-- 本客户端把“插件写过字段的对象”判成脏的（实机：issecurevariable 在 NamePlate1UnitFrame 上唯一为 false 的键就是我们的
+-- 标记，随后暴雪自己的 OnUpdate 就报 secret value / anchor family），所以标记一律走
+-- Core.lua 的 ns:Mark / ns:Marked（以对象为弱键的旁表）。
+local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
+local Marked = function(o, k) return ns:Marked(o, k) end
+
 local Skin = ns.Skin
 
 local function SkinLoot()
@@ -178,8 +186,8 @@ local function TintNineSlice(frame)
         return false
     end
 
-    if not frame.__monetNineTint then
-        frame.__monetNineTint = true
+    if not Marked(frame, "nineTint") then
+        Mark(frame, "nineTint", true)
 
         local dr, dg, db, da = nine:GetBorderColor()
         local cr, cg, cb, ca = nine:GetCenterColor()
@@ -187,12 +195,12 @@ local function TintNineSlice(frame)
         Skin:Record(function()
             if dr then nine:SetBorderColor(dr, dg, db, da) end
             if cr then nine:SetCenterColor(cr, cg, cb, ca) end
-            frame.__monetNineTint = nil
+            Mark(frame, "nineTint", nil)
         end)
 
         -- 关掉美化后主题刷新还会跑，所以这里先问一句"这片框架现在还算被美化着吗"
         Skin:OnTheme(function()
-            if frame.__monetNineTint then PaintNine(frame, nine) end
+            if Marked(frame, "nineTint") then PaintNine(frame, nine) end
         end)
     end
 
@@ -204,8 +212,8 @@ end
 local function TintBackdrop(frame)
     if not frame or type(frame.SetBackdropBorderColor) ~= "function" then return end
 
-    if not frame.__monetBackdropTint then
-        frame.__monetBackdropTint = true
+    if not Marked(frame, "backdropTint") then
+        Mark(frame, "backdropTint", true)
 
         local br, bg, bb, ba
         if type(frame.GetBackdropColor) == "function" then
@@ -219,7 +227,7 @@ local function TintBackdrop(frame)
         Skin:Record(function()
             if frame.SetBackdropColor and br then frame:SetBackdropColor(br, bg, bb, ba) end
             if frame.SetBackdropBorderColor and dr then frame:SetBackdropBorderColor(dr, dg, db, da) end
-            frame.__monetBackdropTint = nil
+            Mark(frame, "backdropTint", nil)
         end)
 
         Skin:OnTheme(function()
@@ -251,8 +259,8 @@ end
 
 local function SkinMenus()
     local create = _G.UIDropDownMenu_CreateFrames
-    if type(create) ~= "function" or create.__monetHooked then return end
-    create.__monetHooked = true
+    if type(create) ~= "function" or Marked(create, "hooked") then return end
+    Mark(create, "hooked", true)
 
     hooksecurefunc("UIDropDownMenu_CreateFrames", function(level, menuIndex)
         TintPanel(_G["DropDownList" .. tostring(level)])
@@ -269,7 +277,7 @@ local function WatchTooltipStyle()
     tooltipStyleWatched = true
 
     hooksecurefunc("SharedTooltip_SetBackdropStyle", function(frame, style)
-        if style or not frame or not frame.__monetNineTint then return end
+        if style or not frame or not Marked(frame, "nineTint") then return end
         TintNineSlice(frame)
     end)
 end

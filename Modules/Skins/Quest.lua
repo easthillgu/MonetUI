@@ -87,6 +87,14 @@ local function SkinObjectiveTracker()
     local tracker = _G.ObjectiveTrackerFrame
     if not tracker then return end
 
+    -- QuestTracker 模块默认开着，并且把暴雪的追踪框整个隐藏、自己画一份（QuestTracker.lua:305
+    -- SuppressBlizzard）。给一个玩家永远看不见的框架换字体/关贴图不只是白做 —— 它会把这个框架
+    -- 染成我们的，之后暴雪自己的布局代码里读光环就被拒，实机报过：
+    --   GetAuraDataByIndex(): Auras cannot be accessed when secret while tainted by 'MonetUI'
+    --   （Blizzard_MawBuffs → ScenarioObjectiveTracker:LayoutContents）
+    -- 所以只有玩家关掉 QuestTracker、暴雪追踪框真的在显示时，才需要这层皮肤。
+    if ns:IsModuleEnabled("QuestTracker") then return end
+
     -- Only the header: the blocks below it are content and must stay legible.
     M:Controls({
         "ObjectiveTrackerHeader", "QuestLogObjectiveHeader",

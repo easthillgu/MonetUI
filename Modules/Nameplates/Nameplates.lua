@@ -15,6 +15,26 @@ local M = { name = "Nameplates" }
 local plates = {}   -- unit token ("nameplate3") -> our plate frame
 local driverHooked = false
 
+--- 本客户端的框体污染是按**键**算的：插件只要往暴雪的框体上写过一个字段，这个框体随后的
+--- 暴雪代码就会以我们的名义跑。实机证据（`issecurevariable` 逐键扫 NamePlate1UnitFrame）：
+--- 唯一为 false 的键就是 `__monetAuraHook`，紧接着暴雪自己的 `CompactUnitFrame_OnUpdate`
+--- 就报 "attempt to compare local 'maxHealth' (a secret number value, while execution tainted
+--- by 'MonetUI')"，而且 10 秒一次刷屏；同族的报错还有 SetPoint 被拒的
+--- "anchor family connection"。所以姓名板的所有簿记一律放进这张**以框体为弱键的旁表**，
+--- 绝不往暴雪的框体（base / UnitFrame / AurasFrame / 它的 debuff 按钮）上写字段。
+local marks = setmetatable({}, { __mode = "k" })
+
+local function Mark(frame, key, value)
+    local t = marks[frame]
+    if not t then t = {}; marks[frame] = t end
+    t[key] = value
+end
+
+local function Marked(frame, key)
+    local t = marks[frame]
+    return t and t[key]
+end
+
 local BORDER   = 1
 local TEXT_GAP = 3     -- the gap the unit frames keep above their bars
 local CAST_GAP = 4
@@ -386,10 +406,10 @@ end
 local function DressDebuffButton(button)
     if not button or type(button) ~= "table" then return end
 
-    local d = button.__monetDebuff
+    local d = Marked(button, "debuff")
     if not d then
         d = { fonts = {} }
-        button.__monetDebuff = d
+        Mark(button, "debuff", d)
         dressedDebuffs = dressedDebuffs + 1
 
         local okW, bw = pcall(button.GetWidth, button)
@@ -508,7 +528,7 @@ end
 
 --- 遍历一整个 debuff 列表，把还没打扮过的按钮补上。
 -- 池化按钮第一次显示时可能还没进 GetChildren()，所以每个按钮额外挂一次 OnShow：
--- 回收复用后再次显示时把字体重新压一遍（边框只建一次，靠 __monetDebuffFonts 记住）。
+-- 回收复用后再次显示时把字体重新压一遍（边框只建一次，靠旁表标记记住）。
 local function DressDebuffList(list)
     if not list or type(list.GetChildren) ~= "function" then return end
     local ok, children = pcall(function() return { list:GetChildren() } end)
@@ -516,8 +536,8 @@ local function DressDebuffList(list)
     for i = 1, #children do
         local child = children[i]
         DressDebuffButton(child)
-        if child and type(child.HookScript) == "function" and not child.__monetDebuffHook then
-            child.__monetDebuffHook = true
+        if child and type(child.HookScript) == "function" and not Marked(child, "debuffHook") then
+            Mark(child, "debuffHook", true)
             pcall(child.HookScript, child, "OnShow", function(self)
                 DressDebuffButton(self)
             end)
@@ -566,19 +586,21 @@ local function HideBlizzardPlate(base, plate)
     if auras and Setting("showDebuffs") ~= false then
         if type(auras.SetParent) == "function" then pcall(auras.SetParent, auras, plate) end
         if type(auras.SetAlpha) == "function" then pcall(auras.SetAlpha, auras, 1) end
-        auras.__monetPlate = plate
+        Mark(auras, "plate", plate)
         plate.blizzardAuras = auras
         AnchorDebuffs(auras, plate)
     end
 
     -- Blizzard re-runs this on its own relayout; follow it or the borrowed aura list goes back
-    -- under the hidden frame.
+    -- under the hidden frame.  The "already hooked" flag lives in `marks`, not as a field on
+    -- Blizzard's frame: writing a field there is what taints it (see the note on `marks`).
     if type(hooksecurefunc) == "function" and type(uf.ApplyFrameOptions) == "function"
-        and not uf.__monetAuraHook then
-        uf.__monetAuraHook = true
+        and not Marked(uf, "auraHook") then
+        Mark(uf, "auraHook", true)
         pcall(hooksecurefunc, uf, "ApplyFrameOptions", function(self)
             local a = rawget(self, "AurasFrame")
-            if a and a.__monetPlate then AnchorDebuffs(a, a.__monetPlate) end
+            local owner = a and Marked(a, "plate")
+            if owner then AnchorDebuffs(a, owner) end
         end)
     end
 
@@ -592,12 +614,14 @@ local function RestoreBlizzardPlate(base, plate)
     local uf = BlizzardUnitFrame(base)
     if uf then
         local auras = rawget(uf, "AurasFrame")
-        if auras and rawget(auras, "__monetPlate") then
-            auras.__monetPlate = nil
+        if auras and Marked(auras, "plate") then
+            Mark(auras, "plate", nil)
             if type(auras.SetParent) == "function" then pcall(auras.SetParent, auras, uf) end
         end
-        if type(uf.ApplyFrameOptions) == "function" then
-            pcall(uf.ApplyFrameOptions, uf)   -- the game re-anchors its own list
+        -- 真正会重排暴雪那套锚点的是 Base 的 ApplyFrameOptions（它自己带 NamePlateSetupOptions）；
+        -- uf:ApplyFrameOptions() 缺这两个参数，进函数第一行就抛，以前的 pcall 把这条静默吞了。
+        if base and type(base.ApplyFrameOptions) == "function" then
+            pcall(base.ApplyFrameOptions, base)   -- the game re-anchors its own list
         end
         if uf.SetAlpha then pcall(uf.SetAlpha, uf, 1) end
         pcall(uf.Show, uf)
@@ -605,8 +629,35 @@ local function RestoreBlizzardPlate(base, plate)
     if plate then
         plate.blizzardHidden = nil
         plate.blizzardAuras = nil
+        plate.blizzardUF = nil
     end
     return uf ~= nil
+end
+
+--- 单位要消失时只做"把借的东西还回去"这一件事，不重排、不 Show。
+--- **必须做，而且必须在暴雪回收之前做**：NAME_PLATE_UNIT_REMOVED 之后
+--- NamePlateDriverFrame:OnNamePlateRemoved 会 ClearUnit + ReleaseUnitFrame，把这个 UnitFrame
+--- 丢回**公共池**，下一次它会被挂到**另一个** base 上。如果 AurasFrame 还挂在我们 plate
+--- （它是旧 base 的孩子）上，两个姓名板的锚点族就被这一根父级连起来了 —— 于是暴雪在新 base
+--- 里自己的 SetPoint 全被拒，实机就是这样报的：
+---   Blizzard_NamePlateUnitFrame.lua:808（光环列表锚到 self.name）
+---   Blizzard_NamePlateUnitFrame.lua:676（CastBarsContainer 锚到 self，跟光环毫无关系，
+---   正好证明是"self 这一族"被别的姓名板连上了）
+---   Action[SetPoint] failed because[SetPoint would result in anchor family connection]
+--- 同时把 alpha 还原：回收的帧若带着 alpha 0 进池子，下一个"不接管"的姓名板（过滤掉的单位）
+--- 会看不见。
+local function HandBackAuras(plate)
+    if not plate then return end
+    local uf = plate.blizzardUF
+    local auras = uf and rawget(uf, "AurasFrame")
+    if auras and Marked(auras, "plate") then
+        Mark(auras, "plate", nil)
+        if type(auras.SetParent) == "function" then pcall(auras.SetParent, auras, uf) end
+    end
+    if uf and uf.SetAlpha then pcall(uf.SetAlpha, uf, 1) end
+    plate.blizzardAuras = nil
+    plate.blizzardHidden = nil
+    plate.blizzardUF = nil
 end
 
 -- The fill computes only with GetTime() (our own plain number) and hands SetValue a value the
@@ -912,10 +963,10 @@ local function Added(unit)
         and Query(C_NamePlate.GetNamePlateForUnit, unit) or nil
     if not base then return nil end
 
-    local plate = rawget(base, "__monetPlate")
+    local plate = Marked(base, "plate")
     if not plate then
         plate = Build(base)
-        base.__monetPlate = plate
+        Mark(base, "plate", plate)
         plate:SetScript("OnEvent", OnPlateEvent)
     end
 
@@ -947,8 +998,9 @@ local function Removed(unit)
     plate.castEndClock = nil
     plate:Hide()
     plate.cast:Hide()
-    -- The Blizzard unit frame is left hidden: whoever gets this pooled base next (us, on the
-    -- next NAME_PLATE_UNIT_ADDED) settles it again.
+    -- 暴雪下一步就把这个 UnitFrame 收回公共池，借来的光环列表必须先还回去（见 HandBackAuras），
+    -- 否则它会被池子带到另一个姓名板上去，把两族的锚点连起来。
+    if plate.blizzardHidden then HandBackAuras(plate) end
     return true
 end
 

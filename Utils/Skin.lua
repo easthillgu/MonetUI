@@ -5,6 +5,14 @@
 
 local ADDON_NAME, ns = ...
 
+
+-- 旁表标记：**绝不往暴雪的框体 / 贴图 / 字体串上写字段**。
+-- 本客户端把“插件写过字段的对象”判成脏的（实机：issecurevariable 在 NamePlate1UnitFrame 上唯一为 false 的键就是我们的
+-- 标记，随后暴雪自己的 OnUpdate 就报 secret value / anchor family），所以标记一律走
+-- Core.lua 的 ns:Mark / ns:Marked（以对象为弱键的旁表）。
+local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
+local Marked = function(o, k) return ns:Marked(o, k) end
+
 local Color    = ns.Color
 local Media    = ns.Media
 local Widget   = ns.Widget
@@ -99,15 +107,15 @@ end
 --- Fade any region (texture) to invisible without moving it, remembering the old alpha.  Hidden once per region.
 function Skin:Fade(region)
     if not region or type(region.SetAlpha) ~= "function" then return region end
-    if region.__monetHidden then return region end
+    if Marked(region, "hidden") then return region end
     -- Our own art (Skin:SwapArt) is never faded: a later pass restyling the same control must not hide the glyph we just put on it.
-    if region.__monetArt then return region end
-    region.__monetHidden = true
+    if Marked(region, "art") then return region end
+    Mark(region, "hidden", true)
 
     local old = region.GetAlpha and region:GetAlpha() or 1
     self:Record(function()
         if region.SetAlpha then region:SetAlpha(old) end
-        region.__monetHidden = nil
+        Mark(region, "hidden", nil)
     end)
 
     region:SetAlpha(0)
@@ -173,13 +181,13 @@ end
 function Skin:Font(fs, size, key, flags, colorKey)
     if not fs or type(fs.SetFont) ~= "function" then return fs end
 
-    if not fs.__monetFont then
-        fs.__monetFont = true
+    if not Marked(fs, "font") then
+        Mark(fs, "font", true)
         local path, oldSize, oldFlags = fs:GetFont()
         if path then
             self:Record(function()
                 if fs.SetFont then fs:SetFont(path, oldSize, oldFlags) end
-                fs.__monetFont = nil
+                Mark(fs, "font", nil)
             end)
         end
     end
@@ -203,15 +211,15 @@ function Skin:ColorText(fs, colorKey)
         r, g, b, a = Color:Get(colorKey or "neutral")
     end
 
-    if not fs.__monetColor then
-        fs.__monetColor = true
+    if not Marked(fs, "color") then
+        Mark(fs, "color", true)
         local oldR, oldG, oldB, oldA = fs:GetTextColor()
         local oldSR, oldSG, oldSB, oldSA
         if fs.GetShadowColor then oldSR, oldSG, oldSB, oldSA = fs:GetShadowColor() end
         self:Record(function()
             if fs.SetTextColor then fs:SetTextColor(oldR, oldG, oldB, oldA) end
             if oldSR and fs.SetShadowColor then fs:SetShadowColor(oldSR, oldSG, oldSB, oldSA) end
-            fs.__monetColor = nil
+            Mark(fs, "color", nil)
         end)
     end
 
@@ -234,7 +242,7 @@ function Skin:Panel(frame, opts)
     if not frame then return nil end
     opts = opts or {}
 
-    local bg = frame.__monetSkinBg
+    local bg = Marked(frame, "skinBg")
     if not bg then
         bg = NewBackdropFrame(frame, opts.levelOffset or -1)
         local inset = opts.inset or 0
@@ -246,7 +254,7 @@ function Skin:Panel(frame, opts)
             borderAlpha = opts.borderAlpha,
             borderKey   = opts.borderKey,
         })
-        frame.__monetSkinBg = bg
+        Mark(frame, "skinBg", bg)
         self:Track(bg)
     end
 
@@ -259,7 +267,7 @@ function Skin:ControlBg(frame, opts)
     if not frame then return nil end
     opts = opts or {}
 
-    local bg = frame.__monetControlBg
+    local bg = Marked(frame, "controlBg")
     if not bg then
         bg = NewBackdropFrame(frame, -1)
         bg:SetAllPoints(frame)
@@ -269,7 +277,7 @@ function Skin:ControlBg(frame, opts)
             borderAlpha = opts.borderAlpha,
             borderKey   = opts.borderKey,
         })
-        frame.__monetControlBg = bg
+        Mark(frame, "controlBg", bg)
         self:Track(bg)
     end
 
@@ -280,12 +288,12 @@ end
 --- Hover feedback on a Blizzard control: tint its Monet border to the highlight colour.  HookScript (never SetScript) so existing scripts survive, installed once.
 function Skin:HoverHighlight(control, opts)
     if not control or type(control.HookScript) ~= "function" then return end
-    if control.__monetHover then return end
-    control.__monetHover = true
+    if Marked(control, "hover") then return end
+    Mark(control, "hover", true)
     opts = opts or {}
 
     local function border(bg)
-        return bg or control.__monetSkinBg or control.__monetControlBg
+        return bg or Marked(control, "skinBg") or Marked(control, "controlBg")
     end
 
     control:HookScript("OnEnter", function()
@@ -309,14 +317,14 @@ end
 -- press so releasing while still hovered does not drop the hover tint.
 function Skin:ControlState(control, opts)
     if not control or type(control.HookScript) ~= "function" then return end
-    if control.__monetState then return end
-    control.__monetState = true
+    if Marked(control, "state") then return end
+    Mark(control, "state", true)
     opts = opts or {}
 
     local pressed = false
 
     local function apply()
-        local bg = control.__monetControlBg or control.__monetSkinBg
+        local bg = Marked(control, "controlBg") or Marked(control, "skinBg")
         if not bg or type(bg.SetBackdropBorderColor) ~= "function" then return end
 
         local enabled = true
@@ -372,7 +380,7 @@ function Skin:ControlState(control, opts)
     apply()
 end
 
--- The control helpers below are *re-appliable*: fades are idempotent through `__monetHidden` (cleared by Rollback) and created objects (backplate, tab underline, thumb fill) are cached on the frame and only toggled, so no helper short-circuits the whole visual pass.
+-- The control helpers below are *re-appliable*: fades are idempotent through the side-table mark "hidden" (cleared by Rollback) and created objects (backplate, tab underline, thumb fill) are cached on the frame and only toggled, so no helper short-circuits the whole visual pass.
 
 --- Restyle a Blizzard button (flat Monet plate + themed border + font).
 function Skin:Button(button, opts)
@@ -404,7 +412,7 @@ end
 -- tabs without any per-tab event we could subscribe to, so PanelTemplates_SelectTab/DeselectTab are
 -- hooked once by HookTabState below; this function is also called on every re-apply.
 function Skin:UpdateTabState(tab)
-    local underline = tab and tab.__monetTabBar
+    local underline = tab and Marked(tab, "tabBar")
     if not underline then return end
 
     local selected = false
@@ -428,7 +436,7 @@ local function HookTabState(Skin)
     if tabStateHooked then return end
     tabStateHooked = true
     local function onChanged(tab)
-        if type(tab) == "table" and tab.__monetTab then Skin:UpdateTabState(tab) end
+        if type(tab) == "table" and Marked(tab, "tab") then Skin:UpdateTabState(tab) end
     end
     for _, fn in ipairs({ "PanelTemplates_SelectTab", "PanelTemplates_DeselectTab" }) do
         if type(_G[fn]) == "function" then pcall(hooksecurefunc, fn, onChanged) end
@@ -440,8 +448,8 @@ function Skin:Tab(tab, opts)
     if not tab then return tab end
     self:Button(tab, opts)
 
-    if not tab.__monetTab then
-        tab.__monetTab = true
+    if not Marked(tab, "tab") then
+        Mark(tab, "tab", true)
         local underline = tab:CreateTexture(nil, "OVERLAY")
         -- Height and offsets go through SnapUnit.  At uiScale 0.71 a raw 2-unit underline is 1.42
         -- physical px and the raw 1-unit offset sits on a half pixel, so it goes soft while every flat
@@ -449,7 +457,7 @@ function Skin:Tab(tab, opts)
         underline:SetPoint("BOTTOMLEFT", tab, "BOTTOMLEFT", Media:SnapUnit(4), Media:SnapUnit(1))
         underline:SetPoint("BOTTOMRIGHT", tab, "BOTTOMRIGHT", -Media:SnapUnit(4), Media:SnapUnit(1))
         underline:SetHeight(Media:SnapUnit(2))
-        tab.__monetTabBar = underline
+        Mark(tab, "tabBar", underline)
         self:Track(underline)
         HookTabState(self)
         self:OnTheme(function()
@@ -479,13 +487,13 @@ function Skin:ScrollBar(scrollbar)
     local thumb = scrollbar.Thumb
     if thumb then
         self:Strip(thumb, { regions = true })
-        if not thumb.__monetThumbFill then
+        if not Marked(thumb, "thumbFill") then
             -- The handle gets the same barfill material as the action-bar buttons: a gradient in the theme hue, brightening under the cursor so the grip feels alive instead of a flat swatch.
             local fill = thumb:CreateTexture(nil, "ARTWORK")
             fill:SetAllPoints(thumb)
             fill:SetTexture(Media.texture["monet_barfill"])
             Widget:TopLight(fill)
-            thumb.__monetThumbFill = fill
+            Mark(thumb, "thumbFill", fill)
             self:Track(fill)
 
             local function tint(k)
@@ -535,13 +543,13 @@ function Skin:Slider(slider)
 
     if thumb then
         if type(thumb.CreateTexture) == "function" then
-            if not thumb.__monetThumbFill then
+            if not Marked(thumb, "thumbFill") then
                 self:ControlBg(thumb, { thickness = 1, bgAlpha = 0.9 })
                 local fill = thumb:CreateTexture(nil, "ARTWORK")
                 fill:SetAllPoints(thumb)
                 fill:SetTexture(Media.texture["monet_barfill"])
                 Widget:TopLight(fill)
-                thumb.__monetThumbFill = fill
+                Mark(thumb, "thumbFill", fill)
                 self:Track(fill)
                 local function tint()
                     local r, g, b = Color:GetBorder()
@@ -552,7 +560,7 @@ function Skin:Slider(slider)
             end
         elseif thumb.SetTexture then
             -- Go through SwapArt, not a raw SetTexture: SwapArt records the old art and sets
-            -- __monetArt, so Rollback can put Blizzard's thumb back.  A bare SetTexture left our
+            -- the side-table mark "art", so Rollback can put Blizzard's thumb back.  A bare SetTexture left our
             -- barfill welded on -- a half-rolled-back skin, which is the one thing the Record/Rollback
             -- design promises will not happen.
             self:SwapArt(thumb, "monet_barfill")
@@ -562,8 +570,8 @@ function Skin:Slider(slider)
                 pcall(thumb.SetVertexColor, thumb, r, g, b, 0.95)
             end
             tint()
-            if not slider.__monetSliderTint then
-                slider.__monetSliderTint = true
+            if not Marked(slider, "sliderTint") then
+                Mark(slider, "sliderTint", true)
                 self:OnTheme(tint)
             end
         end
@@ -598,8 +606,8 @@ function Skin:CheckButton(check, opts)
         if checked.SetVertexColor then
             local r, g, b = Color:GetBorder()
             pcall(checked.SetVertexColor, checked, r, g, b)
-            if not check.__monetCheckTint then
-                check.__monetCheckTint = true
+            if not Marked(check, "checkTint") then
+                Mark(check, "checkTint", true)
                 self:OnTheme(function()
                     local nr, ng, nb = Color:GetBorder()
                     if checked.SetVertexColor then checked:SetVertexColor(nr, ng, nb) end
@@ -637,8 +645,8 @@ function Skin:RadioButton(radio, opts)
         if checked.SetVertexColor then
             local r, g, b = Color:GetBorder()
             pcall(checked.SetVertexColor, checked, r, g, b)
-            if not radio.__monetRadioTint then
-                radio.__monetRadioTint = true
+            if not Marked(radio, "radioTint") then
+                Mark(radio, "radioTint", true)
                 self:OnTheme(function()
                     local nr, ng, nb = Color:GetBorder()
                     if checked.SetVertexColor then checked:SetVertexColor(nr, ng, nb) end
@@ -674,10 +682,10 @@ function Skin:EditBox(editBox)
 end
 
 --- Swap a texture's art for one of ours and remember how to put the original back (atlas name or path, texcoords and alpha, all recorded for Skin:Rollback).
--- The texture is marked __monetArt so Skin:Fade leaves it alone.  Idempotent: a texture already carrying our art is returned as is.  @return the same texture, or nil when it cannot be swapped
+-- The texture carries the side-table mark "art" so Skin:Fade leaves it alone.  Idempotent: a texture already carrying our art is returned as is.  @return the same texture, or nil when it cannot be swapped
 function Skin:SwapArt(tex, key)
     if not tex or type(tex.SetTexture) ~= "function" then return nil end
-    if tex.__monetArt then return tex end
+    if Marked(tex, "art") then return tex end
 
     local atlas = tex.GetAtlas and tex:GetAtlas() or nil
     local path  = tex.GetTexture and tex:GetTexture() or nil
@@ -690,10 +698,10 @@ function Skin:SwapArt(tex, key)
         elseif tex.SetTexture then pcall(tex.SetTexture, tex, path or 0) end
         if tex.SetTexCoord then pcall(tex.SetTexCoord, tex, u1, v1, u2, v2) end
         if tex.SetAlpha then pcall(tex.SetAlpha, tex, alpha) end
-        tex.__monetArt = nil
+        Mark(tex, "art", nil)
     end)
 
-    tex.__monetArt = true
+    Mark(tex, "art", true)
     pcall(tex.SetTexture, tex, Media:Texture(key))
     if tex.SetTexCoord then pcall(tex.SetTexCoord, tex, 0, 1, 0, 1) end
     if tex.SetAlpha then pcall(tex.SetAlpha, tex, 1) end
@@ -718,8 +726,8 @@ function Skin:CloseButton(button)
         if pushed and pushed.SetVertexColor then
             pcall(pushed.SetVertexColor, pushed, r, g, b)
         end
-        if not button.__monetCloseTint then
-            button.__monetCloseTint = true
+        if not Marked(button, "closeTint") then
+            Mark(button, "closeTint", true)
             self:OnTheme(function()
                 local nr, ng, nb = Color:GetBorder()
                 if normal.SetVertexColor then normal:SetVertexColor(nr, ng, nb) end
@@ -750,8 +758,8 @@ function Skin:CropIcon(icon, x0, x1, y0, y1)
         end
     end
 
-    if not icon.__monetCropHook and type(icon.SetTexture) == "function" and type(hooksecurefunc) == "function" then
-        icon.__monetCropHook = true
+    if not Marked(icon, "cropHook") and type(icon.SetTexture) == "function" and type(hooksecurefunc) == "function" then
+        Mark(icon, "cropHook", true)
         hooksecurefunc(icon, "SetTexture", function(self) apply(self) end)
     end
 
@@ -766,8 +774,8 @@ end
 
 --- Crop an icon to a square and give it a Monet border.
 function Skin:Icon(icon, border)
-    if not icon or icon.__monetIcon then return icon end
-    icon.__monetIcon = true
+    if not icon or Marked(icon, "icon") then return icon end
+    Mark(icon, "icon", true)
 
     self:CropIcon(icon, 0.08, 0.92, 0.08, 0.92)
     if border and icon.GetObjectType and icon:GetObjectType() == "Texture" then
