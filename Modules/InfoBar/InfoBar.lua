@@ -363,7 +363,7 @@ local function BuildBlockFrame(block)
         end)
     end
 
-    local text = Widget:Font(frame, 12, "pingfang", "highlight", "CENTER", nil, "MONOCHROME, OUTLINE")
+    local text = Widget:Font(frame, 12, "pingfang", "highlight", "CENTER", nil, Media.outlineFlags)
     text:SetPoint("CENTER", frame, "CENTER", 0, 0)
     frame.text = text
 
