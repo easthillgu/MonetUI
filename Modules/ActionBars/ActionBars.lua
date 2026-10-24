@@ -1620,9 +1620,14 @@ local function AdoptBar(def)
         SyncPetGlow(def, entry)
     end
 
-    -- 宠物 / 姿态条的外壳也是编辑模式的托管框体：我们给它写过 SetScale / EnableMouse，
-    -- 托管容器之后每 10 秒还想重排它一次（SetShownBase / SetPointBase 被拒）。索性退托管。
-    LeaveManagedFrameSystem(bar)
+    -- **不要给外壳写 ignoreFramePositionManager**（以前这里调 LeaveManagedFrameSystem）。
+    -- 那个字段一写，这个受保护的条就变成"被 MonetUI 写过的框"：它的 OnEvent 脚本随之以
+    -- 我们的名义执行，于是它内部调用的暴雪安全函数全被拒 —— 实机链条：
+    --   PetActionBar:OnEvent → Update → Hide → UpdateVisibility
+    --     → SetShownBase (BLOCKED)
+    --     → EditModeManagerFrame:UpdateActionBarLayout → UpdateBottomActionBarPositions
+    --       → MainActionBar:ClearAllPointsBase / SetPointBase (BLOCKED，明明 MainActionBar 自己是干净的)
+    -- 也就是"一进战斗就弹：插件导致界面行为失效"。去掉之后外壳保持干净，链路恢复安全。
 
     return entry
 end

@@ -4,6 +4,11 @@
 
 local ADDON_NAME, ns = ...
 
+
+-- 旁表标记（见 Core.lua 的 ns:Mark）：Widget 也会被套到**暴雪的**按钮上
+-- （动作条 / 宠物栏的 ButtonMaterial），写字段会把它们标脏，之后暴雪自己的安全调用就被拒。
+local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
+local Marked = function(o, k) return ns:Marked(o, k) end
 local Color = ns.Color
 local Media = ns.Media
 local EventBus = ns.EventBus
@@ -129,7 +134,7 @@ function Widget:BarWeave(bar, opts)
     if not bar then return nil end
     opts = opts or {}
 
-    local weave = bar.__monetWeave
+    local weave = Marked(bar, "weave")
     if not weave then
         -- Same layer as the bar's other background textures (BACKGROUND, sublevel 0) and
         -- created after them, so it draws over them -- the StatusBar's own fill texture sits
@@ -142,7 +147,7 @@ function Widget:BarWeave(bar, opts)
         -- the last column instead of repeating the hatch.
         weave:SetTexture(Media.texture["monet_stripe_weave"], "REPEAT", "REPEAT")
         weave:SetAllPoints(bar)
-        bar.__monetWeave = weave
+        Mark(bar, "weave", weave)
     end
 
     -- One texel per physical pixel on both axes.  Media:Mult() is UI units per physical pixel,
@@ -298,10 +303,10 @@ end
 --- screen at once.
 function Widget:ApplyBackdrop(frame, opts)
     if not frame or not frame.SetBackdrop then return end
-    local bd = frame.__monetBackdrop
+    local bd = Marked(frame, "backdrop")
     if not bd then
         bd = {}
-        frame.__monetBackdrop = bd
+        Mark(frame, "backdrop", bd)
     end
     bd.bgFile = Media.texture.blank
     if opts.round then
@@ -527,7 +532,7 @@ end
 -- Weave uses ADD blend (same as Andromeda's BackdropStripes): on a black 0.25 well it adds a faint cloth brightening instead of covering; the vertex alpha (default 0.25) is the strength.
 --   opts.weaveAlpha / opts.alpha  strength of weave / sheen (defaults 0.25 / 0 -- the通透 style: no white wash, faint cloth only);  opts.r,g,b tint;  opts.weaveLayer,Sublevel / layer,Sublevel draw layers (BACKGROUND/2, OVERLAY/1)
 function Widget:ButtonMaterial(frame, opts)
-    if frame.__monetMaterial then return frame.__monetMaterial end
+    if Marked(frame, "material") then return Marked(frame, "material") end
     opts = opts or {}
 
     local weave = frame:CreateTexture(nil, opts.weaveLayer or "BACKGROUND", nil, opts.weaveSublevel or 2)
@@ -563,8 +568,8 @@ function Widget:ButtonMaterial(frame, opts)
     Widget:TopLight(sheen)
     sheen:SetVertexColor(opts.r or 1, opts.g or 1, opts.b or 1, opts.alpha or 0)
 
-    frame.__monetMaterial = { weave = weave, sheen = sheen }
-    return frame.__monetMaterial
+    Mark(frame, "material", { weave = weave, sheen = sheen })
+    return Marked(frame, "material")
 end
 
 --- Soft drop shadow around a frame: four gradient strips reaching outward from the frame edge (opaque where they touch the frame, fading to nothing at the far side), tinted from the Monet ambient tone so it reads as a cool painted grey-blue.
@@ -572,7 +577,7 @@ end
 --   opts.size   reach, in physical pixels (default 6);  opts.alpha  opacity at the frame edge (default 0.55)
 function Widget:Shadow(frame, opts)
     if not frame then return nil end
-    if frame.__monetShadow then return frame.__monetShadow end
+    if Marked(frame, "shadow") then return Marked(frame, "shadow") end
     opts = opts or {}
 
     -- The shadow sits one level below the frame; a level-0 frame would tie with its own child, so lift the frame first.
@@ -589,7 +594,7 @@ function Widget:Shadow(frame, opts)
     sh:SetFrameLevel(frame:GetFrameLevel() - 1)
     sh:SetAllPoints(frame)
     pcall(sh.EnableMouse, sh, false)
-    frame.__monetShadow = sh
+    Mark(frame, "shadow", sh)
 
     local function MakeColor(rr, gg, bb, aa)
         if type(CreateColor) == "function" then return CreateColor(rr, gg, bb, aa) end
@@ -647,7 +652,7 @@ function Widget:Shadow(frame, opts)
 
     if not okAll then
         sh:Hide()
-        frame.__monetShadow = nil
+        Mark(frame, "shadow", nil)
         return nil
     end
     return sh
@@ -836,7 +841,7 @@ end
 --   opts.gap  distance below the anchor, physical px (default 3);  opts.height  stroke height, physical px (default 9);  opts.alpha  (default 0.9)
 function Widget:Rule(frame, anchor, opts)
     if not frame or not anchor then return nil end
-    if frame.__monetRule then return frame.__monetRule end
+    if Marked(frame, "rule") then return Marked(frame, "rule") end
     opts = opts or {}
     local gap = (opts.gap or 3) * Media:Mult()
     local tex = frame:CreateTexture(nil, "ARTWORK")
@@ -845,7 +850,7 @@ function Widget:Rule(frame, anchor, opts)
     tex:SetPoint("TOPRIGHT", anchor, "BOTTOMRIGHT", 0, -gap)
     tex:SetHeight((opts.height or 9) * Media:Mult())
     tex:SetVertexColor(1, 1, 1, opts.alpha or 0.9)
-    frame.__monetRule = tex
+    Mark(frame, "rule", tex)
     return tex
 end
 
@@ -856,7 +861,7 @@ end
 --   opts.alpha (default 0.55);  opts.anchor  anchor point pair, default TOPLEFT/TOPRIGHT
 function Widget:Hairline(frame, anchor, opts)
     if not frame or not anchor then return nil end
-    if frame.__monetHairline then return frame.__monetHairline end
+    if Marked(frame, "hairline") then return Marked(frame, "hairline") end
     opts = opts or {}
     local tex = frame:CreateTexture(nil, "ARTWORK")
     tex:SetTexture(Media.texture["monet_hairline"])
@@ -875,7 +880,7 @@ function Widget:Hairline(frame, anchor, opts)
     -- Blizzard art to roll back; on Skin's undo list it would only make the Skins toggle hide our own
     -- separators.  This used to call self:Track() -- but Track lives on Skin, not Widget, so every
     -- call raised "attempt to call method 'Track' (a nil value)".
-    frame.__monetHairline = tex
+    Mark(frame, "hairline", tex)
     return tex
 end
 
@@ -884,7 +889,7 @@ end
 --   opts.size  edge length, physical px (default 16);  opts.alpha  (default 0.9);  opts.omit  corner names left bare, e.g. { "TOPRIGHT" } when a close button owns it
 function Widget:Corners(frame, opts)
     if not frame then return nil end
-    if frame.__monetCorners then return frame.__monetCorners end
+    if Marked(frame, "corners") then return Marked(frame, "corners") end
     opts = opts or {}
 
     local omit = {}
@@ -894,7 +899,7 @@ function Widget:Corners(frame, opts)
     orn:SetFrameLevel(frame:GetFrameLevel() + 10)
     orn:SetAllPoints(frame)
     pcall(orn.EnableMouse, orn, false)
-    frame.__monetOrnament = orn
+    Mark(frame, "ornament", orn)
 
     local size = (opts.size or 16) * Media:Mult()
     local r, g, b = Color:GetEdge()
@@ -926,7 +931,7 @@ function Widget:Corners(frame, opts)
             list[#list + 1] = tex
         end
     end
-    frame.__monetCorners = list
+    Mark(frame, "corners", list)
     return list
 end
 
