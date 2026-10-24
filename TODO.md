@@ -1,0 +1,152 @@
+# 待办
+
+## ✅ 2026-10-24 污染链收尾批次（已实机验证，全是本地 commit，未推远端）
+
+> 来龙去脉写在 `docs/HANDOFF.md` 第 3 节；硬规则沉淀进 `AGENTS.md`。
+
+1. ✅ **编辑模式 `oldR` 报错**（`e099cc4`）—— 根因是小地图模块覆写 `MinimapCluster.IsInDefaultPosition`
+   骗编辑模式，整条 `EnterEditMode` 栈被记成 MonetUI。现在集群一个字节不动，只把 `Minimap` 帧搬进
+   `MonetUIMinimapHolder`（Ellesmere 在本客户端的做法）。
+2. ✅ **姓名板成片机密值报错**（`c09867e`）—— 去掉 `hooksecurefunc(NamePlateDriverFrame, "UpdateNamePlateOptions")`，
+   改轮询 `C_NamePlate.GetNamePlateSize()`；驱动一脏，它建的每块牌子都脏。
+3. ✅ **页签全局钩子**（`af05939`）、**暴雪小队/团队框完全不再碰**（`99009c3`/`0ba783a`/`34a6efb`）、
+   **最后一批脚本钩子**（`f91ade1`）。
+4. ✅ **`Widget:PollWatch` 一个框只能挂一个回调**（`6db19dc`）—— 四个模块都挤在 `UIParent` 上，
+   后注册的静默顶掉先注册的；已改成多回调。
+5. ✅ **暴雪冷却管理器**（`Essential/Utility/BuffIcon/BuffBar` CooldownViewer）收掉（`6db19dc`）。
+6. ✅ **暴雪任务追踪框**压制：LoD 晚到 + 加载时换对象 → 多时机补藏（`ef0158c`）；
+   `Hide()` 会和它自己的 `Show()` 打架（一闪一闪）→ 改 `alpha 0 + 关鼠标`（`0ff4a4a`）。
+7. ✅ **buff/debuff 时间显示像乱码**（`36b7280`）—— `GetCooldownTimes()` 是**毫秒**、`GetTime()` 是**秒**，
+   算出 568 天；已修 + 加"剩余 > 30 天当读不到"保险。
+8. ✅ **debuff 整行隐形**（`36b7280`）—— debuff 行锚在空的 proc 行（0×0）上，`GetLeft()` 返 nil；
+   改成按实际行高自己算落点。
+9. ✅ 暴雪 `BuffFrame/DebuffFrame` 的收起方式改 `alpha 0 + 关鼠标`（原写法写脚本槽 + 注销事件 = 污染）。
+
+## ✅ 2026-10-18 修复批次（离线验证完成，待实机复核）
+
+1. ✅ `Utils/EventBus.lua` — `Unregister`/`UnregisterAll` 递减 `unitSets` 引用计数；归零收缩 `RegisterUnitEvent` 过滤集，全空则整体注销并清 `registered`（新增 `ResyncUnitFilter`）。
+2. ✅ `Modules/Bags/Bags.lua` — 删除从未接线的 `pool`/`ReleaseButtons`（按钮本就按 `win.buttons` 每窗缓存复用，无泄漏）与未用常量 `BAG_BACKPACK`/`ACCOUNT_TABS`（切片 2 账号银行页 bagID 15–23 用时再加）；`AcquireButton` 展平。
+3. ✅ `Modules/Nameplates/Nameplates.lua` — `UpdateHealth` 5 处 unit 调用全部过 `Query`；查询失败跳过 `SetBar`（保留上次状态，防 nil 把范围打到 0–100）；断连查询失败按"已连接"处理（`Bool(nil,true)` 原会错算为断连）。
+4. ✅ `Utils/Skin.lua` — CloseButton 改冒号调用（hated-wow 证据：暴雪 2871 个实装 Lua 文件点号调用 0 处）；删只写不读的 `__monetThumbHover`；`Skin.added` 逐点核对**全部有缓存守卫、开关不重复登记，判定无缺陷未改**。
+5. ✅ `Core.lua`/`Config/SimpleConfig.lua` — 删死配置 `theme.tintBlizzard`；面板 `MODULE_ORDER`/`MODULE_LABEL` 补 `Bags`（分类背包）；`UnitSetting` 改 `~= nil`（`false` 可存）；OnHide 挂钩加 `__monetHideHook` 幂等守卫。
+
+## 工具
+
+- ✅ hated-wow-mcp 已接入 `opencode.json`（20 工具）：forever API 索引随包可用；Blizzard UI 源码已同步（4481 文件/349 包）。分工：**wuxian 管实机，hated-wow 管离线查证**。
+- 游戏数据（FileDataID/图集）未建；需要时先开浏览器访问 wago.tools 过反爬，再 `npx -y hated-wow-mcp sync game-data`。
+
+## 实机验证清单（游戏上线后）
+
+- 材质：MULT 边框恒 1 物理像素；柔影方向（渐变反了会像外发光）；呼吸节奏；角饰/笔触位置。
+- 背包：`/mui bags` 平铺、银行页、tooltip 品质光晕、品质边框（灰/粗糙归暗、任务琥珀）。
+- 任务追踪：256 宽换行、3 行硬切、折叠按钮、暴雪追踪器压制；`GetQuestObjectives` 字段（进度不显示回报字段名）。
+- 本批修复：反复开关皮肤模块确认 `added` 无重复；受限状态姓名板血条保留上次值；配置面板"分类背包"勾选框生效；多开配置面板关闭无异常。
+- 小控件：滚动条拇指材质/悬停提亮；滑条（首个实例出现时）。
+- **UI 缩放（2026-10-20）**：`/mui scale` 报"1 UI 单位 = N 物理像素"，N 必须是整数
+  （1080p/1440p 期望 1、4K 期望 2）；若 1440p 的首选值 0.5333 被客户端夹成 0.65，
+  面板会退回 1.066667（2 像素/单位），要确认实际生效的是哪一档。拉一次游戏的缩放滑块，
+  应当自动切成"跟随游戏设置"且不再抢。
+- **小地图形状（2026-10-21 只留遮罩一套）**：可见带与面板四边对齐（每边 4）；上下被裁的
+  33px 带子里不出现任何东西；把设置里的 `rotateMinimap` 切一次，形状**保持矩形**
+  （`/mui minimap diagnose` 的"客户端重设遮罩的钩子"一行应为已安装）；装了 HBD 系插件时，
+  带子里的 pin 不再浮在面板外（diagnose 的"第三方 pin"一行应报 HBD 已接入），地图内靠近
+  上下边缘的 pin 仍正常显示；若 diagnose 报 `HybridMinimap 已加载`，地图应仍是矩形
+  （四角不该被啃成圆）；有任务区域的图上，蓝色区域里不该再出现圆形的"华夫饼"环（blob ring）。
+- **单位框（2026-10-20）**：生命条 4px 后的观感；条的**缺失段与能量条空段**能看出织纹
+  （1–2 物理像素的织纹本来就只是"细缝线"，别当渲染错误）；圆角面板（小地图 / 任务追踪）
+  的边框宽度与其它平边框一致（钉住缩放后应为 0 差）。
+
+## 已决
+
+- ✅ 2026-10-20 **方形四角死区**（`docs/MINIMAP-GAP-ANALYSIS-2026-10-19.md` P0-2）—— 覆盖层
+  `MonetUIMinimapOverlay` 铺满**可见区**（不是整个 256×256 画布：上下那两条已被遮罩裁掉，
+  落在那儿的位置地图上并不显示）：滚轮缩放、悬停（区域名）都够得到四个角。
+  **左键也由它接管**：暴雪的 `MinimapMixin:OnClick` 只在点击落在**圆内**时才 `PingLocation`
+  （那个判断是给圆形小地图写的），方形皮肤下四角会被判成"点在圆外"而什么也不做；覆盖层照抄
+  它那套坐标换算，自己调 `PingLocation`，四角也能打标记。为了不让暴雪那条路再打一次标记，
+  `Minimap` 的 `OnMouseUp` 被换成只放行中键的版本（还原时放回原脚本）。
+- ✅ 2026-10-20 **`GetMinimapShape` 全局写**（`Minimap.lua` 2 条 `global-write` 警告，原"未决"项）
+  —— **决定：保留，但改成"存在才覆写"**。
+  证据：客户端 API 手册（2026.10.17.1）与暴雪 4481 个实装源文件里都查不到 `GetMinimapShape`
+  —— 本客户端（Interface 16001）**根本没有**这个全局；平时没人读（装了 HBD 系插件的 pin
+  代码时才有人读，见下）。
+  现在只在 `type(_G.GetMinimapShape) == "function"` 时才覆写，关闭模块时把原值放回去。
+  那两条 `global-write` 是**静态**告警（代码里确实有写全局的语句），不是运行时行为，在 16001 上是惰性的。
+  保留的理由：万一第三方插件自己定义了这个全局（零售小地图插件常这么做给别的插件用），
+  方形的答案能让那些按钮落在矩形里而不是圆外。
+  代价与注意：我们报的是 "SQUARE"，而可见地图是 256×190 —— 第三方按钮若落在
+  遮罩被裁掉的带子里就看不见（顺带一提：HBD 的 pin 代码**确实读**这个全局，
+  `minimap_shapes["SQUARE"]` 让它按矩形边界算位置）。
+- ✅ 2026-10-21 **小地图形状只留一套（遮罩裁剪），`resize` 档已删除** —— 不再有
+  `MonetUIDB.minimap.shape`：画布固定 256×256 + `minimap_rect_mask` 裁掉上下各 33，
+  可见 256×190。`Core.SCHEMA` 升到 5，老库里的 `shape` 键被清掉。
+  理由：外部证据表明**非正方形 `SetSize` 是把正方渲染拉伸**（WoWInterface 老帖里 184×88
+  的小地图被拉长、草药点对不上；Reddit 同结论；ElvUI-WindTools 的 `RectangleMinimap`
+  从不改画布、只换遮罩）。既然拉伸无法在本客户端排除，就不留一条"可能纵向压扁 26%"的
+  代码路径。代价是上下各 33px 的世界信息看不见：引擎 blip 吃遮罩、不用管；HBD 的 pin
+  由 `Pins.lua` 压掉（见下）；任务/考古的 blob ring 由 scalar 0 收掉（见下）。
+- ✅ 2026-10-21 **`UpdateMinimapConfig` 钩子** —— 客户端每次改小地图形态都会走它
+  （`Blizzard_Minimap/Camelot/Minimap.lua:31`：`rotateMinimap` 的 CVar 回调注册在
+  96-99 行），里面 `minimap:SetMaskTexture(圆形图集)`，并把 container / backdrop /
+  compass `SetSize` 回默认 —— 我们的矩形遮罩会被换掉，要等下次换区域才恢复。
+  现在 `hooksecurefunc(MinimapCluster, "UpdateMinimapConfig")` 把重套皮排到下一帧
+  （不在客户端自己的调用栈里改帧），`Restore()` 调它时用 `restoring` 旗跳过；
+  战斗中照旧走 `Queue("skin")`。`/mui minimap diagnose` 新增该钩子的安装状态。
+- ✅ 2026-10-21 **`mask` 档的第三方 pin 裁剪（`Modules/Minimap/Pins.lua`，新文件）** ——
+  HBD 的 pin 挂在 `Minimap` 上、不吃遮罩，按画布 256 算位置（半高 128、边界 0.9），
+  所以会落在离中心 95–115 的带子里、浮在面板外。
+  做法：`LibStub("HereBeDragons-Pins-2.0", true)`（没装就整段空转）；hook
+  `AddMinimapIcon{World,Map}` + 扫 `minimapPins`/`activeMinimapPins` 发现 pin；
+  判据用 `GetPoint(1)` 的 `offsetY`（HBD 锚成 CENTER←Minimap:CENTER）对
+  `VisibleHalfHeight()`=95；压 alpha 而不是 `Hide()`（HBD 每次先 Show 再 SetPoint，
+  Hide 会被推翻），并 hook `SetPoint`/`Show` 重算、hook `SetAlpha` 挡住别人淡回来。
+  原 alpha 只记第一次、放回原值；关模块时全部还原。
+  `/mui minimap diagnose` 报 HBD 是否接入、压掉几个 / 活动几个。
+  证据：WindTools `RectangleMinimap` 同款问题的补丁；HBD 源码 `drawMinimapPin`
+  （`minimapWidth/Height = GetWidth()/2`、`minimap_shapes["SQUARE"]`、`floatOnEdge` 归一化）。
+- ✅ 2026-10-21 **客户端 HybridMinimap 的矩形遮罩** —— `Blizzard_HybridMinimap` 是客户端
+  自带的 LoD（`C_Minimap.ShouldUseHybridMinimap()` 为真的地图里，小地图改用世界地图的
+  MapCanvas 平铺，见 `Blizzard_Minimap/Mainline/Minimap.lua:236` 的 PLAYER_ENTERING_WORLD
+  分支），它给画布套的是圆形 `CircleMask`（XML `parentKey="CircleMask"`，`OnLoad` 里
+  `MapCanvas:SetMaskTexture`）；皮肤开着时换成我们的矩形遮罩（`minimap_rect_mask`），
+  关模块换回 `hybrid.CircleMask`。
+  没有开关 —— 客户端机制，跟皮肤一起进退；帧层级不冲突（BACKGROUND/固定 100，面板之上、
+  小地图 LOW 与覆盖层之下），画布本身禁用了点击/滚轮，所以只动遮罩。
+  `ADDON_LOADED` 认包名即时接管，`Skin()` 每次补一遍，`diagnose` 报加载/接管状态。
+- ✅ 2026-10-21 **矩形下收掉 blob ring** —— `Minimap:SetArchBlobRingScalar(0)` /
+  `SetQuestBlobRingScalar(0)`；关模块时放回默认值 1。
+  理由：任务区域 / 考古点的 "blob ring" 按圆画，矩形地图上会在蓝色任务区域里露出一圈
+  圆形"华夫饼"纹（BasicMinimap 注释原话）。参考实现：Ellesmere
+  `EllesmereUIMinimap.lua:4519-4523` 是 `isCircle and 1 or 0`；Andromeda
+  `modules/map/minimap.lua:21-22` 直接 0。
+  只动 scalar、不动 alpha：环的尺寸已经是 0；手册里只有 `Set*`、没有 getter，
+  所以还原值是默认的 1（不是快照）。`SetTaskBlobRingScalar` 两家都没动，这里也不动。
+- ✅ 2026-10-20 **UI 缩放按分辨率固定** —— `Media.scalePresets`（1080p → 0.711111 /
+  1440p → 0.533333 / 4K → 0.711111），`Core.ApplyAutoScale` 在登录时写进 `uiScale` CVar，
+  配置面板可切"跟随游戏设置"。
+  理由：插件里的尺寸全是 UI 单位写的，1 单位不落在整数物理像素上，4 单位的条、12 单位的字
+  就骑在像素边上、看着发软；`uiScale = 768 × 每单位像素数 / 屏高`，值必须精确，取整就又骑线。
+  这个客户端的缩放滑块下限是 0.65（`Graphics.lua:925`），1440p 的首选值 0.5333 可能被夹掉，
+  所以每档都备了下一个候选（2 像素/单位），写完立刻读回验证。
+  附带好处：圆角边框与平边框的物理宽度差（原先最多半个纹素）在钉住的缩放下正好是 0。
+  玩家自己拖了滑块就交还控制权。
+
+## 未决
+
+- Bags 实机验证通过后退役旧 `BagFrame` 模块（面板同步移除其条目）。
+- `Skin:Divider` 零调用孤儿函数（调查中发现，不在批准清单，未动）。
+- **技能弹出托盘（SpellFlyout）鼠标点选必报 `ADDON_ACTION_FORBIDDEN CastSpellByID()`**（快捷键正常）。
+  原因：托盘挂到我们的按钮上后，暴雪会用脏上下文给托盘按钮写属性。要么接受"鼠标点不展开、只提示一次"，
+  要么自绘托盘（中等工作量）。**待决策。**
+- **暴雪小队/团队框现在完全由玩家自己在编辑模式里隐藏**（我们任何接触都会让成员框比较机密值抛 `oldR`）。
+  若玩家反馈"团队框重复"，先确认编辑模式里那两项的"可见性"。
+- 宠物条每次重载留 10 条 `PetActionButton*:SetShown` BLOCKED（只进日志、不弹窗；卸载外壳事件会让图标/冷却不更新，
+  所以**接受**）。同类噪音还有偶发的 `MainActionBar:SetPointBase/ClearAllPointsBase`。
+- **编辑模式布局曾被抓到被重置**（`Logs/EditMode.log`：账号数据 buffSize 2489 → 78，发生在 2026-10-24 21:19 前后）。
+  与代码里能找到的改动无直接因果；若玩家发现"界面布局突然全乱"，先看这条。
+- 本轮未动的模块需要一次实机过：Bags、InfoBar、Tooltip、Cursor、Toast、Durability、CombatText、Skins 各窗口。
+
+## 备注
+
+- 注释清理前基线备份：`%TEMP%\opencode\comment-cleanup-backup`（29 文件，可逐文件回滚）。
+- 仓库约定：游戏正式上线且初步测试通过前，不向远端推送。
