@@ -393,7 +393,7 @@ end
 ---   * 关它按钮的鼠标（EnableMouse）：那些按钮/容器是**受保护**框体，碰一下就被弄脏，
 ---     之后暴雪自己更新它们就变成 ADDON_ACTION_FORBIDDEN，每次点击动作条都弹
 ---     "MonetUI 已被禁用，因为该功能只对暴雪的 UI 开放"。
---- 现在：所有暴雪动作条（含 MainActionBar）都换到常隐框体，按钮交给暴雪自己按 statehidden 藏。
+--- 现在：普通动作条换到常隐框体；**MainActionBar 例外，必须留在暴雪的父链上**（见下）。
 local function Park(name)
     local frame = _G[name]
     if not frame or Marked(frame, "parked") then return false end
@@ -401,15 +401,50 @@ local function Park(name)
     Mark(frame, "alpha", frame:GetAlpha())
     Mark(frame, "parent", frame:GetParent())
 
-    -- **全部换父到常隐框体，包括 MainActionBar。**
-    -- 之前 MainActionBar 留在原地只 alpha 0（Ellesmere 的做法），但实测 12.1.5 上它仍然把
-    -- 自己矩形内的鼠标事件全部吃掉：bar2 整条（y 61..89）落在它 786..1348 × 45..90 里，
-    -- 拖放和点击都到不了任何上层框体（把 bar2 临时搬到 y=200 立刻正常）。换父之后它
-    -- vis=false，不再占那片屏幕区域，接住器与按钮都能正常收到事件。
+    if name == "MainActionBar" then
+        -- **1 号条不能换父。** 每次进/出战斗、宠物栏显隐、变形/载具切页，暴雪都会走
+        --   EditModeActionBarMixin:UpdateVisibility (ActionBar.lua:334)
+        --     → EditModeManagerFrame:UpdateActionBarLayout (EditModeManager.lua:574)
+        --       → UpdateBottomActionBarPositions (630)
+        -- 对"显示中且处于默认位置"的底部条做 ClearAllPoints + SetPoint（649/661/662）。
+        -- 换过父的框会把这些**安全调用**全部拒掉，实机堆栈逐帧对得上：
+        --   EditModeSystemTemplates.lua:154 ClearAllPoints → ClearAllPointsBase
+        --   EditModeSystemTemplates.lua:148 SetPoint       → SetPointBase
+        -- 表现就是"一进战斗就弹：插件导致界面行为失效"。所以 1 号条留在 UIParent 下面：
+        -- 位置随便它排（我们 alpha 0 看不见），只要**不吃鼠标**就行。
+        -- 鼠标必须自己关：EnableMouse(false) 只关父框，翻页箭头（frameLevel 100）照样
+        -- 可点，所以 KillPagerMouse 也要跟一遍。
+        pcall(frame.SetAlpha, frame, 0)
+        pcall(frame.EnableMouse, frame, false)
+        if frame.EnableMouseClicks then pcall(frame.EnableMouseClicks, frame, false) end
+        if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, false) end
+        KillPagerMouse(frame)
+
+        -- 变形 / 载具 / 翻页 / 骑乘时暴雪会重新 Show 它：Show 本身是安全的（父链没被我们
+        -- 改过），只要把 alpha 压回去。SetAlpha 不受保护、战斗中也能写，不会把框弄脏。
+        if type(hooksecurefunc) == "function" and not Marked(frame, "showHook") then
+            Mark(frame, "showHook", true)
+            pcall(hooksecurefunc, frame, "Show", function(self)
+                pcall(self.SetAlpha, self, 0)
+                KillPagerMouse(self)
+            end)
+        end
+        if frame.Selection and frame.Selection.SetAlpha then
+            pcall(frame.Selection.SetAlpha, frame.Selection, 0)
+        end
+
+        if type(frame.actionButtons) == "table" then
+            for _, button in pairs(frame.actionButtons) do QuietHideButton(button) end
+        end
+        return true
+    end
+
+    -- 其余条：换父到常隐框体（它们不在 UpdateBottomActionBarPositions 的"显示中"集合里，
+    -- 且被藏着时 IsShown() 为假，安全重排不会碰它们）。
     pcall(frame.SetParent, frame, HiddenParent())
     LeaveManagedFrameSystem(frame)
 
-    if name == "MainActionBar" or name == "MainMenuBar" then
+    if name == "MainMenuBar" then
         KillPagerMouse(frame)
     end
 
@@ -450,7 +485,12 @@ local function Restore(name)
         return true
     end
     pcall(frame.SetAlpha, frame, Marked(frame, "alpha") or 1)
-    frame.ignoreFramePositionManager = nil    -- 交还：让编辑模式的托管系统重新接管它
+    pcall(frame.EnableMouse, frame, true)
+    if frame.EnableMouseClicks then pcall(frame.EnableMouseClicks, frame, true) end
+    if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, true) end
+    if Marked(frame, "leftManager") then
+        frame.ignoreFramePositionManager = nil    -- 交还：让编辑模式的托管系统重新接管它
+    end
     if Marked(frame, "parent") and Marked(frame, "parent") ~= hiddenParent then
         pcall(frame.SetParent, frame, Marked(frame, "parent"))
     end
