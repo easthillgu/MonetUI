@@ -179,11 +179,12 @@ function Widget:Icon(parent, size, layer, sublevel)
 end
 
 --- A FontString using the addon fonts.
--- @param key font key in Media.font ("pixel", "cooldown"); @param colorKey "edge" | "neutral" | "highlight" | "health" | "danger" | {r,g,b}
-function Widget:Font(parent, size, key, colorKey, justify, layer)
+-- @param key font key in Media.font ("pixel", "cooldown", "pingfang"); @param colorKey "edge" | "neutral" | "highlight" | "health" | "danger" | {r,g,b}
+-- @param flags optional render flags (default Media.fontFlags = "MONOCHROME"); pass e.g. "MONOCHROME, OUTLINE" for a hard-edged outline.
+function Widget:Font(parent, size, key, colorKey, justify, layer, flags)
     local fs = parent:CreateFontString(nil, layer or "OVERLAY")
     local fontPath = Media:Font(key)
-    fs:SetFont(fontPath, Media:SnapSize(size), Media.fontFlags)
+    fs:SetFont(fontPath, Media:SnapSize(size), flags or Media.fontFlags)
     if fs.SetShadowOffset then fs:SetShadowOffset(0, 0) end
     fs:SetJustifyH(justify or "LEFT")
     Widget:ColorText(fs, colorKey)
@@ -519,7 +520,8 @@ end
 
 --- The Monet button/slot "material": a seamless weave tile laid UNDER the content (this is the Andromeda/NDui "tiled backdrop texture" step, drawn from scratch) plus an ADD-blended top-lit gradient sheen (monet_barfill) OVER the content.
 -- Both layers are near-white and tintable, so one theme colour drives the whole material; purely additive -- two texture regions, the frame itself untouched, which keeps it safe on Blizzard secure buttons.
---   opts.weaveAlpha / opts.alpha  strength of weave / sheen (defaults 0.75 / 0.2);  opts.r,g,b tint;  opts.weaveLayer,Sublevel / layer,Sublevel draw layers (BACKGROUND/2, OVERLAY/1)
+-- Weave uses ADD blend (same as Andromeda's BackdropStripes): on a black 0.25 well it adds a faint cloth brightening instead of covering; the vertex alpha (default 0.25) is the strength.
+--   opts.weaveAlpha / opts.alpha  strength of weave / sheen (defaults 0.25 / 0 -- the通透 style: no white wash, faint cloth only);  opts.r,g,b tint;  opts.weaveLayer,Sublevel / layer,Sublevel draw layers (BACKGROUND/2, OVERLAY/1)
 function Widget:ButtonMaterial(frame, opts)
     if frame.__monetMaterial then return frame.__monetMaterial end
     opts = opts or {}
@@ -530,6 +532,9 @@ function Widget:ButtonMaterial(frame, opts)
     -- the same hatch instead of each squeezing a whole tile into its own square.
     weave:SetTexture(Media.texture["monet_stripe_weave"], "REPEAT", "REPEAT")
     weave:SetAllPoints(frame)
+    -- ADD blend (Andromeda style): the hatch brightens the black well instead of painting over it,
+    -- so a low vertex alpha reads as faint cloth grain rather than a grey wash.
+    weave:SetBlendMode("ADD")
     local function FitWeave()
         local mult = Media:Mult()
         local fw = frame:GetWidth() or 0
@@ -543,7 +548,7 @@ function Widget:ButtonMaterial(frame, opts)
     if type(frame.HookScript) == "function" then
         pcall(frame.HookScript, frame, "OnSizeChanged", FitWeave)
     end
-    weave:SetVertexColor(opts.r or 1, opts.g or 1, opts.b or 1, opts.weaveAlpha or 0.75)
+    weave:SetVertexColor(opts.r or 1, opts.g or 1, opts.b or 1, opts.weaveAlpha or 0.25)
 
     local sheen = frame:CreateTexture(nil, opts.layer or "OVERLAY", nil, opts.sublevel or 1)
     sheen:SetTexture(Media.texture["monet_barfill"])
@@ -552,7 +557,7 @@ function Widget:ButtonMaterial(frame, opts)
     -- The sheen is a flat base colour too; the top-lit look comes from this gradient, not from the art.
     -- Under ADD a dark end simply stops adding, so the button reads lit from above and neutral below.
     Widget:TopLight(sheen)
-    sheen:SetVertexColor(opts.r or 1, opts.g or 1, opts.b or 1, opts.alpha or 0.2)
+    sheen:SetVertexColor(opts.r or 1, opts.g or 1, opts.b or 1, opts.alpha or 0)
 
     frame.__monetMaterial = { weave = weave, sheen = sheen }
     return frame.__monetMaterial

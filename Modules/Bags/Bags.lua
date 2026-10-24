@@ -182,7 +182,7 @@ local function AcquireButton(parent)
     btn.cd = Widget:Cooldown(btn)
 
     Widget:Theme(btn, { thickness = 1, bgAlpha = 0.8 })
-    Widget:ButtonMaterial(btn, { alpha = 0.18 })
+    Widget:ButtonMaterial(btn, { alpha = 0, weaveAlpha = 0.25 })
 
     -- Hand-written instead of Widget:Highlight so the tooltip can ride along.
     btn:SetScript("OnEnter", function(self)

@@ -469,8 +469,8 @@ local function RefreshRing(button)
     local r, g, b = Color:GetBorder()
     parts.ring:SetColorTexture(r, g, b, 0.9)
 
-    local nr, ng, nb = Color:GetNeutral()
-    parts.well:SetColorTexture(nr, ng, nb, 0.45)
+    -- 空槽底色参考 NDui：纯黑 0.25，比灰底更通透、不泛白。
+    parts.well:SetColorTexture(0, 0, 0, 0.25)
 end
 
 local function RefreshRings()
@@ -730,7 +730,8 @@ local function SkinButton(button)
     -- —— ADD 混合的近白渐变直接叠在图标上，等于给每个图标蒙一层白，实测隐藏 sheen 后
     -- 图标区域平均像素差 ~11（明显发白），隐藏 weave 则几乎无变化（~0.2）。把 sheen 压到
     -- 图标之下后：空槽仍有"顶亮底沉"的体积感，有图标时图标保持原色不被洗白。
-    Widget:ButtonMaterial(button, { alpha = 0.16, layer = "BACKGROUND", sublevel = 3 })
+    -- sheen 暂时去掉（alpha=0）；weave 织纹降到 0.25，参考 NDui 的通透感。
+    Widget:ButtonMaterial(button, { alpha = 0, weaveAlpha = 0.25, layer = "BACKGROUND", sublevel = 3 })
 
     -- 热键
     -- 颜色必须是白的（原来用主题的 edge 色，在技能图标上根本看不清）。
@@ -1400,10 +1401,9 @@ local function BuildEmptySlot(button)
 
     local r, g, b = Color:GetBorder()
     ring:SetColorTexture(r, g, b, 0.9)
-    local nr, ng, nb = Color:GetNeutral()
-    well:SetColorTexture(nr, ng, nb, 0.45)
+    well:SetColorTexture(0, 0, 0, 0.25)
 
-    local material = Widget:ButtonMaterial(holder, { alpha = 0.16, layer = "BACKGROUND", sublevel = 3 })
+    local material = Widget:ButtonMaterial(holder, { alpha = 0, weaveAlpha = 0.25, layer = "BACKGROUND", sublevel = 3 })
 
     slot = {
         ring  = ring,
@@ -1521,7 +1521,7 @@ local function AdoptBar(def)
         -- 所以这里把织理/光泽压到负 sublevel（-2、-1），垫在暴雪图标之下、我们自己的
         -- ControlBg 底板之上。
         Widget:ButtonMaterial(button, {
-            alpha = 0.16,
+            alpha = 0, weaveAlpha = 0.25,
             weaveLayer = "BACKGROUND", weaveSublevel = -2,
             layer = "BACKGROUND",      sublevel = -1,
         })

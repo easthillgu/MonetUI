@@ -110,7 +110,7 @@ end
 local function AcquireFont(pool)
     local fs = table.remove(pool)
     if not fs then
-        fs = Widget:Font(tracker, 12, "pixel", "neutral", "LEFT")
+        fs = Widget:Font(tracker, 12, "pingfang", "neutral", "LEFT", nil, "MONOCHROME, OUTLINE")
         fs:SetWordWrap(true)
         fs:SetNonSpaceWrap(true)   -- CJK has no spaces: must wrap mid-"word"
     end
@@ -144,7 +144,7 @@ local function AcquireFold(questID, expanded)
         btn = CreateFrame("Button", nil, tracker)
         btn:SetSize(13, 13)
         Widget:Theme(btn, { thickness = 1, bgAlpha = 0.7 })
-        btn.glyph = Widget:Font(btn, 12, "pixel", "edge", "CENTER")
+        btn.glyph = Widget:Font(btn, 12, "pingfang", "edge", "CENTER", nil, "MONOCHROME, OUTLINE")
         btn.glyph:SetPoint("CENTER", btn, "CENTER", 0, 0)
         Widget:Highlight(btn, 0.9)
     end
@@ -245,8 +245,9 @@ Render = function(settle)
         end
 
         local expanded = not not expDB[questID]
-        local clamped = (not expanded) and fullRows > MAX_LINES
-        if clamped then
+        local showFold = fullRows > MAX_LINES
+        local clamped = (not expanded) and showFold
+        if showFold then
             entry.title:SetWidth(TEXT_W - FOLD_W)  -- the fold takes the corner
         end
 
@@ -277,7 +278,7 @@ Render = function(settle)
             y = y - place(entry.objs[j]) * LINE_H - LINE_GAP
         end
 
-        if clamped then
+        if showFold then
             local btn = AcquireFold(questID, expanded)
             btn:ClearAllPoints()
             btn:SetPoint("TOPRIGHT", tracker, "TOPRIGHT", -PAD, titleTop)
@@ -333,12 +334,12 @@ function M:Skin()
     handle:SetScript("OnDragStart", function() tracker:StartMoving() end)
     handle:SetScript("OnDragStop", SavePosition)
 
-    local headText = Widget:Font(tracker, 12, "pixel", "edge", "LEFT")
+    local headText = Widget:Font(tracker, 12, "pingfang", "edge", "LEFT", nil, "MONOCHROME, OUTLINE")
     headText:SetPoint("TOPLEFT", tracker, "TOPLEFT", PAD, -3)
     headText:SetText("任务追踪")
 
     -- measure the pixel font's real line pitch (the wrap math needs it)
-    local probe = Widget:Font(tracker, 12, "pixel", "neutral", "LEFT")
+    local probe = Widget:Font(tracker, 12, "pingfang", "neutral", "LEFT", nil, "MONOCHROME, OUTLINE")
     probe:SetText("字")
     local h = probe:GetHeight()
     if h and h > 0 then LINE_H = h end

@@ -21,7 +21,7 @@ local Color    = ns.Color
 local Secrets  = ns.Secrets
 local Media    = ns.Media
 
-local LINE    = 2     -- line thickness in physical pixels: same as the bar's bottom hairline
+local LINE    = 1     -- line thickness in physical pixels: the bottom hairline is always 1px
 local MARKER  = 8     -- ▼ glyph height in physical pixels; anything smaller stops reading as a triangle
 local HOVER_W = 24    -- hover zone width around the triangle
 local HOVER_H = 10    -- only the lower half of the strip, so a data block above keeps its own tooltip
@@ -32,7 +32,7 @@ local BLINK_TIME = 0.70   -- seconds for the level-up blink
 local EPS = 0.0005
 
 local bar                        -- the info bar we decorate
-local root, fill, rested, marker, zone
+local root, hairline, fill, rested, marker, zone
 
 local mode                       -- "xp" | "rep"  (what the line is showing right now)
 local lastFaction                -- last watched factionID; a switch snaps instead of sliding
@@ -293,16 +293,30 @@ end
 --- 逐步收敛到目标值：没有动画时直接画，涨了滑过去，掉了（升级）闪一下。
 Apply = function()
     if not root then return end
+
+    -- 底边衬线始终显示，颜色跟随主题（ApplyDecorations 在主题切换时会调到这里）。
+    root:Show()
+    do
+        local r, g, b = Color:GetEdge()
+        hairline:SetVertexColor(r, g, b, 1)
+    end
+
     local data = (M:GetSetting("xp") ~= false) and ReadProgress() or nil
     if not data then
-        root:Hide()
+        -- 没有经验 / 声望数据：只留底边衬线，进度相关元素全部藏起来。
+        fill:Hide()
+        rested:Hide()
+        marker:Hide()
+        zone:Hide()
         M:HideTooltip()
         StopAnim()
         shown = false
         return
     end
 
-    root:Show()
+    fill:Show()
+    marker:Show()
+    zone:Show()
     Tint(data)
 
     local target = data.percent
@@ -400,6 +414,17 @@ local function Build(parentBar)
     -- 画在底板和数据块之上（数据块在条体层级 +1）
     root:SetFrameLevel(bar:GetFrameLevel() + 4)
 
+    -- 底边衬线：始终显示，不管有没有经验。作为轨道，经验进度叠在它上面。
+    hairline = root:CreateTexture(nil, "ARTWORK", nil, -1)
+    hairline:SetTexture(Media.texture.blank)
+    hairline:SetHeight(Px(LINE))
+    hairline:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 0, 0)
+    hairline:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
+    do
+        local r, g, b = Color:GetEdge()
+        hairline:SetVertexColor(r, g, b, 1)
+    end
+
     -- 休息经验先画、已得经验盖在上面：同一根衬线，宽的那截在底下
     rested = root:CreateTexture(nil, "ARTWORK", nil, 0)
     rested:SetTexture(Media.texture.blank)
@@ -442,8 +467,6 @@ local function Build(parentBar)
         M:Hover(false)
         M:HideTooltip()
     end)
-
-    root:Hide()
 
     -- 暴雪自己的经验条：零售 12.x 把它挪到了屏幕最下方的"状态追踪条"
     -- （MainStatusTrackingBarContainer，里面还有那行"经验值: x/y"）。我们的经验线就是进度本身，
