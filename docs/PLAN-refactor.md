@@ -60,26 +60,71 @@
    - 全区零裸 y 残留;行尾 LF 保持;离线 check 0 错误。
    - 变换脚本 bug 两处(独立前进行误删 / 带结算读的重置漏记)在断言层拦下,恢复后重跑。
 
-### BLOCKED 调查记录(2026-10-25 收案)
+### BLOCKED 调查记录(2026-10-25 初次收案)—— ⚠️ 结论已被推翻,案情见下段
 
-reload 后出现每 ~10s 一条的 `ADDON_ACTION_BLOCKED MonetUI UNKNOWN()`(共 16 条记录≈25 次,
-分布在战斗 / 面板操作 / reload 前后,空闲 56s×2 观察窗 + 复现窗内均 0 新增,自停)。
-定性三件套:
-- **taint.log 零字节**(在 taintLog=2 开着时复现)→ 不是污染链,是直接受保护调用拒绝;
-- 0 ERR / 0 弹窗 / 功能正常(用户打了一场、面板照常开);
-- git 基线 cb7d932→HEAD 全 diff **零条**受保护调用新增(脚本扫描 SetShown/SetAttribute/
-  SetParent/EnableMouse/SetScale/HookScript/SetPoint/Hook)。
-结论:与 AGENTS.md"换父 / 宠物条收养"已知代价的性质一致(只进日志),非本轮重构引入,
-不再追。实机目检设置面板布局已通过(用户逐页翻过)。
+初收案依"taint.log 零字节 + diff 零条受保护调用"判定周期性 `UNKNOWN()` 为已知代价、
+非本轮引入。稍后实机取证推翻:同一会话继续正常游玩即爆出姓名板/CUF/施法条 ERR
+全家桶,"零字节"只是当时没触到污染动作。周期性 AOAB 与本回归属两个独立问题
+(周期条见下"遗留";本回归见"姓名板 taint 回归案情")。
+
+### 姓名板 taint 回归案情(2026-10-25 01:07–01:45,哨兵备份 taint.log 实机取证)
+
+**症状**:`CompactUnitFrame.lua:1211`(maxHealth 秘密比较,一分钟 6500 块滚屏)、
+`CastingBarFrame.lua:331/:344`、`Blizzard_NamePlateAuras.lua:247/:366` —— 全部
+"execution tainted by 'MonetUI'",栈内**无一帧 MonetUI**:暴雪自己的事件处理跑在
+"我们的执行环境"里(整条生产链被标脏的下游效应)。
+
+**根因**:触发器 = `ADDON_RESTRICTION_STATE_CHANGED → MONETUI_RESTRICTION_CHANGED →
+M:UpdateAll()`;链条 = 被过滤牌 → `Nameplates:RestoreBlizzardPlate()`(:623)→
+`pcall(base.ApplyFrameOptions)` → `NamePlateBase:68 → CompactUnitFrame:SetUpFrame →
+UpdateMaxHealth / UpdateHealPrediction` → 秘值比较被拦 → 整条 compact 单位帧生产链
+当场标脏,之后暴雪事件处理逐条爆。
+
+**四版四次复现(所有"挑时机"方案全部失败,所以才收"生产者零容忍")**:
+1. `a9f1e41` Combat + `HealthSecret("player")` 门:reload→PLAYER_REGEN_ENABLED 排空时
+   秘值仍活(脱战事件**早于**禁限解除),排队的那次照样打进生产者(01:21:49);
+2. `f039bf2` 排空闭包内再查 + Core 认 `fn==false` 留队重试:player 探针 false、
+   姓名板单位机密 —— **单位级探针不可信**(01:24:27);
+3. `c9ab91c` Core 按引擎事件记账 `ns.Restricted` + 全局级 `ShouldAurasBeSecret` 兜底:
+   旗帜与探针全放行,Blizzard 链内仍读到机密(01:29:14);
+4. `df9efb6` **不挑时机:生产者一概不打**。`RestoreBlizzardPlate` 只留 `SetAlpha(1)`/`Show`
+   (普通受保护项,被拒只进 BLOCKED 日志);锚点重排由游戏下次 SetUnit/更新时自带补齐。
+   **验证:reload 后 taint.log 全程 0 字节、ERR 0 条 —— 案情结。**
+
+**沉淀(AGENTS.md 污染模型的补充条目)**:
+- 暴雪单位帧生产者(`ApplyFrameOptions` / `SetUpFrame` 一族)在受限期**从我们上下文
+  一次都不能调**,没有"探针显示没秘值"的中间档 —— 该客户端秘值存活窗口探针测不全:
+  player 明文与姓名板机密可同刻并存,引擎事件旗帜与全局探针关闭后链内仍读到。
+- `PLAYER_REGEN_ENABLED` **早于**禁限解除,不是"秘值已死"的安全点;
+  `ADDON_RESTRICTION_STATE_CHANGED`(激活前先发/停用后发,载荷 type+state)也只够记账,
+  不够精确判窗。Core 留了 `ns.Restricted` 旗帜作未来通用判据。
+- `ns:AfterCombat` 附加语义:队内 fn 返回 false = "未就绪、留队重试、不提示,error
+  语义不变"(Core.lua:403-407)。
+
+**本轮遗留(不属回归案情,独立已知代价项)**:
+- `TargetFrameToT:Show()` 家族 AOAB(reload 后 13 条 / 7 分钟,每 2-3 分钟一条,只进日志):
+  根因是 UnitFrames:SuppressBlizzard 用 `Hide()` + `SetScript("OnShow", Hide)` 挂槽——
+  正是 AGENTS.md 点名不要的写法,暴雪每次目标变化 `Show` 回来都被拦。
+  修法现成(AGENTS 正解:alpha 0 + 关鼠标 + 不 Hide),登记 TODO 下轮做。
+- WoWBridge / WuxianKit / !WuxianWorkshop 自身的 taint 记录,与本插件无关。
 3. commit `refactor(simpleconfig): LayoutCursor 光标式布局`
    - `local row = LayoutCursor(yStart)`;107 处 `y = y - N` 机械替换,增删行不再手工记账。
    - 逻辑风险 0,diff 大;验证:实机打开设置面板逐页目检(位置应逐像素不变)。
 
-## P3 · 小构件上提(review #4)
+## P3 · 小构件上提(review #4)—— ✅ 3.1/3.2 完成,3.3 待做
 
-1. commit `refactor(groups): PlainBorder 与 EnsureSelectBorder 合并为带参边框构建器`(单文件内,最安全先做)
-2. commit `refactor(widget): Widget:LostBarBG(bar, baseColor)` 三处统一(带底色参数)
-3. commit `refactor(widget/math): Widget:TintIconBorder + Math:Shorten 名字截断收敛`
+1. commit `refactor(groups): 四边框构建骨架收敛` —— ✅ 完成(fcc361d)
+   - `BuildEdges(host, drawLayer, subLevel)` + `SizeEdges(edges, thickness)`;
+     plain/select 两路不再复制"建 4 条贴图 + 锚四边"与量尺寸代码。
+2. commit `refactor(widget): Widget:LostBarBG(bar,r,g,b,subLevel)` —— ✅ 完成(505e173)
+   - 三处(UF/Groups/NP)血条损失底统一;底色走 `SetVertexColor` 保顶点色语义
+     (UF/Groups 血量换色、NP 死亡灰化都要动态改,烧死 texel 会堵死 —— 黑 texel × 灰 = 黑)。
+   - Note: 这两步部署后未及 reload,回归案情爆发(见上案情),验证顺延到案情后一起过。
+3. commit `refactor(widget/math): Widget:TintIconBorder + Math:Shorten 名字截断收敛` —— 待做
+   - UF TintAuraButton 已走 `Widget:ApplyBorder(host,1)`;共用点在 NP DressDebuffButton
+     主题路。Groups 的字节切 `Truncate` 是 CJK 坏字形 bug,改 `Math:Shorten(raw, cap, true)`
+     顺带修正;省略号 `…`→`...` 的视觉差记 PLAN,实机目检确认。
+   - (回归期间实机定制:`RestoreBlizzardPlate` 去掉 ApplyFrameOptions,df9efb6)
 4. 事件注册骨架不单开:与 P1 迁移一起消化(评估后如仍有大块重复再说)。
 
 ## P4 · 长函数拆分(review #5,一个函数一个 commit)
