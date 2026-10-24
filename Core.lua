@@ -893,8 +893,24 @@ if not ns.hasMonetColorCallback then
 end
 
 -- Restricted states (combat / PvP) may hide values again, so let modules refresh their text once the restriction lifts.
-ns.EventBus:Register("ADDON_RESTRICTION_STATE_CHANGED", function()
-    ns.EventBus:Fire("MONETUI_RESTRICTION_CHANGED")
-end)
+-- 同时维护全局禁限旗帜：事件语义是"激活前先发 / 停用后在停用之后发"，载荷 (type, state)
+-- 报的是目标状态（Enum.AddOnRestrictionState: Inactive=0 / Activating=1 / Active=2）。
+-- 秘值探针（ShouldUnitHealthMaxBeSecret("player") 之类）不可靠 —— 实机取证：player
+-- 读得到明文，姓名板单位却已在返回机密；哪类单位被加密是客户端自己的事。我们的生产
+-- 调用（Nameplates 的 ApplyFrameOptions 一枚）关心的只是"此刻是否存在任一禁限"，
+-- 这个事件就是权威真值源。
+ns.Restricted = false   -- 任一禁限类型激活中（含 Activating 等待态，宁可多守一拍）
+do
+    local activeTypes = {}
+    ns.EventBus:Register("ADDON_RESTRICTION_STATE_CHANGED", function(_, restrictionType, state)
+        if state == Enum.AddOnRestrictionState.Inactive or state == nil then
+            activeTypes[restrictionType] = nil
+        else
+            activeTypes[restrictionType] = true
+        end
+        ns.Restricted = next(activeTypes) ~= nil
+        ns.EventBus:Fire("MONETUI_RESTRICTION_CHANGED")
+    end)
+end
 
 _G.MonetUI = ns

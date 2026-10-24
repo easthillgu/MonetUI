@@ -620,7 +620,10 @@ end
 --- @param plate our plate frame that borrowed `base`'s unit frame (may be nil)
 local function SecretsLive()
     if InCombatLockdown and InCombatLockdown() then return true end
-    local ok, live = pcall(Secrets.HealthSecret, "player")
+    if ns.Restricted then return true end   -- Core 按引擎事件记账的禁限旗帜（权威真值源）
+    -- 兜底探针也用**全局**级的查询：单位级探测不可信（实机取证：同一时刻 player 的
+    -- 血量是明文、姓名板单位却已在返回机密）。ShouldAurasBeSecret 不吃单位。
+    local ok, live = pcall(Secrets.AurasSecret)
     return ok and live and true or false
 end
 
