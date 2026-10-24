@@ -1274,12 +1274,9 @@ local function RefreshPetContent(button, index)
 end
 
 local function RefreshBar(bar)
-    if bar.def and bar.def.pet then
-        for index, button in ipairs(bar.buttons) do
-            RefreshPetContent(button, index)
-        end
-        return
-    end
+    -- 宠物条用的是暴雪自己的 PetActionButton（收养），图标/冷却/自动施法提示由暴雪刷新，
+    -- 我们不能也不该去改它们的内容。
+    if bar.def and bar.def.pet then return end
     for index, button in ipairs(bar.buttons) do
         UpdateButtonContent(button, SlotOf(button, bar, index))
     end
@@ -1343,6 +1340,47 @@ local function CreateBar(def)
         visibility = def.paged and VISIBILITY_MAIN or VISIBILITY_OTHER,
     }
 
+    if def.pet then
+        -- **直接收养暴雪的 PetActionButton1..10**（Ellesmere 在同一客户端就是这么做的）：
+        -- 这个客户端没有通用安全按钮的 type="pet"，也没有 SecureHandlerClickTemplate，
+        -- 自建宠物按钮无论怎么点都不会施法。把暴雪那 10 个按钮 SetParent 到我们的框里、
+        -- 摆成我们的格子，施法 / 冷却 / 自动施法提示 / 右键切自动施法全都天然可用。
+        local size, spacing = ButtonSize(), Spacing()
+        for i = 1, 10 do
+            local btn = _G["PetActionButton" .. i]
+            if not btn then break end
+            pcall(btn.SetParent, btn, frame)
+            pcall(btn.ClearAllPoints, btn)
+            pcall(btn.SetSize, btn, size, size)
+            pcall(btn.SetScale, btn, 1)
+            pcall(btn.SetPoint, btn, "TOPLEFT", frame, "TOPLEFT", (i - 1) * (size + spacing), 0)
+            bar.buttons[#bar.buttons + 1] = btn
+        end
+
+        if #bar.buttons == 0 then
+            pcall(frame.Hide, frame)
+            return nil
+        end
+
+        pcall(frame.SetSize, frame, #bar.buttons * size + math.max(#bar.buttons - 1, 0) * spacing, size)
+
+        -- 暴雪那条外壳：藏起来（不卸载事件 —— 它的 Update 还要负责刷新这 10 个按钮的
+        -- 图标/冷却/可用状态；按钮已经搬到我们这边，外壳自己的位置无所谓）。
+        local shell = _G.PetActionBar
+        if shell then
+            pcall(shell.SetAlpha, shell, 0)
+            pcall(shell.EnableMouse, shell, false)
+            pcall(shell.EnableMouseMotion, shell, false)
+        end
+
+        if RegisterStateDriver then
+            pcall(RegisterStateDriver, frame, "visibility", "[pet] show; hide")
+        end
+        PositionBar(bar)
+        bar.page = 1
+        return bar
+    end
+
     for index = 1, (def.count or BUTTONS_PER_BAR) do
         local button = BuildButton(bar, index)
         if not button then break end
@@ -1356,33 +1394,10 @@ local function CreateBar(def)
     end
 
     if def.pet then
-        -- 宠物条不翻页：显隐只由"有宠物"决定；页号恒为 1，用来让翻页子片段把
-        -- action = 本格序号 写进安全环境（见 BuildButton 的宠物分支）。
-        if RegisterStateDriver then
-            pcall(RegisterStateDriver, frame, "visibility", "[pet] show; hide")
-            pcall(RegisterStateDriver, frame, "page", "1")
-        end
+        -- 走不到这里（宠物条在上面已经 return 了），留作保险：按普通布局摆一遍即可。
         LayoutBar(bar)
         PositionBar(bar)
-        -- 宠物条**不装拖放接住器**：它的槽位是宠物技能 1..10，不是动作条槽位；
-        -- PlaceAction 会把这些序号当成"动作条第 N 格"，表现就是"拖到宠物条上错位/乱放"。
-        -- 宠物条本来也不允许自定义（暴雪自己的宠物条同样不接受放技能）。
-        -- 点击转发：条的 frame ref 指向暴雪按钮，按钮的 OnClick 包成安全片段。
-        for i, button in ipairs(bar.buttons) do
-            local blizz = _G["PetActionButton" .. i]
-            if blizz then
-                pcall(frame.SetFrameRef, frame, "pet" .. i, blizz)
-                local snippet = ([[
-                    local b = owner and owner:GetFrameRef("pet%d") or self:GetFrameRef("pet%d")
-                    if b then b:Click("LeftButton") end
-                ]]):format(i, i)
-                pcall(frame.WrapScript, frame, button, "OnClick", snippet)
-            end
-        end
         bar.page = 1
-        PushPageToChildren(bar)
-        PushSecureInit(bar, "pet")
-        RefreshBar(bar)
         return bar
     end
 
