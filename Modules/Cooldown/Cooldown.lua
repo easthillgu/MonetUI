@@ -354,26 +354,16 @@ local function EnsureHooks()
     if hooksDone then return end
     hooksDone = true
 
-    -- All cooldown widgets share one metatable, so hooking its methods once covers Blizzard's action buttons and LibActionButton's alike.
-    local probe = _G.ActionButton1Cooldown
-    if not probe then
-        local ok, frame = pcall(CreateFrame, "Cooldown", "MonetUIProbeCooldown")
-        if ok then probe = frame end
-    end
-
-    local meta = probe and getmetatable(probe)
-    local methods = meta and meta.__index
-    if type(methods) ~= "table" then
-        ns:Print("冷却计时：未找到 Cooldown 方法表，自动缩放不会生效。")
-        return
-    end
-
-    if type(methods.SetCooldown) == "function" then
-        pcall(hooksecurefunc, methods, "SetCooldown", OnCooldownStart)
-    end
-    if type(methods.SetHideCountdownNumbers) == "function" then
-        pcall(hooksecurefunc, methods, "SetHideCountdownNumbers", OnSetHideCountdownNumbers)
-    end
+    -- **不挂全局方法钩子。** 以前这里做的是
+    --   hooksecurefunc(methods, "SetCooldown", OnCooldownStart)
+    --   hooksecurefunc(methods, "SetHideCountdownNumbers", ...)
+    -- 而 Cooldown 的方法表是全客户端共享的 —— 于是**暴雪每次设置冷却**都会在我们的
+    -- 代码里跑一段。本客户端把整条执行链记为 "tainted by MonetUI"，链后续的安全调用
+    -- 就全被拒：实机日志里宠物条的
+    --   PetActionButton*:SetShown / PetActionBar:ClearAllPointsBase
+    -- 全是 ActionButton_UpdateCooldown → SetCooldown → 我们的钩子 之后发生的。
+    -- 计时改由 Tick 里的 GetCooldownTimes 轮询接管（本来就有的回退路径，0.5 秒一次），
+    -- 精度差半个轮询周期，但不再污染任何暴雪调用链。
 end
 
 --- Register a cooldown frame with the auto-scaling text renderer.
@@ -415,8 +405,10 @@ function M:Attach(cd, size, compact, font)
     -- Blizzard's own numbers stay styled for the fallback path.
     Widget:StyleCooldownText(cd, Media:SnapSize(size), "cooldown")
 
-    -- Follow a live resize of the action bar (buttonSize setting).
-    if cd.HookScript then
+    -- Follow a live resize of the action bar (buttonSize setting). 只挂**我们自己的**冷却框：
+    -- 挂到暴雪的冷却框上等于插进它的事件链，一样会污染（见 EnsureHooks 的注释）。
+    local name = cd.GetName and cd:GetName()
+    if cd.HookScript and name and name:find("^MonetUI") then
         cd:HookScript("OnSizeChanged", function(self)
             local st = attached[self]
             if not st then return end
