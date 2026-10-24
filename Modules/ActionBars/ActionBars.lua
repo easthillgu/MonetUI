@@ -748,6 +748,15 @@ local function PaintCooldown(button, slot)
     else
         pcall(cooldown.Clear, cooldown)
     end
+
+    -- 把明文 start/duration 告诉冷却文字渲染器（以前靠 SetCooldown 的全局钩子拿，
+    -- 那个钩子会污染暴雪调用链，已经拆掉；这里是我们自己的调用点，拿到就给）。
+    if ok and info and info.isActive then
+        local cooldowns = ns:GetModule("Cooldown")
+        if cooldowns and cooldowns.NoteStart then
+            pcall(cooldowns.NoteStart, cooldowns, cooldown, info.startTime, info.duration)
+        end
+    end
 end
 
 -- ---------------------------------------------------------------------------
@@ -1378,6 +1387,26 @@ local function SkinAdoptedPetButton(btn)
     -- if cd then pcall(StyleCooldownFrame, cd) end
 end
 
+--- 宠物条的冷却：收养来的按钮，暴雪只在自己的事件里刷（切目标等），不主动更新 ——
+--- 实机表现就是"切个目标才看到冷却时间"。给它一个 0.5 秒的轻量驱动，只调冷却刷新函数
+--- （不调 PetActionBar:Update，那会连带 UpdateShownButtons → 那 10 条拦截）。
+local petCooldownDriver
+local function EnsurePetCooldownDriver()
+    if petCooldownDriver then return end
+    petCooldownDriver = CreateFrame("Frame")
+    local acc = 0
+    petCooldownDriver:SetScript("OnUpdate", function(_, elapsed)
+        acc = acc + (elapsed or 0)
+        if acc < 0.5 then return end
+        acc = 0
+        local bar = bars and bars.BarPet
+        if not bar or not bar.frame:IsShown() then return end
+        if _G.PetActionBar_UpdateCooldowns then
+            pcall(_G.PetActionBar_UpdateCooldowns)
+        end
+    end)
+end
+
 local function CreateBar(def)
     if buildFailure then return nil end
 
@@ -1454,6 +1483,7 @@ local function CreateBar(def)
         end
         PositionBar(bar)
         bar.page = 1
+        EnsurePetCooldownDriver()
         return bar
     end
 

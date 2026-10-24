@@ -382,6 +382,17 @@ local function EnsureDriver()
     end)
 end
 
+--- 外部（ActionBars 的 PaintCooldown）拿到明文 start/duration 时告诉我们，
+--- 用来给自动缩放的倒计时文字提供"到期时间"。拿不到明文就不用调（机密值不能算）。
+function M:NoteStart(cd, start, duration)
+    local state = cd and attached[cd]
+    if not state then return end
+    start, duration = Secrets.Number(start), Secrets.Number(duration)
+    if type(start) ~= "number" or type(duration) ~= "number" then return end
+    state.expiry = start + duration
+    state.next = 0
+end
+
 --- Register a cooldown frame with the auto-scaling text renderer.
 -- Safe to call repeatedly (theme refresh, size change): it only re-styles and asks for an immediate re-render.
 -- compact = true：不用 mm:ss 那种宽格式（"1:05"），退回紧凑的 "59m"/"23h"/"3d"。
