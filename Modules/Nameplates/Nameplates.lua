@@ -124,11 +124,10 @@ end
 function M:ApplyPlateSize()
     if Setting("forcePlateSize") == false then return end
     if InCombatLockdown and InCombatLockdown() then
-        -- Protected territory: retried from PLAYER_REGEN_ENABLED.
-        self.sizePending = true
+        -- Protected territory: ns:AfterCombat 排队，脱战补做（失败也留在队列直到成功）。
+        ns:AfterCombat("nameplates-plate-size", function() M:ApplyPlateSize() end)
         return
     end
-    self.sizePending = nil
 
     local width, height = VisualSize()
 
@@ -1045,7 +1044,7 @@ function M:RegisterEvents()
 
     EventBus:Register("PLAYER_REGEN_ENABLED", function()
         if not M.active then return end
-        if M.sizePending then M:ApplyPlateSize() end
+        -- 被挡的牌子尺寸改写已由 ns:AfterCombat 排队补做。
         M:UpdateAll()
     end)
 

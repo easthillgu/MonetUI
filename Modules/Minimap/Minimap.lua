@@ -63,21 +63,26 @@ local active    = false
 local warned    = {}       -- 一次性提示
 
 -- 战斗队列：战斗中受保护的方法会被**无声拒绝**（连报错都没有），把要做的事按 key
--- 排队，脱战（PLAYER_REGEN_ENABLED）后排空。同一个 key 只排一次 —— 多个按钮同时被拒
--- 也只补一次（Ellesmere 的战斗队列就是这么去重的）。
+-- 排进 queued，统一由 Core 的 ns:AfterCombat 在脱战（PLAYER_REGEN_ENABLED）后排空。
+-- 同一个 key 只排一次 —— 多个按钮同时被拒也只补一次。
+-- 消化必须等下一次脱战（mode "regen"）：Skin 在执行中失败要自己重排一次（Skin 里的
+-- Queue("skin")），当场重跑会立刻重入，所以排空函数执行中触发的 Queue 一律等下一轮。
 local queued = {}
 
 -- 前置声明：排空队列要用到 Restore / Skin，而它们定义在后面
 local Restore, Skin
+local RunQueue
 
---- 排队（按 key 去重）。
+--- 排队（按 key 去重）。不在战斗也照排：消化固定发生在下一次脱战，
+-- 和旧实现一致（旧实现同样只靠 PLAYER_REGEN_ENABLED 消费）。
 local function Queue(key)
     queued[key] = true
+    ns:AfterCombat("minimap-actions", RunQueue, "regen")
 end
 
 --- 排空队列。先还原再套用：两者互斥，还原优先；每个动作单独 pcall，
 --- 一个失败不拖累另一个，失败的那个重新排回去等下一次脱战。
-local function RunQueue()
+function RunQueue()
     local wantRestore = queued["restore"]
     local wantSkin    = queued["skin"]
     queued = {}
@@ -1058,11 +1063,6 @@ function M:Initialize()
         if M.buttons then M.buttons:UpdateDifficulty() end
     end)
     EventBus:Register("MONETUI_THEME_CHANGED",    function() if active then UpdateZoneText() end end)
-
-    -- 战斗中受保护的方法被无声拒绝：脱战后按队列补做。
-    EventBus:Register("PLAYER_REGEN_ENABLED", function()
-        RunQueue()
-    end)
 
     -- 客户端的 HybridMinimap 是按需 LoadAddOn 的：它一落地就把 MapCanvas 的遮罩
     -- 换成矩形的（模块没开时 ApplyHybrid 自己跳过，客户端保留自己的圆形遮罩）。

@@ -135,11 +135,10 @@ end
 local microHooked = false
 
 local function SkinMicroMenu()
-    -- Micro buttons are secure: never touch them in combat; defer to PLAYER_REGEN_ENABLED instead of failing silently.
+    -- Micro buttons are secure: never touch them in combat; ns:AfterCombat defers the
+    -- repaint to combat end instead of failing silently.
     if InCombatLockdown() then
-        local ref
-        ref = ns.EventBus:Register("PLAYER_REGEN_ENABLED", function()
-            ns.EventBus:Unregister("PLAYER_REGEN_ENABLED", ref)
+        ns:AfterCombat("skins-micromenu", function()
             if M.active then SkinMicroMenuCore() end
         end)
         return

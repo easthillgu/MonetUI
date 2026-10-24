@@ -285,7 +285,7 @@ end
 local combatBuffs, combatDebuffs
 local combatMode = false
 local combatWarned = false
-local combatRebuildPending = false
+local RebuildCombatAuras   -- 前置声明：EnsureCombatAuras 战斗中要把它排进 ns:AfterCombat（实现在下面）
 
 --- AuraContainer 属于 LoD 插件，没加载时 CreateFrame 拿不到那个模板。
 local function EnsureAuraContainerAddOn()
@@ -392,8 +392,8 @@ end
 local function EnsureCombatAuras()
     if combatBuffs and combatDebuffs then return true end
     if type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown() then
-        -- 战斗里建出来的容器永远是空的，等脱战补做（PLAYER_REGEN_ENABLED 会再来一次）。
-        combatRebuildPending = true
+        -- 战斗里建出来的容器永远是空的：排队到脱战补做（ns:AfterCombat）。
+        ns:AfterCombat("buffframe-auras", RebuildCombatAuras)
         return false
     end
     -- 染色曲线必须在非 securecall 的上下文里先建好，否则按钮拿不到曲线。
@@ -419,13 +419,13 @@ local function EnsureCombatAuras()
 end
 
 --- 引擎按钮在 initializeFrame 返回后就锁死（连我们建在按钮里的子帧都不能改写），
---- 换主题只能把容器连同按钮扔掉重建。战斗中重建会得到空容器，挂标记等脱战。
-local function RebuildCombatAuras()
+--- 换主题只能把容器连同按钮扔掉重建。战斗中重建会得到空容器：
+--- 把自己排进 ns:AfterCombat，脱战重试。
+function RebuildCombatAuras()
     if type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown() then
-        combatRebuildPending = true
+        ns:AfterCombat("buffframe-auras", RebuildCombatAuras)
         return
     end
-    combatRebuildPending = false
     for _, container in ipairs({ combatBuffs, combatDebuffs }) do
         if container then
             pcall(container.ClearAllPoints, container)
@@ -572,7 +572,7 @@ function M:Initialize()
     -- 进/出战斗要立刻切换两套显示，别等下一次 UNIT_AURA（战斗中那条事件不一定来）。
     EventBus:Register("PLAYER_REGEN_DISABLED", function() M:Update() end)
     EventBus:Register("PLAYER_REGEN_ENABLED", function()
-        if combatRebuildPending then RebuildCombatAuras() end
+        -- 战斗中被拦的容器重建由 ns:AfterCombat 在更早的统一排空里做掉。
         M:Update()
     end)
     -- 换主题：自绘那套直接重涂；引擎那套按钮建完就锁死，只能连容器一起重建。

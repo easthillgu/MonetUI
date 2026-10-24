@@ -336,11 +336,6 @@ local BUTTON_TEMPLATES = {
 local bars    = {}   -- key -> { def, frame, buttons }
 local adopted = {}   -- key -> { def, frame }
 local built   = false
-local applied = false
-local bindingsDirty = false
-local adoptedDirty  = false
-local refreshDirty  = false
-local layoutDirty   = false   -- 战斗中改不动受保护的按钮，脱战补做
 local announced     = false
 local announcedFailure = false
 local buildFailure  -- "lab" | "header" | "button" | "template"
@@ -2019,10 +2014,10 @@ local function AdoptAll()
         return
     end
     if Locked() then
-        adoptedDirty = true
+        -- 战斗中动不了暴雪的条：排队到脱战（ns:AfterCombat）。
+        ns:AfterCombat("actionbars-adopt", AdoptAll)
         return
     end
-    adoptedDirty = false
     for _, def in ipairs(ADOPTED_DEFS) do
         AdoptBar(def)
     end
@@ -2055,11 +2050,11 @@ end
 -- 玩家没给这一格绑键就不接管，战斗中只打标记，PLAYER_REGEN_ENABLED 后再补。
 local function ReassignBindings()
     if Locked() then
-        bindingsDirty = true
+        -- 战斗中写不了 override binding：排队到脱战（ns:AfterCombat）。
+        ns:AfterCombat("actionbars-bindings", ReassignBindings)
         return
     end
     if not (SetOverrideBinding and ClearOverrideBindings) then return end
-    bindingsDirty = false
 
     for _, bar in pairs(bars) do
         -- 宠物条不走 override binding：宠物技能的键位本来就绑在暴雪的动作命令上
@@ -2082,7 +2077,8 @@ end
 
 local function ClearBindings()
     if Locked() then
-        bindingsDirty = true
+        -- 旧实现借 bindingsDirty 让 PLAYER_REGEN_ENABLED 重跑 ReassignBindings，保持一致。
+        ns:AfterCombat("actionbars-bindings", ReassignBindings)
         return
     end
     if not ClearOverrideBindings then return end
@@ -2130,19 +2126,8 @@ function M:RegisterEvents()
         M:Apply()
     end)
 
-    EventBus:Register("PLAYER_REGEN_ENABLED", function()
-        if bindingsDirty then ReassignBindings() end
-        if adoptedDirty then AdoptAll() end
-        if refreshDirty then
-            refreshDirty = false
-            M:UpdateAll()
-        end
-        if layoutDirty then
-            layoutDirty = false
-            M:RefreshLayout()
-        end
-        if not applied then M:Apply() end
-    end)
+    -- 战斗中被挡的绑定 / 收养 / 布局 / Apply 各自入口已经 ns:AfterCombat 排队，
+    -- 不再单独注册 PLAYER_REGEN_ENABLED（Core 的统一排空先于这里执行）。
 
     EventBus:Register("UPDATE_BINDINGS", function()
         ReassignBindings()
@@ -2231,8 +2216,8 @@ end
 function M:RefreshLayout()
     if Locked() then
         -- 按钮本体是受保护的安全模板：战斗中挪不动（SecureActionButtonTemplate），
-        -- 硬来会被客户端拒绝。这次改动记下来，脱战补做。
-        layoutDirty = true
+        -- 硬来会被客户端拒绝。排队到脱战补做（ns:AfterCombat）。
+        ns:AfterCombat("actionbars-layout", function() M:RefreshLayout() end)
         return
     end
     for _, bar in pairs(bars) do
@@ -2299,7 +2284,8 @@ end
 
 function M:Apply()
     if Locked() then
-        applied = false
+        -- 战斗中建不了条：排队到脱战（ns:AfterCombat）。
+        ns:AfterCombat("actionbars-apply", function() M:Apply() end)
         return
     end
 
@@ -2331,7 +2317,6 @@ function M:Apply()
         for _, entry in pairs(adopted) do
             ReleaseBar(entry)
         end
-        adoptedDirty = false
         if leaveVehicle then pcall(leaveVehicle.frame.Hide, leaveVehicle.frame) end
     end
 
@@ -2365,8 +2350,6 @@ function M:Apply()
 
     -- 宠物条的自动施法提示：自绘条开着是动画环，关着是静态环（这条路径不依赖 AdoptAll）。
     SyncPetGlowNow()
-
-    applied = true
 end
 
 function M:SetEnabled(enabled)
@@ -2382,7 +2365,6 @@ function M:SetEnabled(enabled)
         for _, entry in pairs(adopted) do
             ReleaseBar(entry)
         end
-        adoptedDirty = false
         ClearBindings()
         self:RestoreBlizzard()
         TeardownPetGlow()

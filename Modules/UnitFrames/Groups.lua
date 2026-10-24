@@ -31,7 +31,6 @@ local RANGE_INTERVAL = 0.25
 local party        -- { anchor, header, buttons = { ... } }
 local raid         -- { anchor, headers = { [1..8] }, buttons = { ... } }
 local byUnit = {}
-local pending = nil        -- nil / "apply"（脱战重贴）/ "disable"（脱战拆掉）
 local ticker
 
 local function Config()
@@ -900,16 +899,25 @@ end
 -- 模块接口
 -- ============================================================================
 
+-- 排队补做时以模块开关的当前状态为准（排队期间可能被停用，别把已经关掉的框又建回来）
+local function DesiredState()
+    if type(ns.IsModuleEnabled) == "function"
+       and ns:IsModuleEnabled("GroupFrames") == false then
+        M:SetEnabled(false)
+    else
+        M:Apply()
+    end
+end
+
 function M:Apply()
     local cfg = Config()
     if not cfg then return end
 
     -- 受保护的框（安全头）在战斗里不能建、不能改属性：排队到脱战，别硬来。
     if InCombat() then
-        pending = "apply"
+        ns:AfterCombat("groupframes-state", DesiredState)
         return
     end
-    pending = nil
 
     local partyCfg, raidCfg = cfg.party, cfg.raid
     if not partyCfg or not raidCfg then return end
@@ -998,25 +1006,7 @@ function M:RegisterEvents()
     -- 选中目标边框：切目标只改四条边的 alpha，战斗里也能立刻跟上
     EventBus:Register("PLAYER_TARGET_CHANGED", function() SyncSelection() end)
 
-    -- 战斗里排队的东西，出战斗一次性做完（停用也要排队：拆头同样是受保护操作）
-    EventBus:Register("PLAYER_REGEN_ENABLED", function()
-        local want = pending
-        if not want then return end
-        pending = nil
-
-        if want == "disable" then
-            M:SetEnabled(false)
-            return
-        end
-
-        -- 排队期间可能被停用：以模块开关的当前状态为准，别把已经关掉的框又建回来
-        if type(ns.IsModuleEnabled) == "function"
-           and ns:IsModuleEnabled("GroupFrames") == false then
-            M:SetEnabled(false)
-        else
-            M:Apply()
-        end
-    end)
+    -- 战斗里排队的补做已交给 ns:AfterCombat（Core 统一注册 PLAYER_REGEN_ENABLED 排空）。
 
     EventBus:Register("MONETUI_THEME_CHANGED", function() M:RefreshAll() end)
 end
@@ -1028,11 +1018,12 @@ end
 
 function M:SetEnabled(enabled)
     -- 停用要拆安全头、藏受保护框，同样是战斗受限操作：排队到脱战。
+    -- Apply / SetEnabled 两条入口在战斗里想补做的是同一件事"按开关现状落地"，
+    -- 所以共用一个 key（ns:AfterCombat 按 key 去重；DesiredState 读实时状态，任何顺序都对）。
     if InCombat() then
-        pending = enabled and "apply" or "disable"
+        ns:AfterCombat("groupframes-state", DesiredState)
         return
     end
-    pending = nil
 
     if enabled then
         self:Apply()

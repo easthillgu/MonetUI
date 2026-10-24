@@ -1313,6 +1313,7 @@ local function CreateAuraContainer(parent, key, filterString, kind)
 end
 
 local targetAuraDebuffs, targetAuraBuffs
+local RebuildTargetAuras   -- 前置声明：EnsureTargetAuras 战斗中要把它排进 ns:AfterCombat（实现在下面）
 
 --- 建/显示目标光环容器。取代 A 方案的 BorrowTargetAuras。
 --- buff 贴着血条、debuff 叠在 buff 之上，两组都是满一行往上换行。
@@ -1332,9 +1333,9 @@ local function EnsureTargetAuras(frame)
 
     if not targetAuraDebuffs then
         -- 战斗中建容器会被拦：拿到的一组容器**永远是空的**（实测 0 个按钮显示、换目标也不刷新），
-        -- 而且之后没人再重建。所以战斗里干脆不建，等脱战（PLAYER_REGEN_ENABLED）补做。
+        -- 而且之后没人再重建。所以战斗里干脆不建，排队到脱战补做（ns:AfterCombat）。
         if type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown() then
-            M.__auraRebuildPending = true
+            ns:AfterCombat("unitframes-auras", RebuildTargetAuras)
             return
         end
         local debuffs, why = CreateAuraContainer(frame, "monetTargetDebuffs", "HARMFUL", "debuff")
@@ -1377,13 +1378,12 @@ end
 --- 自己建在按钮里的子帧都被 DenyTaintedAccessWhenAurasAreSecret 拒掉（SetBackdropBorderColor /
 --- SetAlpha / Hide 全部报 "Attempt to access forbidden object from code tainted by an AddOn"）。
 --- 所以边框颜色只能在创建窗口里定稿，换主题的唯一出路是把容器连同按钮一起扔掉重建。
---- 战斗中建容器会被拦（会得到一组永远空的容器），这时只挂个标记，脱战后补做。
-local function RebuildTargetAuras()
+--- 战斗中建容器会被拦（会得到一组永远空的容器）：把自己排进 ns:AfterCombat，脱战重试。
+function RebuildTargetAuras()
     if type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown() then
-        M.__auraRebuildPending = true
+        ns:AfterCombat("unitframes-auras", RebuildTargetAuras)
         return
     end
-    M.__auraRebuildPending = false
     for _, container in ipairs({ targetAuraDebuffs, targetAuraBuffs }) do
         if container then
             pcall(container.ClearAllPoints, container)
@@ -1890,10 +1890,7 @@ function M:RegisterEvents()
     EventBus:Register("PLAYER_ENTERING_WORLD", function() M:UpdateAll() end)
     EventBus:Register("GROUP_ROSTER_UPDATE", function() M:UpdateAll() end)
     EventBus:Register("PLAYER_REGEN_ENABLED", function()
-        -- 战斗中换主题时挂起的容器重建（战斗中建容器会被拦）。
-        if M.__auraRebuildPending then RebuildTargetAuras() end
-        -- 战斗中 SetEnabled 被挡住的安全单位按钮显隐，脱战补上。
-        M:FlushPendingEnabled()
+        -- 战斗中被拦的容器重建 / 开关排队都由 ns:AfterCombat 在更早的统一排空里做掉。
         M:UpdateAll()
     end)
     -- Death / resurrection: the bars grey out and come back.
@@ -1933,8 +1930,6 @@ end
 
 --- 安全单位按钮的显隐：走 visibility 驱动（战斗中不能由我们 SetShown ——
 --- 日志里 MonetUITargetFrame:Hide()/Show() 攒了两百多次就是这条路径）。
-local pendingEnabled
-
 local function ApplyEnabled(enabled)
     for _, frame in pairs(frames) do
         ApplyVisibility(frame, enabled)
@@ -1949,24 +1944,12 @@ function M:SetEnabled(enabled)
     -- 模块整个关掉：暴雪的施法条还回去（我们自己那条也没了）。
     self:HideBlizzardCastBars(not enabled)
 
-    if InCombatLockdown() then
-        pendingEnabled = enabled
-        return
-    end
-    ApplyEnabled(enabled)
-
-    -- 重新开启时 UpdateAll -> RefreshUnit -> EnsureTargetAuras 会把容器显示回来。
-    if enabled then
-        self:UpdateAll()
-    end
-end
-
---- 脱战补一次被战斗挡住的显示/隐藏（RegisterEvents 的 PLAYER_REGEN_ENABLED 会调用）。
-function M:FlushPendingEnabled()
-    if pendingEnabled == nil then return end
-    local enabled = pendingEnabled
-    pendingEnabled = nil
-    ApplyEnabled(enabled)
+    -- 显隐本身是受保护操作：不在战斗当场做，在战斗排队到脱战（ns:AfterCombat）。
+    ns:AfterCombat("unitframes-enabled", function()
+        ApplyEnabled(enabled)
+        -- 重新开启时 UpdateAll -> RefreshUnit -> EnsureTargetAuras 会把容器显示回来。
+        if enabled then self:UpdateAll() end
+    end)
 end
 
 ns:Register("UnitFrames", M)
