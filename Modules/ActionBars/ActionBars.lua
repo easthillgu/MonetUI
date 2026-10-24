@@ -224,28 +224,6 @@ local function HiddenParent()
     return hiddenParent
 end
 
---- 退出暴雪的"托管框体"系统（ManagedFrameSystem）：只把条目从 showingFrames 里摘掉。
---- **绝不写 frame.ignoreFramePositionManager。** 那个字段一写，这个受保护的条就成了
---- "被 MonetUI 写过的框"（issecurevariable 实测为 false），它的 OnEvent 脚本随之以我们的名义
---- 执行 —— 而 OnEvent 里（PLAYER_REGEN_ENABLED/DISABLED → UpdateVisibility）会调用暴雪的
---- 安全函数，于是整条链全被拒，连**别人的**干净框也一起遭殃：
----   MultiBar*/PetActionBar:OnEvent → UpdateVisibility → SetShownBase        BLOCKED
----     → EditModeManagerFrame:UpdateActionBarLayout → SetPointBase(MainActionBar) BLOCKED
---- 表现就是"一进战斗就弹：插件导致界面行为失效"。
---- 不走 container:RemoveManagedFrame()：它末尾会 container:Layout()，从我们的脏栈里去挪别的
---- 受保护框，一样被拒。直接把条目从表里摘掉即可。
-local function LeaveManagedFrameSystem(frame)
-    if not frame then return false end
-
-    local getContainer = frame.GetManagedFrameContainer
-    if type(getContainer) == "function" then
-        local ok, container = pcall(getContainer, frame)
-        if ok and type(container) == "table" and type(container.showingFrames) == "table" then
-            container.showingFrames[frame] = nil
-        end
-    end
-    return true
-end
 
 --- 让暴雪自己把按钮藏起来：不碰受保护的 Hide/SetShown，只写 statehidden。
 local function QuietHideButton(button)
@@ -396,58 +374,40 @@ local function Park(name)
     Mark(frame, "alpha", frame:GetAlpha())
     Mark(frame, "parent", frame:GetParent())
 
-    if name == "MainActionBar" then
-        -- **1 号条不能换父。** 每次进/出战斗、宠物栏显隐、变形/载具切页，暴雪都会走
-        --   EditModeActionBarMixin:UpdateVisibility (ActionBar.lua:334)
-        --     → EditModeManagerFrame:UpdateActionBarLayout (EditModeManager.lua:574)
-        --       → UpdateBottomActionBarPositions (630)
-        -- 对"显示中且处于默认位置"的底部条做 ClearAllPoints + SetPoint（649/661/662）。
-        -- 换过父的框会把这些**安全调用**全部拒掉，实机堆栈逐帧对得上：
-        --   EditModeSystemTemplates.lua:154 ClearAllPoints → ClearAllPointsBase
-        --   EditModeSystemTemplates.lua:148 SetPoint       → SetPointBase
-        -- 表现就是"一进战斗就弹：插件导致界面行为失效"。所以 1 号条留在 UIParent 下面：
-        -- 位置随便它排（我们 alpha 0 看不见），只要**不吃鼠标**就行。
-        -- 鼠标必须自己关：EnableMouse(false) 只关父框，翻页箭头（frameLevel 100）照样
-        -- 可点，所以 KillPagerMouse 也要跟一遍。
-        pcall(frame.SetAlpha, frame, 0)
-        pcall(frame.EnableMouse, frame, false)
-        if frame.EnableMouseClicks then pcall(frame.EnableMouseClicks, frame, false) end
-        if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, false) end
-        KillPagerMouse(frame)
+    -- **一律留在暴雪的父链上，只做"看不见 + 不吃鼠标"。**
+    --
+    -- 踩过的坑（都有实机证据，别再试）：
+    --   * **SetParent 到常隐框体**：被插件换过父的受保护框，之后暴雪自己的位置计算
+    --     （EditModeManagerFrame:UpdateBottomActionBarPositions → ClearAllPoints/SetPoint，
+    --      EditModeSystemTemplates.lua:148/154）全被判 ADDON_ACTION_BLOCKED。
+    --     这个拒绝会**在整条调用链上传播**：一条被写过字段的条跑 OnEvent
+    --     （PLAYER_REGEN_* → UpdateVisibility），链里对**别的**条的安全调用也一起被拒，
+    --     于是"一进战斗就弹：插件导致界面行为失效"。
+    --     实测对照：MainActionBar 不换父那一版 → issecurevariable 全 clean；
+    --     换过父的 7 条 → flyoutDirection / popupDirection 被写成脏值，越传越广。
+    --   * Hide()/SetShown()：暴雪下一拍 SetShownBase 把它盖回来。
+    --   * 往这些框上写任何字段：都算污染（见 Core 里 ns:Mark 的注释）。
+    --
+    -- 所以只剩这一套（原本只用在 MainActionBar 上）：alpha 0 + 关鼠标（含翻页箭头）
+    -- + 每次 Show 后把 alpha 压回去。位置让暴雪随便排 —— 反正看不见，
+    -- 换来的是它的安全重排不再被拒。
+    pcall(frame.SetAlpha, frame, 0)
+    pcall(frame.EnableMouse, frame, false)
+    if frame.EnableMouseClicks then pcall(frame.EnableMouseClicks, frame, false) end
+    if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, false) end
+    KillPagerMouse(frame)
 
-        -- 变形 / 载具 / 翻页 / 骑乘时暴雪会重新 Show 它：Show 本身是安全的（父链没被我们
-        -- 改过），只要把 alpha 压回去。SetAlpha 不受保护、战斗中也能写，不会把框弄脏。
-        if type(hooksecurefunc) == "function" and not Marked(frame, "showHook") then
-            Mark(frame, "showHook", true)
-            pcall(hooksecurefunc, frame, "Show", function(self)
-                pcall(self.SetAlpha, self, 0)
-                KillPagerMouse(self)
-            end)
-        end
-        if frame.Selection and frame.Selection.SetAlpha then
-            pcall(frame.Selection.SetAlpha, frame.Selection, 0)
-        end
-
-        if type(frame.actionButtons) == "table" then
-            for _, button in pairs(frame.actionButtons) do QuietHideButton(button) end
-        end
-        return true
+    -- 变形 / 载具 / 翻页 / 骑乘时暴雪会重新 Show 它：Show 本身是安全的（父链没被改过），
+    -- 只要把 alpha 压回去。SetAlpha 不受保护、战斗中也能写。
+    if type(hooksecurefunc) == "function" and not Marked(frame, "showHook") then
+        Mark(frame, "showHook", true)
+        pcall(hooksecurefunc, frame, "Show", function(self)
+            pcall(self.SetAlpha, self, 0)
+            KillPagerMouse(self)
+        end)
     end
-
-    -- 其余条：换父到常隐框体（它们不在 UpdateBottomActionBarPositions 的"显示中"集合里，
-    -- 且被藏着时 IsShown() 为假，安全重排不会碰它们）。
-    pcall(frame.SetParent, frame, HiddenParent())
-    LeaveManagedFrameSystem(frame)
-
-    -- 事件也摘掉：暴雪在这些条自己的 OnEvent 里做 PLAYER_REGEN_* → UpdateVisibility → 重排，
-    -- 而这些脚本正是"被我们的字段污染过的框"跑起来的。不摘的话，进战斗时它会拖着整条链
-    -- （包括对别的条的安全调用）一起被拒。载具条/接管条要保留事件，暴雪靠它切显隐。
-    if name ~= "OverrideActionBar" and name ~= "PossessActionBar" then
-        pcall(frame.UnregisterAllEvents, frame)
-    end
-
-    if name == "MainMenuBar" then
-        KillPagerMouse(frame)
+    if frame.Selection and frame.Selection.SetAlpha then
+        pcall(frame.Selection.SetAlpha, frame.Selection, 0)
     end
 
     if type(frame.actionButtons) == "table" then
@@ -1736,7 +1696,6 @@ function M:RegisterEvents()
     end)
 
     EventBus:Register("PLAYER_REGEN_ENABLED", function()
-        M:ReparkBlizzard()
         if bindingsDirty then ReassignBindings() end
         if adoptedDirty then AdoptAll() end
         if refreshDirty then
@@ -1868,21 +1827,6 @@ function M:RestoreBlizzard()
     end
 end
 
---- 编辑模式偶尔会把我们换过父的条重新塞回它的托管容器（ApplySystemAnchor → AddManagedFrame），
---- 那些条就会重新出现在屏幕上并吃掉鼠标。脱战后再确认一遍父级，不对就搬回去
---- （战斗中 SetParent 是受保护操作，留给下一次 PLAYER_REGEN_ENABLED）。
-function M:ReparkBlizzard()
-    if InCombatLockdown() then return end
-    local hidden = HiddenParent()
-    for _, name in ipairs(ACTION_BAR_FRAMES) do
-        local frame = _G[name]
-        if frame and name ~= "MainActionBar" and Marked(frame, "parked") then
-            if frame:GetParent() ~= hidden then
-                pcall(frame.SetParent, frame, hidden)
-            end
-        end
-    end
-end
 
 local function ReportFailure()
     if announcedFailure then return end
