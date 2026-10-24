@@ -609,24 +609,16 @@ local function HideBlizzardPlate(base, plate)
 end
 
 --- Hand the plate back as found (module off or unit filtered out): box shown, aura list returned.
---- 生产者禁令（实机取证见 taint.log 01:15:42）：ApplyFrameOptions 内部会跑
---- CompactUnitFrame_SetUpFrame → 逐项更新（SetMinMaxValues / UpdateHealPrediction...）。
---- 秘值还活着的时候从我们的上下文直呼它，接下来暴雪那条 UI 代码全被记成 "tainted by
---- MonetUI"，一个秘值比较被拦就把 compact 单位帧的整条生产链标脏，之后暴雪自己的
---- 事件处理逐条爆（CompactUnitFrame:1211 / CastingBarFrame:331 / NamePlateAuras:247）。
---- 所以受限状态（战斗中，或脱战瞬间秘值尚未死亡的窗口）里只把这一步排进 ns:AfterCombat
---- 队列；SetParent / SetAlpha / Show 是普通受保护调用，被拒也只进 BLOCKED 日志，当场还。
+--- **绝不从我们的上下文触碰 ApplyFrameOptions**：它是暴雪的单位帧生产者
+--- （ApplyFrameOptions → SetUpFrame → UpdateMaxHealth / UpdateHealPrediction / 写状态条），
+--- 调用它时环境里若仍有秘值，一次 secret-compare 被拦就把整条 CUF 生产链标脏，之后
+--- 暴雪自己的事件处理逐条爆（taint.log 取证 01:15:42 / 01:21:49 / 01:24:27 / 01:29:14
+--- —— 四个版本三次复现：直接调、InCombat 门、引擎事件旗帜 + 全局探针，全部肯别过）。
+--- 秘值存活窗口探针测不全（player 明文、姓名板机密同刻并存；flags 关掉仍能读到机密），
+--- 所以不再"挑时机"，干脆不打：还原外观只需要 alpha / Show（普通受保护项，被拒只进
+--- BLOCKED 日志），游戏自己会在下一次 SetUnit / 更新时跑 ApplyFrameOptions 补齐。
 --- @param base Blizzard's nameplate base frame
 --- @param plate our plate frame that borrowed `base`'s unit frame (may be nil)
-local function SecretsLive()
-    if InCombatLockdown and InCombatLockdown() then return true end
-    if ns.Restricted then return true end   -- Core 按引擎事件记账的禁限旗帜（权威真值源）
-    -- 兜底探针也用**全局**级的查询：单位级探测不可信（实机取证：同一时刻 player 的
-    -- 血量是明文、姓名板单位却已在返回机密）。ShouldAurasBeSecret 不吃单位。
-    local ok, live = pcall(Secrets.AurasSecret)
-    return ok and live and true or false
-end
-
 local function RestoreBlizzardPlate(base, plate)
     local uf = BlizzardUnitFrame(base)
     if uf then
@@ -634,23 +626,6 @@ local function RestoreBlizzardPlate(base, plate)
         if auras and Marked(auras, "plate") then
             Mark(auras, "plate", nil)
             if type(auras.SetParent) == "function" then pcall(auras.SetParent, auras, uf) end
-        end
-        -- 真正会重排暴雪那套锚点的是 Base 的 ApplyFrameOptions（它自己带 NamePlateSetupOptions）；
-        -- uf:ApplyFrameOptions() 缺这两个参数，进函数第一行就抛，以前的 pcall 把这条静默吞了。
-        if base and type(base.ApplyFrameOptions) == "function" then
-            if SecretsLive() then
-                -- 受限期不直呼生产者："regen" 模式必等下一次脱战排空再跑。排空时
-                -- 秘值可能仍存活（PLAYER_REGEN_ENABLED 先于禁限解除），所以 fn 里
-                -- 再查一次：还活着就返回 false 留队，下一次排空重试直至成功。
-                ns:AfterCombat("nameplates-apply-frame-options", function()
-                    if SecretsLive() then return false end
-                    if type(base) == "table" and type(base.ApplyFrameOptions) == "function" then
-                        pcall(base.ApplyFrameOptions, base)
-                    end
-                end, "regen")
-            else
-                pcall(base.ApplyFrameOptions, base)   -- the game re-anchors its own list
-            end
         end
         if uf.SetAlpha then pcall(uf.SetAlpha, uf, 1) end
         pcall(uf.Show, uf)
