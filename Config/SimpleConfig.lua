@@ -24,7 +24,7 @@ local setOffset        -- Build 里定义，Show/Toggle 打开面板时归零
 local MODULE_ORDER = {
     "UnitFrames", "Cooldown", "BuffFrame",
     "Minimap", "BagFrame", "Bags", "QuestTracker", "ActionBars", "Nameplates", "Skins",
-    "InfoBar", "Tooltip",
+    "InfoBar", "Tooltip", "Cursor",
 }
 
 local MODULE_LABEL = {
@@ -40,6 +40,7 @@ local MODULE_LABEL = {
     Skins        = "界面美化 (Skins)",
     InfoBar      = "信息栏 (InfoBar)",
     Tooltip      = "鼠标提示 (Tooltip)",
+    Cursor       = "光标拖尾 (Cursor)",
 }
 
 local function MakeCheckbox(parent, label, yOffset, getter, setter)
@@ -1142,6 +1143,27 @@ function SimpleConfig:Build()
         tipHint:SetJustifyH("LEFT")
         tipHint:SetText("关＝停在暴雪默认位置（右下角锚点，编辑模式可移动）。边框与底色在上方「界面美化 → 系统 → 鼠标提示边框」。")
         y = y - 44
+
+        -- 光标装饰（Modules/Cursor）：纯视觉，跟着主题色走；用模块开关整体关掉。
+        local cursor = ns:GetModule("Cursor")
+        if cursor then
+            MakeCheckbox(content, "光标拖尾（快速移动时拖出一条主题色笔迹）", y,
+                function() return cursor:GetSetting("trail") end,
+                function(value)
+                    cursor:Settings().trail = value and true or false
+                    cursor:Apply()
+                end)
+            y = y - 26
+
+            MakeCheckbox(content, "光标速度星芒（快速甩动时出现十字光）", y,
+                function() return cursor:GetSetting("glow") end,
+                function(value)
+                    cursor:Settings().glow = value and true or false
+                    cursor:Apply()
+                end)
+            y = y - 26
+        end
+
         sec.bodyHeight = -y + 4
     end
 

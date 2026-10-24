@@ -229,6 +229,11 @@ local DEFAULTS = {
     tooltip = {
         follow = true,
     },
+    -- 光标拖尾 / 速度星芒 (Modules/Cursor)：纯装饰，拖尾跟主题边框色，星芒用高光色。
+    cursor = {
+        trail = true,
+        glow  = true,
+    },
 }
 ns.DEFAULTS = DEFAULTS
 

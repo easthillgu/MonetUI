@@ -46,6 +46,7 @@ Modules\QuestTracker\QuestTracker.lua
 Modules\ActionBars\ActionBars.lua
 Modules\Nameplates\Nameplates.lua
 Modules\Tooltip.lua
+Modules\Cursor.lua
 
 # InfoBar (screen-edge strip with data blocks + the experience line on its bottom hairline)
 Modules\InfoBar\InfoBar.lua
