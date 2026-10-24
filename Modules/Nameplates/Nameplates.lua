@@ -581,18 +581,12 @@ local function HideBlizzardPlate(base, plate)
         AnchorDebuffs(auras, plate)
     end
 
-    -- Blizzard re-runs this on its own relayout; follow it or the borrowed aura list goes back
-    -- under the hidden frame.  The "already hooked" flag lives in `marks`, not as a field on
-    -- Blizzard's frame: writing a field there is what taints it (see the note on `marks`).
-    if type(hooksecurefunc) == "function" and type(uf.ApplyFrameOptions) == "function"
-        and not Marked(uf, "auraHook") then
-        Mark(uf, "auraHook", true)
-        pcall(hooksecurefunc, uf, "ApplyFrameOptions", function(self)
-            local a = rawget(self, "AurasFrame")
-            local owner = a and Marked(a, "plate")
-            if owner then AnchorDebuffs(a, owner) end
-        end)
-    end
+    -- Blizzard 自己的重排会再往 DebuffListFrame 上加锚点；以前这里挂
+    -- hooksecurefunc(uf, "ApplyFrameOptions") 去跟。**不能挂**：secure hook 插在暴雪的调用链
+    -- 中间，我们的代码一跑，同一条链后面暴雪的安全调用就会整片被拒（实机就是这条链上的
+    -- `attempt to call a nil value` / `SetPoint ... anchor family`）。
+    -- 改成在 UpdatePlate（每个姓名板事件都会走）里重新 AnchorDebuffs —— 独立执行，
+    -- 不夹在暴雪的链里。
 
     plate.blizzardUF = uf
     plate.blizzardHidden = true
@@ -868,6 +862,13 @@ local function UpdatePlate(plate)
         HideBlizzardPlate(plate.base, plate)
     else
         KeepBlizzardHidden(plate)
+    end
+
+    -- 暴雪重排过它的光环列表时（每次 ApplyFrameOptions），这里把我们的锚点重新压一遍。
+    -- 独立于暴雪的调用链，所以不会污染它（以前是挂 ApplyFrameOptions 后钩，那会把后面
+    -- 的安全调用整片拖进"被 MonetUI 污染"的执行里）。
+    if plate.blizzardAuras then
+        AnchorDebuffs(plate.blizzardAuras, plate)
     end
 
     if plate.layoutDirty then

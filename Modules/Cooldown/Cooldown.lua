@@ -20,17 +20,15 @@ local M = { name = "Cooldown" }
 
 local buttons = {}
 
--- Bars that exist on a standard action bar layout.
-local ACTION_BUTTON_GROUPS = {
-    { prefix = "ActionButton",              count = 12 },
-    { prefix = "MultiBarBottomLeftButton",  count = 12 },
-    { prefix = "MultiBarBottomRightButton", count = 12 },
-    { prefix = "MultiBarRightButton",       count = 12 },
-    { prefix = "MultiBarLeftButton",        count = 12 },
-    { prefix = "MultiBar5Button",           count = 12 },
-    { prefix = "MultiBar6Button",           count = 12 },
-    { prefix = "MultiBar7Button",           count = 12 },
-}
+-- **只处理我们自己的按钮。** 暴雪那 8 条动作条是隐藏的（alpha 0），给它们的按钮/冷却框
+-- 做任何事都看不见，却会带来污染：StyleCooldownText / SetHideCountdownNumbers /
+-- 改写 OnUpdate 全都落在**暴雪的**冷却框上（taint.log 里宠物条成片的
+-- PetActionButton*:SetShown 就是在我们碰过冷却框之后被拒的）。
+-- 我们自己的按钮在 ActionBars 里通过 cooldowns:StyleCooldown(cd, ...) 注册，不依赖这张表。
+local ACTION_BUTTON_GROUPS = {}
+for i = 1, 8 do
+    ACTION_BUTTON_GROUPS[#ACTION_BUTTON_GROUPS + 1] = { prefix = "MonetUIBar" .. i .. "Button", count = 12 }
+end
 
 -- Blizzard owns the swipe and cannot be re-formatted, so we draw our own font string over it -- but only while the numbers are readable.
 -- Two clocks: a SetCooldown hook captures expiry at start (secret pairs fall back to Blizzard's numbers); a light poll re-adopts running cooldowns and picks the display back up when a restriction lifts.
