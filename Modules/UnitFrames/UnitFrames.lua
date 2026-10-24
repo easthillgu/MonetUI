@@ -1807,6 +1807,17 @@ function M:UpdateAll()
     end
 end
 
+--- 颜色类设置改了要立刻看得到：重涂血条 / 损失部分 / 能量条 / 分隔线，再刷一遍数值。
+--- （颜色是在 CreateUnitFrame 里一次性涂的，只跑 UpdateAll 不会重涂 —— 之前改颜色下拉
+--- 必须 /reload 才生效，就是这里缺了这一层。）
+function M:Apply()
+    for _, frame in pairs(frames) do
+        UpdateHealthColor(frame)
+        UpdatePowerColor(frame)
+    end
+    self:UpdateAll()
+end
+
 local UNIT_EVENTS = {
     UNIT_HEALTH               = "health",
     UNIT_MAXHEALTH            = "health",

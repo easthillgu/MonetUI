@@ -197,7 +197,13 @@ end
 
 local function RefreshUnitFrames()
     local unitFrames = ns:GetModule("UnitFrames")
-    if unitFrames and unitFrames.UpdateAll then unitFrames:UpdateAll() end
+    if not unitFrames then return end
+    -- Apply 会重涂颜色（血条 / 损失部分 / 能量条）再刷新数值；只有它没有时才退回 UpdateAll。
+    if unitFrames.Apply then
+        unitFrames:Apply()
+    elseif unitFrames.UpdateAll then
+        unitFrames:UpdateAll()
+    end
 end
 
 --- Action-bar changes go through Apply: it re-parks Blizzard's chrome, rebuilds the visibility drivers and re-lays the bars out.
