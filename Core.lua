@@ -404,6 +404,8 @@ end
 --     无论如何都等下一次脱战再执行，不当场跑。给"排空函数在自己执行中又往队列
 --     加东西"的场景用：当场跑会立刻重入，等下一轮才是正确的一次性重试
 --     （Minimap 的套用队列就是这种：Skin 在执行中失败会自己再排一次）。
+--     队里的 fn 返回 false 表示"这次还做不了"（条件未满足，如秘值仍存活）：
+--     留队等下一次排空重试，不计失败、不提示。
 
 local afterCombatPending = {}   -- key -> fn
 local afterCombatOrder   = {}   -- 排队顺序（pairs 无序，这里保插入序）
@@ -411,12 +413,16 @@ local afterCombatWarned  = {}   -- key -> true（该 key 的失败提示打过�
 local afterCombatHooked  = false
 
 local function RunAfterCombat(key, fn)
-    local ok, err = pcall(fn)
+    local ok, res = pcall(fn)
+    if ok and res == false then
+        -- fn 自己声明"这次还做不了"（如秘值仍存活）：留队重试，且不算失败 —— 不提示。
+        return false
+    end
     if ok then
         afterCombatWarned[key] = nil   -- 成跑一次就清提示位，之后再失败重新提示
     elseif not afterCombatWarned[key] then
         afterCombatWarned[key] = true
-        ns:Print("AfterCombat '" .. key .. "': " .. tostring(err))
+        ns:Print("AfterCombat '" .. key .. "': " .. tostring(res))
     end
     return ok
 end

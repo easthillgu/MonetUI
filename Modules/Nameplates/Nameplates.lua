@@ -636,9 +636,11 @@ local function RestoreBlizzardPlate(base, plate)
         -- uf:ApplyFrameOptions() 缺这两个参数，进函数第一行就抛，以前的 pcall 把这条静默吞了。
         if base and type(base.ApplyFrameOptions) == "function" then
             if SecretsLive() then
-                -- 受限期不直呼生产者："regen" 模式必等下一次脱战排空再跑，排空时秘值
-                -- 已死亡，调用无污染。闭包里每次都重新做类型检查：牌可能已被回收。
+                -- 受限期不直呼生产者："regen" 模式必等下一次脱战排空再跑。排空时
+                -- 秘值可能仍存活（PLAYER_REGEN_ENABLED 先于禁限解除），所以 fn 里
+                -- 再查一次：还活着就返回 false 留队，下一次排空重试直至成功。
                 ns:AfterCombat("nameplates-apply-frame-options", function()
+                    if SecretsLive() then return false end
                     if type(base) == "table" and type(base.ApplyFrameOptions) == "function" then
                         pcall(base.ApplyFrameOptions, base)
                     end
