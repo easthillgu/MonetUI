@@ -105,6 +105,8 @@ local function MakeDropdown(parent, y, caption, items, getter, setter)
 
     local button = Widget:CreateFrame(nil, parent, 190, 20)
     Widget:Theme(button, { thickness = 1, bgAlpha = 0.9 })
+    -- 织纹底（ADD 混合，和动作条按钮一致）：垫在 Theme 的深色底板之上、文字之下。
+    Widget:ButtonMaterial(button, { alpha = 0, weaveAlpha = 0.25 })
     button:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -24, y)
     button:EnableMouse(true)
 
@@ -145,6 +147,8 @@ local function MakeDropdown(parent, y, caption, items, getter, setter)
         local row = CreateFrame("Button", nil, list)
         row:SetPoint("TOPLEFT", list, "TOPLEFT", 2, -2 - (index - 1) * 20)
         row:SetSize(186, 20)
+        -- 行的底色比按钮更淡（列表本身已有深色底），只留一层织纹。
+        Widget:ButtonMaterial(row, { alpha = 0, weaveAlpha = 0.15 })
 
         local hover = row:CreateTexture(nil, "HIGHLIGHT")
         hover:SetAllPoints()
@@ -841,6 +845,35 @@ function SimpleConfig:Build()
     }
     MakeDropdown(content, y, "团队框宽度", RAID_WIDTHS,
         GroupGetter("raid", "width", 72), GroupSetter("raid", "width"))
+    y = y - 28
+
+    local HEALTH_TEXT_MODES = {
+        { value = "none", text = "不显示" },
+        { value = "percent", text = "百分比" },
+        { value = "value", text = "当前值" },
+    }
+    MakeDropdown(content, y, "小队血量文字", HEALTH_TEXT_MODES,
+        GroupGetter("party", "healthText", "none"), GroupSetter("party", "healthText"))
+    y = y - 28
+
+    MakeDropdown(content, y, "团队血量文字", HEALTH_TEXT_MODES,
+        GroupGetter("raid", "healthText", "none"), GroupSetter("raid", "healthText"))
+    y = y - 26
+
+    MakeCheckbox(content, "血条上显示治疗预估（主题色的浅色延伸段）", y,
+        function() return ns:DB().groupFrames.showIncomingHeals ~= false end,
+        function(value)
+            ns:DB().groupFrames.showIncomingHeals = value
+            RefreshGroups()
+        end)
+    y = y - 26
+
+    MakeCheckbox(content, "血条上显示吸收盾（白色叠层）", y,
+        function() return ns:DB().groupFrames.showAbsorbs ~= false end,
+        function(value)
+            ns:DB().groupFrames.showAbsorbs = value
+            RefreshGroups()
+        end)
     y = y - 30
 
     MakeCheckbox(content, "锁定所有可移动框（网格吸附与拖动）", y,
@@ -1300,6 +1333,8 @@ function SimpleConfig:Build()
     reload:SetSize(120, 24)
     reload:SetPoint("BOTTOM", panel, "BOTTOM", 0, 16)
     reload:SetText("重载界面")
+    -- 和下拉按钮同款织纹底，让面板里所有"按钮"视觉统一。
+    Widget:ButtonMaterial(reload, { alpha = 0, weaveAlpha = 0.25 })
     reload:SetScript("OnClick", function()
         if _G.ReloadUI then _G.ReloadUI() end
     end)

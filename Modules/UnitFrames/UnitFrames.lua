@@ -173,18 +173,37 @@ local function FrameChrome()
     return b, 0  -- split removed: using 1px separator line instead
 end
 
+--- 把颜色向白提亮（factor>1）。对每个分量独立 pcall：秘密值乘法会抛错，失败就原样返回，
+--- 保证受限环境下能量/血条仍能上色、只是不提亮。
+local function Brighten(r, g, b, factor)
+    if factor <= 1 then return r, g, b end
+    local function bump(c)
+        local ok, v = pcall(function() return math.min(c * factor, 1) end)
+        return ok and v or c
+    end
+    return bump(r), bump(g), bump(b)
+end
+
 --- The "current" part of a health bar: "highlight" (player, pet), "class" (target,
 --- focus) or "health".  UnitSelectionColor is never secret, so no identity guard.
 local function FillColor(unit)
     local style = Setting(unit, "fillColor")
     if style == "class" then
         local ok, r, g, b = pcall(UnitSelectionColor, unit)
-        if ok and r then return r, g, b, 1 end
+        if ok and r then
+            -- target / targettarget 比 player 的暗 highlight 稍亮，层次感更清楚。
+            if unit == "target" or unit == "targettarget" then
+                r, g, b = Brighten(r, g, b, 1.15)
+            end
+            return r, g, b, 1
+        end
     elseif style == "health" then
         return Color:GetHealth()
     end
+    -- highlight（player / pet）是 Monet 招牌奶油色，但原色 {0.95,0.93,0.84} 太接近白，
+    -- 铺满整条血条会发灰发白、看不出"血量"。压暗 20% 变成有分量的暖奶油，仍读得出来是 highlight。
     local r, g, b = Color:GetHighlight()
-    return r, g, b, 1
+    return r * 0.8, g * 0.8, b * 0.8, 1
 end
 
 --- The *missing* part of a health bar: pure background, needs no unit value.
@@ -282,9 +301,13 @@ local POWER_COLOR = {
 
 local function UpdatePowerColor(frame)
     local unit = frame.unit
+    -- player / target / targettarget 的能量条提亮，和压暗后的血条拉开层次。
+    local brighten = (unit == "player" or unit == "target" or unit == "targettarget") and 1.25 or 1
 
     if Setting(unit, "powerColor") == "theme" then
-        frame.power:SetStatusBarColor(Color:GetResource())
+        local r, g, b = Color:GetResource()
+        r, g, b = Brighten(r, g, b, brighten)
+        frame.power:SetStatusBarColor(r, g, b)
         return
     end
 
@@ -293,17 +316,21 @@ local function UpdatePowerColor(frame)
     local tuned = (type(token) == "string" and not Secrets.IsSecret(token))
                   and POWER_COLOR[token] or nil
     if tuned then
-        frame.power:SetStatusBarColor(tuned[1], tuned[2], tuned[3])
+        local tr, tg, tb = Brighten(tuned[1], tuned[2], tuned[3], brighten)
+        frame.power:SetStatusBarColor(tr, tg, tb)
         return
     end
 
     local nr, ng, nb = Secrets.Number(r), Secrets.Number(g), Secrets.Number(b)
     if nr and ng and nb and (nr + ng + nb) > 0 then
+        nr, ng, nb = Brighten(nr, ng, nb, brighten)
         frame.power:SetStatusBarColor(nr, ng, nb)
         return
     end
 
-    frame.power:SetStatusBarColor(Color:GetResource())
+    local cr, cg, cb = Color:GetResource()
+    cr, cg, cb = Brighten(cr, cg, cb, brighten)
+    frame.power:SetStatusBarColor(cr, cg, cb)
 end
 
 -- Replacement for PlayerFrame.classPowerBar / powerBarAlt (children of the frame we hide): one

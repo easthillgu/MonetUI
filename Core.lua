@@ -104,15 +104,19 @@ local DEFAULTS = {
     -- hideBlizzard 只在我们真的把头建出来之后才生效：模板缺失时暴雪的框一定留着，不能让人没框可用。
     groupFrames = {
         hideBlizzard = true,
+        showIncomingHeals = true,
+        showAbsorbs = true,
         party = {
             enabled = true,
             width = 110, health = 18, power = 4, spacing = 2,
             showPlayer = true,
+            healthText = "none",
             point = "CENTER", relativeTo = "UIParent", relativePoint = "CENTER", x = -330, y = 40,
         },
         raid = {
             enabled = true,
             width = 72, health = 24, power = 3, spacing = 2, groupGap = 8,
+            healthText = "none",
             point = "CENTER", relativeTo = "UIParent", relativePoint = "CENTER", x = 300, y = 0,
         },
     },

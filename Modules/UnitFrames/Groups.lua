@@ -126,12 +126,15 @@ local SELECT_BORDER = 2   -- 物理像素：1px 和按钮自己的边框糊在�
 --- 选中边框的四条边。常驻（建一次），靠顶点色 alpha 显隐：
 -- 受保护的按钮在战斗里不能 SetShown / SetAlpha，但改它里面贴图的顶点色随时都行，
 -- 所以"谁被选中"这件事在战斗里也能立刻反映，不用等脱战。
+-- 建在覆盖层上（StyleButton 保证 overlay 先于它存在）：作为 button 的 region 会被
+-- 血条子框架盖住一半，选中这种即时反馈不能发灰。
 local function EnsureSelectBorder(button)
     if button.selectEdges then return button.selectEdges end
 
+    local host = button.overlay or button
     local edges = {}
     for i = 1, 4 do
-        local tex = button:CreateTexture(nil, "OVERLAY", nil, 7)
+        local tex = host:CreateTexture(nil, "OVERLAY", nil, 7)
         tex:SetTexture(Media.texture.blank)
         edges[i] = tex
     end
@@ -201,6 +204,48 @@ local function StyleButton(button, cfg, small)
     button.health:SetPoint("TOPLEFT", button, "TOPLEFT", BORDER, -BORDER)
     Widget:BarWeave(button.health, { height = healthHeight })
 
+    -- 治疗预估 / 吸收盾：两条 StatusBar 都从血条填充的右缘往外叠，超出部分由血条裁掉
+    --（Pawprint modules/Frames.lua:811-822 的手法）。值全程不做算术，秘密值直接进
+    -- SetValue；吸收盾叠在治疗预估的填充右缘之后，预估为 0 时自然贴着血条填充。
+    -- 两条都常驻、用值 0 表达"没有"——受保护按钮的子框我们不动显隐，战斗里也安全。
+    if not button.incoming then
+        local fill = button.health:GetStatusBarTexture()
+        local incoming = CreateFrame("StatusBar", nil, button.health)
+        incoming:SetPoint("TOPLEFT", fill, "TOPRIGHT")
+        incoming:SetPoint("BOTTOMLEFT", fill, "BOTTOMRIGHT")
+        incoming:SetStatusBarTexture(Media:Texture("barfill"))
+        incoming:SetMinMaxValues(0, 1)
+        incoming:SetValue(0)
+        button.incoming = incoming
+
+        local absorb = CreateFrame("StatusBar", nil, button.health)
+        absorb:SetPoint("TOPLEFT", incoming:GetStatusBarTexture(), "TOPRIGHT")
+        absorb:SetPoint("BOTTOMLEFT", incoming:GetStatusBarTexture(), "BOTTOMRIGHT")
+        absorb:SetStatusBarTexture(Media:Texture("barfill"))
+        absorb:SetMinMaxValues(0, 1)
+        absorb:SetValue(0)
+        button.absorb = absorb
+
+        button.health:SetClipsChildren(true)
+    end
+    button.incoming:SetWidth(inner)
+    button.absorb:SetWidth(inner)
+    -- 主题色（血条填充同源）的低透明度延伸 = 治疗预估；吸收盾用白叠层区分
+    local ir, ig, ib = Color:GetPrimary()
+    button.incoming:SetStatusBarColor(ir, ig, ib, 0.45)
+    button.absorb:SetStatusBarColor(1, 1, 1, 0.3)
+
+    -- 文字 / 图标 / 选中边框的承载层。WoW 的渲染规则是"子框架盖在父级 region 之上"
+    --（本仓 UnitFrames.lua:1068-1071 的冷却数字就踩过这个），所以压在血条上面的东西
+    -- 不能是 button 的 region —— 会被血条（button 的子框架）整个糊住。收进一个专用
+    -- 覆盖层：层级高于血条、治疗预估、吸收盾，内容随它们一起建。
+    if not button.overlay then
+        local overlay = CreateFrame("Frame", nil, button)
+        overlay:SetAllPoints(button)
+        overlay:SetFrameLevel(button.health:GetFrameLevel() + 3)
+        button.overlay = overlay
+    end
+
     if powerHeight > 0 then
         if not button.power then button.power = Widget:Bar(button, inner, powerHeight) end
         button.power:SetSize(inner, powerHeight)
@@ -212,7 +257,7 @@ local function StyleButton(button, cfg, small)
     end
 
     if not button.name then
-        button.name = Widget:Font(button, small and 9 or 10, "pixel", { r = 1, g = 1, b = 1 }, "LEFT")
+        button.name = Widget:Font(button.overlay, small and 9 or 10, "pixel", { r = 1, g = 1, b = 1 }, "LEFT")
         -- 名字压在血条上：小框放不下一行独立的名字，加硬阴影保证亮色血条上也读得清
         if button.name.SetShadowColor then
             button.name:SetShadowColor(0, 0, 0, 1)
@@ -221,14 +266,30 @@ local function StyleButton(button, cfg, small)
         button.name:SetWordWrap(false)
     end
     Widget:SetFont(button.name, small and 9 or 10, "pixel")
-    button.name:SetSize(inner - 6 - (small and 10 or 12), small and 11 or 13)
+    -- 血量文字开着时名字给右侧让位（百分比 4 字符 / 当前值带千分位，32 够放）
+    local textReserve = ((cfg.healthText or "none") ~= "none") and 32 or 0
+    button.name:SetSize(inner - 6 - (small and 10 or 12) - textReserve, small and 11 or 13)
     button.name:ClearAllPoints()
     button.name:SetPoint("LEFT", button, "LEFT", BORDER + 3, 0)
+
+    -- 血量文字：压在血条右侧。none 模式也建好（只写空串），切模式不用重建 region。
+    if not button.healthText then
+        local fs = Widget:Font(button.overlay, small and 9 or 10, "pixel", { r = 1, g = 1, b = 1 }, "RIGHT")
+        if fs.SetShadowColor then
+            fs:SetShadowColor(0, 0, 0, 1)
+            fs:SetShadowOffset(1, -1)
+        end
+        button.healthText = fs
+    end
+    Widget:SetFont(button.healthText, small and 9 or 10, "pixel")
+    button.healthText:ClearAllPoints()
+    button.healthText:SetPoint("RIGHT", button, "RIGHT", -(BORDER + 3), 0)
+    button.healthTextMode = cfg.healthText or "none"
 
     -- 职责图标：三张灰阶自绘图，形状说明职责，颜色说明队长 / 助理（Color:RoleTint）。
     -- 压在右上角、探出 1px 进缝里，不占名字的行宽。
     if not button.role then
-        button.role = button:CreateTexture(nil, "OVERLAY")
+        button.role = button.overlay:CreateTexture(nil, "OVERLAY")
         button.role:SetTexture(Media:Texture("monet_role_dps"))
         button.role:SetSize(small and 8 or 9, small and 8 or 9)
         button.role:SetPoint("TOPRIGHT", button, "TOPRIGHT", 1, 1)
@@ -250,8 +311,8 @@ end
 local function SetContentAlpha(button, alpha)
     if button.health then button.health:SetAlpha(alpha) end
     if button.power then button.power:SetAlpha(alpha) end
-    if button.name then button.name:SetAlpha(alpha) end
-    if button.role then button.role:SetAlpha(alpha) end
+    -- 文字与职责图标都收在覆盖层里，淡一次全淡；预估 / 吸收盾是血条的子框，随血条淡
+    if button.overlay then button.overlay:SetAlpha(alpha) end
 end
 
 -- ============================================================================
@@ -353,6 +414,108 @@ local function UpdateState(button)
     button.lost:SetVertexColor(lr, lg, lb, 0.85)
 end
 
+-- 血量文字（Pawprint modules/Frames.lua:349-399 的纪律）：
+-- plain 值自己算；秘密值不做算术，要么交给客户端的百分比曲线，要么原样喂给
+-- SetText / SetFormattedText（C 侧格式化秘密值），写不进去就留空。
+local function ShortNum(value)
+    if value == nil then return "" end
+    if not Secrets.IsSecret(value) then
+        local breakUp = _G.BreakUpLargeNumbers
+        if breakUp then
+            local ok, text = pcall(breakUp, value)
+            if ok and text then return text end
+        end
+        return tostring(value)
+    end
+    local breakUp = _G.BreakUpLargeNumbers
+    if breakUp then
+        local ok, text = pcall(breakUp, value)
+        if ok then return text end
+    end
+    return value
+end
+
+local function HealthPercent(unit, current, maximum)
+    local c, m = Secrets.Number(current), Secrets.Number(maximum)
+    if c and m and m > 0 then return c / m * 100 end
+    local constants = _G.CurveConstants
+    if _G.UnitHealthPercent and constants and constants.ScaleTo100 then
+        local ok, pct = pcall(UnitHealthPercent, unit, true, constants.ScaleTo100)
+        if ok and (Secrets.IsSecret(pct) or pct ~= nil) then return pct end
+    end
+end
+
+local function UpdateHealthText(button)
+    local fs = button.healthText
+    if not fs then return end
+
+    local mode = button.healthTextMode or "none"
+    local unit = button.unit
+    if mode == "none" or not unit or not UnitExists(unit) then
+        fs:SetText("")
+        return
+    end
+
+    -- 死亡 / 离线时名字行已经在报状态，血量文字让位
+    local dead = Secrets.Bool(UnitIsDeadOrGhost(unit))
+    local offline = not Secrets.Bool(UnitIsConnected(unit), true)
+    if dead or offline then
+        fs:SetText("")
+        return
+    end
+
+    local current, maximum = UnitHealth(unit), UnitHealthMax(unit)
+    if mode == "percent" then
+        local pct = HealthPercent(unit, current, maximum)
+        if pct == nil or not pcall(fs.SetFormattedText, fs, "%.0f%%", pct) then
+            fs:SetText("")
+        end
+    else -- "value"
+        if not pcall(fs.SetText, fs, ShortNum(current)) then
+            fs:SetText("")
+        end
+    end
+end
+
+-- 治疗预估 / 吸收盾（Pawprint modules/Frames.lua:447-455 的纪律）：
+-- 返回值可以是秘密值 —— 不做比较、不做算术，原样进 SetValue；minmax 的上限同理。
+-- 开关关掉 / 单位不存在时写 0，不写 Show/Hide（见 StyleButton 的常驻注释）。
+local function UpdateIncoming(button)
+    local bar = button.incoming
+    if not bar then return end
+
+    local cfg = Config()
+    local unit = button.unit
+    if not _G.UnitGetIncomingHeals or not unit or not UnitExists(unit)
+       or (cfg and cfg.showIncomingHeals == false) then
+        pcall(bar.SetValue, bar, 0)
+        return
+    end
+
+    local value = UnitGetIncomingHeals(unit)
+    if not Secrets.IsSecret(value) and not value then value = 0 end
+    pcall(bar.SetMinMaxValues, bar, 0, UnitHealthMax(unit))
+    pcall(bar.SetValue, bar, value)
+end
+
+local function UpdateAbsorb(button)
+    local bar = button.absorb
+    if not bar then return end
+
+    local cfg = Config()
+    local unit = button.unit
+    if not _G.UnitGetTotalAbsorbs or not unit or not UnitExists(unit)
+       or (cfg and cfg.showAbsorbs == false) then
+        pcall(bar.SetValue, bar, 0)
+        return
+    end
+
+    local value = UnitGetTotalAbsorbs(unit)
+    if not Secrets.IsSecret(value) and not value then value = 0 end
+    pcall(bar.SetMinMaxValues, bar, 0, UnitHealthMax(unit))
+    pcall(bar.SetValue, bar, value)
+end
+
 local function UpdateRange(button)
     local unit = button.unit
     if not unit or unit == "player" or not UnitExists(unit) then
@@ -377,6 +540,9 @@ local function RefreshButton(button)
     UpdatePower(button)
     UpdateRole(button)
     UpdateState(button)
+    UpdateHealthText(button)
+    UpdateIncoming(button)
+    UpdateAbsorb(button)
     UpdateRange(button)
 end
 
@@ -447,15 +613,25 @@ function M:UpdateUnit(unit, kind)
     if not button or not button:IsShown() then return end
 
     if kind == "health" then
+        -- 血条填充的右缘动了，预估 / 吸收盾的锚点与上限都要跟着重算
         UpdateHealth(button)
         UpdateState(button)
+        UpdateHealthText(button)
+        UpdateIncoming(button)
+        UpdateAbsorb(button)
     elseif kind == "power" then
         UpdatePower(button)
+    elseif kind == "heal" then
+        UpdateIncoming(button)
+    elseif kind == "absorb" then
+        UpdateAbsorb(button)
     elseif kind == "name" then
         UpdateName(button)
         UpdateState(button)
+        UpdateHealthText(button)
     else
         UpdateState(button)
+        UpdateHealthText(button)
     end
 end
 
@@ -480,7 +656,9 @@ local function CreateHeader(name, parent, cfg, count)
 
     local buttons = {}
 
-    header.initialConfigFunction = function(buttonName)
+    -- CallMethod 会把 header 作为 self 传入，所以回调签名必须是 (self, buttonName)；
+    -- 少了 self 的话 buttonName 拿到的是 header 本身，_G[header] 恒为 nil，StyleButton 永不执行。
+    header.initialConfigFunction = function(self, buttonName)
         local button = _G[buttonName]
         if not button then return end
 
@@ -813,6 +991,8 @@ function M:RegisterEvents()
         UNIT_NAME_UPDATE  = "name",
         UNIT_CONNECTION   = "state",
         UNIT_FLAGS        = "state",
+        UNIT_HEAL_PREDICTION       = "heal",
+        UNIT_ABSORB_AMOUNT_CHANGED = "absorb",
     }
 
     for event, kind in pairs(unitEvents) do
