@@ -182,10 +182,12 @@ local BAR_DEFS = {
       blizzard = "MultiBar7",
       point = "BOTTOM", relativeTo = "Bar7",     relativePoint = "TOP",    x = 0,   y = 2 },
 
-    -- 自绘宠物条：type="pet" 的安全按钮，**完全不碰爆雪的宠物框体**（那边一动就污染）。
-    -- 槽位是常量 1..10，写在我们自己的按钮属性上，不需要安全片段。
+    -- 自绘宠物条：按钮是**收养来的**暴雪 PetActionButton（本客户端没有通用 type="pet" 的安全
+    -- 按钮）。位置默认放在 1 号条左侧 —— 原来放 3 号条上方会和 4 号条整条重叠（实测 4 号条的
+    -- 按钮在同一层级更靠前，把点击全吃掉了）。层级 66：高于 1–8 号条的 60/61，低于接住器 70。
     { key = "BarPet", index = 9, page = 0, count = 10, pet = true, bind = "BONUSACTIONBUTTON",
-      point = "BOTTOMRIGHT", relativeTo = "Bar3", relativePoint = "TOPRIGHT", x = 0, y = 2 },
+      level = 66,
+      point = "BOTTOMRIGHT", relativeTo = "Bar1", relativePoint = "BOTTOMLEFT", x = -8, y = 0 },
 }
 
 -- 接管的那几条暴雪动作条：不重画，只搬最外层容器（只搬内层的话，暴雪一 Hide 外层，我们的条就留在
@@ -1330,7 +1332,8 @@ local function CreateBar(def)
 
     -- 抬到暴雪动作条之上（ActionButton 52 / MultiBar* 3），点击才落到我们自己的按钮上；
     -- 暴雪那几条条被 Park 掉（MainActionBar alpha 0，其余换到常隐框体），点击不会落到它们身上。
-    pcall(frame.SetFrameLevel, frame, 60)
+    -- def.level 可以按条单独抬（宠物条要压过 1–8 号条）。
+    pcall(frame.SetFrameLevel, frame, def.level or 60)
 
     local bar = {
         def        = def,
