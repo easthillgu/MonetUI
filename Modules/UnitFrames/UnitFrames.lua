@@ -329,7 +329,10 @@ local POWER_COLOR = {
 local function UpdatePowerColor(frame)
     local unit = frame.unit
     -- player / target / targettarget 的能量条提亮，和压暗后的血条拉开层次。
-    local brighten = (unit == "player" or unit == "target" or unit == "targettarget") and 1.25 or 1
+    -- 自己的条再高一档：玩家血条现在是统一的暗奶油色（不再染职业色），
+    -- 身上唯一的"亮点"就是这条能量，不提亮就显得比目标那条暗。
+    local brighten = (unit == "player") and 1.45
+                  or ((unit == "target" or unit == "targettarget") and 1.25 or 1)
 
     if Setting(unit, "powerColor") == "theme" then
         local r, g, b = Color:GetResource()
