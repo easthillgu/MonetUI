@@ -225,11 +225,31 @@ local function HiddenParent()
 end
 
 
---- 让暴雪自己把按钮藏起来：不碰受保护的 Hide/SetShown，只写 statehidden。
+--- 让暴雪的按钮收不到鼠标：**一个属性都不写**，只关鼠标。
+---
+--- 以前这里是 UnregisterAllEvents + SetAttributeNoHandler("statehidden", true)，让它自己
+--- SetShown(false)。实机 taint.log 证明这条路会反噬：
+---   SetAttributeNoHandler 把受保护按钮标脏 → 暴雪自己之后 UpdateShownButtons 的
+---   SetShown 被拒（"blocked in combat because of taint from MonetUI"）→ 按钮留在"显示"
+---   状态 → alpha 0 看不见但**照样收 OnEnter** → ActionButton.lua:1391 OnEnter →
+---   UpdateAction → SetAttribute/ClearAttribute 再一次被拒 → 每次鼠标扫过都刷一屏。
+--- 关鼠标不是受保护操作，不写任何字段，也不会让按钮卡在错误状态。
+local function KillMouse(frame, depth)
+    if not frame then return end
+    pcall(frame.EnableMouse, frame, false)
+    if frame.EnableMouseClicks then pcall(frame.EnableMouseClicks, frame, false) end
+    if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, false) end
+    if (depth or 0) <= 0 then return end
+    local ok, children = pcall(function() return { frame:GetChildren() } end)
+    if not ok or not children then return end
+    for i = 1, #children do KillMouse(children[i], depth - 1) end
+end
+
+--- 收起一条暴雪动作条时用在它整棵子树上：按钮 + 按钮容器都不能收鼠标。
 local function QuietHideButton(button)
     if not button then return end
     pcall(button.UnregisterAllEvents, button)
-    pcall(button.SetAttributeNoHandler, button, "statehidden", true)
+    KillMouse(button, 1)
 end
 
 -- 1 号条会自己翻页（载具、覆盖、变形、额外动作条都用它），所以挂一个状态驱动；换页片段跑在
@@ -392,9 +412,10 @@ local function Park(name)
     -- + 每次 Show 后把 alpha 压回去。位置让暴雪随便排 —— 反正看不见，
     -- 换来的是它的安全重排不再被拒。
     pcall(frame.SetAlpha, frame, 0)
-    pcall(frame.EnableMouse, frame, false)
-    if frame.EnableMouseClicks then pcall(frame.EnableMouseClicks, frame, false) end
-    if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, false) end
+    -- 整棵子树都关鼠标：alpha 0 只是看不见，按钮/容器照样收 OnEnter，而一进战斗
+    -- 暴雪按钮的 OnEnter（ActionButton.lua:1391）会 UpdateAction → SetAttribute，
+    -- 那一下会被判 BLOCKED（taint.log 里 335 条全是这一类）。
+    KillMouse(frame, 2)
     KillPagerMouse(frame)
 
     -- 变形 / 载具 / 翻页 / 骑乘时暴雪会重新 Show 它：Show 本身是安全的（父链没被改过），
@@ -411,7 +432,10 @@ local function Park(name)
     end
 
     if type(frame.actionButtons) == "table" then
-        for _, button in pairs(frame.actionButtons) do QuietHideButton(button) end
+        for _, button in pairs(frame.actionButtons) do
+            pcall(button.UnregisterAllEvents, button)
+            KillMouse(button, 1)
+        end
     end
     return true
 end
@@ -459,7 +483,7 @@ local function Restore(name)
     Mark(frame, "parent", nil)
     if type(frame.actionButtons) == "table" then
         for _, button in pairs(frame.actionButtons) do
-            pcall(button.SetAttributeNoHandler, button, "statehidden", nil)
+            pcall(button.EnableMouse, button, true)
         end
     end
     return true
