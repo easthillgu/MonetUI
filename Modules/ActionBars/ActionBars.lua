@@ -1424,6 +1424,9 @@ local function CreateBar(def)
             pcall(btn.SetSize, btn, size, size)
             pcall(btn.SetScale, btn, 1)
             pcall(btn.SetPoint, btn, "TOPLEFT", frame, "TOPLEFT", (i - 1) * (size + spacing), 0)
+            -- 外壳事件被卸载后，没人再替我们把这 10 个按钮 Show 出来（它们可能停在
+            -- 壳隐藏时的 SetShown(false) 状态）——直接显式显示一次。
+            pcall(btn.Show, btn)
             SkinAdoptedPetButton(btn)
             bar.buttons[#bar.buttons + 1] = btn
         end
