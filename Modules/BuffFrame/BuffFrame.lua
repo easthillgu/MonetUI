@@ -494,6 +494,18 @@ function M:Update()
     UpdateRow(debuffButtons, debuffContainer, debuffs, DEBUFF_SIZE)
     FitContainer(debuffContainer, #debuffs, DEBUFF_SIZE)
 
+    -- debuff 行自己算落点，**不锚在 proc 行上**：proc 行空的时候被 FitContainer 压成 0×0
+    -- 并且被 SetShown(false)，锚到它上面整行拿不到矩形（GetLeft() 返回 nil）—— 实机症状是
+    -- "debuff 明明在（按钮 shown、冷却在跑），屏幕上什么都没有"。
+    -- 间距和以前完全一致：buff 底 +4 是 proc 行，proc 底 +8 是 debuff 行（proc 空时高度算 0）。
+    local function RowHeight(count, size)
+        if count <= 0 then return 0 end
+        return math.ceil(count / PerRow(size)) * (size + ICON_GAP) - ICON_GAP
+    end
+    debuffContainer:ClearAllPoints()
+    debuffContainer:SetPoint("TOPLEFT", UIParent, "TOPLEFT", AURA_GAP,
+        -(AURA_GAP + RowHeight(#auras, BUFF_SIZE) + 4 + RowHeight(#procs, BUFF_SIZE) + 8))
+
     -- buffContainer 常显（空的时候被 FitContainer 压成 0 高，什么都不画），只切换后两块。
     procContainer:SetShown(#procs > 0)
     debuffContainer:SetShown(#debuffs > 0)
@@ -520,11 +532,12 @@ local function SuppressBlizzard()
         local blizzard = _G[name]
         if blizzard then
             found = found + 1
-            pcall(blizzard.UnregisterAllEvents, blizzard)
-            if blizzard.SetScript then
-                pcall(blizzard.SetScript, blizzard, "OnShow", blizzard.Hide)
-            end
-            blizzard:Hide()
+            -- **不 Hide()、不 UnregisterAllEvents、不写脚本槽**：
+            --   * Hide() 会被暴雪自己的 Show() 顶回来（一边补、一边顶 = 一闪一闪）；
+            --   * 写脚本槽 / 注销事件都是"动过这个框"，之后它自己的代码全算成 MonetUI 的污染。
+            -- alpha 0 的框一直算"显示着"，不触发它的 Show 逻辑，也就不打架（见 AGENTS.md）。
+            pcall(blizzard.SetAlpha, blizzard, 0)
+            pcall(blizzard.EnableMouse, blizzard, false)
         end
     end
     if found == 0 then

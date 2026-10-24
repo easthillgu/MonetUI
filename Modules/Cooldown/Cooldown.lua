@@ -238,8 +238,11 @@ local function Tick(cd, elapsed)
         if ok then
             start = Secrets.Number(start)
             duration = Secrets.Number(duration)
+            -- **GetCooldownTimes 给的是毫秒**（实机：48680011 / 360000），而 GetTime() 与
+            -- state.expiry 都是秒。以前直接相加 → 剩余算成 568 天，buff 图标上就画出一个
+            -- "568d"（还是带颜色码的），看起来就像"时间显示被加密了"。
             if start and duration and duration > 0 then
-                state.expiry = start + duration
+                state.expiry = (start + duration) / 1000
                 state.next = 0
                 return
             end
@@ -249,6 +252,13 @@ local function Tick(cd, elapsed)
     end
 
     local remain = expiry - GetTime()
+    if remain > 86400 * 30 then
+        -- 明显不可能是真的（单位换算错 / 拿到的是别的时钟）：宁可不画，也别把"568d"糊在图标上。
+        state.expiry = nil
+        HandBack(cd, state)
+        state.next = POLL_INTERVAL
+        return
+    end
     if remain <= 0 then
         state.expiry = nil
         HandBack(cd, state)
