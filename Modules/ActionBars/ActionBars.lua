@@ -37,14 +37,19 @@ local Skin     = ns.Skin
 
 local M = { name = "ActionBars" }
 
---- 收养暴雪宠物/姿态条的开关（声明必须在最前面：SyncPetGlowNow 等早于 AdoptAll 定义）。
---- **保持 false**：那条路径必然要写暴雪的 SetPoint / SetScale / 换容器父级，
---- 本客户端会因此把这些受保护框标脏，之后暴雪自己的
+--- 收养暴雪宠物/姿态条的开关。开着 = 让它们**原样显示**（原位置、原大小），玩家能用。
+--- 但**不再替它们排版**（见 STYLE_ADOPTED_BARS）。
+--- 背景：在这两个受保护的条上写 SetScale / SetPoint 会把它们标脏，之后暴雪自己的
 --- PetActionButton…:SetShown / PetActionBar:ClearAllPoints 战斗中被拒
 --- （taint.log: "tainted from MonetUI"），一进战斗就弹「插件导致界面行为失效」。
---- 关掉后宠物/姿态条按普通动作条处理：alpha 0 + 关鼠标。
---- 要真正显示它们，得像 Bar1..8 那样建自己的安全按钮（宠物 type="pet"），见 AGENTS 待办。
-local ADOPT_BLIZZARD_BARS = false
+local ADOPT_BLIZZARD_BARS = true
+
+--- 收养之后要不要再排版（SetScale / SetPoint 到我们的位置）。
+--- **保持 false**：排版写的每一个 SetScale/SetPoint 都会把这些受保护框标脏。
+--- 只关外壳鼠标（那个壳 1303×1193，会把屏幕中间的点击全吃掉）—— 那是必须的。
+--- 想让它长得跟自绘条一致、还落在我们的位置：得像 Bar1..8 那样建自己的安全按钮
+--- （宠物 type="pet"），见 AGENTS 待办。
+local STYLE_ADOPTED_BARS = false
 
 local ActionBar        = _G.C_ActionBar
 local RegisterStateDriver   = _G.RegisterStateDriver
@@ -406,6 +411,11 @@ local parkedList = {}
 local parkDriver
 
 local function KeepParked()
+    -- **战斗里什么都不做。** 受保护的条/按钮上，战斗中写 alpha / 鼠标本身就是受限制的；
+    -- 我们那一下会成为"暴雪后续安全调用被拒"的污染源（taint.log 里宠物条
+    -- PetActionButton*:SetShown / PetActionBar:ClearAllPointsBase 那一串就是这么来的）。
+    -- 脱战后（PLAYER_REGEN_ENABLED 会立刻调一次）再收拾。
+    if InCombatLockdown() then return end
     for i = 1, #parkedList do
         local frame = parkedList[i]
         if Marked(frame, "parked") then
@@ -1368,9 +1378,9 @@ end
 
 --- 宠物条的像素环跟一遍当前状态。自绘动作条关着时这条条没被接管，得自己去拿容器。
 local function SyncPetGlowNow()
-    -- 不收养暴雪宠物条时不画环：环是画在**暴雪的**宠物按钮上的，而我们现在
-    -- 一碰它们就会把受保护按钮弄脏（见 ADOPT_BLIZZARD_BARS 的注释）。
-    if not ADOPT_BLIZZARD_BARS then return end
+    -- 不排版（STYLE_ADOPTED_BARS=false）时不画像素环：环是画在**暴雪的**宠物按钮上的，
+    -- 现阶段一碰它们就有把受保护按钮弄脏的风险（见文件开头两个开关的注释）。
+    if not STYLE_ADOPTED_BARS then return end
     local def = PET_DEF
     if not def then return end
 
@@ -1556,6 +1566,15 @@ local function AdoptBar(def)
     entry.def  = def
     entry.frame = bar
     entry.name  = name
+
+    -- 只让它"能用"，不排版：原位置、原大小，仅关掉外壳的鼠标（那壳 1303×1193，
+    -- 会把屏幕中间整块的点击吃掉）。排版相关的 SetScale / SetPoint 一律不做 ——
+    -- 见 STYLE_ADOPTED_BARS 的注释。
+    if not STYLE_ADOPTED_BARS then
+        pcall(bar.EnableMouse, bar, false)
+        pcall(bar.EnableMouseMotion, bar, false)
+        return entry
+    end
 
     -- 暴雪的条本来就在 UIParent 下面。以前我们把它们塞进隐藏框（SetParent），零售 12.x 上这会把
     -- 受保护的框体弄成"强污染"，暴雪的编辑模式再想给它们挪一下就被拒（ADDON_ACTION_BLOCKED
