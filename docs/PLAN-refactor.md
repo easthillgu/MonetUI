@@ -448,12 +448,39 @@ ActionBars 四个)视试水结果下一轮再定。
 连环 `ADDON_ACTION_BLOCKED UNKNOWN()`（×11 一次、整场不停，只有重载清）。已改成
 “主题不重建、颜色靠 `/reload`”。另外**战斗中绝不创建容器**（创建得到的容器是空的，且会产生拦截）。
 
+### 3.5.6 "借用模式"的残留：每场战斗进出各 1 条 UNKNOWN（2026-10-25 晚）
+症状：每次进战斗 +0.1~0.4 秒冒一条 `ADDON_ACTION_BLOCKED MonetUI UNKNOWN()`，脱战瞬间再来一条。
+`taint.log`（旗子开着）0 字节；`debugstack` 在探针通道与插件上下文里都返回**机密字符串**（读不出）。
+
+定位手段（这次唯一有效的组合）：
+1. **事件时间线**：注册 `ADDON_ACTION_BLOCKED` + `PLAYER_REGEN_*`，带 `GetTime()` 打点 →
+   确认拦截落在"进/出战斗"两个边缘；
+2. **配置级二分**：`ns:DB().modules.<名字> = false` 后重载（`SetModuleEnabled(false)` 停不掉
+   已注册的事件回调，**不能**用它二分）→ 全关时 0 拦截 → 逐组打开 → 锁到 `UnitFrames`；
+3. 读代码找到 `SuppressBlizzard` 里 `TargetFrame` 的**"借用模式"**——当年 A 方案借它的光环列表，
+   只 alpha 0、**事件处理器全保留**；A 方案废弃后没人清，它自己的代码从此跑在"被 MonetUI 写过"
+   的上下文里 → 战斗边缘被拦。
+修正：`TargetFrame` 与其它暴雪单位框一样**彻底压制**（注销事件 + `OnShow` 即 `Hide`）。
+
+**教训**：被我们碰过的暴雪框，要么完全放手，要么连事件一起收掉；**不要留半套**。
+
 ### P5 试水结果（2026-10-25）
 - 已拆 `Modules/UnitFrames/Auras.lua`（763 行，move-only）：输入 `M.frames` / `M.Shared`，
   输出 `M.auras.{EnsureTargetAuras, RebuildTargetAuras, StyleAuraButton}`，`.toc` 紧随
   `UnitFrames.lua` 加载；`ns.AuraButtonStyle` / `ns.PrepareAuraStyle` 保持原路径给 BuffFrame 复用。
-- 实机验收：目标/焦点光环显示与拆分前一致；主题切换（不重建）与进/出编辑模式均无报错。
-- 结论：**move-only 拆分可行**，其余文件（UF 的 Blizzard/ClassPower/CastBar、AB 的
+- 已拆 `Modules/UnitFrames/CastBar.lua`（~190 行，move-only）：输入 `M.Setting` / `M.Shared`，
+  输出 `M.castbar.{CreateCastBar, UpdateCast, HideCast}`。`UnitFrames.lua` 1871 → 1175 行。
+- 实机验收：目标/焦点光环显示与拆分前一致；主题切换（不重建）与进/出编辑模式均无报错；
+  施法条红三角/灰色不可打断正常（顺带修了 `notInterruptible` 取值位，见下）。
+- **拆分类陷阱**：子文件里用到主文件的局部函数（`Shared` / `Setting` / `frames`）必须显式挂在
+  `M` 上；漏一个会在**初始化时静默失败**（Core 只 pcall + 打一行提示），表现为"整个模块的框全没了"。
+  拆分后先探针确认 `模块._initialized == true` 再看画面。
+- **顺带修复**：`UnitFrames.SuppressBlizzard` 里 `TargetFrame` 的"借用模式"残留在废弃后没清，
+  导致每场战斗进出各 1 条 `ADDON_ACTION_BLOCKED UNKNOWN()`；已改为彻底压制（注销事件 + OnShow 即 Hide）。
+- **本客户端施法返回值**：`UnitCastingInfo/UnitChannelInfo` 返回 **11 个值**，
+  `notInterruptible` 在**第 8 位（boolean）**、第 9 位是 `spellID`。取错位会把 spellID 当真值，
+  让所有普通施法都变灰。
+- 结论：**move-only 拆分可行**，其余文件（UF 的 Blizzard/ClassPower、AB 的
   Secure/DragDrop/PetBar/Blizzard 处置）可按同一模式继续，风险点只有"共享局部表"要显式挂到 M。
 
 

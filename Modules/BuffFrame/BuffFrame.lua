@@ -489,7 +489,10 @@ local function SetCombatMode(on)
         -- **战斗中绝不创建容器**（引擎会给出空容器，且可能产生拦截）。容器由脱战路径
         -- 提前建好；真没有就退回暴雪原生框（SuppressBlizzard 里按 EngineCombatReady 判断）。
         SetCombatContainersAlpha(1)
-        SuppressBlizzard()
+        -- 只在"需要原生框兜底"时才去写暴雪光环框：战斗里碰它们会被记成 MonetUI
+        -- （实机：每次进/出战斗各 +1 条 ADDON_ACTION_BLOCKED UNKNOWN()）。
+        -- 引擎容器可用时，那些框的 alpha 在脱战就已经是 0，不需要再写。
+        if not EngineCombatReady() then SuppressBlizzard() end
     else
         combatMode = false
         SetCombatContainersAlpha(0)
