@@ -173,132 +173,180 @@ local function QualityBorder(rec)
     return QUALITY_COLOR[rec.quality or 0]
 end
 
+-- --- 模板槽层压平（收养案 2026-10-25）：模板自带暗色槽底 + IconMask 蒙版 + 默认绘制层，
+-- --- 不解锁就把图标整个蒙成"缺纹理斜纹方块"（实机 snap：只有按探针暴力解的格子出图）。
+-- --- 幂等：Acquire 建钮时跑一遍，UpdateButton 每次重绘再跑（SetItemButtonTexture/disable
+-- --- 会把蒙版/顶点色重新带上）。一律**方法调用**，不写模板按钮属性（污染红线）。
+local function FlattenSlotArt(btn)
+    if btn.icon then
+        pcall(btn.icon.RemoveMaskTexture, btn.icon, btn.IconMask)
+        pcall(btn.icon.SetVertexColor, btn.icon, 1, 1, 1, 1)
+        pcall(btn.icon.SetTexCoord, btn.icon, 0, 1, 0, 1)
+        pcall(btn.icon.SetDrawLayer, btn.icon, "OVERLAY", 7)
+        pcall(btn.icon.ClearAllPoints, btn.icon)
+        pcall(btn.icon.SetAllPoints, btn.icon, btn)
+        pcall(btn.icon.Show, btn.icon)
+    end
+    if btn.IconMask then
+        pcall(btn.IconMask.SetTexture, btn.IconMask, nil)
+        pcall(btn.IconMask.SetSize, btn.IconMask, 0.001, 0.001)
+        pcall(btn.IconMask.Hide, btn.IconMask)
+    end
+    if btn.NewItemTexture then
+        pcall(btn.NewItemTexture.SetAlpha, btn.NewItemTexture, 0)
+        pcall(btn.NewItemTexture.Hide, btn.NewItemTexture)
+    end
+    if btn.BattlepayItemTexture then
+        pcall(btn.BattlepayItemTexture.SetAlpha, btn.BattlepayItemTexture, 0)
+        pcall(btn.BattlepayItemTexture.Hide, btn.BattlepayItemTexture)
+    end
+    if btn.flash then
+        pcall(btn.flash.SetAlpha, btn.flash, 0)
+        pcall(btn.flash.Hide, btn.flash)
+    end
+    if btn.NormalTexture then
+        pcall(btn.NormalTexture.SetAlpha, btn.NormalTexture, 0)
+    end
+    if btn.IconBorder then
+        pcall(btn.IconBorder.SetAlpha, btn.IconBorder, 0)
+    end
+    local ht = btn.GetHighlightTexture and btn:GetHighlightTexture()
+    if ht then
+        pcall(ht.ClearAllPoints, ht)
+        pcall(ht.SetAllPoints, ht, btn)
+    end
+end
+
+-- 收养改写（2026-10-25 案「右键提示被禁用」）：此前手绘按钮 OnClick 调 UseContainerItem，
+-- 调用发生在我们的执行栈上，客户端按「谁在调」判越权，弹「MonetUI 已被禁用，因为该功能
+-- 只对暴雪的 UI 开放」（与动作条 action 属性同键模型：**调用链上下文**说了算，API 本身
+-- 不保护）。改 Ellesmere 收养路线（EllesmereUIBags_Grid.lua:70-128 / RenderButton :167-181）：
+-- 壳框 + 模板 ItemButton，OnClick 是暴雪模板自己的（右键使用 / 左键抓取 / 拖放全原生），
+-- bag/slot 身份装在 shell/btn 的 ID 上（模板 OnClick 读 self:GetID() + 父壳 GetID()）。
+-- 我们的 OnEnter/OnLeave 用 SetScript 覆盖模板自己的（tooltip / 高亮 / 冷却照旧走 rec）。
+-- 两个硬边界：模板按钮**战斗中不能出生**（战斗里建的按钮天生被污染，进本第一次右键就
+-- FORBIDDEN；EllesmereUIBags_Grid.lua:72-76 同一结论）→ 战斗中返回 nil，FillWindow 跳过
+-- 该名额，BAG_UPDATE 在脱战后自然重排；自己的簿记 rec/上次边框全部入 ns:Mark 旁表，
+-- 模板按钮上不写自定义字段。
 local function AcquireButton(parent)
-    local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    btn.icon = Widget:Icon(btn, nil, "ARTWORK")
-    btn.icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 1, -1)
-    btn.icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
+    if InCombatLockdown() then return nil end
 
-    btn.count = Widget:Font(btn, 11, "pixel", { r = 1, g = 1, b = 1 }, "RIGHT")
-    btn.count:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 2)
+    local shell = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    local btn = CreateFrame("ItemButton", nil, shell, "ContainerFrameItemButtonTemplate")
+    -- 内缩 1px：壳的 Monet 边框要露出来（按钮全铺会把背板边线整个盖掉）。
+    btn:SetPoint("TOPLEFT", shell, "TOPLEFT", 1, -1)
+    btn:SetPoint("BOTTOMRIGHT", shell, "BOTTOMRIGHT", -1, 1)
+    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    btn:RegisterForDrag("LeftButton")
+    Mark(shell, "itemBtn", btn)
 
-    btn.quest = Widget:Font(btn, 14, "pixel", { r = 1, g = 0.82, b = 0 }, "CENTER")
-    btn.quest:SetPoint("CENTER", btn, "CENTER", 0, 0)
+    -- Monet 视觉层：边框主题/材质压纹走壳（子层不吃鼠标，点击照旧落到按钮）；任务标
+    -- '!' 与冷却框挂按钮。图标与计数交给模板本体（SetItemButtonTexture / SetItemButtonCount）。
+    Widget:Theme(shell, { thickness = 1, bgAlpha = 0.8 })
+    Widget:ButtonMaterial(shell, { alpha = 0, weaveAlpha = 0.25 })
 
-    btn.cd = Widget:Cooldown(btn)
+    -- 模板自有美术层压平（建钮时第一遍；每次重绘还会再跑，见 UpdateButton）。
+    FlattenSlotArt(btn)
 
-    Widget:Theme(btn, { thickness = 1, bgAlpha = 0.8 })
-    Widget:ButtonMaterial(btn, { alpha = 0, weaveAlpha = 0.25 })
+    local quest = Widget:Font(btn, 14, "pixel", { r = 1, g = 0.82, b = 0 }, "CENTER")
+    quest:SetPoint("CENTER", btn, "CENTER", 0, 0)
+    Mark(shell, "questF", quest)
 
-    -- Hand-written instead of Widget:Highlight so the tooltip can ride along.
+    local cd = Widget:Cooldown(btn)
+    Mark(shell, "cdF", cd)
+
     btn:SetScript("OnEnter", function(self)
-        if self.icon then self.icon:SetVertexColor(1.25, 1.25, 1.25) end
-        local rec = self.item
+        Widget:Pulse(self, 1, 1, 1, 0.9)
+        local rec = Marked(self, "bagRec")
         if not rec then return end
         local qc = QualityBorder(rec)
-        if qc then
-            Widget:Pulse(self, qc.r, qc.g, qc.b, 1)
-        else
-            local r, g, b = Color:GetHighlight()
-            Widget:Pulse(self, r, g, b, 0.9)
-        end
+        if qc then Widget:Pulse(self, qc.r, qc.g, qc.b, 1) end
         local tip = _G.GameTooltip
         if tip then
             pcall(tip.SetOwner, tip, self, "ANCHOR_RIGHT")
             pcall(tip.SetBagItem, tip, rec.bag, rec.slot)
             pcall(tip.Show, tip)
-            -- Tint the tooltip backdrop if the client exposes one; remember its border first.
             if qc and tip.SetBackdropBorderColor then
                 local pr, pg, pb, pa
                 if tip.GetBackdropBorderColor then
                     pr, pg, pb, pa = tip:GetBackdropBorderColor()
                 end
-                self.tipPrev = { pr or 0, pg or 0, pb or 0, pa or 0 }
+                Mark(self, "tipPrev", { pr or 0, pg or 0, pb or 0, pa or 0 })
                 pcall(tip.SetBackdropBorderColor, tip, qc.r, qc.g, qc.b, 0.6)
             end
         end
     end)
     btn:SetScript("OnLeave", function(self)
-        if self.icon then self.icon:SetVertexColor(1, 1, 1) end
         Widget:UnPulse(self)
         local tip = _G.GameTooltip
         if tip then
-            if tip.SetBackdropBorderColor and self.tipPrev then
-                local p = self.tipPrev
-                pcall(tip.SetBackdropBorderColor, tip, p[1], p[2], p[3], p[4])
-                self.tipPrev = nil
+            local prev = Marked(self, "tipPrev")
+            if tip.SetBackdropBorderColor and prev then
+                pcall(tip.SetBackdropBorderColor, tip, prev[1], prev[2], prev[3], prev[4])
+                Mark(self, "tipPrev", nil)
             end
             pcall(tip.Hide, tip)
         end
     end)
 
-    btn:SetScript("OnClick", function(self, mouseButton)
-        local rec = self.item
-        if not rec then return end
-        if mouseButton == "RightButton" and C_Container.UseContainerItem then
-            pcall(C_Container.UseContainerItem, rec.bag, rec.slot)
-        else
-            pcall(C_Container.PickupContainerItem, rec.bag, rec.slot)
-        end
-    end)
-    btn:SetScript("OnDragStart", function(self)
-        local rec = self.item
-        if rec then pcall(C_Container.PickupContainerItem, rec.bag, rec.slot) end
-    end)
-    btn:SetScript("OnReceiveDrag", function(self)
-        local rec = self.item
-        if rec then pcall(C_Container.PickupContainerItem, rec.bag, rec.slot) end
-    end)
-
-    btn:SetParent(parent)
-
-    -- 案（2026-10-25 分类背包右键）：Button 默认**只收左键**，不显式注册右键时
-    -- OnClick 压根不会触发（实机：右键吃食物/喝水无反应，日志 0 条 FORBIDDEN ——
-    -- 调用根本没发生，不是被拒）。参考 EllesmereUIBags.lua:3135 的物品按钮同款注册。
-    -- 顺带 RegisterForDrag：OnDragStart/OnReceiveDrag 脚本早就写了，没注册就一直空挂。
-    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-    btn:RegisterForDrag("LeftButton")
-    return btn
+    return shell
 end
 
-local function UpdateButton(btn, rec)
-    btn.item = rec
+local function UpdateButton(shell, rec)
+    local btn = Marked(shell, "itemBtn")
+    if not btn then return end
+    Mark(btn, "bagRec", rec)
+    local quest = Marked(shell, "questF")
+    local cd = Marked(shell, "cdF")
 
     if not rec then
-        btn.icon:SetTexture(nil)
-        btn.count:SetText("")
-        btn.quest:SetText("")
-        btn.cd:Hide()
-        Widget:SetBorderState(btn, nil)
-        btn:Hide()
+        shell:SetID(0)
+        btn:SetID(0)
+        pcall(SetItemButtonTexture, btn, nil)
+        pcall(SetItemButtonCount, btn, 0)
+        if quest then quest:SetText("") end
+        if cd then cd:Hide() end
+        Widget:SetBorderState(shell, nil)
+        btn:Hide() -- 模板按钮出生即隐藏；空槽连钮带壳一起藏
+        shell:Hide()
         return
     end
 
-    btn.icon:SetTexture(rec.texture)
-    btn:SetAlpha(rec.locked and 0.4 or 1)
-
-    btn.count:SetText(rec.count and rec.count > 1 and rec.count or "")
-    btn.quest:SetText(rec.isQuest and "!" or "")
+    -- 模板点击链的身份：slot 在按钮上，bag 在父壳上（模板 OnClick 的取法）。
+    shell:SetID(rec.bag or 0)
+    btn:SetID(rec.slot or 0)
+    pcall(SetItemButtonTexture, btn, rec.texture)
+    pcall(SetItemButtonCount, btn, (rec.count and rec.count > 1) and rec.count or 0)
+    pcall(SetItemButtonDesaturated, btn, rec.locked and true or false)
+    -- SetItemButton* 会把蒙版/顶点色/槽底美术重新带上（实机：蒙版回来了就是缺纹理
+    -- 斜纹方块），每次重绘后再平一次 —— 全是幂等方法调用，开销可忽略（几十格）。
+    FlattenSlotArt(btn)
+    shell:SetAlpha(rec.locked and 0.4 or 1)
+    if quest then quest:SetText(rec.isQuest and "!" or "") end
 
     local qc = QualityBorder(rec)
-    if qc then Widget:SetBorderState(btn, qc.r, qc.g, qc.b, 1)
-    else Widget:SetBorderState(btn, nil) end
+    if qc then Widget:SetBorderState(shell, qc.r, qc.g, qc.b, 1)
+    else Widget:SetBorderState(shell, nil) end
 
     -- GetItemCooldown 的返回值在受限环境里**可能是机密值**（实测报 "bad argument ... SetCooldown:
     -- Secret values are only allowed during untainted execution"）。一律过 Secrets.Number：
     -- 拿不到明文就不画冷却，绝不把机密值拿去比较或塞进 SetCooldown。
-    if rec.itemID and C_Container.GetItemCooldown then
+    if cd and rec.itemID and C_Container.GetItemCooldown then
         local ok, start, duration, enable = pcall(C_Container.GetItemCooldown, rec.itemID)
         start, duration, enable = Secrets.Number(start), Secrets.Number(duration), Secrets.Number(enable)
-        if ok and start and duration and duration > 0 and enable ~= 0 then -- TAINT-OK: 上一行 Secrets.Number 守卫(见 :280 注释)
-            btn.cd:Show()
-            if not pcall(btn.cd.SetCooldown, btn.cd, start, duration) then btn.cd:Hide() end -- TAINT-OK: 上游 Secrets.Number 守卫 + pcall 兜底
+        if ok and start and duration and duration > 0 and enable ~= 0 then -- TAINT-OK: 上一行 Secrets.Number 守卫
+            cd:Show()
+            if not pcall(cd.SetCooldown, cd, start, duration) then cd:Hide() end -- TAINT-OK: Secrets.Number 守卫 + pcall 兜底
         else
-            btn.cd:Hide()
+            cd:Hide()
         end
     end
 
+    -- 实机父链探针实锤：模板按钮**出生即隐藏**（btn shown=false、icon vis=false 但几何/贴图 ATP 全通
+    -- ——那是图标全黑 + tooltip 失联的真凶：按钮藏着，OnEnter 也不会触发）。壳 Show 不带上按钮，
+    -- 必须显式 Show；自建按钮（非暴雪生成的受保护按钮），Show/Hide 不受战斗 lockdown 限制。
     btn:Show()
+    shell:Show()
 end
 
 -- Each category with items gets its own framed, movable window holding a grid; windows the user dragged keep their spot, the rest tile from the saved anchor.
@@ -362,19 +410,22 @@ local function FillWindow(win, items)
     local columns  = Setting("columns")
 
     for i, rec in ipairs(items) do
-        local btn = win.buttons[i]
-        if not btn then
-            btn = AcquireButton(win)
-            win.buttons[i] = btn
+        local shell = win.buttons[i]
+        if not shell then
+            -- 收养案：战斗中模板按钮不能出生，AcquireButton 返回 nil —— 跳过该名额，
+            -- 等脱战后的 BAG_UPDATE 自然重排补齐（Ellesmere 同款 _poolShort 语义）。
+            shell = AcquireButton(win)
+            if not shell then break end
+            win.buttons[i] = shell
         end
         local col = (i - 1) % columns
         local row = math.floor((i - 1) / columns)
-        btn:ClearAllPoints()
-        btn:SetSize(size, size)
-        btn:SetPoint("TOPLEFT", win, "TOPLEFT",
+        shell:ClearAllPoints()
+        shell:SetSize(size, size)
+        shell:SetPoint("TOPLEFT", win, "TOPLEFT",
             PAD + col * (size + gap),
             -(TITLE_H + row * (size + gap)))
-        UpdateButton(btn, rec)
+        UpdateButton(shell, rec)
     end
     for i = #items + 1, #win.buttons do
         UpdateButton(win.buttons[i], nil)

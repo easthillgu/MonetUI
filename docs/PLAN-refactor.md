@@ -229,6 +229,42 @@ UpdateMaxHealth / UpdateHealPrediction` → 秘值比较被拦 → 整条 compac
 - 闸门:taint 0/0/0(基线保持全清);api-audit 无 HARD;check 0 错。部署 + reload 已发,
   待实机右键复测。
 
+**分类背包收养改写(2026-10-25 第二波,用户复测:"右键点击物品,提示被禁用")**:
+- 病因定性:右键确实发生但 `UseContainerItem` 从**我们的执行栈**被调 → 弹"MonetUI 已被禁用"
+  (与动作条 action 属性同键模型:**调用链上下文**定了越权,API 本身不保护)。
+- 改 EllesmereUIBags_Grid.lua:70-128 / :2238-2291 / :3133 的收养路线:
+  - `AcquireButton` → **壳框(BackdropTemplate,`shell:SetID(bag)`) + `CreateFrame("ItemButton",
+    nil, shell, "ContainerFrameItemButtonTemplate")`(`btn:SetID(slot)`)**,OnClick/左键抓取/
+    拖放/右键使用全走暴雪模板原生上下文;_orders/book 里的 rec/边框状态全入 `ns:Mark` 旁表,
+    模板按钮上零自定义字段(Ellesmere "Weak-keyed state" 同款)。
+  - **模板按钮战斗中不能出生**(出生即被污染,进本第一次右键就 FORBIDDEN;
+    EllesmereUIBags_Grid.lua:72-76 同一结论):`AcquireButton` 在 `InCombatLockdown()` 返回
+    nil,`FillWindow` 跳过该名额,脱战后 BAG_UPDATE 自然重排补齐。
+  - 视觉分工:Monet 边框/压纹走壳,任务 `!` 与冷却框挂按钮,图标/计数交给模板本体
+    (`SetItemButtonTexture` / `SetItemButtonCount` / `SetItemButtonDesaturated` —— FrameXML
+    全局,快照查不到但实机存在,`api-lookup` 判不了)。
+- **图标"黑方块/斜纹"两连案(用户:"分类背包格子中看不到图标")**:
+  - 一修:模板自带美术压平(暗色槽底 `NormalTexture`/`IconBorder` alpha 0、
+    `NewItemTexture`/`BattlepayItemTexture`/`flash` 隐藏、`IconMask` 从 icon 蒙列表摘除)
+    —— 抄 Ellesmere `ns.SkinItemButton`(:2238-2291,"Methods only",不写模板属性)。
+    实机 snap:压平后仍只有一格出图。
+  - 探针(暴力解约束对照组)锁定出图四要素:`RemoveMaskTexture` + `SetVertexColor(1,1,1,1)`
+    + `SetTexCoord(0,1,0,1)` + `SetDrawLayer("OVERLAY", 7)` → 做成幂等
+    **`FlattenSlotArt(btn)`**,`AcquireButton` 建钮时 + `UpdateButton` 每次重绘后都跑
+    (SetItemButton* 会把蒙版/顶点色重新带回来)。
+- **真正根因(btn 出生即隐藏,三症状一次破):** 父链探针(逐层 IsShown/IsVisible)实锤
+  `icon vis=false` 而 btn `shown=false` —— 模板按钮出生即隐藏,我们的 UpdateButton 只
+  `shell:Show()`,从没 `btn:Show()`;因果链一次覆盖三个症状:图标黑(钮藏)、**tooltip 失联**
+  (钮藏 → OnEnter 不触发)、品质框可见(画在壳上)。**探针教训:之前几轮
+  `select(1, pcall(f, ...))` 取到的是 pcall 成功布尔而非返回值,"btn_shown=true"全是假象,
+  读返回值必须 `select(2, ...)`。**
+- 终修:`UpdateButton` 有物品 `btn:Show()`;空槽 `btn:Hide()`(自建按钮非暴雪生成的受保护
+  按钮,Show/Hide 不受战斗限制)。
+- **用户实机复测通过**:图标全部显示 ✅ / tooltip 恢复 ✅ / 右键使用+左键拖拽 ✅;
+  闸门:taint 0/0/0、api-audit 无 HARD、check 0 错 5 警(基线对齐)。
+- 已知取舍:锁定物品的原生去饱和(`SetItemButtonDesaturated(true)` 灰化被 FlattenSlotArt
+  白顶点覆盖,只剩壳 alpha 0.4 暗化)——保留点亮路径,下一轮单独处理。
+
 **回归验证轮(2026-10-25,名字案 OK 后的实机收量)**:
 - ✅ **3453b10 生产波案验收通过**:600+ 条日志 0 条 MathUtil/Backdrop/taint/secret 家族;
   `MonetUICombatBuffFrame` 池审计 **styled=20/20**(此前 10/20 第二批全灭)。
