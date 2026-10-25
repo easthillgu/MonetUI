@@ -458,6 +458,9 @@ local function RebuildCombatAuras()
         end
     end
     combatBuffs, combatDebuffs = nil, nil
+    -- 立刻按新主题重建（脱战才会走到这里）。否则容器要等到进战斗才补建 —— 那时创建
+    -- 会被引擎拒（得到空容器）并可能产生 ADDON_ACTION_BLOCKED（实机 2026-10-25 17:16 一次）。
+    EnsureCombatAuras()
 end
 
 --- 战斗显示开关：只切 alpha（容器常显，引擎才会持续更新；见 CreateCombatAura 的注释）。
@@ -483,7 +486,8 @@ local function SetCombatMode(on)
         HideContainer(procContainer)
         HideContainer(debuffContainer)
         combatMode = true
-        EnsureCombatAuras()          -- 正常情况早已建好；建不出来就退回原生框
+        -- **战斗中绝不创建容器**（引擎会给出空容器，且可能产生拦截）。容器由脱战路径
+        -- 提前建好；真没有就退回暴雪原生框（SuppressBlizzard 里按 EngineCombatReady 判断）。
         SetCombatContainersAlpha(1)
         SuppressBlizzard()
     else
@@ -505,6 +509,9 @@ function M:Update()
         return
     end
     SetCombatMode(false)
+
+    -- 脱战才允许补建战斗容器（主题重建 / 建失败之后都靠这里补）。战斗里创建会被引擎拒。
+    if not EngineCombatReady() then EnsureCombatAuras() end
 
     local buffs, buffsComplete = CollectAuras("player", "HELPFUL")
     local debuffs, debuffsComplete = CollectAuras("player", "HARMFUL")
@@ -616,9 +623,11 @@ function M:Initialize()
             end)
         end
     end)
-    -- 换主题：自绘那套直接重涂；引擎容器按钮锁死，只能连容器重建（战斗中排队到脱战）。
+    -- 换主题：**不重建引擎容器**（2026-10-25 17:54 实机判例）。
+    -- 重建 = 新一批引擎按钮被我们碰过，之后引擎在战斗里写它们就被记成 MonetUI，
+    -- 冒 ADDON_ACTION_BLOCKED UNKNOWN()（×11 一次）。代价：战斗容器（以及目标/焦点光环）
+    -- 的边框颜色停留在创建时那一套，靠 /reload 跟上新主题 —— 换来"0 拦截"这条底线。
     EventBus:Register("MONETUI_THEME_CHANGED", function()
-        RebuildCombatAuras()
         M:Update()
     end)
 
