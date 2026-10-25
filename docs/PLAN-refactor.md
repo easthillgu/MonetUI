@@ -140,6 +140,27 @@ UpdateMaxHealth / UpdateHealPrediction` → 秘值比较被拦 → 整条 compac
 4. taintLog 哨兵法(需要时重启):`%TEMP%\opencode\taint-sentinel.ps1` 直拷
    `Logs/taint.log`,600ms 一次,分析用 `%TEMP%\opencode\taint.log`。
 
+**配色案落地（2026-10-25,用户口述 + 两轮范围澄清）**:
+- 范围澄清轮一("**2 对 3 全覆盖**")与轮二:改动只覆盖**血条颜色**,单位限定
+  **玩家 / 队伍 / 团队 / ToT**;**目标框完全不动**;**能量条颜色不改**(不在范围)。
+- 实施:
+  1. 血条填充 = `monetcolor.edge` 的 RGB 反相(玩家 UnitFrames:FillColor +
+     ToT 同源;小队/团队 Groups:UpdateState GetPrimary→GetEdge 反相)。
+     "边框=主题反色"结论:LibMonetColor 的 edge 本身就是环境色 HSL 反相
+     (ComputeEdgeColor 补色+亮度镜像 0.18..0.82),框体边框现状就走
+     edge → 猜想成立,边框零改动。
+  2. 空槽 = 暗色织纹底(玩家/团/队/ToT:LostColor→GetNeutral×0.32;
+     Groups lost 同款 alpha 1,替换原 danger 红空槽)。BarWeave 发丝线
+     叠底之上,既有的织纹资产生效,无需新材质。
+  3. ToT:不画能量条与分隔线,血条吸收两行(health+1+power),框体总高不变;
+     `frame.power=nil` + UpdatePower 短路nil守卫,UpdateBarLook/SetShown 全有守卫。
+  4. ToT 名字自指(目标是玩家自己):`>☆<`,☆ 中国红 #DE2910
+     (`>|cffde2910☆|r<`,底色 edge),绕过 AbbrName/Shorten。
+- 验证:audit-taint 0 BLOCKER / api-audit 无 HARD / wuxian check 0 错 0 警
+  / 已部署。**实机目检待 reload**:血条反色是否与 edge 观感互补、暗织纹
+  空槽可读性、ToT 占满后分隔线消失痕迹、自指 >☆< 的字号/字形(☆ 可能走
+  回退字体,像素字体可能没有该字形)。
+
 **新任务完成:skill 合并 + taint 闸门工具(2026-10-25,接上节交接后)**:
 - `tools/audit-taint.js` —— commit 前 taint 机械闸门。规则 15 条(BLOCKER/HIGH/SOFT 三级):
   and/or 秘值真值链(案 96c7482 形)、裸 Create in initializeFrame(案 3453b10 形)、旧冷却接口、

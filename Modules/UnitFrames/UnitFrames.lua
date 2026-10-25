@@ -211,10 +211,17 @@ end
 
 --- The "current" part of a health bar: "highlight" (player, pet), "class" (target,
 --- focus) or "health".
---- 玩家单位一律用主题血条色（和玩家自己同一条奶油色）：职业辨认交给能量条
---- （UpdatePowerColor 给 target / focus / targettarget 上职业色），血条不再染职业色。
+--- 配色案（2026-10-25）：玩家与目标的目标的生命条 = monetcolor.edge 的 RGB 反相（小队/团队
+--- 格同款，见 Groups.lua）。目标保持原 class 分支（UnitSelectionColor ×1.15）不变。
+--- 玩家单位其余路径用主题血条色：职业辨认交给能量条（血条不再染职业色）。
 --- NPC 仍用 UnitSelectionColor 的敌我色（敌对红 / 友善绿）——那是"敌我"信号。
 local function FillColor(unit)
+    -- edge 由 LibMonetColor 从环境色推出（HSL 反相 + 亮度镜像）；这里再取一次 RGB 反相
+    -- 得到"edge 的反色"。GetEdge 无机密值（纯主题色），不用守卫。
+    if unit == "player" or unit == "targettarget" then
+        local r, g, b = Color:GetEdge()
+        return 1 - r, 1 - g, 1 - b, 1
+    end
     local style = Setting(unit, "fillColor")
     if style == "class" then
         if UnitIsPlayer(unit) then
@@ -245,6 +252,13 @@ end
 
 --- The *missing* part of a health bar: pure background, needs no unit value.
 local function LostColor(unit)
+    -- 配色案（2026-10-25）：掉血空槽 = 暗色织纹底。玩家 / 团队 / 小队 / 目标的目标走这条；
+    -- 目标保持 danger。BarWeave 的发丝线叠在 lost 之上（:1689），底色调暗后空槽读作
+    -- "暗织纹"而不是黑洞。注意：这优先于 lostColor 设置（同 FillColor 的覆盖语义）。
+    if unit == "player" or unit == "targettarget" then
+        local nr, ng, nb = Color:GetNeutral()
+        return nr * 0.32, ng * 0.32, nb * 0.32, 1
+    end
     local style = Setting(unit, "lostColor")
     if style == "danger" then
         return Color:GetDanger()
@@ -590,6 +604,15 @@ local function UpdateName(frame)
         local _, class = UnitClass(unit)
         classFile = class
     end
+    -- 配色案（2026-10-25）：目标的目标是自己时，名字换成 ">☆<"，☆ 用中国红（#DE2910）。
+    -- 收缩/截断全部跳过 —— 三字符符号串不需要，也不会超 NAME_CAP_SM。
+    if name and unit == "targettarget"
+            and Secrets.Bool(UnitIsUnit(unit, "player"), false) then
+        nameText:SetText(">|cffde2910☆|r<")
+        local r, g, b = Color:GetEdge()
+        nameText:SetTextColor(r, g, b, 1)
+        return  -- targettarget 没有 level / 血量文本，直接收
+    end
     if name then
         -- Leading words become initials, then the whole thing
         -- is capped.  The text row is shared with the level, so an untruncated NPC name would run
@@ -654,7 +677,8 @@ end
 
 local function UpdatePower(frame)
     local unit = frame.unit
-    if not UnitExists(unit) then return end
+    -- 配色案：目标的目标没有能量条（frame.power == nil），整条路径短路。
+    if not frame.power or not UnitExists(unit) then return end
 
     Secrets.SetBar(frame.power, UnitPower(unit), UnitPowerMax(unit), Smoothing())
     UpdatePowerColor(frame)
@@ -1657,8 +1681,16 @@ end
 local function CreateUnitFrame(unit, position)
     local border = FrameChrome()
     local width, healthHeight, powerHeight = UnitGeometry(unit)
+    -- 配色案（2026-10-25）：目标的目标不画能量条、也不画分隔线，血条吸收这两行，
+    -- 占满原来的"血 + 分隔 + 能量"总高（框体总高不变）。
+    local showPower = true
+    if unit == "targettarget" then
+        showPower = false
+        healthHeight = healthHeight + 1 + powerHeight
+        powerHeight = 0
+    end
     -- No split: health + 1px separator + power
-    local height = border * 2 + healthHeight + 1 + powerHeight
+    local height = border * 2 + healthHeight + (showPower and (1 + powerHeight) or 0)
 
     -- 安全单位按钮：和暴雪一样，左键 = 选中（设为目标），右键 = 弹单位菜单
     -- （设置焦点等）。SecureUnitButtonTemplate 的两个模板写在同一条串里实测可用。
@@ -1691,25 +1723,30 @@ local function CreateUnitFrame(unit, position)
     -- 1px separator line between health and power.  It is tinted
     -- with the border colour rather than black: a black line vanishes against the
     -- near-black frame background and the player's black lost-health area.
-    local separator = health:CreateTexture(nil, "OVERLAY")
-    separator:SetHeight(1)
-    separator:SetPoint("TOPLEFT", health, "BOTTOMLEFT", 0, 0)
-    separator:SetPoint("TOPRIGHT", health, "BOTTOMRIGHT", 0, 0)
-    local sr, sg, sb = Color:GetBorder()
-    separator:SetColorTexture(sr, sg, sb, 0.55)
-    frame.healthSeparator = separator
+    -- （配色案：目标的目标没有能量条，这一行整个跳过 —— frame.power 保持 nil，
+    -- 后面的 UpdatePower / SetShown 调用全有 nil 守卫。）
+    local separator, power
+    if showPower then
+        separator = health:CreateTexture(nil, "OVERLAY")
+        separator:SetHeight(1)
+        separator:SetPoint("TOPLEFT", health, "BOTTOMLEFT", 0, 0)
+        separator:SetPoint("TOPRIGHT", health, "BOTTOMRIGHT", 0, 0)
+        local sr, sg, sb = Color:GetBorder()
+        separator:SetColorTexture(sr, sg, sb, 0.55)
 
-    local power = Widget:Bar(frame)
-    power:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", border, border)
-    power:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -border, border)
-    power:SetHeight(powerHeight)
-    power:SetStatusBarColor(Color:GetResource())
+        power = Widget:Bar(frame)
+        power:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", border, border)
+        power:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -border, border)
+        power:SetHeight(powerHeight)
+        power:SetStatusBarColor(Color:GetResource())
 
-    -- Same woven ground as the health bar.
-    Widget:BarWeave(power)
+        -- Same woven ground as the health bar.
+        Widget:BarWeave(power)
+    end
 
     frame.health = health
     frame.healthLost = lost
+    frame.healthSeparator = separator
     frame.power = power
 
     -- The class resource hangs under the player frame only; it owns Blizzard's class power.

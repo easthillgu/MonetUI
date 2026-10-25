@@ -386,14 +386,16 @@ local function UpdateState(button)
     if dead or offline then
         button.health:SetStatusBarColor(0.35, 0.35, 0.35)
     else
-        -- One theme colour for every party health bar: the party column is one
-        -- object, not four classes. Class identity rides on the power strip.
-        local r, g, b = Color:GetPrimary()
-        button.health:SetStatusBarColor(r, g, b)
+        -- 配色案（2026-10-25）：小队/团队血条 = monetcolor.edge 的 RGB 反相，
+        -- 和玩家/目标的目标同款。职业辨认继续只集中在能量条（UpdatePower）。
+        local er, eg, eb = Color:GetEdge()
+        button.health:SetStatusBarColor(1 - er, 1 - eg, 1 - eb)
     end
 
-    local lr, lg, lb = Color:GetDanger()
-    button.lost:SetVertexColor(lr, lg, lb, 0.85)
+    -- 空槽 = 暗色织纹底（同 UnitFrames 的暗织纹；BarWeave 发丝线叠在其上，:187）。
+    -- 原来是 danger 红空槽——那套留给目标框，队伍这边不再用红色暗示"掉血"。
+    local nr, ng, nb = Color:GetNeutral()
+    button.lost:SetVertexColor(nr * 0.32, ng * 0.32, nb * 0.32, 1)
 end
 
 -- 血量文字（Pawprint modules/Frames.lua:349-399 的纪律）：
