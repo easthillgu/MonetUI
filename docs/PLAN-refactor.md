@@ -380,6 +380,40 @@ ActionBars 四个)视试水结果下一轮再定。
 - [ ] 更新 docs/HANDOFF.md 代码地图与"本轮做了什么"
 - [ ] TODO.md 勾掉已完成、登记 P5 剩余拆分
 
+## 2026-10-25 收档 · `ADDON_ACTION_BLOCKED UNKNOWN()` 族 + 战斗中 buff 空白
+
+### 结论(实机证据链)
+1. **族 A = 对机密值做布尔测试**。taintLog=2 详细档 2.6MB / 6465 条里 99% 的发源是
+   `Groups.lua:520/521 UpdateRange` ← `Groups.lua:882`(高频驱动)，其余零星
+   `UpdateState`(:379/380)、`UpdateHealthText`(:448/449)、`SyncSelection`(UnitIsUnit 机密)、
+   `UnitFrames UpdateCast`(notInterruptible)。
+   修法:**值级 `Secrets.IsSecret` 前置**(`issecretvalue` 读取不触发拦截,真值测试才触发)，
+   机密时直接落回"被拦后回退默认"的**逐位一致**分支；真值测试只在明文时做。
+2. **族 B = 自建引擎 AuraContainer 的渲染驱动被拦**。我们 `CreateFrame("AuraContainer", ...)`
+   造的战斗容器，一 Show → 引擎就在"我们"的污染上下文里逐个按钮被拦；拦截条数与按钮批次
+   量级吻合(×2 / ×15 / ×29)。该类**不进 taint.log**(旗子开着实测 0 字节)、也不经过
+   `Secrets.Bool`，所以"双盲"。
+3. **战斗中玩家 buff 空白**的真因与族 B 同源：引擎容器要么"换肤后新 proc 画不进"(只有鼠标
+   提示)、要么"不换肤连已有光环都不画"；且容器创建后立即 Hide → 引擎的刷新驱动从未跑过，
+   单靠 Show 不会补(后来补 `UpdateAllAuras` 才让已有光环可见，但新 proc 仍然画不进)。
+
+### 落地改动
+- `Modules/UnitFrames/Groups.lua`:UpdateRange / UpdateState / UpdateHealthText / SyncSelection
+  全部改为值级 IsSecret 前置;`Modules/UnitFrames/UnitFrames.lua`:UpdateCast 同款。
+- `Utils/Secrets.lua`:`Secrets.Bool` 失败路径自记调用栈(`Secrets.BoolBlocks()`,200 条封顶,
+  重载清零)——客户端详细档对这类拦截**不落盘**，自证账本从此是唯一可信源。
+- `Modules/BuffFrame/BuffFrame.lua`:**战斗显示改由暴雪原生 Buff/Debuff/TempEnchant 框接管**
+  (`SuppressBlizzard` 按 combatMode 切 alpha 1/0),自绘只在脱战显示;引擎 AuraContainer
+  实现整块删除(git 历史可回滚,判例写进文件头注释)。
+- `Modules/QuestTracker/QuestTracker.lua`:压制动作(alpha/鼠标/子树静音)统一加**战斗闸**，
+  脱战由 1 秒 ticker 补做。
+
+### 仍开着的
+- **暴雪小队/团队框重复**：`Groups` 的设计立场是"完全不动暴雪队伍框"(碰它必引编辑模式
+  oldR 机密比对错)。玩家在编辑模式关掉可见性并保存、重载后仍显示 → 16001 客户端 EditMode
+  可见性接线断(功能缺口)。选项 A 共存 / B 关自绘 Groups / C 带风险自动藏(不推荐)，**待用户拍板**。
+- P4 剩余拆分(见上表)与 P5 试水，未动。
+
 ## 验证清单(每阶段共用)
 
 - 离线:`tools.wuxian.check`(live:false)0 错 0 警。

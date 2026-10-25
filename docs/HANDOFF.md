@@ -1,6 +1,6 @@
 # MonetUI 交接文档（换开发平台用）
 
-> 写于 2026-10-24 22:30，跟着 `36b7280` 这个提交。
+> 写于 2026-10-24 22:30，跟着 `36b7280` 这个提交；**2026-10-25 追加了"拦截族 + 战斗中 buff"这一轮的收档（见第 3.5 节）**。
 > 读者：接手这个仓库的 AI agent（Codex）或未来的自己。
 > 先读顺序：**本文件 → `AGENTS.md`（硬规则）→ `TODO.md`（待办）→ `MonetUI.md`（设计/决策，147KB，别整篇塞进上下文，按标题查）**。
 
@@ -140,6 +140,45 @@ NamePlateAuras.lua:366     boolean test on 'isFullUpdate' (secret)
 | 图标上的时间像"加密字符" | `Cooldown:GetCooldownTimes()` 给**毫秒**，`GetTime()` 是**秒**；`start+duration` 直接减出 ≈568 天，再套颜色码，在 8px 下就是乱码 | `/1000`，并加"剩余 > 30 天就当读不到"的保险 |
 | debuff 明明在、屏幕上看不见 | debuff 行锚在 proc 行下面，而 proc 行空时被压成 `0×0` 且隐藏 → `GetLeft()` 返回 nil，整行没有矩形 | debuff 行按**实际行高累加**自己算落点 |
 | 暴雪 BuffFrame/DebuffFrame | 原来写 `OnShow` 脚本槽 + `UnregisterAllEvents`（污染 + 打架） | 改 `SetAlpha(0)` + `EnableMouse(false)` |
+
+---
+
+## 3.5 2026-10-25 这一轮：拦截族收档 + 战斗中 buff 空白
+
+一句话：**`ADDON_ACTION_BLOCKED UNKNOWN()` 不是一类东西，是两类；两类都已拔掉，且"战斗中玩家 buff 空白"与其中一类同源。**
+
+### 3.5.1 族 A —— 对机密值做布尔测试（taint.log 有栈，可读）
+`taintLog=2` 抓到的 2.6MB / 6465 条里 99% 发源 `Groups.lua:520/521 UpdateRange`（← `:882` 高频驱动），
+其余零星 `UpdateState` :379/380、`UpdateHealthText` :448/449、`SyncSelection` :580（`UnitIsUnit` 机密）、
+`UnitFrames UpdateCast`（`notInterruptible`）。
+
+**修法（模式固定，本仓以后统一这么做）**：真值测试之前先做**值级** `Secrets.IsSecret`；
+`issecretvalue` 读取本身不触发拦截，只有对机密值做 `if v then` 才炸。机密时**直接落回
+"被拦后回退默认"的逐位一致分支**，行为零变化。
+
+### 3.5.2 族 B —— 自建引擎 AuraContainer 的渲染驱动（taint.log 0 条，双盲）
+我们 `CreateFrame("AuraContainer", ...)` 造的战斗容器，一 Show 引擎就在"MonetUI 的污染上下文"里
+逐个按钮被拦；条数量级与按钮批次吻合（×2/×15/×29）。它**不写 taint.log**（旗子开着实测 0 字节），
+也不经过 `Secrets.Bool` —— 所以只能靠 `Secrets.BoolBlocks()` 自证账本 + 开关式二分来判。
+
+**修法**：整条路线停用（实现已删，判例写在 `BuffFrame.lua` 文件头注释，git 历史可回滚）。
+
+### 3.5.3 战斗中玩家 buff 空白（玩家可见的 bug）
+引擎容器两条死路都试过：换肤 → 战斗中**新 proc 只有鼠标提示、没有图标**（引擎不能往插件替换过的
+图标/冷却对象写新光环）；不换肤 → 连已有光环都不画（该模板按钮离开 `initializeFrame` 就没图标）。
+另外容器创建后立刻 `Hide()`，引擎的刷新驱动从未跑过，单靠 `Show()` 不会补。
+
+**修法（当前实现）**：战斗中把**暴雪原生** `BuffFrame / DebuffFrame / TempEnchantFrame` 的 alpha
+拉回 1（`SuppressBlizzard` 按 `combatMode` 切 0/1），客户端自己画自己更新，proc 即时上屏；
+脱战 alpha 归 0，自绘行回来。**实机验收：脱战自绘、战斗中可见、proc 即时、0 拦截。**
+
+### 3.5.4 顺带的
+- `Utils/Secrets.lua` 增 `Secrets.BoolBlocks()`：`Bool()` 失败路径自记 `debugstack`（200 条、重载清零）。
+  **诊断这类拦截只认它**，别再等 taint.log。
+- `QuestTracker` 的压制动作（alpha / 鼠标 / 子树静音）统一加战斗闸，脱战 1 秒 ticker 补做——
+  战斗中碰追踪框子树会被拦（×29 形态）。
+- **仍开着**：暴雪小队/团队框与自绘框重复——编辑模式关可见性保存、重载后仍显示，判为 16001
+  客户端 EditMode 可见性接线断；三条选项（共存 / 关自绘 / 带风险自动藏）待作者拍板。
 
 ---
 
