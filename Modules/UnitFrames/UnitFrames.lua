@@ -88,24 +88,16 @@ function M:SuppressBlizzard(enable)
         if blizzard then
             if enable and not Marked(blizzard, "suppressed") then
                 Mark(blizzard, "suppressed", true)
-                -- Read from the DB: Shared() is a local defined further down, out of scope here.
-                local units = ns:DB().unitFrames or {}
-                local borrow = globalName == "TargetFrame" and units.showTargetAuras ~= false
-                if borrow then
-                    if type(blizzard.EnableMouse) == "function" then
-                        pcall(blizzard.EnableMouse, blizzard, false)
-                    end
-                    if type(blizzard.SetAlpha) == "function" then
-                        pcall(blizzard.SetAlpha, blizzard, 0)
-                    end
-                    -- Deliberately not hidden or unregistered: events must keep firing for the borrowed list.
-                else
-                    pcall(blizzard.UnregisterAllEvents, blizzard)
-                    if blizzard.SetScript then
-                        pcall(blizzard.SetScript, blizzard, "OnShow", blizzard.Hide)
-                    end
-                    blizzard:Hide()
+                -- 2026-10-25：**TargetFrame 也走彻底压制**。
+                -- 以前给它留的是"借用模式"（只 alpha 0、事件照跑），因为 A 方案靠它画光环；
+                -- A 方案已废（光环改由引擎容器自绘），留着的后果是：TargetFrame 自己的代码
+                -- 在"被 MonetUI 写过"的上下文里继续跑 → 每次战斗进出都冒一条
+                -- ADDON_ACTION_BLOCKED UNKNOWN()（二分到 UnitFrames 单独开即可复现）。
+                pcall(blizzard.UnregisterAllEvents, blizzard)
+                if blizzard.SetScript then
+                    pcall(blizzard.SetScript, blizzard, "OnShow", blizzard.Hide)
                 end
+                blizzard:Hide()
             elseif not enable and Marked(blizzard, "suppressed") then
                 Mark(blizzard, "suppressed", nil)
                 pcall(blizzard.SetScript, blizzard, "OnShow", nil)
@@ -711,189 +703,7 @@ local function UpdatePower(frame)
     frame.power:SetShown(maximum == nil or maximum > 0)
 end
 
--- ============================================================================
--- Cast indicator (player & target): NO fill bar, only a red triangle spark (2px)
--- that moves RIGHT->LEFT (reverse) under the power bar as the cast progresses.
--- CAST_GAP = 1px between power bar and spark.
--- ============================================================================
-
-local CAST_GAP       = 1          -- gap between power bar and spark
-local SPARK_HEIGHT   = 2          -- triangle height in pixels (2px)
-local SPARK_WIDTH    = 4          -- triangle width in pixels
-local SPARK_RED      = { 1, 0, 0 }  -- normal / interruptible cast
-
---- Create a red upward-pointing triangle spark using a FontString (▲ U+25B2).
-local function CreateTriangleSpark(parent)
-    local spark = parent:CreateFontString(nil, "OVERLAY")
-    local fontPath = Media:Font("pixel")
-    spark:SetFont(fontPath, SPARK_HEIGHT, Media.fontFlags)
-    if spark.SetShadowOffset then spark:SetShadowOffset(0, 0) end
-    spark:SetText("▲")  -- U+25B2 BLACK UP-POINTING TRIANGLE
-    spark:SetTextColor(1, 0, 0, 1)  -- solid red
-    spark:SetJustifyH("CENTER")
-    spark:Hide()
-    return spark
-end
-
---- Build the cast indicator: a simple frame holding only the spark.
-local function CreateCastBar(frame)
-    if frame.unit ~= "player" and frame.unit ~= "target" then return end
-
-    local width = Setting(frame.unit, "width") or 160
-    local border = (Shared("border") or 1)
-    local barWidth = width - border * 2
-
-    -- A plain frame (no StatusBar, no fill, no background) to anchor the spark
-    local cast = CreateFrame("Frame", nil, frame)
-    cast:SetSize(barWidth, SPARK_HEIGHT)
-    cast:SetPoint("TOPLEFT", frame.power, "BOTTOMLEFT", 0, -CAST_GAP)
-
-    -- Red triangle spark (moves RIGHT->LEFT as cast progresses)
-    local spark = CreateTriangleSpark(cast)
-    -- Anchor to bottom of the cast frame
-    spark:SetPoint("BOTTOM", cast, "BOTTOM", 0, 0)
-
-    cast.spark = spark
-    cast:Hide()
-
-    frame.cast = cast
-    return cast
-end
-
---- Read cast/channel info without letting a restricted call break the frame.
-local function CastInfo(channel, unit)
-    local fn = channel and UnitChannelInfo or UnitCastingInfo
-    if type(fn) ~= "function" then return nil end
-
-    local result = { pcall(fn, unit) }
-    if not result[1] then return nil end
-
-    -- pcall wraps returns: result[1]=ok, result[2]=name, result[3]=text, result[4]=texture,
-    -- result[5]=startTimeMS, result[6]=endTimeMS, result[7]=isTradeSkill,
-    -- result[8]=castID (cast) / notInterruptible (channel),
-    -- result[9]=notInterruptible (cast) / spellID (channel),
-    -- result[10]=spellID (cast)
-    local name      = result[2]
-    local texture   = result[4]
-    local startMS   = result[5]
-    local endMS     = result[6]
-    -- `channel and A or B` truth-tests A before selecting; A is a secret under
-    -- restriction and the mere test throws ("boolean test on field '?'").  Pick explicitly.
-    local notInt, spellID
-    if channel then
-        notInt, spellID = result[8], result[9]
-    else
-        notInt, spellID = result[9], result[10]
-    end
-    return name, texture, startMS, endMS, notInt, spellID
-end
-
---- Update the cast indicator for the player/target frame.
---- Only positions the red triangle spark (no fill bar, no text).
-local function UpdateCast(frame)
-    if not frame.cast then return end
-    local unit = frame.unit
-    if unit ~= "player" and unit ~= "target" then return end
-
-    local name, texture, startMS, endMS, notInterruptible, spellID = CastInfo(false, unit)
-    local channel = false
-    if type(name) == "nil" then
-        name, texture, startMS, endMS, notInterruptible, spellID = CastInfo(true, unit)
-        channel = true
-    end
-    if type(name) == "nil" then
-        frame.cast:Hide()
-        frame.cast.spark:Hide()
-        frame.cast:SetScript("OnUpdate", nil)
-        return
-    end
-
-    -- An uninterruptible cast turns the spark grey; a normal
-    -- (interruptible) cast stays red.
-    -- 机密布尔直接落回 false（灰 = 不可断路径不会误点亮；细档实锤同族发源之一，
-    -- 值级判定不触发客户端拦截，真值测试才触发）。
-    if Secrets.IsSecret(notInterruptible) then
-        frame.cast.spark:SetTextColor(SPARK_RED[1], SPARK_RED[2], SPARK_RED[3], 1)
-    elseif Secrets.Bool(notInterruptible, false) then
-        local nr, ng, nb = Color:GetNeutral()
-        frame.cast.spark:SetTextColor(nr, ng, nb, 1)
-    else
-        frame.cast.spark:SetTextColor(SPARK_RED[1], SPARK_RED[2], SPARK_RED[3], 1)
-    end
-
-    -- 受限时 startMS / endMS 是保密值（Secret number），OnUpdate 里的减法会抛
-    -- "attempt to perform arithmetic on a secret number value"（零售服实测）。拿不到普通数字就
-    -- 把火花钉在起点并停掉 OnUpdate，收尾交给下一次施法事件；施法条本身照常显示。
-    if Secrets.IsSecret(startMS) or Secrets.IsSecret(endMS) then
-        frame.cast.startTimeMS = nil
-        frame.cast.endTimeMS = nil
-        frame.cast.channeling = channel
-        frame.cast:Show()
-        frame.cast.spark:Show()
-        frame.cast.spark:ClearAllPoints()
-        frame.cast.spark:SetPoint("BOTTOM", frame.cast, "BOTTOMLEFT", 0, 0)
-        frame.cast:SetScript("OnUpdate", nil)
-        return
-    end
-
-    -- Store times for spark calculation
-    frame.cast.startTimeMS = startMS
-    frame.cast.endTimeMS = endMS
-    frame.cast.channeling = channel
-    frame.cast:Show()
-    frame.cast.spark:Show()
-
-    -- OnUpdate 挂在**普通子框**（frame.cast）上，不挂在单位框上：
-    -- 单位框现在是受保护的安全单位按钮，战斗中改它的脚本会被拒，
-    -- 而战斗恰恰是施条动画最要紧的时候。
-    local castFrame = frame.cast
-    castFrame:SetScript("OnUpdate", function(self, elapsed)
-        local cast = castFrame
-        if not cast or not cast.endTimeMS then
-            self:SetScript("OnUpdate", nil)
-            return
-        end
-
-        local now = GetTime() * 1000
-        local startMS = cast.startTimeMS or 0
-        local endMS = cast.endTimeMS
-        local maxDur = endMS - startMS
-        if maxDur <= 0 then maxDur = 1 end
-
-        local progress
-        if cast.channeling then
-            -- Channeling: progresses from 1 to 0
-            progress = (endMS - now) / maxDur
-        else
-            -- Casting: progresses from 0 to 1
-            progress = (now - startMS) / maxDur
-        end
-        if progress < 0 then progress = 0 elseif progress > 1 then progress = 1 end
-
-        -- Move spark RIGHT -> LEFT (reverse): at progress=0 (start), spark at RIGHT; at progress=1, spark at LEFT
-        local barWidth = cast:GetWidth()
-        local x = barWidth * (1 - progress)
-        cast.spark:SetPoint("BOTTOM", cast, "BOTTOMLEFT", x, 0)
-
-        -- Auto-hide when cast ends
-        if (cast.channeling and now >= endMS) or (not cast.channeling and now >= endMS) then
-            cast:Hide()
-            cast.spark:Hide()
-            self:SetScript("OnUpdate", nil)
-        end
-    end)
-end
-
---- Hide cast bar (called on STOP/FAILED/INTERRUPTED/CHANNEL_STOP).
-local function HideCast(frame)
-    if not frame.cast then return end
-    frame.cast:Hide()
-    frame.cast.spark:Hide()
-    frame.cast.endTimeMS = nil
-    frame.cast.startTimeMS = nil
-    frame.cast.channeling = false
-    frame.cast:SetScript("OnUpdate", nil)
-end
+-- 施法条已拆到 Modules/UnitFrames/CastBar.lua（P5，move-only）：M.castbar.*
 
 -- 光环子系统已拆到 Modules/UnitFrames/Auras.lua（P5 试水，move-only）。
 -- 对外接口：M.auras.EnsureTargetAuras / M.auras.RebuildTargetAuras（内部样式经
@@ -902,6 +712,7 @@ end
 -- 内部表共享给 Auras.lua（它在 .toc 里紧随本文件加载）。
 M.frames = frames
 M.Shared = Shared
+M.Setting = Setting
 
 --- 摆好一个单位框。位置读写统一交给 Utils/Mover.lua：归一落点、网格/互相吸附、战斗锁、依赖顺序都在那边。
 local function PositionFrame(frame)
@@ -1099,7 +910,7 @@ local function CreateUnitFrame(unit, position)
     end
     -- Cast bar for player and target.
     if unit == "player" or unit == "target" then
-        CreateCastBar(frame)
+        M.castbar.CreateCastBar(frame)
     end
 
     UpdateBarLook(frame)
@@ -1177,7 +988,7 @@ function M:UpdateUnit(unit, kind, powerType)
             UpdateClassPower(frame)
         end
     elseif kind == "cast" then
-        UpdateCast(frame)
+        M.castbar.UpdateCast(frame)
     else
         UpdateName(frame)
     end
