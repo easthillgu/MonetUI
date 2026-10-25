@@ -810,7 +810,11 @@ local function UpdateCast(frame)
 
     -- An uninterruptible cast turns the spark grey; a normal
     -- (interruptible) cast stays red.
-    if Secrets.Bool(notInterruptible, false) then
+    -- 机密布尔直接落回 false（灰 = 不可断路径不会误点亮；细档实锤同族发源之一，
+    -- 值级判定不触发客户端拦截，真值测试才触发）。
+    if Secrets.IsSecret(notInterruptible) then
+        frame.cast.spark:SetTextColor(SPARK_RED[1], SPARK_RED[2], SPARK_RED[3], 1)
+    elseif Secrets.Bool(notInterruptible, false) then
         local nr, ng, nb = Color:GetNeutral()
         frame.cast.spark:SetTextColor(nr, ng, nb, 1)
     else
@@ -1105,26 +1109,10 @@ end
 --- initializeFrame：一个引擎按钮只进来一次。碰按钮的事必须在这里做完。
 --- spec（可选）：{ width, height, crop } —— BuffFrame 的战斗兜底复用这套样式，但玩家 buff 行是
 --- 方形图标、且不裁边（目标框的 18x14 槽才需要 3:4 裁切）。不传 spec 就等于原来的目标框样子。
-local function StyleAuraButton(button, kind, spec)
-    if type(button) ~= "table" then return end
-
-    local specW = (type(spec) == "table" and spec.width) or TARGET_AURA_ICON_W
-    local specH = (type(spec) == "table" and spec.height) or TARGET_AURA_ICON_H
-    pcall(button.SetSize, button, specW, specH)
-    -- 引擎按钮默认**可点**：压在条上会吃掉换目标的点击。只有这个窗口能可靠关掉。
-    pcall(button.SetMouseClickEnabled, button, false)
-
-    local okLevel, buttonLevel = pcall(button.GetFrameLevel, button)
-    if not (okLevel and type(buttonLevel) == "number") then buttonLevel = 1 end
-    local pad = Media:Mult()
-    if type(pad) ~= "number" or pad <= 0 then pad = 1 end
-
-    -- spec.borderInside = true：边框画在按钮**里面**（自绘那套就是这样：边框占按钮矩形内侧
-    -- 那 1px，图标再内缩 1px 让出来）。默认仍向外扩，目标框那套沿用这个已验证的外观。
+-- 边框：debuff 优先用引擎的解魔法类型色边框（就是"原始那种带色边框"）；buff 用主题边框。
+-- 引擎那条建不出来（枚举/方法缺失）时退回主题边框，不会出现完全没边框的图标。
+local function EnsureAuraBorder(button, kind, spec, pad, buttonLevel)
     local borderInside = (type(spec) == "table" and spec.borderInside) and true or false
-
-    -- debuff 优先用引擎的解魔法类型色边框（就是"原始那种带色边框"）；buff 用主题边框。
-    -- 引擎那条建不出来（枚举/方法缺失）时退回主题边框，不会出现完全没边框的图标。
     if kind ~= "debuff" or not AddDispelBorder(button, pad, borderInside and 0 or nil) then
         -- 边框画在**我们自己的子帧**上，不画进按钮的贴图：引擎按钮在 initializeFrame 返回之后
         -- 就受 DenyTaintedAccessWhenAurasAreSecret 约束，之后再对它的 region 调 SetColorTexture
@@ -1150,10 +1138,14 @@ local function StyleAuraButton(button, kind, spec)
         Widget:ApplyBorder(borderHost, 1)
         Mark(button, "borderHost", borderHost)
     end
+end
 
+-- 图标：建纹理、按 spec.iconInset 内缩，并按 spec.crop 定裁切（nil = 3:4 槽裁切，
+-- false = 不裁，{x0,x1,y0,y1} = 指定窗）。裁切原因见主函数 spec 注释（BuffFrame 的方形
+-- 行也要砍掉法术图标自带 8% 描边）。
+local function EnsureAuraIcon(button, spec)
     local okIcon, icon = pcall(button.CreateTexture, button, "ARTWORK")
-    if not okIcon or not icon then return end
-    -- spec.iconInset：图标从按钮四边内缩多少（要和边框宽度一致，否则边框会被图标压住）。
+    if not okIcon or not icon then return nil end
     local iconInset = (type(spec) == "table" and spec.iconInset) or 0
     if type(iconInset) == "number" and iconInset > 0 then
         icon:SetPoint("TOPLEFT", button, "TOPLEFT", iconInset, -iconInset)
@@ -1161,9 +1153,6 @@ local function StyleAuraButton(button, kind, spec)
     else
         icon:SetAllPoints(button)
     end
-    -- spec.crop：nil = 目标框那套 3:4 槽裁切；false = 不裁；{x0,x1,y0,y1} = 指定裁切。
-    -- 玩家 buff 行要的正是自绘那套 CropIcon(0.08, 0.92, …)：法术图标自带一圈 8% 的描边，
-    -- 不裁掉的话画面会缩在格子中间，和脱战时那套看着不是一个东西。
     local crop = type(spec) == "table" and spec.crop or nil
     if crop == nil then
         -- Crop the square spell art to the 3:4 (H:W) slot aspect.
@@ -1172,22 +1161,29 @@ local function StyleAuraButton(button, kind, spec)
     elseif type(crop) == "table" then
         ns.Skin:CropIcon(icon, crop[1], crop[2], crop[3], crop[4])
     end
+    return icon
+end
 
+-- 冷却：覆盖图标本身（不是整颗按钮），这样扫过的底色不会染到边框那一圈。
+local function EnsureAuraCooldown(button, icon)
     local okCd, cd = pcall(CreateFrame, "Cooldown", nil, button, "CooldownFrameTemplate")
-    if not okCd or not cd then return end
-    -- 冷却覆盖图标本身（不是整颗按钮），这样扫过的底色不会染到边框那一圈。
+    if not okCd or not cd then return nil end
     cd:SetAllPoints(icon)
     pcall(cd.SetDrawEdge, cd, false)
     pcall(cd.SetDrawSwipe, cd, true)
+    return cd
+end
 
-    -- 时长 / 堆叠数字的字号**跟着图标当前的实际尺寸走**（不写死字号）：现量按钮的宽高，
-    -- 高度不超过 45%（上下各留约 2 单位内边距）、宽度保证最长 5 个字符（"1h37m"）不越界，
-    -- 两个上限取更小的那个，再夹一个可读下限。
-    -- Andromeda 的口径是 fontSize = floor(size / 30 * 10 + 0.5)（modules/blizzard/aura.lua），
-    -- 但那是给 30px 方形图标、外加 HalfHeight 字体算的；我们的图标是 4:3 的小格，
-    -- 直接照抄会顶满整格还往外溢。只要图标尺寸（TARGET_AURA_ICON_W/H 或以后的配置项）
-    -- 变了，这里算出来的字号就跟着变，不需要改代码。
-    -- exact = true 让算出来的值真的生效（Widget:SetFont 默认会把 ≤10 的都夹到 10）。
+-- 数字文本：时长（带颜色曲线的 FontString）+ 层数，全部建在冷却帧上（作为它的 region）——
+-- 实测引擎自己那行数字就是这样画的、位于图标之上；挂在按钮的子帧里会被图标盖住。
+-- 字号**跟着图标当前的实际尺寸走**（不写死字号）：现量按钮的宽高，高度不超过 45%
+-- （上下各留约 2 单位内边距）、宽度保证最长 5 个字符（"1h37m"）不越界，两个上限取更小的
+-- 那个，再夹一个可读下限。Andromeda 的口径是 fontSize = floor(size / 30 * 10 + 0.5)
+-- （modules/blizzard/aura.lua），但那是给 30px 方形图标、外加 HalfHeight 字体算的；
+-- 我们的图标是 4:3 的小格，直接照抄会顶满整格还往外溢。图标尺寸（TARGET_AURA_ICON_W/H
+-- 或以后的配置项）变了，这里算出来的字号就跟着变，不需要改代码。
+-- exact = true 让算出来的值真的生效（Widget:SetFont 默认会把 ≤10 的都夹到 10）。
+local function EnsureAuraTexts(button, cd, spec)
     local okW, iconW = pcall(button.GetWidth, button)
     local okH, iconH = pcall(button.GetHeight, button)
     if not (okW and type(iconW) == "number" and iconW > 0) then iconW = TARGET_AURA_ICON_W end
@@ -1201,7 +1197,7 @@ local function StyleAuraButton(button, kind, spec)
     end
 
     -- 时长文本：先给冷却自带的那行数字留条后路（换成像素字体、压进图标下沿），
-    -- 万一下面 RegisterDurationText 不被客户端接受，就继续用它们。
+    -- 万一 RegisterDurationText 不被客户端接受，就继续用它们。
     local inset = math.max(2, math.floor(textSize * 0.55 + 0.5))
     local okRegions, regions = pcall(function() return { cd:GetRegions() } end)
     if okRegions then
@@ -1217,55 +1213,87 @@ local function StyleAuraButton(button, kind, spec)
         end
     end
 
-    -- 自己建 FontString 注册给 SetDurationText：只有这条路能带**颜色曲线**
-    -- （textColor.curve + RemainingDuration，引擎按剩余时长求值，机密值也有效）。
-    -- 建在冷却帧上（作为它的 region）—— 实测引擎自己那行数字就是这样画的、位于图标之上；
-    -- 挂在按钮的子帧里会被图标盖住。
     local okDur, duration = pcall(cd.CreateFontString, cd, nil, "OVERLAY")
-    if not okDur or not duration then return end
+    if not okDur or not duration then return nil end
     -- 时长数字用 PingFangPixel + 硬描边：这套字号是跟着图标尺寸算的（目标框光环 14-20px，
     -- 算出来 4-8px），像素字体在这个尺寸下认不出来。
     Widget:SetFont(duration, textSize, "pingfang", Media.outlineFlags, true)
     duration:SetPoint("BOTTOM", button, "BOTTOM", 0, inset)
     duration:SetJustifyH("CENTER")
 
-    -- 层数：同样画在冷却帧上（在图标之上），锚在右上角，和左下角的时长错开。
+    -- 层数：锚在右上角，和左下角的时长错开。
     local okStack, stack = pcall(cd.CreateFontString, cd, nil, "OVERLAY")
-    if not okStack or not stack then return end
+    if not okStack or not stack then return nil end -- 与原函数同语义：任一文本串建不出就整批罢手
     Widget:SetFont(stack, textSize, "pixel", nil, true)
     stack:SetPoint("TOPRIGHT", button, "TOPRIGHT", -1, -1)
     stack:SetJustifyH("RIGHT")
+    return duration, stack
+end
 
-    -- 区域全部就绪之后才注册（见上面第 3 条约束）。
+-- 时长注册：带颜色曲线（textColor.curve + RemainingDuration，引擎按剩余时长求值，
+-- 机密值也有效）；客户端不接受这套选项时退回最简形式，再不行才用冷却自带的数字。
+-- 返回 registered —— 真生效了调用方就关掉冷却自带的那行数字，避免同一格里两份时长。
+local function RegisterAuraDuration(button, cd, duration)
+    local prop = _G.Enum and Enum.DurationTextBindingProperty
+    prop = prop and prop.RemainingDuration
+    local curve = GetDurationColorCurve()
+    if curve and prop ~= nil then
+        if pcall(button.SetDurationText, button, duration,
+            { textColor = { curve = curve, property = prop } }) then
+            return true
+        end
+    end
+    if not pcall(button.SetDurationText, button, duration, {}) then
+        return false
+    end
+    -- 退一步：文本已注册、只是这次没接受颜色选项，就单独给绑定设曲线
+    -- （不同客户端对 options 的校验不一致，这条路等价）。
+    if curve and prop ~= nil and type(button.GetDurationTextBinding) == "function" then
+        local okBinding, binding = pcall(button.GetDurationTextBinding, button)
+        local bindingType = type(binding)
+        if okBinding and (bindingType == "table" or bindingType == "userdata")
+            and type(binding.SetTextColorCurve) == "function" then
+            pcall(binding.SetTextColorCurve, binding, curve, prop)
+        end
+    end
+    return true
+end
+
+-- initializeFrame：一个引擎按钮只进来一次。碰按钮的事必须在这里做完。
+-- spec（可选）：{ width, height, crop } —— BuffFrame 的战斗兜底复用这套样式，但玩家 buff 行是
+-- 方形图标、且不裁边（目标框的 18x14 槽才需要 3:4 裁切）。不传 spec 就等于原来的目标框样子。
+local function StyleAuraButton(button, kind, spec)
+    if type(button) ~= "table" then return end
+
+    local specW = (type(spec) == "table" and spec.width) or TARGET_AURA_ICON_W
+    local specH = (type(spec) == "table" and spec.height) or TARGET_AURA_ICON_H
+    pcall(button.SetSize, button, specW, specH)
+    -- 引擎按钮默认**可点**：压在条上会吃掉换目标的点击。只有这个窗口能可靠关掉。
+    pcall(button.SetMouseClickEnabled, button, false)
+
+    local okLevel, buttonLevel = pcall(button.GetFrameLevel, button)
+    if not (okLevel and type(buttonLevel) == "number") then buttonLevel = 1 end
+    local pad = Media:Mult()
+    if type(pad) ~= "number" or pad <= 0 then pad = 1 end
+
+    EnsureAuraBorder(button, kind, spec, pad, buttonLevel)
+
+    local icon = EnsureAuraIcon(button, spec)
+    if not icon then return end
+
+    local cd = EnsureAuraCooldown(button, icon)
+    if not cd then return end
+
+    local duration, stack = EnsureAuraTexts(button, cd, spec)
+    if not (duration and stack) then return end
+
+    -- 图标/冷却/层数注册：注意顺序 —— 区域全部就绪之后才轮到 duration 的注册（见下）。
     pcall(button.SetIcon, button, icon)
     pcall(button.SetDurationCooldown, button, cd)
     pcall(button.SetApplicationCount, button, stack, {})
 
-    -- 带颜色曲线注册时长；客户端不接受这套选项时退回最简形式，再不行才用冷却自带的数字。
-    local prop = _G.Enum and Enum.DurationTextBindingProperty
-    prop = prop and prop.RemainingDuration
-    local curve = GetDurationColorCurve()
-    local registered = false
-    if curve and prop ~= nil then
-        registered = pcall(button.SetDurationText, button, duration,
-            { textColor = { curve = curve, property = prop } })
-    end
-    if not registered then
-        registered = pcall(button.SetDurationText, button, duration, {})
-        -- 退一步：文本已注册、只是这次没接受颜色选项，就单独给绑定设曲线
-        -- （不同客户端对 options 的校验不一致，这条路等价）。
-        if registered and curve and prop ~= nil
-            and type(button.GetDurationTextBinding) == "function" then
-            local okBinding, binding = pcall(button.GetDurationTextBinding, button)
-            local bindingType = type(binding)
-            if okBinding and (bindingType == "table" or bindingType == "userdata")
-                and type(binding.SetTextColorCurve) == "function" then
-                pcall(binding.SetTextColorCurve, binding, curve, prop)
-            end
-        end
-    end
-    if registered then
-        -- 我们自己的文本生效了：关掉冷却自带的那行数字，避免同一格里两份时长。
+    if RegisterAuraDuration(button, cd, duration) then
+        -- 我们的文本生效了：关掉冷却自带的那行数字，避免同一格里两份时长。
         pcall(cd.SetHideCountdownNumbers, cd, true)
     else
         duration:Hide()
