@@ -321,6 +321,12 @@ local function UpdateButton(shell, rec)
     -- SetItemButton* 会把蒙版/顶点色/槽底美术重新带上（实机：蒙版回来了就是缺纹理
     -- 斜纹方块），每次重绘后再平一次 —— 全是幂等方法调用，开销可忽略（几十格）。
     FlattenSlotArt(btn)
+    -- 去饱和补挂（2026-10-25 实锤：SetItemButtonDesaturated 走 shader 层 SetDesaturated，
+    -- 不写顶点色，白顶点覆盖不掉它——此前"被白色顶点色覆盖"是误诊。在这里再补一次，
+    -- 防 SetItemButtonTexture 内部重置的时序；幂等）。
+    if btn.icon and btn.icon.SetDesaturated then
+        pcall(btn.icon.SetDesaturated, btn.icon, rec.locked and true or false)
+    end
     shell:SetAlpha(rec.locked and 0.4 or 1)
     if quest then quest:SetText(rec.isQuest and "!" or "") end
 

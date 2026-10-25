@@ -265,6 +265,19 @@ UpdateMaxHealth / UpdateHealPrediction` → 秘值比较被拦 → 整条 compac
 - 已知取舍:锁定物品的原生去饱和(`SetItemButtonDesaturated(true)` 灰化被 FlattenSlotArt
   白顶点覆盖,只剩壳 alpha 0.4 暗化)——保留点亮路径,下一轮单独处理。
 
+**收养案尾巴两笔(2026-10-25 第二波晚间)**:
+- `ADDON_ACTION_BLOCKED UNKNOWN()` ×9 @11:40:06(用户报):开 taintLog=2 取证窗口期间
+  **未再复现**,属性维持上一轮回归验证定档的同一族(`Secrets.Bool` 秘值布尔拦截、设计内、
+  弹窗无、功能无碍);taintLog 已开→读锁失败(无新增)→关回 0。登记:再爆发时重复本流程
+  即可,不属收养改写回归(600 条日志抽样 160 条 UNKNOWN 与心跳穿插持续生长,分布与
+  收养部署前一致)。
+- **锁定物品去饱和"被白顶点覆盖"判为误诊**:实机探针——`SetItemButtonDesaturated(btn,true)`
+  后 vertex 仍 1,1,1(它不写顶点色),灰化走 shader 层 `icon:SetDesaturated`(存在、可用,
+  客户端无 `GetDesaturated` 读取侧);顶点色 × 顶点色并不叠加,白顶点根本覆盖不掉 shader
+  去饱和。修 = `UpdateButton` 在 `FlattenSlotArt` 后幂等补挂
+  `icon:SetDesaturated(rec.locked and true or false)`(防时序,一行)。闸门照旧 0/0/0,
+  已部署待用户瞄一眼。
+
 **回归验证轮(2026-10-25,名字案 OK 后的实机收量)**:
 - ✅ **3453b10 生产波案验收通过**:600+ 条日志 0 条 MathUtil/Backdrop/taint/secret 家族;
   `MonetUICombatBuffFrame` 池审计 **styled=20/20**(此前 10/20 第二批全灭)。
