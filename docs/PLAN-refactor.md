@@ -161,6 +161,20 @@ UpdateMaxHealth / UpdateHealPrediction` → 秘值比较被拦 → 整条 compac
   空槽可读性、ToT 占满后分隔线消失痕迹、自指 >☆< 的字号/字形(☆ 可能走
   回退字体,像素字体可能没有该字形)。
 
+**战斗名字案(2026-10-25,实机:副本里目标/ToT 框体只显示固定"目标/目标的目标")**:
+- 根因:UF `UpdateName` 用 `Secrets.CanReadIdentity` 谓词总闸;本客户端战斗窗口该谓词
+  (`C_Secrets.ShouldUnitIdentityBeSecret`)误报受限 → 整个名字读取被拦死,退化成 frame.label。
+  同窗口**名牌读得到名字**(Nameplates:807 是值级路径)——真实性对照即定案。
+- 修(对齐 skill 档"值级判定、谓词不作门槛"):UpdateName 改名牌同款——`pcall(UnitName)`
+  读值,`Secrets.IsSecret(name)` 值级守卫,明文才截断上屏;`UnitClass` 同款守卫(读不到
+  退 edge 底色)。顺带 `>☆<` 自指分支提前到名字读取之前(UnitIsUnit pcall 包裹),
+  机密窗口不依赖名字可读。
+- 排查同构风险:全仓谓词总闸仅余 `CanMeasureHealth`(UF :653 与名牌 :790 同构、此前
+  实机血量百分比窗口正常)——不动,观察。
+- 闸门:taint 0 BLOCKER / api-audit 无 HARD / check 0 错 0 警;已部署 + reload 请求已发。
+  **实机验证**:战斗中选怪 → 目标/ToT 框体显示真名;**顺手看名牌血量百分比在战斗中
+  是否本来就正常**(若同样空白,则 `CanMeasureHealth` 是下一个同构案)。
+
 **新任务完成:skill 合并 + taint 闸门工具(2026-10-25,接上节交接后)**:
 - `tools/audit-taint.js` —— commit 前 taint 机械闸门。规则 15 条(BLOCKER/HIGH/SOFT 三级):
   and/or 秘值真值链(案 96c7482 形)、裸 Create in initializeFrame(案 3453b10 形)、旧冷却接口、

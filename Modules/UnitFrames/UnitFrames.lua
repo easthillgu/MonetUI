@@ -598,28 +598,36 @@ local function UpdateName(frame)
     local nameText = frame.name
     if not nameText then return end   -- pet frames carry no text
 
-    local name, classFile
-    if Secrets.CanReadIdentity(unit) then
-        name = UnitName(unit)
-        local _, class = UnitClass(unit)
-        classFile = class
-    end
     -- 配色案（2026-10-25）：目标的目标是自己时，名字换成 ">☆<"，☆ 用中国红（#DE2910）。
-    -- 收缩/截断全部跳过 —— 三字符符号串不需要，也不会超 NAME_CAP_SM。
-    if name and unit == "targettarget"
-            and Secrets.Bool(UnitIsUnit(unit, "player"), false) then
+    -- 收缩/截断全部跳过 —— 三字符符号串不需要。UnitIsUnit 只认 unit token 是普通布尔，
+    -- pcall 包一层防 token 异常；这个分支不依赖"名字可读"，机密窗口也能接管显示。
+    local okSelf, isSelf = pcall(UnitIsUnit, unit, "player")
+    if okSelf and unit == "targettarget" and isSelf then
         nameText:SetText(">|cffde2910☆|r<")
         local r, g, b = Color:GetEdge()
         nameText:SetTextColor(r, g, b, 1)
         return  -- targettarget 没有 level / 血量文本，直接收
     end
-    if name then
+
+    -- 案（2026-10-25 战斗名字）：原来是 CanReadIdentity 谓词总闸 —— 本客户端战斗中该
+    -- 谓词误报"受限"，其实可读的名字整个被拦死（实机：同窗口名牌读得到名字，我们的
+    -- 框体只剩 label"目标"/"目标的目标"）。改成名牌同款（Nameplates UpdateText :807）
+    -- 的**值级守卫**：pcall 读 UnitName / UnitClass，读到的值不是机密才用。
+    -- 谓词 API（C_Secrets.*）仍可用于上色前参考，但不作读取门槛。
+    local okName, name = pcall(UnitName, unit)
+    local hasName = okName and type(name) == "string" and not Secrets.IsSecret(name)
+    local classFile
+    if hasName then
+        local okClass, _, class = pcall(UnitClass, unit)
+        if okClass and type(class) == "string" and not Secrets.IsSecret(class) then
+            classFile = class
+        end
         -- Leading words become initials, then the whole thing
         -- is capped.  The text row is shared with the level, so an untruncated NPC name would run
-        -- past the bar's edge.
+        -- past the bar's edge.  AbbrName/Shorten 都做字符串截取，只在明文值上做。
         name = Math:Shorten(Math:AbbrName(name), frame.nameCap or NAME_CAP, true)
     end
-    nameText:SetText(name or frame.label)
+    nameText:SetText(hasName and name or frame.label)
 
     local r, g, b = Color:ClassColor(classFile)
     if not r then
