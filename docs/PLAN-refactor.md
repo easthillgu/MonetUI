@@ -443,6 +443,19 @@ ActionBars 四个)视试水结果下一轮再定。
 **已知限制**：引擎光环分组只支持 `maxDuration` 上限、没有下限 → 战斗中无法还原
 “光环类 / 触发类”两排，只能是**一条流式排**（代码注释已记，别再当 bug 查）。
 
+**追加判例（2026-10-25 下午）**：**主题切换不要重建引擎容器**。重建留下旧世代容器
+（帧销毁不了、仍 `SetEnabled(true)` 被引擎驱动），战斗中引擎写那批被我们碰过的按钮 →
+连环 `ADDON_ACTION_BLOCKED UNKNOWN()`（×11 一次、整场不停，只有重载清）。已改成
+“主题不重建、颜色靠 `/reload`”。另外**战斗中绝不创建容器**（创建得到的容器是空的，且会产生拦截）。
+
+### P5 试水结果（2026-10-25）
+- 已拆 `Modules/UnitFrames/Auras.lua`（763 行，move-only）：输入 `M.frames` / `M.Shared`，
+  输出 `M.auras.{EnsureTargetAuras, RebuildTargetAuras, StyleAuraButton}`，`.toc` 紧随
+  `UnitFrames.lua` 加载；`ns.AuraButtonStyle` / `ns.PrepareAuraStyle` 保持原路径给 BuffFrame 复用。
+- 实机验收：目标/焦点光环显示与拆分前一致；主题切换（不重建）与进/出编辑模式均无报错。
+- 结论：**move-only 拆分可行**，其余文件（UF 的 Blizzard/ClassPower/CastBar、AB 的
+  Secure/DragDrop/PetBar/Blizzard 处置）可按同一模式继续，风险点只有"共享局部表"要显式挂到 M。
+
 
 ## 验证清单(每阶段共用)
 

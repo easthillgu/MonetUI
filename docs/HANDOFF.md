@@ -186,6 +186,17 @@ NamePlateAuras.lua:366     boolean test on 'isFullUpdate' (secret)
 - 机密期不建颜色曲线（`C_CurveUtil` 会被拒），退回冷却自带数字；
 - 引擎容器建不出来时自动退回暴雪原生框（alpha 1）兜底。
 
+### 3.5.5 主题切换不要重建容器（2026-10-25 下午判例）
+症状：换主题后进战斗，`ADDON_ACTION_BLOCKED UNKNOWN()` 一直冒（×11 一次、整场不停），
+**只有 `/reload` 能清**。
+
+原因：换主题曾经靠"重建容器"来换边框色。但帧销毁不了——旧容器只是被 `Hide`，仍
+`SetEnabled(true)` 由引擎驱动；它的按钮被我们的 `initializeFrame` 碰过，于是战斗中引擎每次
+写它们都被记成 MonetUI → 连环拦截。
+
+现做法：**主题切换不重建容器**（颜色保持创建时那一套，`/reload` 后跟新主题）；
+**战斗中绝不创建容器**（创建会得到空容器且产生拦截），只在脱战补建。
+
 ### 3.5.4 顺带的
 - `Utils/Secrets.lua` 增 `Secrets.BoolBlocks()`：`Bool()` 失败路径自记 `debugstack`（200 条、重载清零）。
   **诊断这类拦截只认它**，别再等 taint.log。
