@@ -609,29 +609,38 @@ local function UpdateName(frame)
         return  -- targettarget 没有 level / 血量文本，直接收
     end
 
-    -- 案（2026-10-25 战斗名字）：原来是 CanReadIdentity 谓词总闸 —— 本客户端战斗中该
-    -- 谓词误报"受限"，其实可读的名字整个被拦死（实机：同窗口名牌读得到名字，我们的
-    -- 框体只剩 label"目标"/"目标的目标"）。改成名牌同款（Nameplates UpdateText :807）
-    -- 的**值级守卫**：pcall 读 UnitName / UnitClass，读到的值不是机密才用。
-    -- 谓词 API（C_Secrets.*）仍可用于上色前参考，但不作读取门槛。
+    -- 案（2026-10-25 战斗名字，7afecfb 的值级设想被实机探针修正）：本客户端战斗窗口
+    -- UnitName 返回的就是**机密字符串**（快照：SecretWhenUnitNameIdentityRestricted +
+    -- "允许污染代码传机密"；探针 unitName_secret=true，名牌同窗口 plate_name_secret=true
+    -- ——名牌能显示名字，是因为它把机密串原样 SetText 进显示控件：认为机密值可展示、
+    -- 不可读）。策略分三档：
+    --   明文 → 截断（AbbrName/Shorten）+ 职业色；
+    --   机密串 → 原样 SetText 进显示（不可截断、不派生、不比较），底色退主题 neutral；
+    --   读不到（nil / 抛错）→ frame.label。
     local okName, name = pcall(UnitName, unit)
-    local hasName = okName and type(name) == "string" and not Secrets.IsSecret(name)
+    local rawName = okName and type(name) == "string" and name or nil
+    local secretName = rawName ~= nil and Secrets.IsSecret(rawName)
     local classFile
-    if hasName then
+    if rawName ~= nil and not secretName then
         local okClass, _, class = pcall(UnitClass, unit)
         if okClass and type(class) == "string" and not Secrets.IsSecret(class) then
             classFile = class
         end
-        -- Leading words become initials, then the whole thing
-        -- is capped.  The text row is shared with the level, so an untruncated NPC name would run
-        -- past the bar's edge.  AbbrName/Shorten 都做字符串截取，只在明文值上做。
-        name = Math:Shorten(Math:AbbrName(name), frame.nameCap or NAME_CAP, true)
+        -- Leading words become initials, then the whole thing is capped. The text row is
+        -- shared with the level, so an untruncated NPC name would run past the bar's edge.
+        -- 字符串截取只许在明文值上做 —— 机密串跳过这段，走下面的原样显示。
+        rawName = Math:Shorten(Math:AbbrName(rawName), frame.nameCap or NAME_CAP, true)
     end
-    nameText:SetText(hasName and name or frame.label)
+    nameText:SetText(rawName or frame.label)
 
     local r, g, b = Color:ClassColor(classFile)
     if not r then
-        r, g, b = Color:GetEdge()
+        -- 机密窗口里的名字没有职业信息：给主题中性色，底边不误导。
+        if secretName then
+            r, g, b = Color:GetNeutral()
+        else
+            r, g, b = Color:GetEdge()
+        end
     end
     nameText:SetTextColor(r, g, b, 1)
 

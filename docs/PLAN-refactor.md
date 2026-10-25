@@ -169,6 +169,13 @@ UpdateMaxHealth / UpdateHealPrediction` → 秘值比较被拦 → 整条 compac
   读值,`Secrets.IsSecret(name)` 值级守卫,明文才截断上屏;`UnitClass` 同款守卫(读不到
   退 edge 底色)。顺带 `>☆<` 自指分支提前到名字读取之前(UnitIsUnit pcall 包裹),
   机密窗口不依赖名字可读。
+- **案翻案(实机探针 7afecfb 后)"未成功"**:探针实证战斗窗口 UnitName 返回的就是
+  **机密字符串**(unitName_secret=true,identityPredicate=true 一致;名牌 plate_name_secret
+  =true)——名牌显示名字是因为**机密串原样 SetText 进显示控件**(快照:UnitName 标
+  "允许污染代码传机密",机密值可展示、不可读)。二版:明文→截断+职业色;机密串→原样
+  SetText 显示(不截断/不派生),底色退主题 neutral;读不到→label。Groups.UpdateName
+  同案防御:读到机密不覆盖明文缓存(绝不让 DisplayName 的 string.find 碰机密值)。
+  判例入档:**战斗中身份类文本的正确解 = 机密串直进显示控件**,不是过滤掉。
 - 排查同构风险:全仓谓词总闸仅余 `CanMeasureHealth`(UF :653 与名牌 :790 同构、此前
   实机血量百分比窗口正常)——不动,观察。
 - 闸门:taint 0 BLOCKER / api-audit 无 HARD / check 0 错 0 警;已部署 + reload 请求已发。

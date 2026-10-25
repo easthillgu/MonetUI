@@ -345,8 +345,12 @@ local function UpdateName(button)
     local unit = button.unit
     if not unit or not UnitExists(unit) then return end
 
+    -- 同案（2026-10-25 战斗名字）：战斗窗口 UnitName 返回机密串 —— 读到机密就不覆盖
+    -- 缓存（保持上一轮明文），绝不让 DisplayName 的 string.find 碰机密值。
     local ok, name = pcall(UnitName, unit)
-    button.unitName = (ok and type(name) == "string") and name or nil
+    if ok and type(name) == "string" and not Secrets.IsSecret(name) then
+        button.unitName = name
+    end
     button.name:SetText(DisplayName(button))
 end
 

@@ -52,6 +52,10 @@ description: 审查魔兽世界插件 Lua 代码中因"秘密值(Secret Values)"
 7. **机密标记分层**（快照标注）：`C_Spell.GetSpellCooldown` → 机密[SecretWhenCooldownsRestricted]
    且"允许污染代码传机密"（可以传给引擎接口，不能自己算）；`C_UnitAuras.GetAuraDataBySlot` →
    机密[SecretWhenUnitAuraRestricted]（战斗/受限时段数不可读）；DurationObject 接口本身非机密。
+   9'. **身份类文本（UnitName 等）标着"允许污染代码传机密"时，机密串要原样 SetText 进显示
+   控件**（机密值可展示、不可读）。战斗身份文本的解法不是"过滤掉留白"，而是按值三档：
+   明文 → 截断 + 职业色；机密串 → 原样显示 + 底色退中性；读不到 → label。
+   （实机判例：名牌显示战斗中的名字，就是机密串 SetText；案翻案见 PLAN 2026-10-25。）
 8. **战斗内测试才算数**。条件性秘值只在副本/战斗/团队框架下变秘密。主城/非战斗测试通过 ≠ 安全。
 
 ---
