@@ -187,6 +187,20 @@ UpdateMaxHealth / UpdateHealPrediction` → 秘值比较被拦 → 整条 compac
 - 闸门:taint 0 BLOCKER / api-audit 无 HARD / check 0 错 0 警;已部署 + reload 请求已发。
   **实机验证**:战斗中选怪 → 目标/ToT 框体显示真名;**顺手看名牌血量百分比在战斗中
   是否本来就正常**(若同样空白,则 `CanMeasureHealth` 是下一个同构案)。
+- **作者拍板(2026-10-25)**:战斗中**不强制** `>☆<` —— 战斗中首次锁定 ToT=自身且无历史
+  明文判定时显示真名,接受现行行为(信息模型边界)。判定缓存只在明文窗生效,三版设计定稿。
+
+**回归验证轮(2026-10-25,名字案 OK 后的实机收量)**:
+- ✅ **3453b10 生产波案验收通过**:600+ 条日志 0 条 MathUtil/Backdrop/taint/secret 家族;
+  `MonetUICombatBuffFrame` 池审计 **styled=20/20**(此前 10/20 第二批全灭)。
+- ✅ ToT 几何:血条高 6、`frame.power=nil`、无分隔线 —— 配色案落地正确。
+- ⚠️ `MonetUICombatDebuffFrame` 池审计 styled=0/10:受限窗生产的整批失格(设计内,受限窗
+  样式交引擎外观兜底);下轮围绕 debuff 行出图/边框观感收尾,不算回归缺陷。
+- ⚠️ BLOCKED 日志 320 条/17.5 分钟/40 时刻持续生长,`MonetUI UNKNOWN()`:taintLog=2 抓栈
+  定性 = `Secrets.lua:83/89 Bool()` 秘值布尔 pcall 拦截(2961 条同类"boolean test on
+  secret blocked")——设计内拦截 + 详细日志放大(Groups UpdateRange 族的常态),弹窗无、
+  功能无碍,taintLog 已关回 0。登记:高频 `Secrets.Bool` 秘值窗守卫是未来限流/合并判定的
+  候选,不属回归缺陷。
 
 **新任务完成:skill 合并 + taint 闸门工具(2026-10-25,接上节交接后)**:
 - `tools/audit-taint.js` —— commit 前 taint 机械闸门。规则 15 条(BLOCKER/HIGH/SOFT 三级):
