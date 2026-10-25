@@ -21,6 +21,14 @@
 8. ✅ **debuff 整行隐形**（`36b7280`）—— debuff 行锚在空的 proc 行（0×0）上，`GetLeft()` 返 nil；
    改成按实际行高自己算落点。
 9. ✅ 暴雪 `BuffFrame/DebuffFrame` 的收起方式改 `alpha 0 + 关鼠标`（原写法写脚本槽 + 注销事件 = 污染）。
+10. ✅ **`ADDON_ACTION_BLOCKED UNKNOWN()` 族根治**（2026-10-25）—— 实测是两类：①对机密值做布尔测试
+    （发源 `Groups.lua:520/521`，另 `UpdateState`/`UpdateHealthText`/`SyncSelection`/`UpdateCast`），
+    改**值级 `Secrets.IsSecret` 前置**；②**自建引擎 AuraContainer** 的渲染驱动被拦（×2/×15/×29 = 按钮批次），
+    整条路线停用。诊断只认新增的 `Secrets.BoolBlocks()` 自证账本（taint.log 对这类零记录）。
+11. ✅ **战斗中玩家 buff 空白**（2026-10-25）—— 引擎容器两条死路（换肤→新 proc 无图标；不换肤→全空白），
+    战斗中改用**暴雪原生 Buff/Debuff/TempEnchant 框**（alpha 0/1 切换），proc 即时上屏；实机验收通过。
+12. ⏳ **暴雪小队/团队框与自绘框重复**（2026-10-25）—— 编辑模式关可见性保存后重载仍显示，
+    判为 16001 客户端 EditMode 可见性接线断；选项 A 共存 / B 关自绘 Groups / C 带风险自动藏（不推荐），**待作者拍板**。
 
 ## ✅ 2026-10-18 修复批次（离线验证完成，待实机复核）
 

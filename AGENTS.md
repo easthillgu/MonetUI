@@ -31,6 +31,13 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
 - secure 元素（微按钮等）战斗中禁改：`InCombatLockdown()` 防护 + `PLAYER_REGEN_ENABLED` 一次性重试。
 - **安全单位按钮（`SecureUnitButtonTemplate`）的显隐只能交给 `visibility` state driver**（`[@target,exists] show; hide` 等），任何代码路径都不要再 `Show/Hide/SetShown` —— 战斗中必被拒（`ADDON_ACTION_BLOCKED MonetUITargetFrame:Hide()`），`UNIT_*` 事件驱动的刷新路径尤其容易漏。
 - 秘密值：数值上下文用 `Secrets.Number` 包裹，受限时保留上次状态。但**"nil" 不等于"机密"**：`UnitThreatSituation` 这类 API 脱战后返回的是普通 nil（表示没有该信息），必须按"0/无"处理，只有 `issecretvalue` 为真才保留上次状态 —— 否则红边之类的状态会永远挂着。
+- **布尔值同理，且必须"值级前置"**：对机密值做真值测试（`if v then`）会被客户端拦成
+  `ADDON_ACTION_BLOCKED UNKNOWN()`；而 `issecretvalue`(**读取**本身)不触发拦截。所以统一写法是
+  `if Secrets.IsSecret(v) then <回退到"被拦后默认"那一支> else <真值测试> end`，
+  机密分支与被拦后的回退**逐位一致**（行为零变化，拦截归零）。2026-10-25 全仓 `Secrets.Bool`
+  调用点按此模式过了一遍（Groups 四处 + UpdateCast 是主要发源）。诊断这类拦截**只认**
+  `Secrets.BoolBlocks()`（`Bool()` 失败路径自记 `debugstack`）——本客户端 taint.log 对
+  "布尔测试被拦"会记、对 `ADDON_ACTION_BLOCKED` 却**零记录**（旗子开着实测 0 字节）。
 
 ## 污染（taint）模型 —— 本客户端最贵的一课
 
@@ -96,6 +103,14 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   `ADDON_ACTION_BLOCKED MonetUI UNKNOWN()`。改成轮询 `C_NamePlate.GetNamePlateSize()` 后
   10 分钟 0 报错、`taint.log` 全空。判定口诀：**只要那东西是暴雪用来"生产"其它帧的
   （驱动 / 池 / 管理器），碰它一次，产物全脏**。
+- **同一个坑的第三例：自建 `CreateFrame("AuraContainer", ...)`**（2026-10-25 定案）。
+  容器是我们造的，引擎在它上面跑的渲染就全记在 MonetUI 名下：战斗里一 `Show`，逐个按钮
+  被拦（×2 / ×15 / ×29 与按钮批次量级吻合），而且**这类拦截不进 taint.log**。更糟的是
+  按钮换肤（`SetIcon` / `SetDurationCooldown` / `SetApplicationCount` 换成自建子帧）后，
+  战斗中**新触发的 proc 只有鼠标提示、没有图标**；完全不换肤则这套模板的按钮一个都画不出来。
+  **结论**：玩家光环的战斗显示交给**暴雪原生** `BuffFrame / DebuffFrame / TempEnchantFrame`
+  （`SuppressBlizzard` 按 combatMode 切 alpha 0/1），别再自建 AuraContainer 顶班。
+  判定口诀同上一条：**引擎的生产件，不要用我们的手去造、去改**。
 
 ## 安全按钮（自绘动作条）的额外约束
 
