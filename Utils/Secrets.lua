@@ -84,10 +84,30 @@ local function TestBool(value)
     return false
 end
 
+-- 诊断：真值测试被客户端拦下时（机密布尔,设计内软拦），记**我们自己的账**——
+-- 调用栈进旁表,探针直读,不再依赖 Logs/taint.log 的批量 flush（实机两次 A/B 窗口
+-- 均零字节未落）。只记失败路径,成功路径零开销;表封顶丢弃,防长时段膨胀。
+local boolBlocks = {}
+local boolBlocksSeen = 0
+
+--- 最近被拦的 Bool 调用（调试用）: { { at, stack }... } + 总数。只增不清(重载清)。
+function Secrets.BoolBlocks()
+    return boolBlocks, boolBlocksSeen
+end
+
 --- Truthiness test that survives secret booleans.
 function Secrets.Bool(value, default)
     local ok, result = pcall(TestBool, value)
     if ok then return result end
+    -- 说明:true 测试被客户端拦了。记调用栈(纯字符串,机密值不进 concat)。
+    boolBlocksSeen = boolBlocksSeen + 1
+    if #boolBlocks < 200 then
+        local stack
+        if type(_G.debugstack) == "function" then
+            stack = _G.debugstack(2, 2, 4)
+        end
+        boolBlocks[#boolBlocks + 1] = { at = GetTime(), stack = stack or "?" }
+    end
     return default
 end
 

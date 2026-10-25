@@ -376,8 +376,20 @@ local function UpdateState(button)
     local unit = button.unit
     if not unit or not UnitExists(unit) then return end
 
-    local dead = Secrets.Bool(UnitIsDeadOrGhost(unit))
-    local offline = not Secrets.Bool(UnitIsConnected(unit), true)
+    -- 机密布尔值级前置（同 UpdateRange 2026-10-25 修：issecretvalue 不触发客户端拦截，
+    -- 真值测试才触发；机密时落回与 Bool 被拦后默认**逐位一致**的分支）。进战斗的一次
+    -- 全池刷新会把这组测试放大成每次 ×4 的拦截波（UpdateState + UpdateHealthText ± 2）。
+    local dead
+    if not Secrets.IsSecret(UnitIsDeadOrGhost(unit)) then
+        dead = Secrets.Bool(UnitIsDeadOrGhost(unit))
+    end
+    local offline
+    if Secrets.IsSecret(UnitIsConnected(unit)) then
+        -- 连接状态未知 → 按在线处理（= Bool 默认 true）
+        offline = false
+    else
+        offline = not Secrets.Bool(UnitIsConnected(unit), true)
+    end
 
     if offline then
         button.name:SetText("离线")
@@ -444,9 +456,17 @@ local function UpdateHealthText(button)
         return
     end
 
-    -- 死亡 / 离线时名字行已经在报状态，血量文字让位
-    local dead = Secrets.Bool(UnitIsDeadOrGhost(unit))
-    local offline = not Secrets.Bool(UnitIsConnected(unit), true)
+    -- 死亡 / 离线时名字行已经在报状态,血量文字让位(值级前置同 UpdateState)
+    local dead
+    if not Secrets.IsSecret(UnitIsDeadOrGhost(unit)) then
+        dead = Secrets.Bool(UnitIsDeadOrGhost(unit))
+    end
+    local offline
+    if Secrets.IsSecret(UnitIsConnected(unit)) then
+        offline = false
+    else
+        offline = not Secrets.Bool(UnitIsConnected(unit), true)
+    end
     if dead or offline then
         fs:SetText("")
         return
@@ -517,8 +537,17 @@ local function UpdateRange(button)
         return
     end
 
-    local known = Secrets.Bool(checked)
-    local near = Secrets.Bool(inRange, true)
+    -- 对机密值做布尔测试会被客户端拦下（2026-10-25 13:37 细档实锤：UNKNOWN() 日志族
+    -- 99% 的发源就是下面这两行，~5 条/秒持续）。issecretvalue 的**值级判定不触发拦**，
+    -- 真值测试才触发 —— 所以先值级判，机密时直接落回"未知"语义（known=nil / near=true，
+    -- 与 Bool 被拦后的回退默认**逐位一致**），非机密才做真值测试。
+    local known, near
+    if not Secrets.IsSecret(checked) then known = Secrets.Bool(checked) end
+    if Secrets.IsSecret(inRange) then
+        near = true
+    else
+        near = Secrets.Bool(inRange, true)
+    end
     SetContentAlpha(button, (known and not near) and RANGE_ALPHA or 1)
 end
 
@@ -567,8 +596,10 @@ local function SyncSelection()
     -- 只看显示着的按钮：团队里小队的那些按钮还在 byUnit 里（unit 已被安全头清空，这里再兜一层）
     for unit, button in pairs(byUnit) do
         if button:IsShown() then
+            -- UnitIsUnit 在受限时返回**机密布尔**（秘密标注 SecretWhenUnitComparisonRestricted，
+            -- AGENTS 实机判例）：先值级判，机密就当作"不是"跳过（= Bool 被拦后的 nil 回退分支）。
             local ok, same = pcall(UnitIsUnit, unit, "target")
-            if ok and Secrets.Bool(same) then
+            if ok and not Secrets.IsSecret(same) and Secrets.Bool(same) then
                 target = button
                 break
             end
