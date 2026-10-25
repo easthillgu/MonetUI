@@ -316,7 +316,12 @@ function M:Update()
     if not buffContainer then return end
 
     if not Secrets.CanReadAuras() then
-        -- 加密/受限环境（战斗中）：插件读不到任何光环，交给引擎 AuraContainer。
+        -- 加密/受限环境（战斗中）：**插件被硬禁读**——2026-10-25 插件上下文实测：
+        --   GetAuraDataByIndex(): Auras cannot be accessed when secret while tainted by 'MonetUI'
+        -- 不是"返回机密字段"，是整个 API 直接拒。所以任何"自己画战斗光环"的方案
+        -- （自绘网格 / 引擎 AuraContainer + 我们的皮肤）都缺数据源；引擎那条还额外撞
+        -- DenyTaintedAccessWhenAurasAreSecret（战斗中交给引擎的按钮样式注入被拒 → 新 proc
+        -- 只有鼠标提示、没有图标）。战斗显示只能交给客户端自己的框，见 SuppressBlizzard。
         SetCombatMode(true)
         return
     end

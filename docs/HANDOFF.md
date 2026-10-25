@@ -172,6 +172,13 @@ NamePlateAuras.lua:366     boolean test on 'isFullUpdate' (secret)
 拉回 1（`SuppressBlizzard` 按 `combatMode` 切 0/1），客户端自己画自己更新，proc 即时上屏；
 脱战 alpha 归 0，自绘行回来。**实机验收：脱战自绘、战斗中可见、proc 即时、0 拦截。**
 
+**为什么"战斗中套我们自己的皮肤"做不到（2026-10-25 插件上下文实测）**：
+`C_UnitAuras.GetAuraDataByIndex` 在战斗中对我们整个插件抛
+`Auras cannot be accessed when secret while tainted by 'MonetUI'` —— **硬禁读**，不是"字段加密"。
+所以没有"先 `IsSecret` 判断再自绘"这条路；引擎按钮那条又被
+`DenyTaintedAccessWhenAurasAreSecret` 挡住（战斗中新建按钮的样式注入被拒 = 新 proc 只有提示没图标）。
+**结论：战斗显示只能交给客户端自己的框**，我们的皮肤只在脱战生效。
+
 ### 3.5.4 顺带的
 - `Utils/Secrets.lua` 增 `Secrets.BoolBlocks()`：`Bool()` 失败路径自记 `debugstack`（200 条、重载清零）。
   **诊断这类拦截只认它**，别再等 taint.log。

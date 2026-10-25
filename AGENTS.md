@@ -111,6 +111,12 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   **结论**：玩家光环的战斗显示交给**暴雪原生** `BuffFrame / DebuffFrame / TempEnchantFrame`
   （`SuppressBlizzard` 按 combatMode 切 alpha 0/1），别再自建 AuraContainer 顶班。
   判定口诀同上一条：**引擎的生产件，不要用我们的手去造、去改**。
+- **战斗光环是"硬禁读"，不是"字段加密"**（2026-10-25 插件上下文实测）：
+  `C_UnitAuras.GetAuraDataByIndex` 在 `ShouldAurasBeSecret()` 为真时对**整个插件**抛出
+  `Auras cannot be accessed when secret while tainted by 'MonetUI'` —— 拿不到 aura 表，
+  也就没有"先 `IsSecret` 判断再自绘"这条路（那是"字段加密"才有的写法）。
+  推论：**任何"战斗中自己画光环"的设计都不成立**（自绘网格无数据源；引擎按钮的
+  `DenyTaintedAccessWhenAurasAreSecret` 连创建期样式注入都会拒），战斗显示只能靠客户端自己的框。
 
 ## 安全按钮（自绘动作条）的额外约束
 
