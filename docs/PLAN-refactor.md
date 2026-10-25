@@ -464,6 +464,23 @@ ActionBars 四个)视试水结果下一轮再定。
 
 **教训**：被我们碰过的暴雪框，要么完全放手，要么连事件一起收掉；**不要留半套**。
 
+### 姓名板光环（2026-10-25 晚，本轮修复 + 遗留）
+1. **本客户端默认不画姓名板光环**：`nameplateShowAllPersonalAuras=0` 时只显示被客户端标为
+   "个人重要"的光环 —— 连暴雪自己的姓名板也不显示普通减益。调到 `1` 后原生才出图标。
+   （这不是插件设置，是客户端 CVar；已登记。）
+2. 我们对暴雪 `UnitFrame` 压 `alpha 0` 来接管外观，而 `AurasFrame` 是它的**子帧** →
+   会连带透明；所以减益行必须 `SetParent` 到我们自己的牌子（原本就是这么做的）。
+3. **接管早的牌子拿不到 `AurasFrame`**（生成晚于接管）：实机表现是"非目标牌子有减益、
+   当前目标牌子没有"。修法：`UpdatePlate` 每次补一次借用（`TryBorrowAuras`，幂等）。
+4. 敌对减益在本客户端可能挂在 **`BuffListFrame`** 而不是 `DebuffListFrame`（实测前者有按钮、
+   后者恒 0）：两个列表都要摆位 + 美化。
+5. **边框必须是四条 1px 边**：原实现用一张铺满按钮的白贴图（`Widget:TintIconBorder` 走
+   `SetColorTexture`）且层级在图标之上 —— 实机表现是"图标被一块灰/色块盖住"。
+6. **遗留**：`BuffListFrame`（控制类/特殊分类）仍会被暴雪摆回牌子右端，我们只压得住一瞬；
+   要彻底接管需要高频强压，暂登记为已知小问题（图标可见、样式偏原生）。
+7. **战斗中**姓名板光环列表是禁用对象，`rawget(UnitFrame,"AurasFrame")` 拿不到 →
+   战斗中新建的牌子无法借用减益（客户端限制）。
+
 ### P5 试水结果（2026-10-25）
 - 已拆 `Modules/UnitFrames/Auras.lua`（763 行，move-only）：输入 `M.frames` / `M.Shared`，
   输出 `M.auras.{EnsureTargetAuras, RebuildTargetAuras, StyleAuraButton}`，`.toc` 紧随

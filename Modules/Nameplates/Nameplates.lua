@@ -408,12 +408,10 @@ end
 --   3. 层数 / 剩余时间换 pixel 数字字体。
 -- 冷却扫圈保留（关掉描边，扫圈继续走）。
 -- 全部不依赖暴雪内部成员名：名字优先、几何判据兜底，任何一步失败静默跳过。
-local function DressDebuffButton(button)
-    if not button or type(button) ~= "table" then return end
-
-    local d = Marked(button, "debuff")
-    if not d then
-        d = { fonts = {} }
+--- debuff 按钮第一次出现时的"发现 + 建造"（P4 拆分：原 DressDebuffButton 416-520 行）。
+--- 任何一步失败都静默跳过：不依赖暴雪内部成员名（名字优先、几何判据兜底）。
+local function BuildDebuffDressing(button)
+        local d = { fonts = {} }
         Mark(button, "debuff", d)
         dressedDebuffs = dressedDebuffs + 1
 
@@ -481,13 +479,27 @@ local function DressDebuffButton(button)
             d.stockBorder = stock
         end
 
-        local bd = button:CreateTexture(nil, "OVERLAY")
+        local bd = CreateFrame("Frame", nil, button)
         bd:SetPoint("TOPLEFT", button, "TOPLEFT", -1, 1)
         bd:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 1, -1)
-        -- 白 texel + 顶点色(review #4 与 UF 的 TintAuraButton 共用):初始可以带驱散色,
-        -- 之后主题换色还能重复重涂(以前 SetColorTexture 烧死颜色,重不了)。
-        Widget:TintIconBorder(bd, sr, sg, sb)
+        bd:SetFrameLevel(button:GetFrameLevel() + 2)
+        -- **四条 1px 边**（2026-10-25 判例）：以前这里是一张铺满整个按钮的白贴图
+        -- （`Widget:TintIconBorder` 走 SetColorTexture），层级又在图标之上 —— 实机表现
+        -- 就是"图标被一块纯色块盖住"。边必须是边，不能是填充。
+        local px = ns.Media:Mult()
+        if type(px) ~= "number" or px <= 0 then px = 1 end
+        local edges = {}
+        for i = 1, 4 do
+            local t = bd:CreateTexture(nil, "OVERLAY")
+            t:SetColorTexture(sr, sg, sb, 1)   -- 直接烘色（换主题靠重建，见主题处理）
+            edges[i] = t
+        end
+        edges[1]:SetPoint("TOPLEFT");  edges[1]:SetPoint("TOPRIGHT");    edges[1]:SetHeight(px)
+        edges[2]:SetPoint("BOTTOMLEFT"); edges[2]:SetPoint("BOTTOMRIGHT"); edges[2]:SetHeight(px)
+        edges[3]:SetPoint("TOPLEFT");  edges[3]:SetPoint("BOTTOMLEFT");  edges[3]:SetWidth(px)
+        edges[4]:SetPoint("TOPRIGHT"); edges[4]:SetPoint("BOTTOMRIGHT"); edges[4]:SetWidth(px)
         d.border = bd
+        d.borderEdges = edges
 
         -- 4) 冷却：关描边，保留扫圈。
         local okC2, children = pcall(function() return { button:GetChildren() } end)
@@ -518,8 +530,12 @@ local function DressDebuffButton(button)
         -- 字号跟着矩形走：14px 高的图标配 8 号数字。
         d.size = math.max(DEBUFF_TEXT_MIN, math.min(DEBUFF_TEXT_MAX,
             math.floor(DEBUFF_H * 0.42 + 0.5)))
-    end
+    return d
+end
 
+--- 每次显隐都把矩形 / 贴图坐标 / 字体压回去（P4 拆分：原 523-539 行）。
+--- 这套按钮是暴雪的，回收/重排时会写回尺寸与坐标，只在第一次设就会退回方块。
+local function ReapplyDebuffDressing(button, d)
     -- 每一次显隐都把矩形和图标压回去：这套按钮是暴雪的，回收 / 重排时它会把尺寸
     -- 和贴图坐标写回去；只在第一次设，第二次显示就退回方块了。
     pcall(button.SetSize, button, DEBUFF_W, DEBUFF_H)
@@ -539,6 +555,14 @@ local function DressDebuffButton(button)
     end
 end
 
+local function DressDebuffButton(button)
+    if not button or type(button) ~= "table" then return end
+
+    local d = Marked(button, "debuff")
+    if not d then d = BuildDebuffDressing(button) end
+    ReapplyDebuffDressing(button, d)
+end
+
 --- 遍历一整个 debuff 列表，把还没打扮过的按钮补上。
 --- 池化按钮第一次显示时可能还没进 GetChildren()；以前给每个按钮挂 OnShow 补一次，
 --- 现在不挂了（HookScript 写脚本槽 = 污染，见 AGENTS）。AnchorDebuffs 在每次
@@ -547,16 +571,32 @@ local function DressDebuffList(list)
     if not list or type(list.GetChildren) ~= "function" then return end
     local ok, children = pcall(function() return { list:GetChildren() } end)
     if not ok or not children then return end
+    ns.NPStats = ns.NPStats or { calls = 0, kids = 0, ok = 0, err = nil }
+    ns.NPStats.calls = ns.NPStats.calls + 1
+    ns.NPStats.kids = #children
     for i = 1, #children do
-        DressDebuffButton(children[i])
+        local okB, errB = pcall(DressDebuffButton, children[i])
+        if okB then ns.NPStats.ok = ns.NPStats.ok + 1 else ns.NPStats.err = tostring(errB):sub(1, 160) end
     end
 end
 
---- Your debuffs without reading any aura: Blizzard's AurasFrame is moved onto our plate (the
---- game keeps drawing it, we only say where), hung above the name row; redone per pooled plate.
+-- 迟到的按钮也要打扮：目标牌的常见时序是"我们先接管、暴雪随后才建光环按钮"。
+-- 低频补扫（打扮本身幂等：Marked 命中就直接 return），不动锚点，只补样式。
+Widget:PollWatch(_G.UIParent, function()
+    for _, plate in pairs(plates) do
+        local auras = plate and plate.blizzardAuras
+        if auras then
+            local dl = rawget(auras, "DebuffListFrame")
+            if dl then DressDebuffList(dl) end
+            local bl = rawget(auras, "BuffListFrame")
+            if bl then DressDebuffList(bl) end
+        end
+    end
+end)
+
+-- B1：借来之后补外观。列表被暴雪重排时会再走一遍，字体重新压一次。
 local function AnchorDebuffs(auras, plate)
-    local list = auras and rawget(auras, "DebuffListFrame")
-    if not list or type(list.SetPoint) ~= "function" then return end
+    if not auras then return end
 
     local gap = Setting("auraGap") or 4
     local textRow = 0
@@ -564,11 +604,36 @@ local function AnchorDebuffs(auras, plate)
         textRow = ns.Media:SnapSize(Setting("nameSize")) + TEXT_GAP
     end
 
-    pcall(list.ClearAllPoints, list)
-    pcall(list.SetPoint, list, "BOTTOMLEFT", plate, "TOPLEFT", 0, textRow + gap)
+    -- 两个列表都要处理：本客户端把敌对减益放在 `BuffListFrame` 里的情况实机出现过
+    -- （`DebuffListFrame` 一直 0 个按钮，图标却显示在屏幕上，且保持暴雪原位/原样式）。
+    local function place(key)
+        local list = rawget(auras, key)
+        if not list or type(list.SetPoint) ~= "function" then return end
+        pcall(list.ClearAllPoints, list)
+        pcall(list.SetPoint, list, "BOTTOMLEFT", plate, "TOPLEFT", 0, textRow + gap)
+        DressDebuffList(list)
+    end
+    place("DebuffListFrame")
+    place("BuffListFrame")
+end
 
-    -- B1：借来之后补外观。列表被暴雪重排时会再走一遍，字体重新压一次。
-    DressDebuffList(list)
+--- 补借用（幂等）：目标那块牌子往往被我们**更早**接管，那时 AurasFrame 还没生成，
+--- `HideBlizzardPlate` 里的借用分支就跳过了 —— 实机表现正是"非目标牌子有减益、当前目标
+--- 的牌子没有"（2026-10-25）。每次刷新补一次即可理顺。
+local function TryBorrowAuras(plate)
+    if plate.blizzardAuras then return end
+    local uf = plate.blizzardUF
+    if not uf then return end
+    if Setting("showDebuffs") == false then return end
+
+    local ok, auras = pcall(rawget, uf, "AurasFrame")
+    if not ok or not auras then return end
+
+    if type(auras.SetParent) == "function" then pcall(auras.SetParent, auras, plate) end
+    if type(auras.SetAlpha) == "function" then pcall(auras.SetAlpha, auras, 1) end
+    Mark(auras, "plate", plate)
+    plate.blizzardAuras = auras
+    AnchorDebuffs(auras, plate)
 end
 
 local function BlizzardUnitFrame(base)
@@ -591,6 +656,10 @@ local function HideBlizzardPlate(base, plate)
 
     local auras = rawget(uf, "AurasFrame")
     if auras and Setting("showDebuffs") ~= false then
+        -- **必须 SetParent 出来**（2026-10-25 实机）：我们对 UnitFrame 做了 alpha 0，
+        -- AurasFrame 是它的子帧 → 会连带变透明（表现就是"减益一个都不显示"）。
+        -- 早先"改父后不生成按钮"的观察是 `nameplateShowAllPersonalAuras=0` 造成的，
+        -- 打开该 CVar 后改父不再影响生成。
         if type(auras.SetParent) == "function" then pcall(auras.SetParent, auras, plate) end
         if type(auras.SetAlpha) == "function" then pcall(auras.SetAlpha, auras, 1) end
         Mark(auras, "plate", plate)
@@ -893,9 +962,20 @@ local function UpdatePlate(plate)
         KeepBlizzardHidden(plate)
     end
 
+    -- **接管失败就别画我们这块**（2026-10-25 实机：同一只怪出现两块牌子 —— 暴雪的牌子
+    -- 右端显示冰冻陷阱，我们的牌子左上显示猎人标记）。拿不到暴雪 UnitFrame 时我们无法把它
+    -- 压暗，两块就会叠在屏幕上；此时宁可退回暴雪原生那一块。
+    if not plate.blizzardHidden then
+        plate:Hide()
+        HideCast(plate)
+        return false
+    end
+
     -- 暴雪重排过它的光环列表时（每次 ApplyFrameOptions），这里把我们的锚点重新压一遍。
     -- 独立于暴雪的调用链，所以不会污染它（以前是挂 ApplyFrameOptions 后钩，那会把后面
     -- 的安全调用整片拖进"被 MonetUI 污染"的执行里）。
+    -- 先补一次借用：接管得早的牌子（典型是当前目标）那时还没有 AurasFrame。
+    TryBorrowAuras(plate)
     if plate.blizzardAuras then
         AnchorDebuffs(plate.blizzardAuras, plate)
     end
