@@ -269,183 +269,31 @@ local function SplitBuffs(buffs)
 end
 
 -- ============================================================================
--- 战斗兜底：引擎 AuraContainer
+-- 战斗中的玩家光环：交给**暴雪原生 Buff 框**
 -- ----------------------------------------------------------------------------
 -- 这个客户端在战斗中把光环数据标成机密：C_Secrets.ShouldAurasBeSecret() 为真时，
 -- C_UnitAuras.GetAuraDataByIndex 对插件直接抛
 --   "Auras cannot be accessed when secret while tainted by 'ForceTaint_Strong'"
--- 一个索引都读不到，自己读数据画的那套只能整块让位（这就是"一进战斗整块 Buff 消失"）。
--- 引擎的 AuraContainer 由客户端自己读光环、自己画按钮（目标框光环走的就是这条路），不受这条
--- 限制，所以战斗中改由它顶班，数据实时准确。
--- 代价：引擎不能按**剩余时长**给光环分类，"光环类 / 触发类"两行只能在脱战期间保留；
--- 战斗中是一整条流式排列（尺寸、边框、冷却、时长数字都和目标框同一套样式）。
--- 约束：容器必须在**脱战**时创建——战斗里 CreateFrame 出来的容器永远是空的（目标框实测）。
+-- 一个索引都读不到，自己读数据画的那套只能整块让位。
+--
+-- 曾用引擎 AuraContainer 顶班（2026-10-25 前的实现，git 历史可查/可回滚）。实测两条死路：
+--   1) 按钮换肤（SetIcon / SetDurationCooldown / SetApplicationCount 换成我们自建的子帧）：
+--      战斗中**新触发的 proc 只有鼠标提示、没有图标** —— 引擎无法往插件替换过的对象写新光环；
+--   2) 完全不换肤：这套模板的按钮离开 initializeFrame 就一个图标都画不出来，整块空白。
+-- 而且自建容器一 Show，引擎就在我们的污染上下文里逐个按钮被拦：日志里那批
+-- ADDON_ACTION_BLOCKED UNKNOWN() 的量级（×2 / ×15 / ×29）正好等于按钮批次数。
+--
+-- 现在的做法：战斗中把暴雪原生 Buff / Debuff / TempEnchant 框的 alpha 拉回 1（见
+-- SuppressBlizzard），客户端自己画、自己更新，proc 即时上屏；脱战 alpha 归 0，自绘行回来。
 -- ============================================================================
 
-local combatBuffs, combatDebuffs
 local combatMode = false
-local combatWarned = false
-local RebuildCombatAuras   -- 前置声明：EnsureCombatAuras 战斗中要把它排进 ns:AfterCombat（实现在下面）
+local SuppressBlizzard   -- 前置声明：SetCombatMode 里要用（定义在下面）
 
---- AuraContainer 属于 LoD 插件，没加载时 CreateFrame 拿不到那个模板。
-local function EnsureAuraContainerAddOn()
-    local C = _G.C_AddOns
-    if not C or type(C.LoadAddOn) ~= "function" then return false end
-    local ok, loaded = pcall(C.IsAddOnLoaded, "Blizzard_AuraContainer")
-    if not ok then return false end
-    if not loaded and not pcall(C.LoadAddOn, "Blizzard_AuraContainer") then return false end
-    return true
-end
-
--- 两代 API：Flow* 是新名字，AuraLayout* 是旧名字；新名优先、旧名兜底、都没有就跳过。
-local function FlowCall(container, newName, oldName, ...)
-    local f = container[newName]
-    if type(f) ~= "function" and oldName then f = container[oldName] end
-    if type(f) ~= "function" then return false end
-    return pcall(f, container, ...)
-end
-
---- 贴左上、向右长、满行往下换行。
-local function ApplyCombatFlow(container, size)
-    local perRow = PerRow(size)
-    -- 引擎判换行时会多算一个 elementSpacing，所以行宽要多给一格间距（见 UnitFrames 的同名注释）。
-    local lineSize = perRow * size + perRow * ICON_GAP
-
-    FlowCall(container, "SetFlowLayoutAnchorPoint", "SetAuraLayoutAnchorPoint", "TOPLEFT")
-    local flow = _G.AnchorUtil and _G.AnchorUtil.FlowDirection
-    local grown = false
-    if type(flow) == "table" and flow.Right ~= nil and flow.Down ~= nil then
-        grown = FlowCall(container, "SetFlowLayoutGrowthDirection", "SetAuraLayoutGrowthDirection",
-            flow.Right, flow.Down)
-    end
-    if not grown then
-        FlowCall(container, "SetFlowLayoutGrowthDirection", "SetAuraLayoutGrowthDirection", "RIGHT", "DOWN")
-    end
-    local axes = _G.AnchorUtil and _G.AnchorUtil.FlowLayoutAxis
-    if axes and type(container.SetFlowLayoutAxis) == "function" then
-        pcall(container.SetFlowLayoutAxis, container, axes.Horizontal)
-    end
-    FlowCall(container, "SetFlowLayoutElementSpacing", "SetAuraLayoutElementSpacing", ICON_GAP)
-    FlowCall(container, "SetFlowLayoutLineSpacing", "SetAuraLayoutLineSpacing", ICON_GAP)
-    FlowCall(container, "SetFlowLayoutMaximumLineSize", "SetAuraLayoutRowWidth", lineSize)
-end
-
-local function CreateCombatAura(frameName, key, filter, size, kind)
-    if not EnsureAuraContainerAddOn() then
-        return nil, "Blizzard_AuraContainer 未加载"
-    end
-    local ok, container = pcall(CreateFrame, "AuraContainer", frameName, UIParent, "CustomAuraContainerTemplate")
-    if not ok or type(container) ~= "table" then
-        return nil, "CreateFrame(AuraContainer) 失败（模板可能不存在）"
-    end
-
-    -- 先给一个可渲染的矩形，否则引擎那轮 OnUpdate 永远不会跑第一次布局。
-    container:SetSize(1, 1)
-    ApplyCombatFlow(container, size)
-
-    local opts = {
-        maxFrameCount = MAX_AURAS,
-        candidateFilters = {},              -- 空表 = 不设白名单，引擎自己决定显示什么
-        layout = {
-            elementSpacing = ICON_GAP,
-            lineSpacing    = ICON_GAP,
-            elementWidth   = size,
-            elementHeight  = size,
-            layoutIndex    = 1,
-        },
-        -- 按钮样式与目标框共用（尺寸/裁切/字号由 spec 覆盖）。kind = "debuff" 时走引擎的
-        -- 解魔法类型色边框 —— 那条也是引擎自己上色，战斗中照样有效。
-        -- crop 必须和自绘那套一模一样（砍掉法术图标自带的 8% 描边），边框 1px、图标内缩
-        -- 同样的 1 个物理像素、时长 12px，否则战斗中一看就是"另一套皮肤"。
-        initializeFrame = function(button)
-            pcall(function()
-                if type(ns.AuraButtonStyle) == "function" then
-                    local pad = ns.Media and ns.Media:Mult() or 1
-                    if type(pad) ~= "number" or pad <= 0 then pad = 1 end
-                    ns.AuraButtonStyle(button, kind, {
-                        width = size, height = size,
-                        crop = { 0.08, 0.92, 0.08, 0.92 },
-                        iconInset = pad,
-                        textSize = 12,
-                        borderInside = true,   -- 自绘那套的边框画在按钮内侧，引擎默认向外扩，必须统一
-                    })
-                end
-            end)
-        end,
-    }
-    local sortMethod = _G.AuraContainerSortMethod
-    if type(sortMethod) == "table" then sortMethod = sortMethod.Default end
-    if type(sortMethod) == "number" then opts.sortMethod = sortMethod end
-    local sortDirection = _G.AuraContainerSortDirection
-    if type(sortDirection) == "table" then sortDirection = sortDirection.Normal end
-    if type(sortDirection) == "number" then opts.sortDirection = sortDirection end
-
-    local okAdd, err = pcall(container.AddAuraGroup, container, key, filter, opts)
-    if not okAdd then
-        return nil, "AddAuraGroup 失败: " .. tostring(err)
-    end
-
-    pcall(container.SetUnit, container, "player")
-    pcall(container.UpdateAllAuras, container)
-    container:Hide()
-    return container
-end
-
-local function EnsureCombatAuras()
-    if combatBuffs and combatDebuffs then return true end
-    if type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown() then
-        -- 战斗里建出来的容器永远是空的：排队到脱战补做（ns:AfterCombat）。
-        ns:AfterCombat("buffframe-auras", RebuildCombatAuras)
-        return false
-    end
-    -- 染色曲线必须在非 securecall 的上下文里先建好，否则按钮拿不到曲线。
-    if type(ns.PrepareAuraStyle) == "function" then pcall(ns.PrepareAuraStyle) end
-
-    local buffs, why = CreateCombatAura("MonetUICombatBuffFrame", "monetPlayerCombatBuffs", "HELPFUL", BUFF_SIZE, "buff")
-    local debuffs = buffs and CreateCombatAura("MonetUICombatDebuffFrame", "monetPlayerCombatDebuffs", "HARMFUL", DEBUFF_SIZE, "debuff")
-    if not buffs or not debuffs then
-        if not combatWarned then
-            combatWarned = true
-            ns:Print("战斗中的玩家光环（原生 AuraContainer）不可用：" .. tostring(why or "未知原因"))
-        end
-        if buffs then pcall(buffs.Hide, buffs) end
-        if debuffs then pcall(debuffs.Hide, debuffs) end
-        return false
-    end
-
-    combatBuffs, combatDebuffs = buffs, debuffs
-    combatBuffs:SetPoint("TOPLEFT", UIParent, "TOPLEFT", AURA_GAP, -AURA_GAP)
-    -- debuff 跟自绘那套一样隔 8 个像素，把"有益 / 有害"分开。
-    combatDebuffs:SetPoint("TOPLEFT", combatBuffs, "BOTTOMLEFT", 0, -8)
-    return true
-end
-
---- 引擎按钮在 initializeFrame 返回后就锁死（连我们建在按钮里的子帧都不能改写），
---- 换主题只能把容器连同按钮扔掉重建。战斗中重建会得到空容器：
---- 把自己排进 ns:AfterCombat，脱战重试。
-function RebuildCombatAuras()
-    if type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown() then
-        ns:AfterCombat("buffframe-auras", RebuildCombatAuras)
-        return
-    end
-    for _, container in ipairs({ combatBuffs, combatDebuffs }) do
-        if container then
-            pcall(container.ClearAllPoints, container)
-            pcall(container.Hide, container)
-            pcall(container.SetParent, container, nil)
-        end
-    end
-    combatBuffs, combatDebuffs = nil, nil
-end
-
---- 两套显示互斥切换。进战斗 → 引擎顶班；脱战 → 自绘分行那套回来。
+--- 两套显示互斥切换。进战斗 → 暴雪原生 Buff 框；脱战 → 自绘分行那套回来。
 local function SetCombatMode(on)
     if on == combatMode then
-        -- 已经在这个模式里：容器可能还没建过（进战斗前一帧才失败），补一次，别每次重做。
-        if on and EnsureCombatAuras() then
-            pcall(combatBuffs.Show, combatBuffs)
-            pcall(combatDebuffs.Show, combatDebuffs)
-        end
+        if on then SuppressBlizzard() end   -- 幂等：保证原生框仍是可见状态
         return
     end
     if on then
@@ -457,14 +305,10 @@ local function SetCombatMode(on)
         HideContainer(procContainer)
         HideContainer(debuffContainer)
         combatMode = true
-        if EnsureCombatAuras() then
-            pcall(combatBuffs.Show, combatBuffs)
-            pcall(combatDebuffs.Show, combatDebuffs)
-        end
+        SuppressBlizzard()
     else
-        if combatBuffs then pcall(combatBuffs.Hide, combatBuffs) end
-        if combatDebuffs then pcall(combatDebuffs.Hide, combatDebuffs) end
         combatMode = false
+        SuppressBlizzard()
     end
 end
 
@@ -528,7 +372,7 @@ local function QueueUpdate()
     end)
 end
 
-local function SuppressBlizzard()
+function SuppressBlizzard()
     local found = 0
     for _, name in ipairs({ "BuffFrame", "DebuffFrame", "TempEnchantFrame" }) do
         local blizzard = _G[name]
@@ -538,8 +382,15 @@ local function SuppressBlizzard()
             --   * Hide() 会被暴雪自己的 Show() 顶回来（一边补、一边顶 = 一闪一闪）；
             --   * 写脚本槽 / 注销事件都是"动过这个框"，之后它自己的代码全算成 MonetUI 的污染。
             -- alpha 0 的框一直算"显示着"，不触发它的 Show 逻辑，也就不打架（见 AGENTS.md）。
-            pcall(blizzard.SetAlpha, blizzard, 0)
-            pcall(blizzard.EnableMouse, blizzard, false)
+            -- **战斗策略（2026-10-25 定案）**：战斗中直接让**暴雪原生 Buff 框**顶上
+            -- （alpha 1 + 可鼠标，客户端自己更新，proc/新光环一律即时上屏）；
+            -- 脱战中 alpha 0 藏起来，用我们自绘那套。
+            -- 为什么不用引擎 AuraContainer 顶班：换成我们自建的图标/冷却对象后，战斗中
+            -- 新 proc 只画得出鼠标提示、画不出图标（engine 无法往插件替换的对象写新光环）；
+            -- 完全不做换肤则连已有光环都不画（该模板的按钮靠 initializeFrame 才有图标）。
+            local alpha = combatMode and 1 or 0
+            pcall(blizzard.SetAlpha, blizzard, alpha)
+            pcall(blizzard.EnableMouse, blizzard, combatMode and true or false)
         end
     end
     if found == 0 then
@@ -563,10 +414,6 @@ function M:Initialize()
 
     SuppressBlizzard()
 
-    -- 战斗兜底的引擎容器**必须在脱战时建好**：战斗里建的容器永远空。这里顺手建一次，
-    -- 进战斗时就不用现建（也避免进战斗那一刻才失败）。
-    EnsureCombatAuras()
-
     EventBus:RegisterUnit("UNIT_AURA", "player", QueueUpdate)
     EventBus:Register("PLAYER_ENTERING_WORLD", function() M:Update() end)
     EventBus:Register("PLAYER_SPECIALIZATION_CHANGED", function() M:Update() end)
@@ -577,9 +424,8 @@ function M:Initialize()
         -- 战斗中被拦的容器重建由 ns:AfterCombat 在更早的统一排空里做掉。
         M:Update()
     end)
-    -- 换主题：自绘那套直接重涂；引擎那套按钮建完就锁死，只能连容器一起重建。
+    -- 换主题：自绘那套直接重涂（战斗中用的原生框不归我们管，无需重建）。
     EventBus:Register("MONETUI_THEME_CHANGED", function()
-        RebuildCombatAuras()
         M:Update()
     end)
 
@@ -593,8 +439,6 @@ function M:SetEnabled(enabled)
         -- buffContainer 也藏起来的话，QueueUpdate 的 OnUpdate 驱动就停了，所以只清按钮。
         if procContainer then procContainer:Hide() end
         if debuffContainer then debuffContainer:Hide() end
-        if combatBuffs then pcall(combatBuffs.Hide, combatBuffs) end
-        if combatDebuffs then pcall(combatDebuffs.Hide, combatDebuffs) end
         for _, button in ipairs(buffButtons) do button:Hide() end
         for _, button in ipairs(procButtons) do button:Hide() end
         for _, button in ipairs(debuffButtons) do button:Hide() end
