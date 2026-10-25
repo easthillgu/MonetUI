@@ -62,6 +62,16 @@ description: 审查魔兽世界插件 Lua 代码中因"秘密值(Secret Values)"
    `Secrets.IsSecret(isSelf)` 值级判定，明文且为真才走该分支；判定是机密就落回另一条
    真实信息路径（如真名直显），不缓存上一次明文判定、不保留旧状态**（旧状态会把
    "上一轮是它"错画成"这一轮还是它"）。（>☆< 自指案 tail，2026-10-25 二定拍板。）
+   9'''. **受保护全局在「我们上下文」调用即越权**（分类背包右键案，2026-10-25）：
+   `C_Container.UseContainerItem` 自绘按钮 OnClick 里调弹「MonetUI 已被禁用」——不是 API
+   本身保护，是**调用链上下文**定越权（与动作条 action 属性同键模型）。正解 = 收养：
+   壳框（BackdropTemplate，`SetID`=bag）+ `ContainerFrameItemButtonTemplate` 按钮
+   （`SetID`=slot），点击/拖放全走暴雪模板原生上下文，我们的状态入 ns:Mark 旁表、
+   模板按钮零自定义字段。附赠判例：**模板按钮战斗中不能出生**（出生即被污染，脱战
+   补建——Ellesmere _poolShort 同款）；**模板按钮出生即隐藏**（我们 UpdateButton 只
+   Show 壳、没 Show 钮：图标黑 + tooltip 失联 + 框线可见（画在壳上）三症状同源）。
+   另记探针陷阱：`select(1, pcall(f,...))` 取到的是 pcall 成功布尔不是返回值，读值
+   必须 `select(2, ...)`。
 8. **战斗内测试才算数**。条件性秘值只在副本/战斗/团队框架下变秘密。主城/非战斗测试通过 ≠ 安全。
 
 ---
