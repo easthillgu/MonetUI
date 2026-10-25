@@ -1262,6 +1262,14 @@ end
 -- initializeFrame：一个引擎按钮只进来一次。碰按钮的事必须在这里做完。
 -- spec（可选）：{ width, height, crop } —— BuffFrame 的战斗兜底复用这套样式，但玩家 buff 行是
 -- 方形图标、且不裁边（目标框的 18x14 槽才需要 3:4 裁切）。不传 spec 就等于原来的目标框样子。
+--
+-- **必需件优先（2026-10-25 修复"战斗中 proc 只有提示没有图标"）**：
+-- 引擎把机密光环数据写进 `SetIcon / SetDurationCooldown / SetApplicationCount` 交给它的那三个
+-- 对象。以前任一文本串/边框建不出来就整段 return，等于**连 SetIcon 一起放弃**——屏幕上就是
+-- "按钮在、能悬停、没有图标"。现在顺序改成：先建图标→冷却→层数并**立刻注册**，装饰件
+-- （边框 / 时长文本 / 染色）全部排在注册之后、各自 pcall 隔离：装饰失败最多"不好看"，不会
+-- 让图标消失。机密期不建颜色曲线（`C_CurveUtil` 会被拒），退回冷却自带数字。
+-- （对齐 ArcAuras 的 `initializeFrame` 纪律：`AD_DriverAura.lua:796-883`。）
 local function StyleAuraButton(button, kind, spec)
     if type(button) ~= "table" then return end
 
@@ -1271,35 +1279,48 @@ local function StyleAuraButton(button, kind, spec)
     -- 引擎按钮默认**可点**：压在条上会吃掉换目标的点击。只有这个窗口能可靠关掉。
     pcall(button.SetMouseClickEnabled, button, false)
 
+    -- 必需件 1/3：图标。
+    local icon = EnsureAuraIcon(button, spec)
+    if icon then pcall(button.SetIcon, button, icon) end
+
+    -- 必需件 2/3：冷却（覆盖在图标上；时长数字也建在它上面）。
+    local cd
+    if icon then
+        cd = EnsureAuraCooldown(button, icon)
+        if cd then pcall(button.SetDurationCooldown, button, cd) end
+    end
+
+    -- 必需件 3/3：层数 + 我们自己的时长文本（建不出来不影响前两件）。
+    local duration, stack
+    if cd then
+        local okTexts, d, s = pcall(EnsureAuraTexts, button, cd, spec)
+        if okTexts then duration, stack = d, s end
+    end
+    if stack then pcall(button.SetApplicationCount, button, stack, {}) end
+
+    -- 装饰 1/3：边框（我们自己的子件，写不进引擎数据，失败只丢边框）。
     local okLevel, buttonLevel = pcall(button.GetFrameLevel, button)
     if not (okLevel and type(buttonLevel) == "number") then buttonLevel = 1 end
     local pad = Media:Mult()
     if type(pad) ~= "number" or pad <= 0 then pad = 1 end
+    pcall(EnsureAuraBorder, button, kind, spec, pad, buttonLevel)
 
-    EnsureAuraBorder(button, kind, spec, pad, buttonLevel)
-
-    local icon = EnsureAuraIcon(button, spec)
-    if not icon then return end
-
-    local cd = EnsureAuraCooldown(button, icon)
-    if not cd then return end
-
-    local duration, stack = EnsureAuraTexts(button, cd, spec)
-    if not (duration and stack) then return end
-
-    -- 图标/冷却/层数注册：注意顺序 —— 区域全部就绪之后才轮到 duration 的注册（见下）。
-    pcall(button.SetIcon, button, icon)
-    pcall(button.SetDurationCooldown, button, cd)
-    pcall(button.SetApplicationCount, button, stack, {})
-
-    if RegisterAuraDuration(button, cd, duration) then
-        -- 我们的文本生效了：关掉冷却自带的那行数字，避免同一格里两份时长。
-        pcall(cd.SetHideCountdownNumbers, cd, true)
-    else
-        duration:Hide()
+    -- 装饰 2/3：时长文本绑定。机密期跳过颜色曲线（会被拒），退回冷却自带数字。
+    if duration and cd then
+        local registered = false
+        if not Secrets.AurasSecret() then
+            local okReg, res = pcall(RegisterAuraDuration, button, cd, duration)
+            registered = okReg and res == true
+        end
+        if registered then
+            pcall(cd.SetHideCountdownNumbers, cd, true)
+        else
+            pcall(duration.Hide, duration)
+        end
     end
 
-    TintAuraButton(button)
+    -- 装饰 3/3：主题染色（同样只碰我们自己的子件）。
+    pcall(TintAuraButton, button)
 end
 
 --- 导出给 BuffFrame：战斗里客户端不给插件读光环，玩家 buff 行改由引擎 AuraContainer 显示，
