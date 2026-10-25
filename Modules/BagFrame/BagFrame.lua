@@ -53,9 +53,11 @@ local function SkinContainer(frame)
         pcall(Widget.SetFont, Widget, title, 12, "pixel")
     end
 
-    if frame.HookScript then
-        frame:HookScript("OnShow", function() M:ArrangeBags() end)
-    end
+    -- 污染审查（2026-10-25）：不再 HookScript —— frame 是暴雪的 ContainerFrame，
+    -- 往它脚本槽写函数会把它标脏（此后暴雪自己在包裹框上跑的代码全部记到
+    -- MonetUI 名下，战斗中就是 ADDON_ACTION_BLOCKED 家族）。改用 Widget:ShowWatch
+    -- 轮询（旁表 + 0.2s 轮查 IsVisible，零框体写），隐藏→显示的瞬间重排一次。
+    Widget:ShowWatch(frame, function() M:ArrangeBags() end)
 end
 
 function M:Initialize()

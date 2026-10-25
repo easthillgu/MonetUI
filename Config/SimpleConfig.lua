@@ -192,7 +192,7 @@ local function MakeDropdown(parent, y, caption, items, getter, setter)
 
     if not Marked(parent, "hideHook") then
         Mark(parent, "hideHook", true)
-        parent:HookScript("OnHide", CloseDropdown)
+        parent:HookScript("OnHide", CloseDropdown) -- TAINT-OK: parent 是自建设置面板（Widget:CreateFrame），上方有 Marked 幂等守卫
     end
 
     dropdowns[#dropdowns + 1] = Refresh

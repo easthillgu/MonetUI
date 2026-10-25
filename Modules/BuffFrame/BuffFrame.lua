@@ -519,9 +519,9 @@ local function QueueUpdate()
     if not frame or pending then return end
     pending = true
     frame:SetScript("OnUpdate", function(self, elapsed)
-        self.__elapsed = (self.__elapsed or 0) + elapsed
+        self.__elapsed = (self.__elapsed or 0) + elapsed -- TAINT-OK: buffContainer 是自建容器（MonetUICombatBuffFrame），暴雪代码不在此框上运行
         if self.__elapsed < 0.25 then return end
-        self.__elapsed = 0
+        self.__elapsed = 0 -- TAINT-OK: 同上，自建节流计数
         self:SetScript("OnUpdate", nil)
         pending = false
         M:Update()

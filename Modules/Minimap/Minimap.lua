@@ -568,8 +568,8 @@ local function EnsureBlocker(minimap)
             if M.microMenu and Settings().microMenu then M.microMenu:Toggle(M.panel) end
         end)
         -- 区域名：悬停小地图才显示，平时藏起来
-        blocker:HookScript("OnEnter", function() SetZoneTextVisible(true) end)
-        blocker:HookScript("OnLeave", function() SetZoneTextVisible(false) end)
+        blocker:HookScript("OnEnter", function() SetZoneTextVisible(true) end) -- TAINT-OK: blocker 是自建小地图遮罩
+        blocker:HookScript("OnLeave", function() SetZoneTextVisible(false) end) -- TAINT-OK: 同上
     end
     blocker:ClearAllPoints()
     -- 画布上下各有一条被裁掉的带子，覆盖层只铺**可见区**（落在那儿的位置地图上并不显示）。

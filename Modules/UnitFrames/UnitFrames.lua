@@ -1410,7 +1410,7 @@ local function EnsureTargetAuras(frame)
         if not debuffs then
             -- 一次性警告，不刷屏。
             if not M.__auraWarned then
-                M.__auraWarned = true
+                M.__auraWarned = true -- TAINT-OK: M 是本模块自建 table
                 ns:Print("目标光环（原生 AuraContainer）不可用：" .. tostring(why))
             end
             return
@@ -1566,7 +1566,7 @@ end
 -- update; the hook re-stacks it (the same guard pattern as Nameplates).
 local function HookAuraRelayout()
     if M.__auraHooked then return end
-    M.__auraHooked = true
+    M.__auraHooked = true -- TAINT-OK: M 是本模块自建 table（幂等门控）
 
     local function restack()
         local frame = frames.target
@@ -1822,8 +1822,8 @@ local function CreateUnitFrame(unit, position)
 
     Widget:Theme(frame, { thickness = border, bgAlpha = 0.9 })
     Widget:UnitTooltip(frame, unit)
-    frame:HookScript("OnEnter", function(self) HoverBorder(self, true) end)
-    frame:HookScript("OnLeave", function(self) HoverBorder(self, false) end)
+    frame:HookScript("OnEnter", function(self) HoverBorder(self, true) end) -- TAINT-OK: frame 是自建单位框（hover 边框）
+    frame:HookScript("OnLeave", function(self) HoverBorder(self, false) end) -- TAINT-OK: 同上
 
     -- 拖动 / 吸附 / 位置记忆统一走 Utils/Mover.lua（默认位置是调用方给的 position 表）。
     ns.Mover:Register(frame, unit, {

@@ -112,8 +112,8 @@ local function Build()
                 pcall(action)
                 M:Close()
             end)
-            row:HookScript("OnEnter", function() Widget:ColorText(label, "highlight") end)
-            row:HookScript("OnLeave", function() Widget:ColorText(label, "neutral") end)
+            row:HookScript("OnEnter", function() Widget:ColorText(label, "highlight") end) -- TAINT-OK: row 是自建微型菜单行
+            row:HookScript("OnLeave", function() Widget:ColorText(label, "neutral") end) -- TAINT-OK: 同上
 
             rows[#rows + 1] = row
             y = y - (ROW_H + 1)

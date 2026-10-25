@@ -123,7 +123,7 @@ function M:Apply(entry)
         -- QUEST_LOG_UPDATE / WORLD_MAP_UPDATE hook, so an unguarded print turns one broken frame name
         -- into dozens of identical lines per session.
         if not entry.__applyFailed then
-            entry.__applyFailed = true
+            entry.__applyFailed = true -- TAINT-OK: entry 是自建注册表记录（纯 Lua table），非暴雪对象
             ns:Print("界面美化「" .. tostring(entry.key) .. "」应用失败: " .. tostring(err))
         end
     end

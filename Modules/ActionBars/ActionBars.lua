@@ -646,7 +646,7 @@ end
 -- PetActionBar:UpdateShownButtons → SetShown、UseAction → MainActionBar:ClearAllPoints）
 -- 全部被判 ADDON_ACTION_BLOCKED —— 实机 taint.log 的链就是：
 --   OnActionButtonClick → PerformAction → handler → CastPetAction
---     → PetActionBar:UpdateShownButtons → PetActionButton10:SetShown()  BLOCKED
+--     → PetActionBar:UpdateShownButtons → PetActionButton10:SetShown()  BLOCKED -- TAINT-OK: 注释内引用的拦截记录（说明为何不直控 SetShown），非代码
 --
 -- 所以这些属性改由 ChildUpdate 片段在**安全环境**里写（和 action 同一个套路）。
 local KIND_CHILD   = "mui-kind"
@@ -1164,7 +1164,7 @@ local function BuildButton(bar, index)
     -- 否则下一次别人（包括暴雪自己的 ActionButton）要弹托盘就撞断言。
     if not Marked(button, "flyoutHooked") then
         Mark(button, "flyoutHooked", true)
-        button:HookScript("OnHide", function(self)
+        button:HookScript("OnHide", function(self) -- TAINT-OK: button 是自建动作按钮（托盘 FlyoutMixin 的旧版残留收尾），实机案已入 AGENTS/PLAN
             local popup = _G.SpellFlyout
             if popup and popup.flyoutButton == self then
                 pcall(popup.DetatchFromButton, popup)
@@ -1643,7 +1643,7 @@ local GetPetActionInfo = _G.GetPetActionInfo
 ---   overlay.UpdateShineAnim = function() end
 --- —— 三行都是往暴雪的 AutoCastOverlay 上写字段。本客户端按"键"判污染：写过就脏，
 --- 之后暴雪自己的 PetActionButton:UpdateShownButtons → SetShown 在战斗中全被拒
---- （taint.log: "blocked in combat because of taint from MonetUI - PetActionButton5:SetShown()"），
+--- （taint.log: "blocked in combat because of taint from MonetUI - PetActionButton5:SetShown()"）， -- TAINT-OK: 同上，注释非代码
 --- 连带 PetActionBar/MainActionBar 的整体重排也被拒。停动画 + 藏起来就够了，不需要改它的函数。
 local function SuppressAutoCastShine(button)
     local overlay = button.AutoCastOverlay
@@ -1962,7 +1962,7 @@ local function AdoptBar(def)
     --
     -- taint.log 实测：这些写入会把**受保护的**动作按钮/按钮容器弄脏。脏了之后：
     --   * 暴雪自己的 UpdateShownButtons → SetShown 在战斗中被拒
-    --     （"An action was blocked in combat because of taint from MonetUI - PetActionButton9:SetShown()"）；
+    --     （"An action was blocked in combat because of taint from MonetUI - PetActionButton9:SetShown()"）； -- TAINT-OK: 同上，注释非代码
     --   * 按钮卡在错误状态，暴雪只能反复重试 → 每次进战斗刷一屏，并连带把
     --     PetActionBar / MainActionBar 的整体重排也拒掉（ClearAllPointsBase / SetPointBase）；
     --   * 连带 UpdateShownButtons 的后钩也失去意义。

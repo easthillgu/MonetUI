@@ -195,6 +195,30 @@ UpdateMaxHealth / UpdateHealPrediction` → 秘值比较被拦 → 整条 compac
   判断区只剩 `pcall(UnitIsUnit)` + `Secrets.IsSecret(isSelf)` 值级守卫。三版作废,四版
   定稿。skill 档判例 9'' 同步改写(删缓存语义,改"明文判定可用才显示")。
 
+**加密污染审查轮(2026-10-25,skill 档全流程:机械扫描→敏感点人工复核→修复→收档)**:
+- 机械闸门复扫:`audit-taint.js` 0 BLOCKER(与基线一致,近三轮 UnitIsUnit/名字改动没引入
+  新档);`api-audit.js` 无 HARD;check 0 错(5 条 note = 既有受保护全局清单,PlaceAction
+  有 InCombatLockdown 守门)。
+- **真违规一例(已修)——`BagFrame.lua:57`**:对暴雪 `ContainerFrame` 直接
+  `HookScript("OnShow", ArrangeBags)`。`M:HookShow` 的实现注释正好写着红线原因(往暴雪框体
+  脚本槽写函数=标脏,之后暴雪在包裹框上的代码全部记 MonetUI 名下),排查才发现 BagFrame
+  自己绕开了这个入口。修:`Widget:ShowWatch` 轮询(旁表+0.2s 轮询 IsVisible,零框体写,
+  隐藏→显示瞬间重排一次,行为等价)。
+- **22 条 HIGH 逐条人工复盘**(计数与改动前一致,逐文件定性):全是
+  (a)自建对象上的 HookScript/`__field` 写(SimpleConfig 面板、自建动作按钮、MonetUI 冷却框、
+  MonetUIMinimapDifficulty、微型菜单行、小地图遮罩、自建单位框、buffContainer 节流计数、
+  M 模块表的幂等门控、Skins 注册表记录)或 (b)ActionBars 三条**注释文本**误报
+  (SETSHOWN-SECURE 把"记录被拦调用链"的文档行当代码)。各行内 `-- TAINT-OK: <原因>`
+  收档,21 条豁免 + 1 条真修。
+- **基线首次全清**:`0 BLOCKER / 0 HIGH / 0 SOFT`(45 文件)。此后扫描器再报 HIGH=新增
+  待审,不达标不带病 commit。skill 档 7 节(闸门用法)同步更新基线描述。
+- 复盘中间还确认:`Secrets.SetBar` 三段 pcall 回退(0,100 百分比兜底 + 失败保留上次值)
+  符合 Plat;`Ask` fail-safe 语义(缺 API/抛错/受限→按"更严"方向退化)正确;Groups
+  `not IsSecret(value) and not value` 的短路次序正确(IsSecret 为真时不评估 `not value`)。
+- 观察(不修项):Nameplates `Update` Border 的威胁状态 `Secrets.Number or 0` 在战斗窗
+  秘值时退回主题底色而不保留上次状态(UF 侧 :1648 是保留式的);视觉降级非炸点,与
+  "nil≠secret"判例半符 —— 有意保留(名牌威胁红边战斗中的体感损失远小于状态机扰动),登记即可。
+
 **回归验证轮(2026-10-25,名字案 OK 后的实机收量)**:
 - ✅ **3453b10 生产波案验收通过**:600+ 条日志 0 条 MathUtil/Backdrop/taint/secret 家族;
   `MonetUICombatBuffFrame` 池审计 **styled=20/20**(此前 10/20 第二批全灭)。

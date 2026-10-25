@@ -327,7 +327,7 @@ end
 local function SetupDifficultyTooltip()
     if not difficultyFrame then return end
     difficultyFrame:EnableMouse(true)
-    difficultyFrame:HookScript("OnEnter", function(self)
+    difficultyFrame:HookScript("OnEnter", function(self) -- TAINT-OK: difficultyFrame 是自建标记（MonetUIMinimapDifficulty）
         local _, instanceType, _, difficultyName, maxPlayers = GetInstanceInfo()
         if type(instanceType) ~= "string" or instanceType == "" then return end
         if not _G.GameTooltip then return end
@@ -342,7 +342,7 @@ local function SetupDifficultyTooltip()
         end
         GameTooltip:Show()
     end)
-    difficultyFrame:HookScript("OnLeave", function()
+    difficultyFrame:HookScript("OnLeave", function() -- TAINT-OK: 同上（OnLeave 藏 tooltip）
         if _G.GameTooltip then GameTooltip:Hide() end
     end)
 end
@@ -352,8 +352,8 @@ local function SetupDifficulty()
         -- 徽章就是材质本身（4:3），难度徽章按副本难度染色
         difficultyFrame = Widget:CreateFrame("MonetUIMinimapDifficulty", container, B.WIDTH, B.HEIGHT)
         difficultyFrame.icon = AddBadge(difficultyFrame, "monet_map_difficulty", "edge")
-        difficultyFrame:HookScript("OnEnter", function() SetHover(difficultyFrame.icon, true) end)
-        difficultyFrame:HookScript("OnLeave", function() SetHover(difficultyFrame.icon, false) end)
+        difficultyFrame:HookScript("OnEnter", function() SetHover(difficultyFrame.icon, true) end) -- TAINT-OK: 同上（hover 用 EnableMouse 开启）
+        difficultyFrame:HookScript("OnLeave", function() SetHover(difficultyFrame.icon, false) end) -- TAINT-OK: 同上
         SetupDifficultyTooltip()
     end
     difficultyFrame:SetPoint("TOPLEFT", container, "TOPLEFT", 4, -4)

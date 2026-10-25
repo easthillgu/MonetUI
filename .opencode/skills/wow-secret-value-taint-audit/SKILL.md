@@ -266,9 +266,11 @@ node tools/audit-taint.js          # BLOCKER 必须为 0（exit 0）才能 commi
 node tools/audit-taint.js --strict # HIGH 也计入退出码（严格模式）
 ```
 
-- 当下基线：**0 BLOCKER**；22 条 HIGH 是静态剥离不了"我们自己对象 vs 暴雪对象"的人工
-  复核清单 —— **改完代码新增的 HIGH 每条都要人工定性**，已审行用 `-- TAINT-OK: <原因>`
-  行内豁免（规则变更两边同步改）。
+- 当下基线（2026-10-25 污染审查全清）：**0 BLOCKER / 0 HIGH / 0 SOFT**。历史 22 条 HIGH
+  已逐条人工复盘：全是"自建对象上 HookScript/写字段 + 注释文本误报"，已各行内
+  `-- TAINT-OK: <原因>` 收档；唯一真违规（BagFrame 往暴雪 `ContainerFrame` 挂
+  OnShow 脚本槽）已改 `Widget:ShowWatch` 轮询。**此后扫描器再报 HIGH = 新增待审**，
+  违反点必须定性或豁免；已审行勿动豁免注释。
 
 ---
 

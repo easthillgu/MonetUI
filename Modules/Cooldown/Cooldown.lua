@@ -446,7 +446,7 @@ function M:Attach(cd, size, compact, font)
     -- 挂到暴雪的冷却框上等于插进它的事件链，一样会污染（见 EnsureHooks 的注释）。
     local name = cd.GetName and cd:GetName()
     if cd.HookScript and name and name:find("^MonetUI") then
-        cd:HookScript("OnSizeChanged", function(self)
+        cd:HookScript("OnSizeChanged", function(self) -- TAINT-OK: 有 name:find("^MonetUI") 门控，只挂自建冷却框
             local st = attached[self]
             if not st then return end
             UpdateScale(self, st)
