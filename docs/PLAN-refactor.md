@@ -176,6 +176,12 @@ UpdateMaxHealth / UpdateHealPrediction` → 秘值比较被拦 → 整条 compac
   SetText 显示(不截断/不派生),底色退主题 neutral;读不到→label。Groups.UpdateName
   同案防御:读到机密不覆盖明文缓存(绝不让 DisplayName 的 string.find 碰机密值)。
   判例入档:**战斗中身份类文本的正确解 = 机密串直进显示控件**,不是过滤掉。
+- **案二续(ToT 自指,"未成功")**:探针实证战斗中 `UnitIsUnit("targettarget","player")`
+  返回**机密布尔**(机密[SecretWhenUnitComparisonRestricted];真值测试连探针都炸,
+  正是 UpdateName 的炸点、>☆< 一直没接上的根因)。三版:判定移明文窗 —— pcall+
+  `Secrets.Bool(isSelf, 缓存)` 守卫,结果 `ns:Mark(frame,"selfMark")` 旁表缓存
+  (框体不写字段),秘值窗**保留上次明文判定**,战斗中新切目标(无历史明文)落回
+  名字直显路径。判例 9'' 入 skill 档:**单位对比结果在战斗中是闭锁信息,无明文旁路**。
 - 排查同构风险:全仓谓词总闸仅余 `CanMeasureHealth`(UF :653 与名牌 :790 同构、此前
   实机血量百分比窗口正常)——不动,观察。
 - 闸门:taint 0 BLOCKER / api-audit 无 HARD / check 0 错 0 警;已部署 + reload 请求已发。

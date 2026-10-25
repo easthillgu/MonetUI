@@ -598,15 +598,26 @@ local function UpdateName(frame)
     local nameText = frame.name
     if not nameText then return end   -- pet frames carry no text
 
-    -- 配色案（2026-10-25）：目标的目标是自己时，名字换成 ">☆<"，☆ 用中国红（#DE2910）。
-    -- 收缩/截断全部跳过 —— 三字符符号串不需要。UnitIsUnit 只认 unit token 是普通布尔，
-    -- pcall 包一层防 token 异常；这个分支不依赖"名字可读"，机密窗口也能接管显示。
-    local okSelf, isSelf = pcall(UnitIsUnit, unit, "player")
-    if okSelf and unit == "targettarget" and isSelf then
-        nameText:SetText(">|cffde2910☆|r<")
-        local r, g, b = Color:GetEdge()
-        nameText:SetTextColor(r, g, b, 1)
-        return  -- targettarget 没有 level / 血量文本，直接收
+    -- 配色案（2026-10-25）+ 案（2026-10-25 战斗名字二版）：目标的目标是自己时，名字换成
+    -- ">☆<"，☆ 用中国红（#DE2910）。
+    -- **UnitIsUnit 在本客户端标注机密[SecretWhenUnitComparisonRestricted]**（实机探针：
+    -- 战斗中返回机密布尔，直接真值测试连 UpdateName 全炸）—— "目标的目标是不是我"是
+    -- 客户端闭锁的信息。判定只能在明文窗口做：
+    --   明文 → 记进 ns:Mark 旁表（框体不写字段）；
+    --   机密（战斗）→ 保留上次明文判定（条件秘值纪律：不比较、保留状态）；
+    --   无历史明文（战斗中新切目标）→ 落回名字显示路径。
+    if unit == "targettarget" then
+        local prevMark = Marked(frame, "selfMark") and true or false
+        local okSelf, isSelf = pcall(UnitIsUnit, unit, "player")
+        if okSelf then
+            Mark(frame, "selfMark", Secrets.Bool(isSelf, prevMark))
+        end
+        if prevMark or (okSelf and Marked(frame, "selfMark")) then
+            nameText:SetText(">|cffde2910☆|r<")
+            local r, g, b = Color:GetEdge()
+            nameText:SetTextColor(r, g, b, 1)
+            return  -- targettarget 没有 level / 血量文本，直接收
+        end
     end
 
     -- 案（2026-10-25 战斗名字，7afecfb 的值级设想被实机探针修正）：本客户端战斗窗口
