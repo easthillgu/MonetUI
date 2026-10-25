@@ -28,6 +28,9 @@ local function Ask(query, ...)
     if not fn then return true end
     local ok, isSecret = pcall(fn, ...)
     if not ok then return true end
+    -- 查询本身可能返回**机密布尔**（ArcAuras 在同一处踩过）：对它做真值测试会被客户端
+    -- 拦成 ADDON_ACTION_BLOCKED。机密答案一律按"受限"处理（= true）。
+    if Secrets.IsSecret(isSecret) then return true end
     return isSecret and true or false
 end
 
@@ -96,10 +99,15 @@ function Secrets.BoolBlocks()
 end
 
 --- Truthiness test that survives secret booleans.
+-- **值级前置在唯一的漏斗里做**（2026-10-25）：`issecretvalue` 读取本身不触发客户端的
+-- "对机密值做布尔测试"拦截，所以机密值直接落回 `default`（= 以前被拦之后的回退值，
+-- 逐位一致），非机密才真值测试。全仓 30 多个调用点因此不需要逐个改。
+-- 失败路径（例如 issecretvalue 不可用的构建）仍然记账，见 `Secrets.BoolBlocks()`。
 function Secrets.Bool(value, default)
+    if Secrets.IsSecret(value) then return default end
     local ok, result = pcall(TestBool, value)
     if ok then return result end
-    -- 说明:true 测试被客户端拦了。记调用栈(纯字符串,机密值不进 concat)。
+    -- true 测试被客户端拦了（理论上不该再走到这里）。记调用栈（纯字符串，机密值不进 concat）。
     boolBlocksSeen = boolBlocksSeen + 1
     if #boolBlocks < 200 then
         local stack
