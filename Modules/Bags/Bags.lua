@@ -283,9 +283,9 @@ local function UpdateButton(btn, rec)
     if rec.itemID and C_Container.GetItemCooldown then
         local ok, start, duration, enable = pcall(C_Container.GetItemCooldown, rec.itemID)
         start, duration, enable = Secrets.Number(start), Secrets.Number(duration), Secrets.Number(enable)
-        if ok and start and duration and duration > 0 and enable ~= 0 then
+        if ok and start and duration and duration > 0 and enable ~= 0 then -- TAINT-OK: 上一行 Secrets.Number 守卫(见 :280 注释)
             btn.cd:Show()
-            if not pcall(btn.cd.SetCooldown, btn.cd, start, duration) then btn.cd:Hide() end
+            if not pcall(btn.cd.SetCooldown, btn.cd, start, duration) then btn.cd:Hide() end -- TAINT-OK: 上游 Secrets.Number 守卫 + pcall 兜底
         else
             btn.cd:Hide()
         end

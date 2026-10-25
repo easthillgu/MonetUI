@@ -140,6 +140,20 @@ UpdateMaxHealth / UpdateHealPrediction` → 秘值比较被拦 → 整条 compac
 4. taintLog 哨兵法(需要时重启):`%TEMP%\opencode\taint-sentinel.ps1` 直拷
    `Logs/taint.log`,600ms 一次,分析用 `%TEMP%\opencode\taint.log`。
 
+**新任务完成:skill 合并 + taint 闸门工具(2026-10-25,接上节交接后)**:
+- `tools/audit-taint.js` —— commit 前 taint 机械闸门。规则 15 条(BLOCKER/HIGH/SOFT 三级):
+  and/or 秘值真值链(案 96c7482 形)、裸 Create in initializeFrame(案 3453b10 形)、旧冷却接口、
+  raw 字段写、SetParent/HookScript/SetScale/Hide 暴雪框、secure 按钮直控、COMBAT_LOG、
+  GetCooldownTimes(IsAnchoringSecret 证否的反向提醒)。注释行不扫;`-- TAINT-OK: <原因>` 行内豁免。
+  **基线:0 BLOCKER / 22 HIGH(静态分不清自家对象 vs 暴雪对象的人工复核清单,已逐条定性)/ 0 SOFT。**
+- `.opencode/skills/wow-secret-value-taint-audit/SKILL.md` —— 两份 Desktop 草稿合并:
+  draft2 骨架 + draft1 参考仓库清单;实机修正三处(IsAnchoringSecret 证否 → issecretvalue +
+  C_Secrets 谓词;API 签名以 docs/api 快照为准;案 A/B/C 链段 + AGENTS 污染模型速查表入档)。
+  opencode 项目级 skill 自动发现/触发已验证。
+- 顺手归位:petbar skill 从 `.opencode/skill/`(单数,非文档发现路径)挪进 `.opencode/skills/`。
+- 本轮关联 Lua 改动:仅 13 行 `-- TAINT-OK` 注释(BuffFrame 7 / ActionBars 3 / Bags 2 /
+  Cooldown 1),无逻辑变化;`wuxian check` 0 错 0 警,已部署。
+
 **本轮遗留(不属回归案情,独立已知代价项)**:
 - `TargetFrameToT:Show()` 家族 AOAB(reload 后 13 条 / 7 分钟,每 2-3 分钟一条,只进日志):
   根因是 UnitFrames:SuppressBlizzard 用 `Hide()` + `SetScript("OnShow", Hide)` 挂槽——

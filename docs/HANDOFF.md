@@ -23,11 +23,12 @@
 
 ```
 node tools/api-audit.js          # 撞 docs/api 快照（HARD 项退出码 1）
+node tools/audit-taint.js        # 秘值/taint 机械闸门（BLOCKER≠0 退出码 1；HIGH=人工复核清单）
 powershell -File tools/deploy-retail.ps1
 # 游戏内 /reload（有 wuxian MCP 时用 tools.wuxian.reload）
 ```
 
-`wuxian check`（有 MCP 时）等价于"客户端侧的语法 + 未解析名字 + 受保护调用"体检，**0 error 才算改完**；`api-audit.js` 离线也能跑，是它拦住了大部分"名字写错/事件名不存在"的错。
+`wuxian check`（有 MCP 时）等价于"客户端侧的语法 + 未解析名字 + 受保护调用"体检，**0 error 才算改完**；`api-audit.js` 离线也能跑，是它拦住了大部分"名字写错/事件名不存在"的错；`audit-taint.js` 是 2026-10-25 新增的**commit 前 taint 自查**（规则 = `.opencode/skills/wow-secret-value-taint-audit/SKILL.md`，已审行用 `-- TAINT-OK: <原因>` 行内豁免，两边规则变更要同步）。
 
 ---
 
@@ -262,11 +263,12 @@ end
 | `Modules/UnitFrames/*` | 单位框 / 小队团队 | 暴雪的 Group 框**完全别碰** |
 | `Modules/Skins/*` | 暴雪窗口美化（含 `Forever.lua` 客户端专属） | 不给里面的按钮/页签挂钩子 |
 | `Config/SimpleConfig.lua` | 配置面板（滚轮滚动） | — |
-| `tools/` | 部署、API 审计、材质生成、像素审计 | 材质改完必须 `node tools/audit-pixels.js` |
+| `tools/` | 部署、API 审计、材质生成、像素审计、taint 闸门 | 材质改完必须 `node tools/audit-pixels.js`；commit 前跑 `node tools/audit-taint.js` |
 | `docs/api/` | 本客户端 API 快照（**效力高于 hated-wow MCP**） | `node tools/api-lookup.js <名字>` |
+| `.opencode/skills/` | 项目级 agent skill | `wow-secret-value-taint-audit`（秘值/taint 审查，含三起实机案情档案）与 `wow-petbar-autocast-pixel-glow` |
 
 > 另：宠物动作条"自动施法"像素环的完整实现要点（参数、`Widget:PixelGlow`、为什么要替掉暴雪的
-> `AutoCastOverlay.Shine`）在 **`.opencode/skill/wow-petbar-autocast-pixel-glow/SKILL.md`**。
+> `AutoCastOverlay.Shine`）在 **`.opencode/skills/wow-petbar-autocast-pixel-glow/SKILL.md`**。
 > Codex 不会自动加载它，需要时直接读这个文件。
 
 ---

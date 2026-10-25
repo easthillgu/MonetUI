@@ -241,7 +241,7 @@ local function Tick(cd, elapsed)
             -- **GetCooldownTimes 给的是毫秒**（实机：48680011 / 360000），而 GetTime() 与
             -- state.expiry 都是秒。以前直接相加 → 剩余算成 568 天，buff 图标上就画出一个
             -- "568d"（还是带颜色码的），看起来就像"时间显示被加密了"。
-            if start and duration and duration > 0 then
+            if start and duration and duration > 0 then -- TAINT-OK: :239-240 Secrets.Number 守卫,机密→None
                 state.expiry = (start + duration) / 1000
                 state.next = 0
                 return

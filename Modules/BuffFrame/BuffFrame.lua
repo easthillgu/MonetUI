@@ -137,7 +137,7 @@ local function CreateAuraButton(parent, size)
             pcall(tip.AddLine, tip, "层数：" .. tostring(count), 1, 1, 1)
         end
         local duration = Secrets.Number(aura.duration)
-        if duration and duration > 0 then
+        if duration and duration > 0 then -- TAINT-OK: 上游 CollectAuras 只在 Secrets.CanReadAuras() 为真时喂明文 duration/expiration
             pcall(tip.AddLine, tip, "持续：" .. tostring(Math:DurationText(duration)), 1, 1, 1)
         end
         pcall(tip.AddLine, tip, "右键取消", 0.6, 0.6, 0.6)
@@ -154,7 +154,7 @@ local function CreateAuraButton(parent, size)
         if not aura then return end
         local id = Secrets.Number(aura.auraInstanceID)
         if not id then return end
-        if _G.C_UnitAuras and type(C_UnitAuras.CancelAuraByInstanceID) == "function" then
+        if _G.C_UnitAuras and type(C_UnitAuras.CancelAuraByInstanceID) == "function" then -- TAINT-OK: 真值测试的是全局表存在性,不涉秘值
             pcall(C_UnitAuras.CancelAuraByInstanceID, "player", id)
         end
     end)
@@ -198,13 +198,13 @@ local function ShowAura(button, aura, index)
 
     local duration = Secrets.Number(aura.duration)
     local expiration = Secrets.Number(aura.expirationTime)
-    local remaining = (duration and expiration) and (expiration - GetTime()) or nil
+    local remaining = (duration and expiration) and (expiration - GetTime()) or nil -- TAINT-OK: 同上,CanReadAuras 总闸后才进来(duration/expiration 均明文)
 
-    if duration and duration > 0 and expiration and remaining and remaining > 0 then
+    if duration and duration > 0 and expiration and remaining and remaining > 0 then -- TAINT-OK: CanReadAuras 总闸(Update:474)
         -- 时长文本由 Cooldown 模块接管（见 CreateAuraButton），这里只驱动冷却本身：
         -- 模块的 tick 会读这个冷却的剩余时间，按大小换颜色 / 放大。
         -- SetCooldown is a protected method; never let it abort the update.
-        if not pcall(button.cooldown.SetCooldown, button.cooldown, expiration - duration, duration) then
+        if not pcall(button.cooldown.SetCooldown, button.cooldown, expiration - duration, duration) then -- TAINT-OK: CanReadAuras 总闸明文值;pcall 包裹兜底
             pcall(button.cooldown.Clear, button.cooldown)
         end
     else
@@ -254,8 +254,8 @@ local function SplitBuffs(buffs)
         local duration = Secrets.Number(aura.duration)
         local expiration = Secrets.Number(aura.expirationTime)
         local foldable = true
-        if duration ~= nil and expiration ~= nil then
-            if duration > 0 and expiration > 0 then
+        if duration ~= nil and expiration ~= nil then -- TAINT-OK: CanReadAuras 总闸明文值
+            if duration > 0 and expiration > 0 then -- TAINT-OK: 同上
                 foldable = (expiration - now) > PROC_THRESHOLD
             end
         end

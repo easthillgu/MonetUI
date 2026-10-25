@@ -732,7 +732,7 @@ local function PaintCooldown(button, slot)
     if not cooldown or type(slot) ~= "number" then return end
     local ok, info = pcall(C_ActionBar.GetActionCooldown, slot)
     local durationObject
-    if ok and info and info.isActive and C_ActionBar.GetActionCooldownDuration then
+    if ok and info and info.isActive and C_ActionBar.GetActionCooldownDuration then -- TAINT-OK: GetActionCooldown().isActive 是 NeverSecret,链里其余是全局表
         local ok2, dur = pcall(C_ActionBar.GetActionCooldownDuration, slot)
         if ok2 then durationObject = dur end
     end
@@ -1274,8 +1274,8 @@ local function RefreshPetContent(button, index)
     if cooldown then
         local ok, start, duration, enable = pcall(_G.GetPetActionCooldown, index)
         start, duration, enable = Secrets.Number(start), Secrets.Number(duration), Secrets.Number(enable)
-        if ok and start and duration and duration > 0 and enable ~= 0 then
-            pcall(cooldown.SetCooldown, cooldown, start, duration)
+        if ok and start and duration and duration > 0 and enable ~= 0 then -- TAINT-OK: 上一行 Secrets.Number 守卫,机密→None
+            pcall(cooldown.SetCooldown, cooldown, start, duration) -- TAINT-OK: 同上明文值 + pcall 兜底
         else
             pcall(cooldown.Clear, cooldown)
         end
