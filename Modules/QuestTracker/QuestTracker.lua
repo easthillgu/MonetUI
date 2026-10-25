@@ -330,6 +330,12 @@ end
 --- "原本开着鼠标"的那些；新池化的按钮等 1 秒兜底补关。一律旁表，不写暴雪框字段。
 local function MuteMouseTree(root, restore)
     if not root or not root.EnableMouse then return end
+    -- 战斗中完全跳过（连登记守卫都不落）：追踪器的子按钮可能带 secure 属性，对它
+    -- EnableMouse 在战斗里 = ADDON_ACTION_BLOCKED（实机 ×29 一次一阵的形态：新任务块
+    -- 涌进池的第一批全拦）。脱战之后 1 秒 ticker 自动补关，不丢功能。
+    if not restore and type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown() then
+        return
+    end
     local function apply(f)
         if f.EnableMouse then
             if restore then
@@ -354,6 +360,12 @@ local function MuteMouseTree(root, restore)
 end
 
 function SuppressBlizzard()
+    -- 战斗中一概不动手：不只是子树静音，根框的 SetAlpha/EnableMouse 同样是被拦面
+    -- （×29 修后残余的 ×2 低频形态与"个别时机从两个入口穿过子树闸"吻合——根框
+    -- 写入每秒都随 ticker 重打，一次性事件路径在战斗里也会进来）。脱战后 ticker 秒级补关。
+    if type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown() then
+        return
+    end
     local bt = _G.ObjectiveTrackerFrame
     if not bt then return end
 
