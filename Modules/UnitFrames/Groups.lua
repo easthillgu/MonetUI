@@ -160,22 +160,8 @@ local function SetSelected(button, selected)
     button.selected = selected and true or false
 end
 
---- 建（或重贴）一个单位按钮的外观。可重复调用：只改尺寸和锚点，不重建 region。
-local function StyleButton(button, cfg, small)
-    local width, height = cfg.width, FrameHeight(cfg)
-    button:SetSize(width, height)
-
-    if button.SetBackdrop then
-        Widget:Theme(button, { thickness = BORDER, bgAlpha = 0.9 })
-    else
-        PlainBorder(button)
-        SizePlainBorder(button)
-    end
-
-    local inner = width - BORDER * 2
-    local healthHeight = cfg.health or 16
-    local powerHeight = cfg.power or 0
-
+--- 血条 + 治疗预估 / 吸收盾（P4 拆分：原 StyleButton 内 179-219 行原样搬出）。
+local function StyleHealthBars(button, inner, healthHeight)
     if not button.health then
         button.health = Widget:Bar(button, inner, healthHeight)
         -- 空的那一半：一层平涂，血条才有体积
@@ -216,7 +202,10 @@ local function StyleButton(button, cfg, small)
     local ir, ig, ib = Color:GetPrimary()
     button.incoming:SetStatusBarColor(ir, ig, ib, 0.45)
     button.absorb:SetStatusBarColor(1, 1, 1, 0.3)
+end
 
+--- 文字 / 图标 / 选中边框的承载覆盖层（原 220-229 行）。
+local function StyleOverlay(button)
     -- 文字 / 图标 / 选中边框的承载层。WoW 的渲染规则是"子框架盖在父级 region 之上"
     --（本仓 UnitFrames.lua:1068-1071 的冷却数字就踩过这个），所以压在血条上面的东西
     -- 不能是 button 的 region —— 会被血条（button 的子框架）整个糊住。收进一个专用
@@ -227,7 +216,10 @@ local function StyleButton(button, cfg, small)
         overlay:SetFrameLevel(button.health:GetFrameLevel() + 3)
         button.overlay = overlay
     end
+end
 
+--- 能量条（原 231-239 行）。
+local function StylePowerBar(button, inner, powerHeight)
     if powerHeight > 0 then
         if not button.power then button.power = Widget:Bar(button, inner, powerHeight) end
         button.power:SetSize(inner, powerHeight)
@@ -237,7 +229,10 @@ local function StyleButton(button, cfg, small)
     elseif button.power then
         button.power:Hide()
     end
+end
 
+--- 名字 + 血量文字（原 241-269 行）。
+local function StyleTexts(button, cfg, small, inner)
     if not button.name then
         button.name = Widget:Font(button.overlay, small and 9 or 10, "pixel", { r = 1, g = 1, b = 1 }, "LEFT")
         -- 名字压在血条上：小框放不下一行独立的名字，加硬阴影保证亮色血条上也读得清
@@ -267,7 +262,10 @@ local function StyleButton(button, cfg, small)
     button.healthText:ClearAllPoints()
     button.healthText:SetPoint("RIGHT", button, "RIGHT", -(BORDER + 3), 0)
     button.healthTextMode = cfg.healthText or "none"
+end
 
+--- 职责图标（原 271-278 行）。
+local function StyleRoleIcon(button, small)
     -- 职责图标：三张灰阶自绘图，形状说明职责，颜色说明队长 / 助理（Color:RoleTint）。
     -- 压在右上角、探出 1px 进缝里，不占名字的行宽。
     if not button.role then
@@ -276,10 +274,37 @@ local function StyleButton(button, cfg, small)
         button.role:SetSize(small and 8 or 9, small and 8 or 9)
         button.role:SetPoint("TOPRIGHT", button, "TOPRIGHT", 1, 1)
     end
+end
 
-    -- 选中目标边框：四条边常驻、平时 alpha 0，成为当前目标时才点亮（SyncSelection）
+--- 建（或重贴）一个单位按钮的外观。可重复调用：只改尺寸和锚点，不重建 region。
+--- P4 拆分：本函数只做"顺序 + 组合"，各段实现在上面五个 helper 里；语义逐条保留
+---（无早退、各段条件与顺序都与拆分前一致）。
+local function StyleButton(button, cfg, small)
+    local width, height = cfg.width, FrameHeight(cfg)
+    button:SetSize(width, height)
+
+    if button.SetBackdrop then
+        Widget:Theme(button, { thickness = BORDER, bgAlpha = 0.9 })
+    else
+        PlainBorder(button)
+        SizePlainBorder(button)
+    end
+
+    local inner = width - BORDER * 2
+    local healthHeight = cfg.health or 16
+    local powerHeight = cfg.power or 0
+
+    StyleHealthBars(button, inner, healthHeight)
+    StyleOverlay(button)
+    StylePowerBar(button, inner, powerHeight)
+    StyleTexts(button, cfg, small, inner)
+    StyleRoleIcon(button, small)
+    -- 选中目标边框：四条边常驻、平时 alpha 0，成为当前目标时才点亮（SyncSelection）。
+    -- **必须显式初始化 alpha**：BuildEdges 建出来的贴图默认是白色 alpha 1，不主动压掉的话
+    -- 每格都像"被选中"（2026-10-25 实机：队伍框开局满屏高亮）。
     EnsureSelectBorder(button)
     SizeSelectBorder(button)
+    SetSelected(button, button.selected == true)
 
     -- Clique / 点击施法类插件认这张表；没装也没有副作用。
     -- 走 _G 拿：这个全局在本客户端根本没有，直接写全局名会被静态检查当成"用了一个不存在的全局"。
