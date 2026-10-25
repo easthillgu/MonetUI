@@ -251,6 +251,13 @@ local function AcquireButton(parent)
     end)
 
     btn:SetParent(parent)
+
+    -- 案（2026-10-25 分类背包右键）：Button 默认**只收左键**，不显式注册右键时
+    -- OnClick 压根不会触发（实机：右键吃食物/喝水无反应，日志 0 条 FORBIDDEN ——
+    -- 调用根本没发生，不是被拒）。参考 EllesmereUIBags.lua:3135 的物品按钮同款注册。
+    -- 顺带 RegisterForDrag：OnDragStart/OnReceiveDrag 脚本早就写了，没注册就一直空挂。
+    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    btn:RegisterForDrag("LeftButton")
     return btn
 end
 

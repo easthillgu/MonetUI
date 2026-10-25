@@ -219,6 +219,16 @@ UpdateMaxHealth / UpdateHealPrediction` → 秘值比较被拦 → 整条 compac
   秘值时退回主题底色而不保留上次状态(UF 侧 :1648 是保留式的);视觉降级非炸点,与
   "nil≠secret"判例半符 —— 有意保留(名牌威胁红边战斗中的体感损失远小于状态机扰动),登记即可。
 
+**分类背包右键案(2026-10-25,用户:"分类包裹内物品无法右键使用")**:
+- 实机排查:图标/tooltip 正常 → rec 映射通;日志 0 条 FORBIDDEN → UseContainerItem 没被拒;
+  快照+探针确认 `C_Container.UseContainerItem` 存在 → 唯一断点 = Button **默认只收左键**,
+  Bags.lua 全文零 `RegisterForClicks`,右键根本到不了 OnClick(调用没发生,不是被拒)。
+- 修(参考 EllesmereUIBags.lua:3135 的物品按钮同款):`AcquireButton` 加
+  `btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")` + `RegisterForDrag("LeftButton")`
+  (OnDragStart/OnReceiveDrag 脚本早已写了但从未注册拖拽,一并补)。
+- 闸门:taint 0/0/0(基线保持全清);api-audit 无 HARD;check 0 错。部署 + reload 已发,
+  待实机右键复测。
+
 **回归验证轮(2026-10-25,名字案 OK 后的实机收量)**:
 - ✅ **3453b10 生产波案验收通过**:600+ 条日志 0 条 MathUtil/Backdrop/taint/secret 家族;
   `MonetUICombatBuffFrame` 池审计 **styled=20/20**(此前 10/20 第二批全灭)。
