@@ -277,6 +277,19 @@ UpdateMaxHealth / UpdateHealPrediction` → 秘值比较被拦 → 整条 compac
   去饱和。修 = `UpdateButton` 在 `FlattenSlotArt` 后幂等补挂
   `icon:SetDesaturated(rec.locked and true or false)`(防时序,一行)。闸门照旧 0/0/0,
   已部署待用户瞄一眼。
+- **目标追踪框"原始的鼠标没杀掉,还能点击"(2026-10-25 第二波.Experimental)**:
+  病因 = `SuppressBlizzard` 只对根框 `EnableMouse(false)`,而 Frame 的鼠标开关**不递归**
+  ——探针实锤:根 mouse=false 但子树深层 **~17 个无名 Button**(任务块按钮池,逐目标
+  生成)各带鼠标。修 = `QuestTracker.MuteMouseTree`:子树级静音(旁表 `mutedMouse`/
+  `muteMousePrior` 记原状态,恢复时只还原本开着的;1 秒 ticker 补关新池化按钮)。
+  `UnmuteBlizzard` 同套恢复。**用户实机复测通过**(点击/悬停无反应)。
+- **debuff 行"styled=0/10"判为审计口径误诊,结案不改码**:上轮池审计数的是
+  `borderHost` mark,但 debuff 成功走 `AddDispelBorder` 的按钮打的是 `dispelBorder`
+  mark(:1096)——永远不写 borderHost,被读成"整批失格"。实机复查:debuff 池
+  **10/10 dispelBorder + 10/10 icon**(引擎解魔法色边框 + 图标注册完整),受限窗生产
+  批次样式链完整。教训:审计判据随 mark 种类枚举,别单点。taint.log 详细模式这轮
+  两次窗口(12:35 起)均零字节未落(客户端批量 flush 触发点比预想刁;当日落窗仅
+  10:37 / 12:11 两次,小时级周期推测),flag 保持开,下次间隔点复读。
 
 **回归验证轮(2026-10-25,名字案 OK 后的实机收量)**:
 - ✅ **3453b10 生产波案验收通过**:600+ 条日志 0 条 MathUtil/Backdrop/taint/secret 家族;

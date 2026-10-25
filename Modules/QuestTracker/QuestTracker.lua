@@ -322,6 +322,37 @@ end
 ---      屏幕上就是"一闪一闪、时而可见"。alpha 0 不会触发它的 Show 逻辑（框一直"显示着"），
 ---      也就不再有拉锯 —— 和收起暴雪动作条用的是同一套（MainActionBar 的结论）。
 --- 待机成本为零：alpha 只在第一次登记时写，之后每次调用最多两次 SetAlpha（幂等）。
+--- 子树级鼠标静音：Frame 的 EnableMouse **不递归**——本客户端追踪框的点击件是深层
+--- 的任务块按钮池（实机探针 2026-10-25：根 mouse=false 但深层 ~17 个无名 Button
+--- 各带鼠标，逐目标生成），只关根框照样能点（用户实机："原始的目标追踪的鼠标没
+--- 杀掉，还能点击"）。
+--- 幂等与恢复：旁表守卫（mutedMouse / muteMousePrior 记**原状态**），恢复时只还回
+--- "原本开着鼠标"的那些；新池化的按钮等 1 秒兜底补关。一律旁表，不写暴雪框字段。
+local function MuteMouseTree(root, restore)
+    if not root or not root.EnableMouse then return end
+    local function apply(f)
+        if f.EnableMouse then
+            if restore then
+                if Marked(f, "mutedMouse") then
+                    pcall(f.EnableMouse, f, Marked(f, "muteMousePrior") == true)
+                    Mark(f, "mutedMouse", nil)
+                    Mark(f, "muteMousePrior", nil)
+                end
+            else
+                if not Marked(f, "mutedMouse") then
+                    local _, prior = pcall(f.IsMouseEnabled, f)
+                    -- prior == false（本来没开）就只登记守卫不动它，恢复时直接跳过
+                    pcall(f.EnableMouse, f, false)
+                    Mark(f, "mutedMouse", true)
+                    Mark(f, "muteMousePrior", prior == true)
+                end
+            end
+        end
+        for _, c in ipairs({ f:GetChildren() }) do apply(c) end
+    end
+    apply(root)
+end
+
 function SuppressBlizzard()
     local bt = _G.ObjectiveTrackerFrame
     if not bt then return end
@@ -339,6 +370,8 @@ function SuppressBlizzard()
     if not enabled then return end
     pcall(bt.SetAlpha, bt, 0)
     if bt.EnableMouse then pcall(bt.EnableMouse, bt, false) end
+    -- 关键：连带子树（任务块按钮池）一起关鼠标；每秒兜底会再跑一遍补新按钮。
+    MuteMouseTree(bt, false)
 end
 
 --- 模块关掉时把透明度 / 鼠标还回去。
@@ -347,6 +380,7 @@ local function UnmuteBlizzard()
     if not bt or not Marked(bt, "muted") then return end
     pcall(bt.SetAlpha, bt, Marked(bt, "alpha") or 1)
     if bt.EnableMouse then pcall(bt.EnableMouse, bt, Marked(bt, "mouse") ~= false) end
+    MuteMouseTree(bt, true)
     Mark(bt, "muted", nil)
 end
 
