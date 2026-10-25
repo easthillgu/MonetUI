@@ -172,12 +172,19 @@ NamePlateAuras.lua:366     boolean test on 'isFullUpdate' (secret)
 拉回 1（`SuppressBlizzard` 按 `combatMode` 切 0/1），客户端自己画自己更新，proc 即时上屏；
 脱战 alpha 归 0，自绘行回来。**实机验收：脱战自绘、战斗中可见、proc 即时、0 拦截。**
 
-**为什么"战斗中套我们自己的皮肤"做不到（2026-10-25 插件上下文实测）**：
+**为什么"战斗中套我们自己的皮肤"曾经做不到（2026-10-25 一期结论，二期已绕开）**：
 `C_UnitAuras.GetAuraDataByIndex` 在战斗中对我们整个插件抛
 `Auras cannot be accessed when secret while tainted by 'MonetUI'` —— **硬禁读**，不是"字段加密"。
-所以没有"先 `IsSecret` 判断再自绘"这条路；引擎按钮那条又被
-`DenyTaintedAccessWhenAurasAreSecret` 挡住（战斗中新建按钮的样式注入被拒 = 新 proc 只有提示没图标）。
-**结论：战斗显示只能交给客户端自己的框**，我们的皮肤只在脱战生效。
+所以自绘网格没有数据源；但**引擎 AuraContainer 的按钮**仍可由客户端灌机密数据，
+插件只需要在 `initializeFrame` 里把"接数据的对象"（图标纹理 / 冷却 / 层数字体）交给引擎。
+
+**二期做法（ArcAuras 纪律，2026-10-25）**：战斗显示回到引擎容器 + 我们的皮肤。
+- 容器在登录/脱战时建好并 `SetEnabled(true)`；脱战隐藏，进战斗 Show（Show 合法，已实测）；
+- `StyleAuraButton` 改成**必需件先注册**（SetIcon / SetDurationCooldown / SetApplicationCount），
+  装饰件（边框 / 时长文本 / 染色）排在注册之后、各自 pcall —— 任何装饰失败都不再连累图标
+  （一期"战斗中新 proc 只有提示没有图标"的真因就是旧顺序里任一文本建不出就 `return`）；
+- 机密期不建颜色曲线（`C_CurveUtil` 会被拒），退回冷却自带数字；
+- 引擎容器建不出来时自动退回暴雪原生框（alpha 1）兜底。
 
 ### 3.5.4 顺带的
 - `Utils/Secrets.lua` 增 `Secrets.BoolBlocks()`：`Bool()` 失败路径自记 `debugstack`（200 条、重载清零）。

@@ -32,12 +32,14 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
 - **安全单位按钮（`SecureUnitButtonTemplate`）的显隐只能交给 `visibility` state driver**（`[@target,exists] show; hide` 等），任何代码路径都不要再 `Show/Hide/SetShown` —— 战斗中必被拒（`ADDON_ACTION_BLOCKED MonetUITargetFrame:Hide()`），`UNIT_*` 事件驱动的刷新路径尤其容易漏。
 - 秘密值：数值上下文用 `Secrets.Number` 包裹，受限时保留上次状态。但**"nil" 不等于"机密"**：`UnitThreatSituation` 这类 API 脱战后返回的是普通 nil（表示没有该信息），必须按"0/无"处理，只有 `issecretvalue` 为真才保留上次状态 —— 否则红边之类的状态会永远挂着。
 - **布尔值同理，且必须"值级前置"**：对机密值做真值测试（`if v then`）会被客户端拦成
-  `ADDON_ACTION_BLOCKED UNKNOWN()`；而 `issecretvalue`(**读取**本身)不触发拦截。所以统一写法是
-  `if Secrets.IsSecret(v) then <回退到"被拦后默认"那一支> else <真值测试> end`，
-  机密分支与被拦后的回退**逐位一致**（行为零变化，拦截归零）。2026-10-25 全仓 `Secrets.Bool`
-  调用点按此模式过了一遍（Groups 四处 + UpdateCast 是主要发源）。诊断这类拦截**只认**
-  `Secrets.BoolBlocks()`（`Bool()` 失败路径自记 `debugstack`）——本客户端 taint.log 对
-  "布尔测试被拦"会记、对 `ADDON_ACTION_BLOCKED` 却**零记录**（旗子开着实测 0 字节）。
+  `ADDON_ACTION_BLOCKED UNKNOWN()`；而 `issecretvalue`(**读取**本身)不触发拦截。
+  **本仓已把这层做进唯一漏斗 `Secrets.Bool`**（2026-10-25）：机密值直接落回 `default`
+  （= 以前被拦后的回退值，逐位一致），非机密才真值测试 —— 所以调用点直接写
+  `Secrets.Bool(v, 默认)` 即可，不要再手工拼 `IsSecret` 分支。
+  真正需要**分支逻辑**的地方（例如"机密时走另一条路径"）才显式写
+  `if Secrets.IsSecret(v) then ... else ... end`。
+  诊断这类拦截**只认** `Secrets.BoolBlocks()`（失败路径自记 `debugstack`）——本客户端
+  taint.log 对"布尔测试被拦"会记、对 `ADDON_ACTION_BLOCKED` 却**零记录**（旗子开着实测 0 字节）。
 
 ## 污染（taint）模型 —— 本客户端最贵的一课
 
@@ -114,9 +116,13 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
 - **战斗光环是"硬禁读"，不是"字段加密"**（2026-10-25 插件上下文实测）：
   `C_UnitAuras.GetAuraDataByIndex` 在 `ShouldAurasBeSecret()` 为真时对**整个插件**抛出
   `Auras cannot be accessed when secret while tainted by 'MonetUI'` —— 拿不到 aura 表，
-  也就没有"先 `IsSecret` 判断再自绘"这条路（那是"字段加密"才有的写法）。
-  推论：**任何"战斗中自己画光环"的设计都不成立**（自绘网格无数据源；引擎按钮的
-  `DenyTaintedAccessWhenAurasAreSecret` 连创建期样式注入都会拒），战斗显示只能靠客户端自己的框。
+  所以**不存在"先 `IsSecret` 判断再自绘"**这条路（那是"字段加密"才有的写法）。
+- **战斗显示的可行解法**：让**引擎 AuraContainer** 顶班（客户端自己读机密数据），插件只在
+  `initializeFrame` 里把"接数据的对象"（`SetIcon` / `SetDurationCooldown` /
+  `SetApplicationCount`）交给它。三条纪律（ArcAuras 实践，二〇二六年十月实机验证）：
+  ①容器只在装载窗口或脱战时创建（战斗里建出来是空的）；②**必需件先注册、装饰件各自 pcall**，
+  任何装饰失败都不能连累 `SetIcon`（否则就是"按钮能悬停、没有图标"）；③机密期不建颜色曲线
+  （`C_CurveUtil` 会被拒），时长退回冷却自带数字。兜底：容器建不出来时用暴雪原生 Buff 框。
 
 ## 安全按钮（自绘动作条）的额外约束
 

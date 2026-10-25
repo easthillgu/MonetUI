@@ -414,6 +414,36 @@ ActionBars 四个)视试水结果下一轮再定。
   可见性接线断(功能缺口)。选项 A 共存 / B 关自绘 Groups / C 带风险自动藏(不推荐)，**待用户拍板**。
 - P4 剩余拆分(见上表)与 P5 试水，未动。
 
+## 2026-10-25 二期 · 战斗光环"引擎容器 + 我们的皮肤"（按 ArcAuras 纪律重做）
+
+参考实现：`../ArcAuras-3.1.1-forever`（`Drivers/AD_DriverAura.lua:777-883`、
+`Drivers/AD_DriverUnitAuras.lua:354-386`）。它的三条纪律：
+
+1. **创建窗口**：容器只在"装载窗口"（`PLAYER_LOGIN` 之前）或脱战且光环明文时创建；
+   战斗/机密期不建，置 `pending`，脱战后重建（`Settle` 里再 `C_Timer.After(1, ...)`，
+   因为保密状态在脱战后要过一拍才解除）。
+2. **按钮只在 `initializeFrame` 里接线**（注释原文 "the always-legal write window"），
+   之后不再改按钮结构；**必需件优先**（`SetIcon / SetDurationCooldown / SetApplicationCount`），
+   装饰件延后且机密期跳过（`stylePending`）。
+3. **机密期只延后，不读取**：所有 restyle / 需要数据的判断在 `AurasSecretNow()` 为真时置
+   pending；`C_Secrets.ShouldAurasBeSecret()` 的返回值本身可能是**机密布尔**，必须先
+   `issecretvalue`（我们同步硬化了 `Secrets.Ask`）。
+
+我们的落地（本次改动）：
+- `UnitFrames.StyleAuraButton`：顺序改为**必需件先注册**，装饰件（边框/时长文本/染色）各自
+  pcall 隔离；机密期跳过颜色曲线（`C_CurveUtil` 会被拒），退回冷却自带数字。
+  —— 这一条即使不走引擎容器也消除了"按钮能悬停、没有图标"的隐患。
+- `BuffFrame`：恢复引擎容器作为**战斗显示本体**。关键设计：容器**出生即 Show + alpha 0**
+  （引擎只喂"活着"的框；Hide 掉就再也不更新，一期血泪），进战斗只 `SetAlpha(1)`，
+  **战斗内一次 `UpdateAllAuras` 都不推**（那正是历史上 ×15 级拦截的来源）；原生 Buff 框
+  降级为兜底（容器建不出来时才 alpha 1）；主题变化重建容器（战斗中排队）；脱战后 +1 秒补一次。
+
+**实机验收（2026-10-25，用户确认）**：脱战自绘正常；进战斗左上角是**我们的皮肤**；
+战斗中新触发 proc 即时出图标；按到期时间排序（短时在前）；0 拦截。
+**已知限制**：引擎光环分组只支持 `maxDuration` 上限、没有下限 → 战斗中无法还原
+“光环类 / 触发类”两排，只能是**一条流式排**（代码注释已记，别再当 bug 查）。
+
+
 ## 验证清单(每阶段共用)
 
 - 离线:`tools.wuxian.check`(live:false)0 错 0 警。
