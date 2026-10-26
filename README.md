@@ -6,7 +6,7 @@
 ![Interface](https://img.shields.io/badge/Interface-16001-orange.svg)
 ![Version](https://img.shields.io/badge/version-0.12.0-informational.svg)
 ![Lua](https://img.shields.io/badge/Lua-5.1-2C2D72.svg)
-![Status](https://img.shields.io/badge/status-待实机验证-yellow.svg)
+![Status](https://img.shields.io/badge/status-实机验收通过-brightgreen.svg)
 
 它不是一个静态配色表，而是随着「你所在的地图」实时推导界面颜色：环境互补色 + 明度曲线钳制 + 色相域细分，输出一组协调、耐看的 Monet 主题色。
 
@@ -97,12 +97,16 @@ MonetUI/
 
 ## ⚠️ 状态
 
-**离线验证通过，待实机验收。**
+**2026-10-26 这一轮改动已实机验收通过。**
 
+- 验收过的项：姓名板无光环 + 目标金色/1.1 倍、鼠标提示三摆法 + 1px 主题边框 + 边缘翻转 + Alt 常显 ID、
+  施法条三角贴能量条、经验线三角顶在线上沿、连按 B 不出现两套背包、启动 `17/17 个模块`。
 - `wuxian check`（离线）：**0 error / 5 warning**（4 条 `PickupAction`·`PlaceAction` 受保护调用 + 1 条 `toc-interface`，均为已知基线；前者受 `InCombatLockdown` 守门，后者是部署脚本按客户端改 `## Interface` 造成的）。
-- 静态 API 审核 `tools/api-audit.js`：**0 hard**，8 条 soft 均为 `InCombatLockdown`（文档已改为 `C_RestrictedActions.InCombatLockdown`）。
-- 待验收：自绘材质接线、信息栏、`load` / `try` 热加载、小队 / 团队框架战斗内刷新。
-- 逐项进度、验收清单与客户端约定记在**本地**开发文档（`AGENTS.md`、`MonetUI.md`、`TODO.md`，按 `.gitignore` 不入库）。
+- 静态 API 审核 `tools/api-audit.js`：**0 hard**；taint 闸门 `tools/audit-taint.js`：**0 / 0 / 0**。
+- 仍开着的（都不是功能缺陷）：`ADDON_ACTION_BLOCKED MonetUI UNKNOWN()` 偶发（仅进日志）、
+  `BuffListFrame` 被暴雪钉在牌子右端的小问题、`ActionBars/Secure.lua` 拆分未做、
+  **发行前必须把 `Pingfangpixel.ttf` 换成 OFL 字体**（见 `THIRD-PARTY-NOTICES.txt`）。
+- 逐项进度、验收清单与客户端约定记在**本地**开发文档（`AGENTS.md`、`MonetUI.md`、`TODO.md`、`docs/`，按 `.gitignore` 不入库）。
 
 ## 📄 协议
 
