@@ -471,6 +471,10 @@ Ellesmere 在本客户端也是收养（`EllesmereUIActionBars.lua:3136` "Stance
    + `ShowWatch` 双轮询，结果每次悬停先在暴雪锚点闪一下、移动时 5 fps 阶梯）；贴到右/上边缘
    **翻到光标另一侧**再顶回屏幕内；偏移改物理像素（`Media:Mult`）；`SetClampedToScreen(true)` 兜底。
    还删掉了 `Apply()` 里"取消跟随就把正在看的提示框 Hide 掉"那一记。
+   **摆法做成三选一**（设置键 `anchor`，默认 `cursor`）：`cursor` 跟随鼠标 / `minimap` 提示框的
+   **右下角对齐小地图面板 `MonetUIMinimapPanel` 的右上角**（贴在地图上沿、右边缘齐平；长得顶出屏幕
+   顶边就改挂面板下方；小地图模块关掉/面板隐藏时自动退回跟随）/ `off` 暴雪默认位置。
+   老存档只有布尔 `follow`：`true`→`cursor`、`false`→`off`，由 `ResolveMode()` 迁移，不丢设置。
 2. **单位提示补一行「目标: 谁」** —— Andromeda `TOOLTIP:GetTarget` 的等价物，不碰 inspect、不扫团队。
 3. **Alt 显示 ID** —— 单位 = GUID 里的 `Creature-/Vehicle-` 编号、物品 = 链接里的 itemID、
    法术 = `GetSpell` 的 spellID（Andromeda `id.lua` 的内容，但改成"显示"而不是挂 11 个钩子）。

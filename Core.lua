@@ -229,13 +229,14 @@ local DEFAULTS = {
             friends    = true,
         },
     },
-    -- 鼠标提示 (Modules/Tooltip)：位置是全局行为，和美化分开开关。follow = 所有提示框（物品 / 技能 / 角色 / 光环……）
-    -- 跟着鼠标走 —— 默认开，因为暴雪的默认锚点在屏幕右下角，那正好是 MonetUI 放小地图集群的地方；
-    -- 关掉就退回暴雪的默认容器（编辑模式下可移动）。
+    -- 鼠标提示 (Modules/Tooltip)：位置是全局行为，和美化分开开关。三种摆法：
+    --   cursor  = 所有提示框（物品 / 技能 / 角色 / 光环……）跟着鼠标走（默认，跟手且贴边自动翻）；
+    --   minimap = 提示框右下角对齐小地图面板右上角（贴在地图上沿、右边缘齐平）；
+    --   off     = 退回暴雪的默认容器（编辑模式下可移动）。
     tooltip = {
-        follow   = true,   -- 提示框跟随光标（关掉＝停在暴雪默认锚点）
-        enrich   = true,   -- 单位提示追加「目标: 谁」一行
-        idsByAlt = true,   -- 按住 Alt 显示 ID（NPC / 物品 / 法术）
+        anchor   = "cursor",  -- 位置：cursor=跟随鼠标 / minimap=贴小地图右上角 / off=暴雪默认
+        enrich   = true,      -- 单位提示追加「目标: 谁」一行
+        idsByAlt = true,      -- 按住 Alt 显示 ID（NPC / 物品 / 法术）
     },
     -- 光标拖尾 / 速度星芒 (Modules/Cursor)：纯装饰，拖尾跟主题边框色，星芒用高光色。
     cursor = {

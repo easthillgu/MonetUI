@@ -1103,12 +1103,17 @@ function SimpleConfig:Build()
         content = sec.body
         row = LayoutCursor(0)
 
-        -- 位置是全局行为：一个开关管所有 GameTooltip（物品 / 技能 / 角色 / 光环 / 动作条……），
+        -- 位置是全局行为：一个下拉管所有 GameTooltip（物品 / 技能 / 角色 / 光环 / 动作条……），
         -- 和信息栏自己的悬停提示也共用。
-        MakeCheckbox(content, "提示框跟随鼠标（物品 / 技能 / 角色…）", row(26),
-            function() return tooltip:GetSetting("follow") end,
+        local TIP_ANCHOR = {
+            { value = "cursor",  text = "跟随鼠标" },
+            { value = "minimap", text = "小地图右上角" },
+            { value = "off",     text = "暴雪默认位置" },
+        }
+        MakeDropdown(content, row(24), "提示框位置", TIP_ANCHOR,
+            function() return tooltip:ResolveMode(tooltip) end,
             function(value)
-                tooltip:Settings().follow = value and true or false
+                tooltip:Settings().anchor = value
                 tooltip:Apply()
             end)
 
@@ -1130,7 +1135,7 @@ function SimpleConfig:Build()
         tipHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(44))
         tipHint:SetWidth(328)
         tipHint:SetJustifyH("LEFT")
-        tipHint:SetText("关＝停在暴雪默认位置（右下角锚点，编辑模式可移动）。贴到屏幕右/上边缘会自动翻到光标另一侧。边框与底色在上方「界面美化 → 系统 → 鼠标提示边框」。")
+        tipHint:SetText("用鼠标＝跟手（贴屏幕右/上边缘自动翻边）；用小地图＝提示框右下角对齐小地图面板右上角（小地图模块关掉时自动退回跟随）。边框与底色在上方「界面美化 → 系统 → 鼠标提示边框」。")
 
         -- 光标装饰（Modules/Cursor）：纯视觉，跟着主题色走；用模块开关整体关掉。
         local cursor = ns:GetModule("Cursor")

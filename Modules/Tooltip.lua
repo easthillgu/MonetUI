@@ -1,8 +1,12 @@
 -- Modules/Tooltip.lua
 -- 鼠标提示：**位置** + **内容增强**（精简自 Andromeda 的 modules/tooltip）。
 --
--- 位置（原缺陷已修）：跟随光标；贴到屏幕右/上边缘时**翻到光标另一侧**，再越界就顶回屏幕内；
---   偏移按物理像素算（Media:Mult），不再是随 UI 缩放浮动的 UI 单位。
+-- 位置有三种摆法（设置键 anchor）：
+--   cursor  —— 跟随光标；贴到屏幕右/上边缘时**翻到光标另一侧**，再越界就顶回屏幕内；
+--   minimap —— 提示框的**右下角对齐小地图面板的右上角**（贴在地图上沿、右边缘齐平），
+--              长得顶出屏幕顶边就改挂在面板下方；
+--   off     —— 不动，用暴雪自己的锚点。
+--   偏移按物理像素算（Media:Mult），不随 UI 缩放浮动。
 --
 -- 内容（只保留三样，其余在 HANDOFF 3.13 里写了为什么砍）：
 --   * 单位：追加一行「目标: <名字>」—— 这个单位正在打谁（名字用职业色，NPC 用高光色）；
@@ -29,14 +33,16 @@ ns.Tooltip = M
 
 --- 光标与提示框之间让开的距离（物理像素）。
 local OFFSET = 14
+--- 提示框与小地图面板之间让开的距离（物理像素）。
+local MM_GAP = 8
 --- 内容扫描间隔（秒）。位置是每帧；内容只在"变了"的时候才动，没必要每帧重算。
 local SCAN = 0.05
 
-local follow, enrich, idsByAlt      -- 设置缓存（每帧要读，别去翻 DB）
-local driver, wasShown, scanAcc, lastKey
+local mode, enrich, idsByAlt       -- 设置缓存（每帧要读，别去翻 DB）：cursor / minimap / off
+local driver, wasShown, scanAcc, cursorKey, mmKey
 
 -- ============================================================================
--- 设置（键仍是 follow / enrich / idsByAlt，面板与 /mui 都走这里）
+-- 设置（键：anchor / enrich / idsByAlt，面板与 /mui 都走这里）
 -- ============================================================================
 
 function M:Settings()
@@ -52,12 +58,29 @@ function M:GetSetting(key)
     return value
 end
 
+--- 位置模式。老存档只有 follow（布尔）：true = 跟随鼠标，false = 暴雪默认。
+local function ResolveMode(self)
+    local db = self:Settings()
+    local value = db.anchor
+    if value == nil then
+        if db.follow ~= nil then
+            value = db.follow and "cursor" or "off"
+        else
+            value = (ns.DEFAULTS.tooltip or {}).anchor or "cursor"
+        end
+    end
+    if value ~= "cursor" and value ~= "minimap" and value ~= "off" then value = "cursor" end
+    return value
+end
+
+M.ResolveMode = ResolveMode
+
 -- ============================================================================
 -- 位置
 -- ============================================================================
 
 --- 把提示框摆到光标旁：默认右下，右边放不下翻左边，上面放不下翻下面，最后顶回屏幕。
-local function Place(tip)
+local function PlaceCursor(tip)
     local ui = _G.UIParent
     if not ui then return end
     local x, y = _G.GetCursorPosition()
@@ -68,8 +91,8 @@ local function Place(tip)
     -- 只在"该动"的时候动：光标没动、尺寸没变就不写布局（静止悬停零开销）。
     local w, h = tip:GetWidth() or 0, tip:GetHeight() or 0
     local key = string.format("%.2f:%.2f:%.2f:%.2f:%.3f", x, y, w, h, scale)
-    if key == lastKey then return end
-    lastKey = key
+    if key == cursorKey then return end
+    cursorKey = key
 
     local off = OFFSET * (Media:Mult() or 1)
     local cx, cy = x / scale, y / scale
@@ -83,6 +106,47 @@ local function Place(tip)
 
     tip:ClearAllPoints()
     tip:SetPoint("BOTTOMLEFT", ui, "BOTTOMLEFT", cx + ox, cy + oy)
+end
+
+--- 提示框的**右下角对齐小地图面板的右上角**：贴在地图上沿、右边缘齐平。
+--- 长得顶出屏幕顶边就改挂在面板下方（顶边贴面板底边）；小地图模块没开就退回跟随光标。
+local function PlaceMinimap(tip)
+    local minimap = ns:GetModule("Minimap")
+    local panel = minimap and minimap.panel
+    -- 面板是我们自己造的框（MonetUIMinimapPanel），但模块关掉时它是隐藏的：
+    -- 隐藏时锚上去等于锚在一个看不见的位置，宁可直接退回光标。
+    if not panel or not Secrets.Bool(panel:IsShown(), false) then
+        PlaceCursor(tip)
+        return
+    end
+
+    local ui = _G.UIParent
+    local gap = MM_GAP * (Media:Mult() or 1)
+    local w, h = tip:GetWidth() or 0, tip:GetHeight() or 0
+    local right, top = panel:GetRight() or 0, panel:GetTop() or 0
+    local uiH = ui and ui:GetHeight() or 0
+
+    -- 面板被拖动 / 提示框内容变长都要重摆；两者没变就不写。
+    local key = string.format("%.2f:%.2f:%.2f:%.2f", right, top, w, h)
+    if key == mmKey then return end
+    mmKey = key
+
+    tip:ClearAllPoints()
+    if uiH > 0 and h > 0 and top + gap + h > uiH then
+        -- 上面放不下：挂到面板下方，仍然右对齐
+        tip:SetPoint("TOPRIGHT", panel, "BOTTOMRIGHT", 0, -gap)
+    else
+        tip:SetPoint("BOTTOMRIGHT", panel, "TOPRIGHT", 0, gap)
+    end
+end
+
+--- 按当前模式摆位。off 什么都不做（让暴雪的锚点留着）。
+local function ApplyPlacement(tip)
+    if mode == "cursor" then
+        PlaceCursor(tip)
+    elseif mode == "minimap" then
+        PlaceMinimap(tip)
+    end
 end
 
 -- ============================================================================
@@ -253,7 +317,7 @@ local function Reset(tip)
     Mark(tip, "tipPre", nil)
     Mark(tip, "tipPost", nil)
     Mark(tip, "tipNoAdd", nil)
-    lastKey = nil
+    cursorKey, mmKey = nil, nil
     scanAcc = 0
 end
 
@@ -273,12 +337,14 @@ local function Tick(_, elapsed)
         -- 上升沿：当帧摆位 + 补内容（晚一帧的那一行，就是在这一步补的）
         wasShown = true
         scanAcc = 0
-        if follow then Place(tip) end
+        ApplyPlacement(tip)
         Enrich(tip)
         return
     end
 
-    if follow then Place(tip) end
+    -- 每帧都过一遍：光标模式靠 cursorKey 去重、小地图模式靠 mmKey 去重，
+    -- 两边都只在"位置或尺寸真的变了"时才写布局。
+    ApplyPlacement(tip)
 
     scanAcc = scanAcc + (elapsed or 0)
     if scanAcc < SCAN then return end
@@ -303,7 +369,7 @@ end
 -- ============================================================================
 
 function M:Apply()
-    follow   = self:GetSetting("follow") and true or false
+    mode     = ResolveMode(self)
     enrich   = self:GetSetting("enrich") and true or false
     idsByAlt = self:GetSetting("idsByAlt") and true or false
     -- 开关变了：记账清零，下一次扫描按新设置重来。
@@ -313,7 +379,7 @@ function M:Apply()
 end
 
 function M:Initialize()
-    follow   = self:GetSetting("follow") and true or false
+    mode     = ResolveMode(self)
     enrich   = self:GetSetting("enrich") and true or false
     idsByAlt = self:GetSetting("idsByAlt") and true or false
     Install()
@@ -325,7 +391,7 @@ function M:SetEnabled(value)
         self:Apply()
         Install()
     else
-        follow, enrich, idsByAlt = false, false, false
+        mode, enrich, idsByAlt = "off", false, false
         local tip = _G.GameTooltip
         if tip then Reset(tip) end
     end
