@@ -302,9 +302,17 @@ MISSING（新文件没部署）/ STALE（改过没部署）/ EXTRA（旧部署�
 - **收养的按钮**：`_G["StanceButton"..i]`（`SetParent` 到 `MonetUIBarStance`、`SetSize` 到
   `ButtonSize()`、`SetScale(1)`、换皮）。施法 / 选中态 / 冷却 / 图标全走暴雪
   `StanceButtonMixin_OnClick → StanceBar:Select → CastShapeshiftForm`，和我们自己写的按钮无关。
-- **布局**：`BAR_DEFS` 里 `BarStance`（`stance = true`）锚在 `Bar3` 的 `BOTTOMLEFT`，按钮**从右往左**
-  排、最右一格留给最后一个形态 —— 可见的 1..N 读起来仍是左 → 右，整排永远贴着 3 号条。
-  `RefreshLayout` 对这条走 `AdoptStanceButtons` 而**不是** `LayoutBar`（左上是给自绘按钮的）。
+- **布局**：`BAR_DEFS` 里 `BarStance`（`stance = true`）锚在 **`Bar3` 正上方、左对齐**
+  （`BOTTOMLEFT → Bar3.TOPLEFT`，y=2），按钮**左对齐**往右排（`(i-1)*step`）；容器宽度只算
+  **可见的形态数**，藏起来的 N+1..10 挂在框外更右边。`RefreshLayout` 对这条走
+  `AdoptStanceButtons` 而**不是** `LayoutBar`（左下排布是给自绘按钮的）。
+- **宠物条位置**：`BarPet` 锚在 **1 号条下方、右对齐**（`TOPRIGHT → Bar1.BOTTOMRIGHT`，y=-2），
+  右端与 1 号条齐平。
+- **宠物条"悬停才显示"**（`SetupHoverOnly`）：平时 `SetAlpha(0)`、悬停 `SetAlpha(1)`。
+  用 alpha **不用 Hide** —— alpha 0 的帧在客户端眼里仍是"显示着"的，鼠标进得来（`EnableMouse(true)`
+  开在**我们自己的**容器上），也不会和 `[pet]` 状态驱动的 Show/Hide 互相顶（顶的结果是
+  "一闪一闪"）。判定走 `Widget:HoverWatch`（0.1 秒轮询），**绝不往暴雪的受保护按钮挂 OnEnter**。
+  配置面板「动作条」里有对应勾（`actionBars.petHover`，默认开）。
 - **形态数**：`GetNumShapeshiftForms()`（本客户端只有复数名，单数版不存在）。>N 的格子 `Hide`；
   =0（猎人/牧师这种没有姿态条的）就不显示我们的条，并把按钮与外壳还给暴雪。
 - **外壳**：`StanceBar` 只 `SetAlpha(0)` + 关鼠标，**事件一条都不卸载** —— 图标 / 选中态 / 冷却

@@ -256,6 +256,10 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
     能施法"，正是本客户端踩过的坑（自绘 `type="pet"` 按钮属性全对、0 拦截、点击无反应）。
   - **两条退路必须把按钮还回去**（`ReleaseStance`）：玩家关掉自绘条、或 `GetNumShapeshiftForms()==0`
     —— 否则按钮留在我们藏起来的框体里，原生姿态条成了空壳，玩家没法变形态。
+  - **收编位置**：姿态条在 3 号条**正上方、左对齐**（按钮左对齐）；宠物条在 1 号条**下方、右对齐**，
+    且**悬停才显示**（`SetupHoverOnly`：平时 alpha 0、悬停 alpha 1，帧仍算"显示"所以鼠标进得来；
+    **不要用 Hide**，那会和 `[pet]` 状态驱动互相顶成"一闪一闪"；判定走 `Widget:HoverWatch` 轮询，
+    绝不往暴雪受保护按钮挂 `OnEnter`）。
   - **收养来的条（宠物 / 姿态）不进我们那几套循环**：`IsAdopted(bar)` 守 `UpdateCooldowns`
     （自绘槽位公式对它们算出负数 → 只剩 `Clear()`，把原生冷却圈擦掉）、`SetClickOptions`
     （暴雪按钮带 `.bar` 字段，会去 `Execute` 一条没有 `mui-keydown` 片段的受保护条）、
