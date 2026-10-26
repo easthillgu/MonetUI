@@ -1902,21 +1902,6 @@ local function AdoptBar(def)
     return entry
 end
 
---- 只把一条暴雪条"变透明"（**只 SetAlpha，不动鼠标、不换父、不写字段**）。
---- 用在我们自己已经接管显示（自绘宠物条/姿态条）的时候：暴雪那条留着但它看不见。
---- ParkWatch 会在脱战后把 alpha 压回去（战斗中不碰受保护框体）。
---- 实测记录：连 EnableMouse(false) 都会让这条受保护的条变脏（flyoutDirection / 按钮的
---- popupDirection 被写成脏值），之后暴雪自己的 SetShown / ClearAllPoints 就全被拒 ——
---- 所以这里只保留 alpha 这一项（它只需要"看不见"，鼠标在更上层由我们自己的按钮接住）。
-local function GhostBar(name)
-    local frame = _G[name]
-    if not frame or Marked(frame, "parked") then return end
-    Mark(frame, "parked", true)
-    Mark(frame, "alpha", frame:GetAlpha())
-    pcall(frame.SetAlpha, frame, 0)
-    ParkWatch(frame)
-end
-
 --- 暴雪的宠物/姿态条现在**完全交给玩家自己的编辑模式设置**：想藏就在
 --- 编辑模式里把「宠物栏 / 姿态栏」的可见性设成隐藏（那是玩家操作，不算插件污染）。
 --- 我们不再碰它：实测连 SetAlpha(0) 都会让它变脏，之后暴雪自己的
@@ -1924,9 +1909,13 @@ end
 local function AdoptAll()
     if not M.own then return end
     if not ADOPT_BLIZZARD_BARS then
-        -- 宠物条是"收养"暴雪按钮做的（见 CreateBar），外壳在 CreateBar 里已经 alpha 0；
-        -- 姿态条暂时不接管（同样只透明）。
-        GhostBar("StanceBar")
+        -- 宠物条是"收养"暴雪按钮做的（见 CreateBar），外壳在 CreateBar 里已经 alpha 0。
+        -- 姿态条（德鲁伊形态 / 死骑灵气 / 战士姿态 / 潜行）**不接管也不收掉**：它是玩家
+        -- 唯一能点的地方，收掉就等于"姿态条不见了"（实机 2026-10-26：德鲁伊 21 级、
+        -- NumShapeshiftForms=3、按钮全在、只有外壳 alpha 被我们压成 0）。
+        -- 它的壳只有 94×30（不是宠物条那种 1303×1193 的大壳），鼠标留着也不会吃掉别处的
+        -- 点击；默认位置正好在 3 号条左边、同一行，玩家还能在编辑模式里自己挪。
+        -- 想要"和自绘条长得一样"再另开一轮（照收养宠物按钮的做法搬 StanceButton1..N）。
         return
     end
     if Locked() then
