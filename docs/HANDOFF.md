@@ -427,6 +427,31 @@ Ellesmere 在本客户端也是收养（`EllesmereUIActionBars.lua:3136` "Stance
 ——说明客户端侧确实是顺着 toc → xml → `.lua` 找文件的。
 版本号 `0.11.0` → `0.12.0`。**待实机 `/reload` 确认模块全开**（`x/17 个模块`）。
 
+### 3.12 2026-10-26：姓名板去光环 + 当前目标金色/放大
+
+玩家要求：姓名板**不再显示 buff / debuff**；**当前目标放大 1.1 倍、边框变金色**。
+
+- **去光环（`Nameplates.lua` 净删 ~300 行）**：整套"借用暴雪 AurasFrame"的机器全拆了
+  （`BuildDebuffDressing` / `ReapplyDebuffDressing` / `DressDebuffButton` / `DressDebuffList` /
+  那条 `PollWatch` 补扫 / `AnchorDebuffs` / `TryBorrowAuras` / `HandBackAuras` 以及
+  `HideBlizzardPlate` 里的 `SetParent(auras → plate)` 分支），Core 的 `showDebuffs` / `auraGap`
+  默认值、设置面板的「显示减益光环（借用暴雪）」勾选框一并删掉。
+  **为什么这样删就够了**：我们对暴雪 `UnitFrame` 只做 `SetAlpha(0)`（不能 Hide，C++ 点击区锚在它上面），
+  `AurasFrame` 是它的子帧 —— 以前正是"连带透明所以必须 SetParent 出来"才看得见；不借了，它就跟着
+  alpha 0 一起消失。**副作用是好的**：最大的两块污染面（改父 + 给暴雪光环按钮换皮）整个不存在了，
+  `NAME_PLATE_UNIT_REMOVED` 也不再有"光环列表挂在旧 base 上把两族锚点连起来"的隐患。
+- **当前目标标记**：`UpdateBorder` 里算一次 `UnitIsUnit(unit,"target")`（过 `Secrets.Bool`，
+  **默认值是上一次的判定**而不是 `false`，否则机密期每次刷新都会把牌子缩回 1.0、金边闪一下），
+  目标 → `TARGET_GOLD = {1.00, 0.84, 0.28}` + `plate:SetScale(1.1)`，非目标 → 缩回 1.0。
+  金色**不跟主题走**（它回答"这是我的目标"，不是"什么威胁"）；**仇恨色优先级更高**：
+  `3`(红) / `2·1`(琥珀) 仍然盖过金色，只在该单位不是威胁目标时显示金边。
+  设置面板那一项改名「当前目标：金色描边 + 放大 1.1 倍」（键仍是 `highlightTarget`）。
+  `Added()` 里把 `plate.isTarget / targetScale` 清空 —— 同一个 base 会被池子换给另一只。
+
+验证：`api-audit` 0 hard、`wuxian check(live:false)` **0 error / 5 warning**（同基线）。
+**待实机看**：① 姓名板确实一个光环都不显示（连自己的 proc 也没有）；② 切目标时金边 + 1.1x 跟得上，
+战斗中（机密期）不闪；③ 1.1 倍只是视觉，暴雪点击区没跟着放大，最外圈 10% 仍然点不到。
+
 ---
 
 ## 4. 污染（taint）模型 —— 这个客户端最贵的一课

@@ -169,11 +169,9 @@ local DEFAULTS = {
 
         showThreat      = true,
         highlightTarget = true,
-        showDebuffs     = true,
         classColor      = true,
         smooth          = true,
         forcePlateSize  = true,
-        auraGap         = 4,
     },
     -- Blizzard panel beautification (Modules/Skins): each window is a switch under `panels`.  `font` is an optional global override: "off" (Blizzard faces) or "pixel" (Fusion Pixel everywhere -- Media:SnapSize keeps text on the 12px grid, MONOCHROME keeps the edges hard).
     skins = {
