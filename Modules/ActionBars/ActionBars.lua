@@ -909,11 +909,8 @@ local function SetHotkey(button)
     end
 end
 
---- 画一个按钮的自绘部分（底板、图标、数字、宏名、热键、冷却）。
-local function SkinButton(button)
-    if Marked(button, "skinned") then return end
-    Mark(button, "skinned", true)
-
+-- 图标件：底色描边（ring/well）、图标本体、织纹。抽自 SkinButton（P4 拆分，逐条保留语义）。
+local function BuildButtonIcon(button)
     -- 图标往后缩 1 像素，露出来的底色就是描边；空槽时 well 顶上（见 RefreshRing）。
     local ring = button:CreateTexture(nil, "BACKGROUND", nil, 0)
     ring:SetAllPoints(button)
@@ -940,7 +937,10 @@ local function SkinButton(button)
     -- 图标之下后：空槽仍有"顶亮底沉"的体积感，有图标时图标保持原色不被洗白。
     -- sheen 暂时去掉（alpha=0）；weave 织纹降到 0.25，参考 NDui 的通透感。
     Widget:ButtonMaterial(button, { alpha = 0, weaveAlpha = 0.25, layer = "BACKGROUND", sublevel = 3 })
+end
 
+-- 热键 / 堆叠数 / 宏名三个文本。抽自 SkinButton（P4 拆分，逐条保留语义）。
+local function BuildButtonFonts(button)
     -- 热键
     -- 颜色必须是白的（原来用主题的 edge 色，在技能图标上根本看不清）。
     local hotkey = Widget:Font(button, HOTKEY_SIZE, "pixel", { r = 1, g = 1, b = 1 }, "LEFT")
@@ -956,8 +956,11 @@ local function SkinButton(button)
     local macro = Widget:Font(button, MACRO_SIZE, "pixel", "edge", "CENTER")
     macro:SetPoint("BOTTOM", button, "BOTTOM", 0, 1)
     button.macro = macro
+end
 
-    -- 冷却：**自己建自己的框**，但计时由我们自己从 duration 对象灌进去（见 PaintCooldown）。
+-- 冷却框：**自己建自己的框**，但计时由我们自己从 duration 对象灌进去（见 PaintCooldown）。
+-- 抽自 SkinButton（P4 拆分，逐条保留语义）。
+local function BuildButtonCooldown(button)
     -- 绝不能用 C_ActionBar.RegisterActionUIButton：客户端回写我们的冷却框时参数是机密值，
     -- 受限环境（副本/战斗）里必报 "Secret values are only allowed during untainted execution"。
     local cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
@@ -968,7 +971,10 @@ local function SkinButton(button)
     if cooldown.SetHideCountdownNumbers then pcall(cooldown.SetHideCountdownNumbers, cooldown, false) end
     StyleCooldownFrame(cooldown)
     button.cooldown = cooldown
+end
 
+-- 按下 / 悬停反馈贴图（默认必须是隐藏的）。抽自 SkinButton（P4 拆分，逐条保留语义）。
+local function BuildButtonFeedback(button)
     -- 按下 / 悬停：默认**必须是隐藏的**，由按钮自己的事件来显隐。
     -- 以前这两张贴图建出来就一直 shown（全仓没有一处切 visible），45% 黑 + 15% 白常年压在
     -- 图标上：对比度掉一半、整体发灰发白。
@@ -986,6 +992,18 @@ local function SkinButton(button)
     highlight:SetColorTexture(1, 1, 1, 0.15)
     highlight:Hide()
     button.highlight = highlight
+end
+
+--- 画一个按钮的自绘部分（底板、图标、数字、宏名、热键、冷却）。
+-- 装配顺序：图标件 → 文本 → 冷却 → 按下/悬停反馈 → 描边状态。
+local function SkinButton(button)
+    if Marked(button, "skinned") then return end
+    Mark(button, "skinned", true)
+
+    BuildButtonIcon(button)
+    BuildButtonFonts(button)
+    BuildButtonCooldown(button)
+    BuildButtonFeedback(button)
 
     RefreshRing(button)
 end
