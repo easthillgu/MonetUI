@@ -45,6 +45,10 @@
   `MonetUIBarPet/BarStance alpha=0.302`、`MonetUIPetFrame alpha=0`、`PetActionButton8` well `shown=true`。
   **待玩家实机看效果**（详见 HANDOFF 3.9）。
 - ⏳ 拖放 / 姿态翻页（`DragDrop.lua` 拆分后先 `/reload` 再测）、切主题后的光环边框颜色。
+- ⏳ **转正 + xml 加载清单**（2026-10-26，见 HANDOFF 3.11）：仓库改名 `MonetUI`、旧版留 `MonetUI-archive`，
+  toc 改成"每组一份 xml"。离线闸门已过（`check` 0 错 / 5 警基线、`api-audit` 0 hard）。
+  **待实机 `/reload` 确认启动打印 `17/17 个模块`**：xml 若有一份没被客户端读到，那一组模块会整体消失
+  （症状是 `/mui status` 缺模块 + 相关功能静默不出现，且**不会有 Lua 错误**）。
 - ⏸ **`ADDON_ACTION_BLOCKED MonetUI UNKNOWN()`（暂缓，玩家 2026-10-26 说先不管）**：
   两次记录的时间戳形状完全一致 —— 重载后约 14 秒第一条，再过 10 秒「5 more times」共 6 条
   （06:21:41/06:21:51 与 06:30:52/06:31:02），无伴随 Lua 错误。`taintLog=2` 下

@@ -1,0 +1,4 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- MonetUI · Modules/Tooltip — 鼠标提示位置（跟鼠标 / 停在默认右下角）。只负责行为，外观在 Skins。单文件模块。 -->
+    <Script file="Tooltip.lua"/>
+</Ui>

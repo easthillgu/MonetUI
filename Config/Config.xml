@@ -1,0 +1,6 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- MonetUI · Config — 设置面板
+         SimpleConfig.lua 在 Core.lua 之后加载：它要读 Core 的模块注册表（ns:GetModules / DB），
+         并给每个模块挂上自己的设置页。单文件，仍留一份清单，模块目录的规矩保持一致。 -->
+    <Script file="SimpleConfig.lua"/>
+</Ui>

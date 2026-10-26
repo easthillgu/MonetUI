@@ -1,0 +1,4 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- MonetUI · Modules/QuestTracker — 自绘任务追踪（压掉 ObjectiveTrackerFrame，用 Monet 窗口重画）。单文件模块。 -->
+    <Script file="QuestTracker.lua"/>
+</Ui>

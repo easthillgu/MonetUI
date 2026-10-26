@@ -16,7 +16,7 @@ node tools/api-audit.js
 
 # 3) 有 wuxian MCP 时（0 error 才算完）
 #    **传仓库绝对路径**：按 addon 名查的是"已安装副本"，审不到还没部署的源码
-#    tools.wuxian.check({ target = "C:\\Users\\EastHillGu\\Documents\\wowaddonsdev\\MonetUI-refactor", live = false })
+#    tools.wuxian.check({ target = "C:\\Users\\EastHillGu\\Documents\\wowaddonsdev\\MonetUI", live = false })
 #    （按名字跑会多一条 toc-interface 警告：部署脚本才会把 ## Interface 改成客户端号，不是缺陷）
 ```
 

@@ -1,6 +1,7 @@
 # MonetUI 重构计划(根据原仓 docs/CODE-REVIEW-2026-10-24.md)
 
-- 工作副本:本仓(MonetUI-refactor,同级行)是**重构专用副本**,原 MonetUI 目录保持 cb7d932 不动。
+- 工作副本:本仓(原名 `MonetUI-refactor`,**2026-10-26 已转正为 `MonetUI`**);旧版目录改名
+  `MonetUI-archive`(停在 cb7d932)留存,不再开发。
 - 基线:cb7d932
 - 来源报告:原仓 docs/CODE-REVIEW-2026-10-24.md
 - 硬约束:全程遵守 AGENTS.md 污染模型(ns:Mark 旁表、不 hook 暴雪帧、安全片段/宠物收养约束);

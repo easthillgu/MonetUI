@@ -1,0 +1,4 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- MonetUI · Modules/Nameplates — 细条姓名板（挂在暴雪底座上，血条 / 施法 / 减益 / 仇恨描边）。单文件模块。 -->
+    <Script file="Nameplates.lua"/>
+</Ui>

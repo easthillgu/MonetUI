@@ -1,0 +1,15 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- MonetUI · Utils — 基础工具层（先于 Core.lua 加载）
+         顺序：Math / Secrets / Media / EventBus / Color 是叶子（不依赖别的 Utils 文件）；
+         Widget 自绘控件库用到 Math + Media；Layout / Mover / Skin 用到 Widget，
+         所以这三件（以及 Skin 的皮肤原语）必须排在 Widget 之后。 -->
+    <Script file="Math.lua"/>
+    <Script file="Secrets.lua"/>
+    <Script file="Media.lua"/>
+    <Script file="EventBus.lua"/>
+    <Script file="Color.lua"/>
+    <Script file="Widget.lua"/>
+    <Script file="Layout.lua"/>
+    <Script file="Mover.lua"/>
+    <Script file="Skin.lua"/>
+</Ui>

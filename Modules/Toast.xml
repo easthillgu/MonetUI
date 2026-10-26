@@ -1,0 +1,4 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- MonetUI · Modules/Toast — 通知横幅（屏幕顶部一条，排队播完，底边细线随停留时间排空）。单文件模块。 -->
+    <Script file="Toast.lua"/>
+</Ui>

@@ -1,0 +1,14 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- MonetUI · Modules/UnitFrames — 单位框
+         玩家 / 目标 / 焦点 / 宠物细条框，外加光环、施法条、职业资源、小队-团队框、暴雪单位框压制。
+         顺序：UnitFrames.lua 先建 M.frames / M.Setting / M.Shared（其余文件都从这里取）；
+         Auras / CastBar / ClassPower 是它的子面板（挂到已建好的单位框上）；
+         Blizzard.lua 负责收掉暴雪原生框（要在我们的框存在之后才好比对）；
+         Groups.lua 自带安全头，最后加载。 -->
+    <Script file="UnitFrames.lua"/>
+    <Script file="Auras.lua"/>
+    <Script file="CastBar.lua"/>
+    <Script file="ClassPower.lua"/>
+    <Script file="Blizzard.lua"/>
+    <Script file="Groups.lua"/>
+</Ui>

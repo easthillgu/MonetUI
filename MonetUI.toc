@@ -2,74 +2,47 @@
 ## Title: MonetUI
 ## Notes: Monet-style UI addon - adaptive Impressionist color engine integration
 ## Author: EastHillGu
-## Version: 0.11.0
+## Version: 0.12.0
 ## Category: Interface
 ## IconTexture: Interface\AddOns\MonetUI\Assets\Textures\monet_addon_icon.tga
 ## X-Website: https://github.com/EastHillGu/MonetUI
 ## SavedVariables: MonetUIDB
 
-# Libraries
-Libs\LibStub\LibStub.lua
-Libs\LibMonetColor-1.0\LibMonetColor-1.0.lua
-Libs\MonetColorMapData-1.0\MonetColorMapData-1.0.lua
-Libs\LibMonetColor-Anim-1.0\LibMonetColor-Anim-1.0.lua
+# ============================================================
+# 加载清单：一个子模块 = 一份 xml
+#   成组的文件（Libs / Utils / Config / 每个 Modules 目录）各有一份同名 xml，
+#   组内顺序写在 xml 的 <Script file> 里；单文件模块直接在下面列 .lua。
+#   要调加载顺序：改对应 xml，或在这里调换 xml 的位置 —— 别在 xml 之外加文件。
+# ============================================================
 
-# Utilities
-Utils\Math.lua
-Utils\Secrets.lua
-Utils\Media.lua
-Utils\EventBus.lua
-Utils\Color.lua
-Utils\Widget.lua
-Utils\Layout.lua
-Utils\Mover.lua
-Utils\Skin.lua
+# Libraries (LibStub / LibMonetColor-1.0 / 区域色数据包 / Anim)
+Libs\Libs.xml
 
-# Core
+# Utilities (Math Secrets Media EventBus Color Widget Layout Mover Skin)
+Utils\Utils.xml
+
+# Core (SavedVariables / 模块注册与生命周期 / 主题管线 / 斜杠命令)
 Core.lua
 
-# Config
-Config\SimpleConfig.lua
+# Config (设置面板)
+Config\Config.xml
 
-# Modules
-Modules\UnitFrames\UnitFrames.lua
-Modules\UnitFrames\Auras.lua
-Modules\UnitFrames\CastBar.lua
-Modules\UnitFrames\ClassPower.lua
-Modules\UnitFrames\Blizzard.lua
-Modules\UnitFrames\Groups.lua
-Modules\Cooldown\Cooldown.lua
-Modules\BuffFrame\BuffFrame.lua
-Modules\Minimap\Minimap.lua
-Modules\Minimap\Buttons.lua
-Modules\Minimap\Pins.lua
-Modules\Minimap\MicroMenu.lua
-Modules\BagFrame\BagFrame.lua
-Modules\Bags\Bags.lua
-Modules\QuestTracker\QuestTracker.lua
-Modules\ActionBars\ActionBars.lua
-Modules\ActionBars\Blizzard.lua
-Modules\ActionBars\PetBar.lua
-Modules\ActionBars\DragDrop.lua
-Modules\Nameplates\Nameplates.lua
-Modules\Tooltip.lua
-Modules\Cursor.lua
-Modules\Toast.lua
-Modules\Durability.lua
-Modules\CombatText.lua
-
-# InfoBar (screen-edge strip with data blocks + the experience line on its bottom hairline)
-Modules\InfoBar\InfoBar.lua
-Modules\InfoBar\Blocks.lua
-Modules\InfoBar\XP.lua
-
-# Skins (Blizzard panel beautification)
-Modules\Skins\Skins.lua
-Modules\Skins\Quest.lua
-Modules\Skins\WorldMap.lua
-Modules\Skins\Character.lua
-Modules\Skins\Collections.lua
-Modules\Skins\Social.lua
-Modules\Skins\Trade.lua
-Modules\Skins\System.lua
-Modules\Skins\Forever.lua
+# Modules —— 这张表的顺序就是加载顺序
+#   同组子文件的先后见各自 xml：UnitFrames 主文件先建 M.frames；ActionBars 主文件先导出共享件；
+#   InfoBar 的 XP.lua 必须最后；Skins 注册顺序 = 设置面板里的排列顺序。
+Modules\UnitFrames\UnitFrames.xml
+Modules\Cooldown\Cooldown.xml
+Modules\BuffFrame\BuffFrame.xml
+Modules\Minimap\Minimap.xml
+Modules\BagFrame\BagFrame.xml
+Modules\Bags\Bags.xml
+Modules\QuestTracker\QuestTracker.xml
+Modules\ActionBars\ActionBars.xml
+Modules\Nameplates\Nameplates.xml
+Modules\Tooltip.xml
+Modules\Cursor.xml
+Modules\Toast.xml
+Modules\Durability.xml
+Modules\CombatText.xml
+Modules\InfoBar\InfoBar.xml
+Modules\Skins\Skins.xml

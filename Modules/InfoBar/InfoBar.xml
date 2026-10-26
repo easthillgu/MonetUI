@@ -1,0 +1,8 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- MonetUI · Modules/InfoBar — 屏幕边缘整幅细条 + 数据块 + 底边经验线
+         顺序：InfoBar.lua 先建条（容器、底边衬线、显隐与悬停逻辑）；Blocks.lua 往条上挂六个数据块
+         （金钱 / 耐久 / 货币 / 系统 / 专精 / 好友）；XP.lua 拿那条衬线当经验条用，必须最后加载。 -->
+    <Script file="InfoBar.lua"/>
+    <Script file="Blocks.lua"/>
+    <Script file="XP.lua"/>
+</Ui>

@@ -1,0 +1,4 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- MonetUI · Modules/Cooldown — 冷却数字 / 充能 / 快捷键字体 + 技能可用着色。单文件模块。 -->
+    <Script file="Cooldown.lua"/>
+</Ui>

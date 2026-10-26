@@ -1,0 +1,16 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- MonetUI · Modules/Skins — 暴雪窗口美化
+         顺序：Skins.lua 先建引擎（Skins:Panel 注册表 + apply / rollback / 加载时机），
+         其余文件随后逐个注册面板 —— 注册顺序就是设置面板里的排列顺序：
+         任务 → 世界地图 → 角色 → 收藏 → 社交 → 交易 → 系统 → Forever 专属窗口。
+         每个文件只用 Skins:Panel 登记，不碰暴雪脚本槽（HookScript / hooksecurefunc 一概不用）。 -->
+    <Script file="Skins.lua"/>
+    <Script file="Quest.lua"/>
+    <Script file="WorldMap.lua"/>
+    <Script file="Character.lua"/>
+    <Script file="Collections.lua"/>
+    <Script file="Social.lua"/>
+    <Script file="Trade.lua"/>
+    <Script file="System.lua"/>
+    <Script file="Forever.lua"/>
+</Ui>

@@ -10,11 +10,11 @@
 
 | 事 | 值 |
 |---|---|
-| 仓库 | `C:\Users\EastHillGu\Documents\wowaddonsdev\MonetUI` |
+| 仓库 | `C:\Users\EastHillGu\Documents\wowaddonsdev\MonetUI`（2026-10-26 转正：原 `MonetUI-refactor` 改名为 `MonetUI`，旧版封存在 `MonetUI-archive`） |
 | 游戏 | `C:\Users\EastHillGu\Documents\Blizzards\World of Warcraft\_retail_\Wow.exe`（客户端 12.1.5.70575） |
 | 插件安装目录 | `...\_retail_\Interface\AddOns\MonetUI`（由 `tools/deploy-retail.ps1` 从仓库拷过去） |
 | 客户端日志 | `...\_retail_\Logs\`（`taint.log` 是污染日志，`EditMode.log` 是编辑模式布局的二进制转储） |
-| 版本 | `MonetUI.toc` 0.11.0，`## Interface: 16001`（部署脚本会按客户端改写） |
+| 版本 | `MonetUI.toc` 0.12.0，`## Interface: 16001`（部署脚本会按客户端改写） |
 | 当前 HEAD | `36b7280`（2026-10-24 22:17），比 `origin/main` 领先 48 个提交 |
 | 远端 | `origin` = github.com/easthillgu/MonetUI，**私有备份**。**在游戏上线并通过初步测试之前一律不 push**（作者定的，见 `TODO.md` 末尾） |
 | 参考插件（只读） | `../Andromeda`、`../EllesmereUI-v9.4`（Ellesmere 是**这个客户端**的实机皮肤代码，优先级最高） |
@@ -36,7 +36,7 @@ node tools/sync-check.js         # 仓库 vs 已安装副本（退出码 0 = 游
 
 > **`wuxian check` 的路径陷阱（2026-10-26 记）**：`check({target="MonetUI"})` 查的是**游戏里的
 > 已安装副本**（`Interface/AddOns/MonetUI`），不是仓库。想在校验**当前源码**（部署之前）就把
-> `target` 写成仓库绝对路径（`...\MonetUI-refactor`），否则审的是上一版。按 addon 名跑时
+> `target` 写成仓库绝对路径（`...\MonetUI`），否则审的是上一版。按 addon 名跑时
 > 还会多一条 `toc-interface`（部署脚本会改 `## Interface`），那不是缺陷。
 
 `wuxian check`（有 MCP 时）等价于"客户端侧的语法 + 未解析名字 + 受保护调用"体检，**0 error 才算改完**；`api-audit.js` 离线也能跑，是它拦住了大部分"名字写错/事件名不存在"的错；`audit-taint.js` 是 2026-10-25 新增的**commit 前 taint 自查**（规则 = `.opencode/skills/wow-secret-value-taint-audit/SKILL.md`，已审行用 `-- TAINT-OK: <原因>` 行内豁免，两边规则变更要同步）。
@@ -406,6 +406,27 @@ Ellesmere 在本客户端也是收养（`EllesmereUIActionBars.lua:3136` "Stance
 **教训**：凡是"挂在别的条矩形上的覆盖层"，它的鼠标状态必须**无条件每拍结算**，
 不能因为宿主隐藏就早退 —— 覆盖层是独立框体，不会跟着宿主一起失效。
 
+### 3.11 2026-10-26：转正成 MonetUI + 子模块 xml 清单
+
+两件事一起做，纯结构，**没有任何 Lua 逻辑改动**（`.lua` 一个字节没动）：
+
+1. **转正**：`wowaddonsdev\MonetUI-refactor` → `wowaddonsdev\MonetUI`（就是这个仓库，174 个提交、
+   游戏里装的那一份）；原来的 `MonetUI`（停在 `cb7d932`）改名 **`MonetUI-archive`** 留存，不再开发。
+   游戏侧无需动作：安装目录本来就叫 `Interface\AddOns\MonetUI`，`sync-check` 仍然同步。
+2. **加载清单改成 xml**：`MonetUI.toc` 从 60+ 行 `.lua` 变成"每组一份 xml"：
+   `Libs/Libs.xml`、`Utils/Utils.xml`、`Config/Config.xml`、以及 `Modules/` 下 14 份
+   （`UnitFrames` / `ActionBars` / `Minimap` / `InfoBar` / `Skins` 是多文件组，其余是单文件模块
+   —— 单文件模块仍**直接列 `.lua`**，不再多套一层 xml）。组内顺序 = `<Script file>` 的先后，
+   组间顺序 = toc 的先后，两级合起来和改动前的加载顺序**逐一对应**（51 个 `.lua` 全部仍被引用）。
+   每个 xml 头部写了这组"是什么 + 为什么是这个顺序"（例如 `UnitFrames.lua` 必须先建 `M.frames`、
+   `InfoBar/XP.lua` 必须最后拿那条经验衬线），改顺序时不用再猜。
+
+验证：19 份 xml 逐个 `[xml]` 解析通过；`node tools/api-audit.js` 0 hard（`toc: 0 problem(s)`）；
+`wuxian check(live:false)` **0 error / 5 warning**（就是那 5 条已知基线：4× `PickupAction/PlaceAction`
+受保护 + `toc-interface`），并且 `not-loaded` 只剩 `tools/api-audit-selftest/Broken.lua`
+——说明客户端侧确实是顺着 toc → xml → `.lua` 找文件的。
+版本号 `0.11.0` → `0.12.0`。**待实机 `/reload` 确认模块全开**（`x/17 个模块`）。
+
 ---
 
 ## 4. 污染（taint）模型 —— 这个客户端最贵的一课
@@ -541,6 +562,13 @@ end
 > 另：宠物动作条"自动施法"像素环的完整实现要点（参数、`Widget:PixelGlow`、为什么要替掉暴雪的
 > `AutoCastOverlay.Shine`）在 **`.opencode/skills/wow-petbar-autocast-pixel-glow/SKILL.md`**。
 > Codex 不会自动加载它，需要时直接读这个文件。
+
+> **加载结构（2026-10-26 起）**：`MonetUI.toc` 不再逐个列 `.lua`，只列**每个子模块的一份 xml 清单**
+> （`Libs/Libs.xml`、`Utils/Utils.xml`、`Config/Config.xml`、`Modules/<模块>/<模块>.xml`；
+> 单文件模块如 `Modules/Tooltip.lua` 直接在 toc 里列）。组内加载顺序写在 xml 的 `<Script file>` 里，
+> 组间顺序 = toc 里的顺序。**加文件就加到对应 xml**，别只在某处 `dofile`；`wuxian check` 会顺着
+> toc → xml 找文件，漏挂会报 `not-loaded` 而不是静默跳过。改这块之后照例跑
+> `node tools/api-audit.js`（会校验 toc 列的 xml 是否存在）+ `wuxian check`。
 
 ---
 

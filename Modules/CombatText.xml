@@ -1,0 +1,4 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- MonetUI · Modules/CombatText — 自身战斗文字（受到伤害 / 治疗 / 闪避招架，浮在玩家框上方）。单文件模块。 -->
+    <Script file="CombatText.lua"/>
+</Ui>

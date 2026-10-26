@@ -1,0 +1,5 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- MonetUI · Modules/BuffFrame — 玩家增益 / 减益网格（小地图下方），替代暴雪光环框。
+         战斗中的机密光环不硬顶：受限时交回暴雪原生 BuffFrame（见 AGENTS.md「引擎的生产件」）。 -->
+    <Script file="BuffFrame.lua"/>
+</Ui>

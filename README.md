@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](#-协议)
 ![Interface](https://img.shields.io/badge/Interface-16001-orange.svg)
-![Version](https://img.shields.io/badge/version-0.11.0-informational.svg)
+![Version](https://img.shields.io/badge/version-0.12.0-informational.svg)
 ![Lua](https://img.shields.io/badge/Lua-5.1-2C2D72.svg)
 ![Status](https://img.shields.io/badge/status-待实机验证-yellow.svg)
 
@@ -75,24 +75,30 @@
 
 ```
 MonetUI/
-├── MonetUI.toc          入口清单
+├── MonetUI.toc          入口清单：只列各组 xml + 单文件模块（顺序即加载顺序）
 ├── Core.lua             SavedVariables / 模块注册与生命周期 / 主题管线 / 斜杠命令
-├── Utils/               Math Secrets Media EventBus Color Widget Mover Skin
-├── Config/              SimpleConfig 配置面板
-├── Modules/             各功能模块（见上表）
-├── Libs/                随包库 + NOTICE.md（第三方许可清单）
+├── Libs/                随包库 + NOTICE.md（第三方许可清单）+ Libs.xml
+├── Utils/               基础工具（Math Secrets Media EventBus Color Widget Layout Mover Skin）+ Utils.xml
+├── Config/              设置面板（SimpleConfig）+ Config.xml
+├── Modules/             各功能模块（见上表），每个模块一份同名 xml 清单
 ├── Assets/              字体 / 自绘材质 / 图标
 ├── docs/                开发记录、布局与材质预览页
 └── tools/               材质/遮罩生成脚本 + API 审核（`api-audit.js`）
 ```
 
-> 仓库只跟踪**发行集**（`.toc` 列出的文件 + `Assets/` + `Libs/`）。`tools/`、`docs/`、`AGENTS.md` 等开发资料按 `.gitignore` 不入库 —— 克隆下来是可直接用的插件，不是完整开发环境。静态审核与材质生成器的用法写在各脚本头部注释里。
+**一个子模块 = 一份 xml 清单**：`MonetUI.toc` 不再逐个列 `.lua`，而是列
+`Libs/Libs.xml`、`Utils/Utils.xml`、`Config/Config.xml` 和 `Modules/<模块>/<模块>.xml`；
+组内加载顺序写在 xml 的 `<Script file>` 里，组间顺序就是 toc 里的排列。单文件模块（`Tooltip`
+`Cursor` `Toast` `Durability` `CombatText`）直接在 toc 里列 `.lua`。要加减文件就改对应 xml ——
+顺序和"这一组是干什么的、为什么是这个先后"都写在各 xml 头部的注释里。
+
+> 仓库只跟踪**发行集**（`.toc` / 各 xml 列出的文件 + `Assets/` + `Libs/`）。`tools/`、`docs/`、`AGENTS.md` 等开发资料按 `.gitignore` 不入库 —— 克隆下来是可直接用的插件，不是完整开发环境。静态审核与材质生成器的用法写在各脚本头部注释里。
 
 ## ⚠️ 状态
 
 **离线验证通过，待实机验收。**
 
-- `wuxian check`（离线）全绿：**0 error / 0 warning**。
+- `wuxian check`（离线）：**0 error / 5 warning**（4 条 `PickupAction`·`PlaceAction` 受保护调用 + 1 条 `toc-interface`，均为已知基线；前者受 `InCombatLockdown` 守门，后者是部署脚本按客户端改 `## Interface` 造成的）。
 - 静态 API 审核 `tools/api-audit.js`：**0 hard**，8 条 soft 均为 `InCombatLockdown`（文档已改为 `C_RestrictedActions.InCombatLockdown`）。
 - 待验收：自绘材质接线、信息栏、`load` / `try` 热加载、小队 / 团队框架战斗内刷新。
 - 逐项进度、验收清单与客户端约定记在**本地**开发文档（`AGENTS.md`、`MonetUI.md`、`TODO.md`，按 `.gitignore` 不入库）。

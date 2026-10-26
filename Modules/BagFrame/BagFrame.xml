@@ -1,0 +1,5 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- MonetUI · Modules/BagFrame — 旧排列式背包（把暴雪容器排成一行 + Monet 边框）。
+         已被 Modules/Bags 的分类背包顶替，保留待其实机验证通过后退役。 -->
+    <Script file="BagFrame.lua"/>
+</Ui>

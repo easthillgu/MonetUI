@@ -172,6 +172,11 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
 ## 代码风格
 
 - 皮肤包用 `M:Panel(key, { ... })` 注册；窗口统一 `M:SkinWindow`。
+- **加载清单是 xml，不直接在 toc 里列 `.lua`**（2026-10-26 起）：`MonetUI.toc` 只列各组 xml
+  （`Libs/Libs.xml`、`Utils/Utils.xml`、`Config/Config.xml`、`Modules/<模块>/<模块>.xml`）与单文件模块的 `.lua`。
+  **新增 `.lua` 必须挂进对应 xml 的 `<Script file>`，并放在正确的先后位置** —— 漏挂不会报错，
+  客户端直接不加载（`wuxian check` 会以 `not-loaded` 提示）。组内顺序 = xml 内的次序，
+  组间顺序 = toc 内的次序；动顺序时顺手更新该 xml 头部的注释。
 - OnShow 重涂一律走 `M:HookShow`（引擎带幂等守卫），调用处勿自行 `HookScript("OnShow")`。
 - 高频事件用 `M:Debounce`；LoD 窗口在面板声明 `addons = { ... }` 门控。
 - 小步改动、可回滚；不顺手重构无关代码。

@@ -1,0 +1,9 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- MonetUI · Modules/Minimap — 矩形小地图 + 集群按钮 / 微型菜单 / 第三方 pin 收编
+         顺序：Minimap.lua 先建框、接管暴雪集群；Buttons.lua 往面板上挂追踪 / 难度 / 收纳三只按钮；
+         Pins.lua 处理不吃遮罩的第三方 pin；MicroMenu.lua 是右键弹出的面板菜单，最后加载。 -->
+    <Script file="Minimap.lua"/>
+    <Script file="Buttons.lua"/>
+    <Script file="Pins.lua"/>
+    <Script file="MicroMenu.lua"/>
+</Ui>

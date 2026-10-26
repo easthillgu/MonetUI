@@ -1,0 +1,4 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- MonetUI · Modules/Durability — 装备耐久警告（跌破阈值用横幅提醒一次，修好后重新武装）。单文件模块。 -->
+    <Script file="Durability.lua"/>
+</Ui>

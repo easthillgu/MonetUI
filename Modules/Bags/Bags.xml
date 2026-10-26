@@ -1,0 +1,4 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- MonetUI · Modules/Bags — 分类背包 / 银行（全自绘，C_Container / C_Bank）。单文件模块。 -->
+    <Script file="Bags.lua"/>
+</Ui>
