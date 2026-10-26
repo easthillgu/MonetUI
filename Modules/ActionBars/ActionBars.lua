@@ -1415,11 +1415,18 @@ local function AdoptStanceButtons(bar)
         pcall(btn.ClearAllPoints, btn)
         pcall(btn.SetSize, btn, size, size)
         pcall(btn.SetScale, btn, 1)
-        -- **从右端往左排，最右一格留给最后一个形态**：暴雪只 Show 前 N 格（N = 形态数），
-        -- 这样可见的 1..N 读起来仍是左 → 右，整排永远贴着 3 号条左边；
-        -- 隐藏的 N+1..10 落在更左边，看不见也不响应鼠标。
-        pcall(btn.SetPoint, btn, "RIGHT", frame, "RIGHT", -(total - i) * (size + spacing), 0)
-        if forms > 0 and i > forms then pcall(btn.Hide, btn) else pcall(btn.Show, btn) end
+        -- 排布：**第 N 个形态（最后一个可见格）贴右端**，1..N 从右往左依次排开 —— 这样可见的
+        -- 那几格读起来仍是左 → 右，且整组永远贴着 3 号条左边；藏起来的 N+1..10 排在更左边
+        -- （看不见也不响应鼠标），不占可见区。
+        local step = size + spacing
+        local offset
+        if forms >= 1 and i <= forms then
+            offset = -(forms - i) * step
+        else
+            offset = -(i - 1) * step
+        end
+        pcall(btn.SetPoint, btn, "RIGHT", frame, "RIGHT", offset, 0)
+        if forms >= 1 and i > forms then pcall(btn.Hide, btn) else pcall(btn.Show, btn) end
         SkinAdoptedButton(btn)
         -- 放开过一次（ReleaseStance 藏了边框）再收养回来时，边框要重新露出来。
         local border = Marked(btn, "adoptedBorder")
