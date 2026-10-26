@@ -1130,6 +1130,13 @@ function SimpleConfig:Build()
                 tooltip:Apply()
             end)
 
+        MakeCheckbox(content, "条目标题色跟主题（红/金/绿/蓝映射到 Monet 色系）", row(26),
+            function() return tooltip:GetSetting("tint") ~= false end,
+            function(value)
+                tooltip:Settings().tint = value and true or false
+                tooltip:Apply()
+            end)
+
         local tipHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
         tipHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(44))
         tipHint:SetWidth(328)
