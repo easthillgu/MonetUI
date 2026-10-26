@@ -1425,14 +1425,17 @@ local function AdoptStanceButtons(bar)
         else
             offset = -(i - 1) * step
         end
-        pcall(btn.SetPoint, btn, "RIGHT", frame, "RIGHT", offset, 0)
+        -- 竖直方向锚**底边**对齐条底边（不是中心）：这样即使条的尺寸没设上，这一排也和 3 号条同一行。
+        pcall(btn.SetPoint, btn, "BOTTOMRIGHT", frame, "BOTTOMRIGHT", offset, 0)
         if forms >= 1 and i > forms then pcall(btn.Hide, btn) else pcall(btn.Show, btn) end
         SkinAdoptedButton(btn)
         -- 放开过一次（ReleaseStance 藏了边框）再收养回来时，边框要重新露出来。
         local border = Marked(btn, "adoptedBorder")
         if border then pcall(border.Show, border) end
     end
-    pcall(frame.SetSize, total * size + math.max(total - 1, 0) * spacing, size)
+    -- pcall 的第一个参数是**函数**，`self` 还得显式再传一遍（漏了就是静默失败：实机表现为
+    -- 这条条宽高停在 2×2、按钮全挂在框外 —— 反而是"按钮位置看着对、条的矩形是错的"）。
+    pcall(frame.SetSize, frame, total * size + math.max(total - 1, 0) * spacing, size)
     return total
 end
 
