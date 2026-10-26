@@ -929,65 +929,6 @@ local function SyncStanceAnchor()
     bar.def.relativeTo = "Bar" .. math.max(1, math.min(BarCount(), 8))
 end
 
---- 把一条上所有按钮的内容刷新一遍（槽位变了才需要）。
---- 宠物条的一格：图标 / 冷却 / 自动施法提示。
---- 全部读宠物 API（受限状态下可能是机密值），所以一律 pcall + Secrets 兜底；
---- 像素环画在**我们自己的**按钮上，不碰暴雪的任何宠物框体。
-local function RefreshPetContent(button, index)
-    if not button then return end
-
-    local texture, isToken
-    if _G.GetPetActionInfo then
-        local r = { pcall(_G.GetPetActionInfo, index) }
-        if r[1] then
-            texture, isToken = r[3], r[4]
-        end
-    end
-    -- 宠物条的"基础命令"（攻击/跟随/停留/被动…）返回的是一张**全局变量名**
-    -- （"PET_ATTACK_TEXTURE" 这种），不是贴图路径 —— 直接塞给 SetTexture 什么也画不出来。
-    -- 实测：只有带数字 fileID 的两个自动施法技能有图标，其余全空。
-    if isToken and type(texture) == "string" then
-        texture = _G[texture] or texture
-    end
-
-    if texture ~= nil then
-        pcall(button.icon.SetTexture, button.icon, texture)
-        pcall(button.icon.Show, button.icon)
-    else
-        pcall(button.icon.SetTexture, button.icon, nil)
-        pcall(button.icon.Hide, button.icon)
-    end
-
-    pcall(button.count.SetText, button.count, "")
-    pcall(button.count.Hide, button.count)
-    pcall(button.macro.SetText, button.macro, "")
-
-    local cooldown = button.cooldown
-    if cooldown then
-        local ok, start, duration, enable = pcall(_G.GetPetActionCooldown, index)
-        start, duration, enable = Secrets.Number(start), Secrets.Number(duration), Secrets.Number(enable)
-        if ok and start and duration and duration > 0 and enable ~= 0 then -- TAINT-OK: 上一行 Secrets.Number 守卫,机密→None
-            pcall(cooldown.SetCooldown, cooldown, start, duration) -- TAINT-OK: 同上明文值 + pcall 兜底
-        else
-            pcall(cooldown.Clear, cooldown)
-        end
-    end
-
-    local enabled
-    if _G.GetPetActionInfo then
-        local r = { pcall(_G.GetPetActionInfo, index) }
-        if r[1] then enabled = Secrets.Bool(r[7], false) end
-    end
-    if enabled then
-        -- 显式给像素/点距：默认值在本客户端换算出 1.0 单位（≈1 物理像素），肉眼看不见。
-        -- pixel/pitch 都是"物理像素"语义，会再乘 Media:Mult()。
-        Widget:PixelGlow(button, { side = ButtonSize(), static = true,
-            pixel = 5, pitch = 12, ringAlpha = 1 })
-    else
-        Widget:StopPixelGlow(button)
-    end
-end
-
 --- 这条是不是"收养暴雪按钮"的条（宠物 / 姿态）：图标、冷却、选中态全由暴雪自己刷，
 --- 我们的图标/冷却/绑定/翻页那几套循环必须绕开它们（否则会读到错的槽位，把原生冷却清掉）。
 local function IsAdopted(bar)
@@ -1088,73 +1029,6 @@ local function SkinAdoptedButton(btn)
     -- 结果两层都没显示 —— 实机表现就是"冷却看不到"。收养来的按钮直接用原生冷却。
     -- local cd = btn.cooldown or btn.Cooldown
     -- if cd then pcall(StyleCooldownFrame, cd) end
-end
-
---- 宠物条的冷却：收养来的按钮，暴雪只在自己的事件里刷（切目标等），不主动更新 ——
---- 实机表现就是"切个目标才看到冷却时间"。给它一个 0.5 秒的轻量驱动，只调冷却刷新函数
---- （不调 PetActionBar:Update，那会连带 UpdateShownButtons → 那 10 条拦截）。
-local petCooldownDriver
-local function EnsurePetCooldownDriver()
-    if petCooldownDriver then return end
-    petCooldownDriver = CreateFrame("Frame")
-    local acc = 0
-    petCooldownDriver:SetScript("OnUpdate", function(_, elapsed)
-        acc = acc + (elapsed or 0)
-        if acc < 0.5 then return end
-        acc = 0
-        local bar = bars and bars.BarPet
-        if not bar or not bar.frame:IsShown() then return end
-        -- 本客户端没有全局 PetActionBar_UpdateCooldowns（实测 nil），但有方法
-        -- PetActionBar:UpdateCooldowns()。只刷冷却，不碰 Update（那会连带 UpdateShownButtons）。
-        local shell = _G.PetActionBar
-        if shell and type(shell.UpdateCooldowns) == "function" then
-            pcall(shell.UpdateCooldowns, shell)
-        elseif _G.PetActionBar_UpdateCooldowns then
-            pcall(_G.PetActionBar_UpdateCooldowns)
-        end
-    end)
-end
-
--- 宠物条本体。抽自 CreateBar（P4 拆分，逐条保留语义）。
-local function BuildPetBar(bar, frame, def)
-    local size, spacing = ButtonSize(), Spacing()
-    for i = 1, 10 do
-        local btn = _G["PetActionButton" .. i]
-        if not btn then break end
-        pcall(btn.SetParent, btn, frame)
-        pcall(btn.ClearAllPoints, btn)
-        pcall(btn.SetSize, btn, size, size)
-        pcall(btn.SetScale, btn, 1)
-        pcall(btn.SetPoint, btn, "TOPLEFT", frame, "TOPLEFT", (i - 1) * (size + spacing), 0)
-        -- 外壳事件被卸载后，没人再替我们把这 10 个按钮 Show 出来（它们可能停在
-        -- 壳隐藏时的 SetShown(false) 状态）——直接显式显示一次。
-        pcall(btn.Show, btn)
-        SkinAdoptedButton(btn)
-        bar.buttons[#bar.buttons + 1] = btn
-    end
-    if #bar.buttons == 0 then
-        pcall(frame.Hide, frame)
-        return nil
-    end
-    pcall(frame.SetSize, frame, #bar.buttons * size + math.max(#bar.buttons - 1, 0) * spacing, size)
-
-    local shell = _G.PetActionBar
-    if shell then
-        pcall(shell.SetAlpha, shell, 0)
-        pcall(shell.EnableMouse, shell, false)
-        pcall(shell.EnableMouseMotion, shell, false)
-        -- **事件不能卸载**：实测卸载之后没人再更新这套按钮的图标/冷却（冷却圈直接不转），
-        -- 也没人再 Show 它们。代价就是壳的 Update → UpdateShownButtons 会对这 10 个已经
-        -- 搬家的受保护按钮 SetShown，日志里出现 10 条 BLOCKED（只进日志、不弹窗）。
-        -- 功能优先，接受这个代价。
-    end
-    if RegisterStateDriver then
-        pcall(RegisterStateDriver, frame, "visibility", "[pet] show; hide")
-    end
-    PositionBar(bar)
-    bar.page = 1
-    EnsurePetCooldownDriver()
-    return bar
 end
 
 --- 宠物条 / 姿态条"悬停高亮"的静默透明度。**用 alpha 而不是 Hide**：alpha 不为 0 的帧在客户端
@@ -1349,7 +1223,7 @@ local function CreateBar(def)
     -- 代价：SetParent/SetSize 会把受保护按钮标脏，暴雪自己的 SetShown 会被拒（日志里 10 条
     -- BLOCKED，只进日志、不弹窗）。功能优先，接受这个代价。
     if def.pet then
-        return BuildPetBar(bar, frame, def)
+        return M.petbar.BuildPetBar(bar, frame, def)
     end
 
     -- 姿态条同理：收养暴雪 StanceButton1..10（见 BuildStanceBar 的注释）。
@@ -1478,129 +1352,6 @@ local function ResolveContainer(def)
         if frame then return frame, name end
     end
     return nil
-end
-
--- 宠物条的"自动施法"提示：本客户端暴雪用的是一圈旋转的蚂蚁（按钮的 AutoCastOverlay.Shine），
--- 角标（Corners，"这个技能可以自动施法"）是另一块，别动。这里把蚂蚁换成自绘的像素环：
--- 暴雪的动画摁掉，状态自己按 GetPetActionInfo 的第 6 个返回值（autoCastEnabled）跟。
--- 自绘动作条开着时环沿边框跑；关着时改成静态的一圈（宠物条交还暴雪，但提示不丢）。
--- 战斗中也照常跟：只是往按钮上加几个方块，不碰受保护的框体。
-
-local GetPetActionInfo = _G.GetPetActionInfo
-
---- 摁掉暴雪的旋转蚂蚁。暴雪每次刷新按钮状态都会把它再点亮，所以这里把方法本身换掉，
--- 顺带把已经点亮的旧动画停掉。
---- 关掉暴雪的自动施法旋转蚂蚁。
---- **只调方法，不写字段。** 以前这里做的是
----   overlay.monetShineSuppressed = true
----   overlay.monetShineUpdate = overlay.UpdateShineAnim
----   overlay.UpdateShineAnim = function() end
---- —— 三行都是往暴雪的 AutoCastOverlay 上写字段。本客户端按"键"判污染：写过就脏，
---- 之后暴雪自己的 PetActionButton:UpdateShownButtons → SetShown 在战斗中全被拒
---- （taint.log: "blocked in combat because of taint from MonetUI - PetActionButton5:SetShown()"）， -- TAINT-OK: 同上，注释非代码
---- 连带 PetActionBar/MainActionBar 的整体重排也被拒。停动画 + 藏起来就够了，不需要改它的函数。
-local function SuppressAutoCastShine(button)
-    local overlay = button.AutoCastOverlay
-    if not overlay then return end
-    local shine = overlay.Shine
-    if shine then
-        if shine.Anim then pcall(shine.Anim.Stop, shine.Anim) end
-        pcall(shine.Hide, shine)
-        pcall(shine.SetAlpha, shine, 0)
-    end
-end
-
---- 还原成暴雪原样（只在模块整个停用时走这条）。
-local function RestoreAutoCastShine(button)
-    local overlay = button.AutoCastOverlay
-    local shine = overlay and overlay.Shine
-    if not shine then return end
-    pcall(shine.SetAlpha, shine, 1)
-    pcall(shine.Show, shine)
-    if shine.Anim then pcall(shine.Anim.Play, shine.Anim) end
-end
-
---- 这个槽位开没开自动施法。返回顺序：name, texture, isToken, isActive, autoCastAllowed,
---- autoCastEnabled, spellID ... -- 第 6 个才是"开着"，第 5 个是"可以开"。
-local function PetAutoCastEnabled(index)
-    if not GetPetActionInfo then return false end
-    local ok, _, _, _, _, _, enabled = pcall(GetPetActionInfo, index)
-    if not ok then return false end
-    return Secrets.Bool(enabled, false)
-end
-
---- 像素环的边长：跟着暴雪的自动施法遮罩走（那圈蚂蚁就画在这块遮罩里：45 - 8 = 37），
---- 遮罩不在就按按钮宽度推。取的是像素环该落在哪，不是图标本身的大小。
-local function PetGlowSide(button, entry)
-    local overlay = button.AutoCastOverlay
-    local mask = overlay and overlay.Mask
-    if mask and mask.GetWidth then
-        local ok, width = pcall(mask.GetWidth, mask)
-        if ok then
-            local size = Secrets.Number(width)
-            if size and size > 4 then return size end
-        end
-    end
-    return (entry.base or 30) + 7
-end
-
---- 开着自动施法的按钮上跑一圈像素环，其余的干净。
--- 自绘动作条开着 → 环跟着跑；关着 → 宠物条还是暴雪自己的样子，环改成静态的一圈。
-local function SyncPetGlow(def, entry)
-    local isStatic = not M.own
-    local scale = entry.scale or 1
-    for index = 1, def.count do
-        local button = _G[def.pattern:format(index)]
-        if not button then break end
-
-        SuppressAutoCastShine(button)
-
-        if PetAutoCastEnabled(index) then
-            Widget:PixelGlow(button, {
-                side   = PetGlowSide(button, entry),
-                scale  = scale,
-                static = isStatic,
-            })
-        else
-            Widget:StopPixelGlow(button)
-        end
-    end
-end
-
---- 宠物条的像素环跟一遍当前状态。自绘动作条关着时这条条没被接管，得自己去拿容器。
-local function SyncPetGlowNow()
-    -- 不排版（STYLE_ADOPTED_BARS=false）时不画像素环：环是画在**暴雪的**宠物按钮上的，
-    -- 现阶段一碰它们就有把受保护按钮弄脏的风险（见文件开头两个开关的注释）。
-    if not STYLE_ADOPTED_BARS then return end
-    local def = PET_DEF
-    if not def then return end
-
-    local entry = adopted[def.key]
-    if not entry or not entry.frame then
-        local bar = ResolveContainer(def)
-        if not bar then return end
-        local first = _G[def.pattern:format(1)]
-        local base
-        if first and first.GetWidth then
-            local ok, width = pcall(first.GetWidth, first)
-            if ok then base = Secrets.Number(width) end
-        end
-        entry = { def = def, frame = bar, scale = 1, base = base }
-    end
-
-    SyncPetGlow(def, entry)
-end
-
---- 模块整个关掉：环拆掉，暴雪的旋转蚂蚁还回去（不然玩家会永久失去原版提示）。
-local function TeardownPetGlow()
-    local def = PET_DEF
-    if not def then return end
-    for index = 1, def.count do
-        local button = _G[def.pattern:format(index)]
-        if not button then break end
-        Widget:StopPixelGlow(button)
-        RestoreAutoCastShine(button)
-    end
 end
 
 --- 零售 12.x 的姿态条 / 宠物条外面套了一层编辑模式管理的框体（StanceBar / PetActionBar）：
@@ -1844,7 +1595,7 @@ local function AdoptBar(def)
     -- （宠物用 type="pet"），那是另一件事，记进 AGENTS 待办。
 
     if def.glow == "autoCast" then
-        SyncPetGlow(def, entry)
+        M.petbar.SyncPetGlow(def, entry)
     end
 
     -- **不要给外壳写 ignoreFramePositionManager**（以前这里调 LeaveManagedFrameSystem）。
@@ -2006,7 +1757,7 @@ function M:RegisterEvents()
     end
 
     for _, event in ipairs(PET_GLOW_EVENTS) do
-        EventBus:Register(event, function() SyncPetGlowNow() end)
+        EventBus:Register(event, function() M.petbar.SyncPetGlowNow() end)
     end
 
     for _, event in ipairs(SLOT_EVENTS) do
@@ -2230,7 +1981,7 @@ function M:Apply()
     self:UpdateAll()
 
     -- 宠物条的自动施法提示：自绘条开着是动画环，关着是静态环（这条路径不依赖 AdoptAll）。
-    SyncPetGlowNow()
+    M.petbar.SyncPetGlowNow()
 end
 
 function M:SetEnabled(enabled)
@@ -2249,7 +2000,7 @@ function M:SetEnabled(enabled)
         end
         ClearBindings()
         self:RestoreBlizzard()
-        TeardownPetGlow()
+        M.petbar.TeardownPetGlow()
     end
 end
 
@@ -2258,5 +2009,21 @@ function M:Initialize()
     self:Apply()
     self:RegisterEvents()
 end
+
+-- ---------------------------------------------------------------------------
+-- P5' 拆分共享件（Modules/ActionBars/PetBar.lua）
+--
+-- 那边用**同名别名**接走（`local ButtonSize = M.ButtonSize`），所以搬过去的三段函数体
+-- 一行都不用改。这里是它们唯一的定义处，别再在别处复制一份。
+-- ---------------------------------------------------------------------------
+M.ButtonSize         = ButtonSize
+M.Spacing            = Spacing
+M.PositionBar        = PositionBar
+M.SkinAdoptedButton  = SkinAdoptedButton
+M.STYLE_ADOPTED_BARS = STYLE_ADOPTED_BARS
+M.ResolveContainer   = ResolveContainer
+M.bars               = bars
+M.adopted            = adopted
+M.PET_DEF            = PET_DEF
 
 ns:Register("ActionBars", M)
