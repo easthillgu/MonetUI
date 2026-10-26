@@ -192,7 +192,8 @@ local BAR_DEFS = {
 
     -- 姿态条（德鲁伊形态 / 死骑灵气 / 战士姿态 / 潜行）：和宠物条一样**收养**暴雪的
     -- StanceButton1..10（本客户端没有可用的通用安全按钮；暴雪按钮的施法路径才是原生的）。
-    -- 位置：**3 号条正上方、左对齐**（BOTTOMLEFT 对齐 Bar3 的 TOPLEFT），按钮从左往右排；
+    -- 位置：**最上面那条的正上方、左对齐**（默认 3 组时就是 Bar3 的 TOPLEFT；锚点每次排布按
+    -- 当前条数重算，见 SyncStanceAnchor），按钮从左往右排；
     -- 只显示当前职业的形态数（1..N），N+1..10 藏起来排在右边。
     -- hover = true：和宠物条同一套"平时 0.3 / 悬停 1"（见 SetupHoverOnly）。
     { key = "BarStance", index = 10, page = 0, count = 10, stance = true, hover = true,
@@ -1153,6 +1154,17 @@ end
 
 local function PositionBar(bar)
     Anchor(bar.frame, StoredPosition(bar.def, bar.def.key), bar.def)
+end
+
+--- 姿态条贴在"当前最上面那条"的顶边。
+--- 默认锚在 `Bar3`，但玩家把「显示动作条数量」开到 4 组以上时，`Bar4` 会长在**同一个 y** ——
+--- 两条直接叠在一起。实机症状（2026-10-26）：点在姿态格上，命中的却是 bar4 的拖放接住器
+--- （level 70，压在姿态条 67 之上），于是"点姿态放出动作条第 1 格"。条数是活的，所以每次排布
+--- 都按当前最高的一条重算一次默认锚点；玩家自己拖过的位置存在 `positions` 里，优先级更高，不受影响。
+local function SyncStanceAnchor()
+    local bar = bars.BarStance
+    if not bar or not bar.def then return end
+    bar.def.relativeTo = "Bar" .. math.max(1, math.min(BarCount(), 8))
 end
 
 --- 把一条上所有按钮的内容刷新一遍（槽位变了才需要）。
@@ -2316,6 +2328,8 @@ function M:RefreshLayout()
         ns:AfterCombat("actionbars-layout", function() M:RefreshLayout() end)
         return
     end
+    -- 条数可能刚改过：姿态条的默认锚点跟着"最高那条"走，再统一排布。
+    SyncStanceAnchor()
     for _, bar in pairs(bars) do
         -- 姿态条收养的按钮是**从右端往左**排的（见 AdoptStanceButtons）：LayoutBar 那套左上是
         -- 给自绘按钮的，用在这条上会把可见的 1..N 格顶到整条最左边、离 3 号条一大段空隙。
@@ -2397,6 +2411,8 @@ function M:Apply()
     M.own = own
 
     local count = BarCount()
+    -- 姿态条默认锚点先跟着当前条数算好，再走下面的逐条分支（见 SyncStanceAnchor）。
+    SyncStanceAnchor()
     for _, def in ipairs(BAR_DEFS) do
         local bar = bars[def.key]
         if bar then
@@ -2414,6 +2430,10 @@ function M:Apply()
                 --   ① 玩家关掉自绘动作条；② 这个职业根本没有形态（NumShapeshiftForms = 0）。
                 if own and StanceFormCount() > 0 then
                     AdoptStanceButtons(bar)
+                    -- 条数刚变过也可能走到这里（面板改「显示动作条数量」只调 Apply）：
+                    -- 锚点由 SyncStanceAnchor 重算，必须再摆一次，否则姿态条还停在旧位置、
+                    -- 和长出来的 Bar4 叠在一起。
+                    PositionBar(bar)
                     SetBarShown(bar, true)
                     -- 和宠物条同一套"平时 0.3 / 悬停 1"（玩家 2026-10-26 要求，见 SetupHoverOnly）。
                     SetupHoverOnly(bar, def.hover and Config().stanceHover ~= false)
