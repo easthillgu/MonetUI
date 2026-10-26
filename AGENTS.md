@@ -246,11 +246,22 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   这些是 BLOCKED（只进日志、不弹窗、功能正常），换成"不换父 / 不缩放 / 不关壳鼠标"的代价更大
   （鼠标事件被吃 / 按钮尺寸对不上 / 1303×1193 吃掉屏幕中央）。**唯一属于我们的非法调用是单位框架
   战斗中 `Show/Hide` 安全单位按钮** —— 那条已改成 `visibility` state driver（见下）。
-- **姿态条（德鲁伊形态 / 死骑灵气 / 战士姿态）交给暴雪原生显示，不收掉也不接管**（2026-10-26
-  `8d4ab87`）：它没有自绘替代品（宠物条有 `BuildPetBar` 收养），`GhostBar` 一压就是"形态条
-  整条消失、但按钮全在"（实机：`alpha=0` + `Marked(parked)=true`，探针一查就清楚）。它的壳只有
-  94×30（宠物条才是 1303×1193），鼠标留着不吃别处点击，默认位置正好在 3 号条左边同一行。
-  **口诀：给"已接管条"让路的隐藏动作，千万别落到没被接管的那条上。**
+- **姿态条（德鲁伊形态 / 死骑灵气 / 战士姿态）现在也"收养"了**（2026-10-26 `8d4ab87` 先把它
+  从 `GhostBar` 里救回来，`816c320` 再照宠物条的做法接管）：`BuildStanceBar` /
+  `AdoptStanceButtons` 把 `StanceButton1..10` `SetParent` 到 `MonetUIBarStance` 并换皮，施法走
+  原生 `StanceButtonMixin_OnClick → StanceBar:Select → CastShapeshiftForm`。
+  - **壳（`StanceBar`）只 `SetAlpha(0)` + 关鼠标，事件一条都不卸载** —— 图标 / 选中态 / 冷却都是它
+    自己的 `UpdateState` 在刷（它的 `UpdateGridLayout` 动的是**容器**，不是我们搬走的按钮）。
+  - **不要自建 `StanceButtonTemplate` 按钮**（ElvUI 的做法）：那要求"我们自己造的受保护按钮点下去
+    能施法"，正是本客户端踩过的坑（自绘 `type="pet"` 按钮属性全对、0 拦截、点击无反应）。
+  - **两条退路必须把按钮还回去**（`ReleaseStance`）：玩家关掉自绘条、或 `GetNumShapeshiftForms()==0`
+    —— 否则按钮留在我们藏起来的框体里，原生姿态条成了空壳，玩家没法变形态。
+  - **收养来的条（宠物 / 姿态）不进我们那几套循环**：`IsAdopted(bar)` 守 `UpdateCooldowns`
+    （自绘槽位公式对它们算出负数 → 只剩 `Clear()`，把原生冷却圈擦掉）、`SetClickOptions`
+    （暴雪按钮带 `.bar` 字段，会去 `Execute` 一条没有 `mui-keydown` 片段的受保护条）、
+    `ReassignBindings` / `ClearBindings`（键位本来就绑在暴雪命令上）。
+  - `GetNumShapeshiftForms` **只有复数名**（单数 `GetNumShapeshiftForm` 本客户端不存在）。
+  - 口诀不变：**给"已接管条"让路的隐藏动作，千万别落到没被接管的那条上**。
 - **拖放落点**：普通 `Frame` 收不到 `OnReceiveDrag`（实机 0 次；`IsMouseEnabled` 也开着、`GetMouseFoci`
   也显示它在最上层）。可行做法是用 `ActionBarButtonTemplate` 建一个"只在 `GetCursorInfo()` 有货时才
   开鼠标"的透明接住器，**`OnMouseUp`** 里按光标坐标算出目标格再 `PlaceAction(slot)`。

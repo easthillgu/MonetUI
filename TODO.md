@@ -24,6 +24,9 @@
   `errors` 档案当天 0 新增，`taint.log` 未被写。
 - ✅ **姿态条不见了 → 已修**（`8d4ab87`）：`AdoptAll()` 把没被接管的 `StanceBar` 压成了
   alpha 0（10-24 起就有），删掉那记 `GhostBar` 即恢复原生显示。详见 `docs/HANDOFF.md` 3.8。
+- ✅ **姿态条改成"收养"**（`816c320`）：`StanceButton1..10` 搬进自己的 `MonetUIBarStance`、
+  与宠物条同一套换皮，施法走原生 `CastShapeshiftForm`；位置贴 3 号条左边（从右往左排）。
+  **待玩家实机点一下三个形态**（注入鼠标在本机不生效，自动化点不了）。详见 HANDOFF 3.8 后续。
 - ⏳ 拖放 / 姿态翻页（`DragDrop.lua` 拆分后先 `/reload` 再测）、切主题后的光环边框颜色。
 
 **B. 需开游戏（攒着一起验）**
@@ -31,8 +34,8 @@
 - ⏳ 两天改动一次性回归：动作条施法/翻页/拖放、宠物条自动施法环、单位框血条与文本、
   姓名板减益、进出编辑模式、`Logs/taint.log` 是否为空。
 - ⏳ `BuffListFrame`（冰冻陷阱那类减益）仍被暴雪 `ApplyFrameOptions` 钉在牌子右端 —— 已知小问题。
-- ⏳ 姿态条现在是暴雪原生外观（30×30、间距 32，自绘条是 28/30）—— 想统一就得照宠物条
-  收养 `StanceButton1..N`，代价同宠物条（每 reload 十条 `SetShown` BLOCKED 噪音）。
+- ✅ 姿态条外观已统一（`816c320` 收养 `StanceButton1..N`），代价同宠物条（每 reload 几条
+  `StanceButton*:SetShown` BLOCKED 噪音，只进日志）。
 
 **C. 等拍板**
 

@@ -64,7 +64,7 @@ node tools/sync-check.js         # 仓库 vs 已安装副本（退出码 0 = 游
 |---|---|---|
 | Core / Config | 可用 | 模块注册、主题管线、`/mui` 命令、滚轮配置面板 |
 | UnitFrames / GroupFrames | 可用 | 单位框、小队/团队框（**暴雪的团队/小队框我们已完全不再碰**，要藏请玩家在编辑模式里设"可见性=隐藏"） |
-| ActionBars | 可用 | 1–8 号自绘安全按钮 + **收养**暴雪 `PetActionButton1..10` 做宠物条；冷却/拖放/翻页实测通过 |
+| ActionBars | 可用 | 1–8 号自绘安全按钮 + **收养**暴雪 `PetActionButton1..10`（宠物条）与 `StanceButton1..10`（姿态条）；冷却/拖放/翻页实测通过 |
 | Cooldown | 可用 | 只处理**我们自己的**冷却框；暴雪的「冷却管理器」4 块 HUD 帧被它收掉 |
 | BuffFrame | 可用 | 自绘 buff/proc/debuff 三行；战斗中切到引擎 `AuraContainer` 兜底 |
 | Minimap | 可用 | 矩形遮罩 + 面板 + 三个集群按钮；**集群不动，只搬 `Minimap` 帧**（见 3.1） |
@@ -274,6 +274,63 @@ MISSING（新文件没部署）/ STALE（改过没部署）/ EXTRA（旧部署�
 
 ---
 
+## 3.8 2026-10-26：姿态条不见了（`8d4ab87`）
+
+**现象**：德鲁伊 21 级实机，形态条（熊/猫/旅行…）整条看不见，也点不到。
+
+**取证**（`wuxian run` 探针）：`NumShapeshiftForms=3`；`StanceBar` `shown=true` /
+`mouse=true` / **`alpha=0`** / `Marked(parked)=true`；三个 `StanceButton` 与容器都在
+（30×30，785..849 ×95），`GetAlpha()=1` —— 数据、布局、按钮全好好的，只是外壳被压透明。
+
+**根因**：`AdoptAll()` 在 `ADOPT_BLIZZARD_BARS == false` 的分支里调 `GhostBar("StanceBar")`。
+而**姿态条从来没有自绘替代品**（宠物条有 `BuildPetBar` 收养 `PetActionButton1..10`，
+姿态条没有），所以"给已接管条让路"的这刀落在了唯一一条没被接管、却是玩家唯一能点的条上。
+`git log -S` 追到 2026-10-24 的 `8b2c943` / `de78e4b`，**一直存在，不是昨天的回归**。
+
+**修法**：删掉那个调用（连同只被它用过的 `GhostBar` 函数）—— 姿态条交回暴雪原生显示，
+玩家想挪/藏就在编辑模式里调（那是玩家操作，不算插件污染）。
+
+**为什么留着它安全**：它的壳只有 **94×30**（宠物条那个才是 1303×1193、必须关鼠标），
+默认位置正好在 3 号条左边、同一行；我们**一行字段都不往它写、一个方法都不调**。
+实机对照：改后 alpha=1、三格可见、可点。
+
+### 3.8 后续：姿态条改成「收养」（`816c320`）
+
+原生姿态条能用但长得跟我们的条不一样（30×30、暴雪美术）。照宠物条那条**已验证**的路子
+把它接管过来：`BuildStanceBar` / `AdoptStanceButtons` / `ReleaseStance` / `SkinAdoptedButton`。
+
+- **收养的按钮**：`_G["StanceButton"..i]`（`SetParent` 到 `MonetUIBarStance`、`SetSize` 到
+  `ButtonSize()`、`SetScale(1)`、换皮）。施法 / 选中态 / 冷却 / 图标全走暴雪
+  `StanceButtonMixin_OnClick → StanceBar:Select → CastShapeshiftForm`，和我们自己写的按钮无关。
+- **布局**：`BAR_DEFS` 里 `BarStance`（`stance = true`）锚在 `Bar3` 的 `BOTTOMLEFT`，按钮**从右往左**
+  排、最右一格留给最后一个形态 —— 可见的 1..N 读起来仍是左 → 右，整排永远贴着 3 号条。
+  `RefreshLayout` 对这条走 `AdoptStanceButtons` 而**不是** `LayoutBar`（左上是给自绘按钮的）。
+- **形态数**：`GetNumShapeshiftForms()`（本客户端只有复数名，单数版不存在）。>N 的格子 `Hide`；
+  =0（猎人/牧师这种没有姿态条的）就不显示我们的条，并把按钮与外壳还给暴雪。
+- **外壳**：`StanceBar` 只 `SetAlpha(0)` + 关鼠标，**事件一条都不卸载** —— 图标 / 选中态 / 冷却
+  都是它自己的 `UpdateState` 在刷（`StanceBarMixin:UpdateState` → `UpdateShownButtons`）。
+  代价与宠物条同类：它的 `SetShown` 会对已搬家的受保护按钮被拒，日志多几条 BLOCKED
+  （只进日志、不弹窗、功能正常）。`UpdateGridLayout` 动的是**容器**，容器还在外壳里，不影响我们。
+- **两条退路**（`M:Apply` / `M:SetEnabled(false)`）：玩家关掉自绘动作条、或这个职业形态数为 0 时
+  `ReleaseStance` 把按钮 `SetParent` 回 `StanceBarButtonContainerN`、外壳 alpha/鼠标放开 —— 否则
+  按钮留在我们藏起来的框体里，原生姿态条就成一条**空壳**，玩家直接没法变形态。
+- **三处循环要用 `IsAdopted(bar)` 绕开**（宠物 + 姿态共用）：`UpdateCooldowns`（`PaintCooldown`
+  用的是自绘槽位公式，对收养条算出来是负数 → `GetActionCooldown` 读不到，只剩 `Clear()`，
+  等于把原生冷却圈擦掉）、`SetClickOptions`（暴雪按钮身上有 `.bar = StanceBar/PetActionBar`，
+  我们那套会去 `Execute` 一条**没有** `mui-keydown` 片段的受保护条）、`ReassignBindings` /
+  `ClearBindings`（收养条的键位本来就绑在暴雪命令上，再包一层会把整条调用链记成我们的）。
+
+**为什么收养，而不是像 ElvUI 那样自建 `StanceButtonTemplate` 按钮**：自建要求"我们自己造的受保护
+按钮点下去能施法"，而这正是本客户端踩过的坑（自绘 `type="pet"` 按钮属性全对、层级也压过所有条、
+0 拦截，点击毫无反应 —— 客户端根本不处理）。收养拿到的施法路径与已验证的宠物条逐位相同；
+Ellesmere 在本客户端也是收养（`EllesmereUIActionBars.lua:3136` "Stance bar: reuse StanceButton1-N"）。
+
+**待玩家复核**（自动化点不了：注入鼠标不生效，`GetCursorPosition()` 返回常数）：
+点一下三个形态是否都能变、`/reload` 后位置是否还在 3 号条左边、`taint.log` 有没有新的
+"blocked in combat because of taint from MonetUI"。
+
+---
+
 ## 4. 污染（taint）模型 —— 这个客户端最贵的一课
 
 完整版在 `AGENTS.md` 的「污染（taint）模型」一节，这里只列**判断用的最短版本**：
@@ -370,7 +427,7 @@ end
 - [ ] buff/debuff：有时长的 buff 显示 `6m`/`45` 这类正常读数；**proc 行为空时 debuff 行仍在**
 - [ ] 小地图：位置/尺寸/矩形遮罩/面板/三个按钮/四角打标记/右键菜单/滚轮缩放；**编辑模式里拖小地图不再影响我们的位置**
 - [ ] 任务追踪：只剩自绘那一块（换地图、接任务、重载后再看）
-- [ ] 动作条：1–8 号条施法/翻页/拖放；宠物条左右键/冷却/自动施法
+- [ ] 动作条：1–8 号条施法/翻页/拖放；宠物条左右键/冷却/自动施法；姿态条三个形态能点、位置贴 3 号条、`/reload` 后不变
 - [ ] 未动的模块各看一眼：Bags、InfoBar、Tooltip、Cursor、Toast、Durability、CombatText、Skins 各窗口
 
 ---
@@ -385,7 +442,7 @@ end
 | `Utils/Skin.lua` | 窗口装饰引擎、`CropIcon`、页签 | 只装饰，不挂脚本 |
 | `Utils/EventBus.lua` | 事件总线（懒注册） | 回调第一个参数是事件名 |
 | `Utils/Mover.lua` | 位置/吸附/战斗锁 | 战斗里不要挪受保护帧 |
-| `Modules/ActionBars/ActionBars.lua` | 8 条自绘安全按钮 + 宠物条收养 + 拖放接住器 | `action` 等点击属性只能由**安全片段**写；`PickupAction/PlaceAction` 必须脱战 |
+| `Modules/ActionBars/ActionBars.lua` | 8 条自绘安全按钮 + 宠物条/姿态条收养 + 拖放接住器 | `action` 等点击属性只能由**安全片段**写；`PickupAction/PlaceAction` 必须脱战；收养来的条（`IsAdopted`）不进图标/冷却/绑定/布局那几套循环 |
 | `Modules/Cooldown/Cooldown.lua` | 冷却数字渲染 + 暴雪冷却管理器收掉 | 只处理我们自己的冷却框；`GetCooldownTimes` 是毫秒 |
 | `Modules/BuffFrame/BuffFrame.lua` | buff/proc/debuff 三行 + 战斗中引擎兜底 | 行位置按行高算，别锚空行 |
 | `Modules/Nameplates/Nameplates.lua` | 姓名板细条 | 绝不 hook 驱动框 |
@@ -425,6 +482,7 @@ end
 
 1. **实机回归这一轮的 P4 拆分**（动作条 + 单位框的创建路径全都动过）：
    动作条 1–8 施法/翻页/拖放、宠物条（收养十按钮 + 自动施法像素环 + 冷却转圈）、
+   **姿态条（收养 `StanceButton1..3`：点形态能不能变、位置是否贴在 3 号条左边、`/reload` 后不变）**、
    单位框（玩家/目标/目标的目标/焦点）血条与文本位置、进出编辑模式、`/reload` 后无新增 BLOCKED。
 2. **回归一遍编辑模式**（改动最密集的地方），确认 `oldR` 与 BLOCKED 都不再出现。
 3. **P5 剩余文件拆分**：Auras/CastBar 试水已通过，按同一模式拆
