@@ -188,6 +188,14 @@ local BAR_DEFS = {
     { key = "BarPet", index = 9, page = 0, count = 10, pet = true, bind = "BONUSACTIONBUTTON",
       level = 66,
       point = "BOTTOMRIGHT", relativeTo = "Bar1", relativePoint = "BOTTOMLEFT", x = -8, y = 0 },
+
+    -- 姿态条（德鲁伊形态 / 死骑灵气 / 战士姿态 / 潜行）：和宠物条一样**收养**暴雪的
+    -- StanceButton1..10（本客户端没有可用的通用安全按钮；暴雪按钮的施法路径才是原生的）。
+    -- 10 格只显示当前职业的形态数（1..N），按钮从**右端**往左排 —— 可见的那几格永远贴着 3 号条。
+    -- 位置沿用原来暴雪默认摆放的那一行（3 号条左边，y 相同），玩家看到的位置和以前一致。
+    { key = "BarStance", index = 10, page = 0, count = 10, stance = true,
+      level = 66,
+      point = "BOTTOMRIGHT", relativeTo = "Bar3", relativePoint = "BOTTOMLEFT", x = -8, y = 0 },
 }
 
 -- 接管的那几条暴雪动作条：不重画，只搬最外层容器（只搬内层的话，暴雪一 Hide 外层，我们的条就留在
@@ -1204,9 +1212,15 @@ local function RefreshPetContent(button, index)
     end
 end
 
+--- 这条是不是"收养暴雪按钮"的条（宠物 / 姿态）：图标、冷却、选中态全由暴雪自己刷，
+--- 我们的图标/冷却/绑定/翻页那几套循环必须绕开它们（否则会读到错的槽位，把原生冷却清掉）。
+local function IsAdopted(bar)
+    return bar and bar.def and (bar.def.pet or bar.def.stance) or false
+end
+
 local function RefreshBar(bar)
-    -- 宠物条是收养来的暴雪按钮：图标/冷却/自动施法提示由暴雪自己刷新，我们不碰。
-    if bar.def and bar.def.pet then return end
+    -- 宠物条 / 姿态条是收养来的暴雪按钮：图标/冷却/自动施法提示/选中态由暴雪自己刷新，我们不碰。
+    if IsAdopted(bar) then return end
     for index, button in ipairs(bar.buttons) do
         UpdateButtonContent(button, SlotOf(button, bar, index))
     end
@@ -1237,15 +1251,15 @@ local function WatchPages(show)
     if show then pageWatcher:Show() else pageWatcher:Hide() end
 end
 
---- 给收养来的暴雪宠物按钮"换皮"（ElvUI 的 StyleButton 同一思路，但只做最必要的几层）：
+--- 给收养来的暴雪按钮"换皮"（宠物条 / 姿态条共用；ElvUI 的 StyleButton 同一思路，但只做最必要的几层）：
 ---   * 藏掉它自己的美术（NormalTexture / Border / SlotBackground / Flash）—— 只调它们的方法；
 ---   * 垫一块**我们自己的**底板 + 1px 边框（子框体属于我们，不会污染暴雪对象）；
 ---   * 图标裁外圈 8%（CropIcon 现在是轮询实现，不挂钩子）；
 ---   * 热键/数量换像素字体；冷却文字接我们那套渲染。
 --- 全部 pcall：这个客户端对受保护按钮的某些方法会拒绝，失败就保持原生样子，不能崩。
-local function SkinAdoptedPetButton(btn)
-    if not btn or Marked(btn, "petSkinned") then return end
-    Mark(btn, "petSkinned", true)
+local function SkinAdoptedButton(btn)
+    if not btn or Marked(btn, "adoptedSkinned") then return end
+    Mark(btn, "adoptedSkinned", true)
 
     local function fade(region)
         if region and type(region.SetAlpha) == "function" then pcall(region.SetAlpha, region, 0) end
@@ -1265,7 +1279,7 @@ local function SkinAdoptedPetButton(btn)
     border:SetFrameLevel(btn:GetFrameLevel() + 1)
     border:EnableMouse(false)
     Widget:Theme(border, { thickness = 1, bgAlpha = 0 })
-    Mark(btn, "petBorder", border)
+    Mark(btn, "adoptedBorder", border)
 
     -- 图标内缩 1px，和我们自绘按钮完全一致（露出来的那 1px 就是边框）。
     local icon = btn.icon
@@ -1329,7 +1343,7 @@ local function BuildPetBar(bar, frame, def)
         -- 外壳事件被卸载后，没人再替我们把这 10 个按钮 Show 出来（它们可能停在
         -- 壳隐藏时的 SetShown(false) 状态）——直接显式显示一次。
         pcall(btn.Show, btn)
-        SkinAdoptedPetButton(btn)
+        SkinAdoptedButton(btn)
         bar.buttons[#bar.buttons + 1] = btn
     end
     if #bar.buttons == 0 then
@@ -1355,6 +1369,115 @@ local function BuildPetBar(bar, frame, def)
     bar.page = 1
     EnsurePetCooldownDriver()
     return bar
+end
+
+--- 姿态条的可见性：宠物对战 / 载具 / 超控条时交给暴雪自己藏（它不比我们少算一步）。
+local STANCE_VISIBILITY = "[petbattle][overridebar][vehicleui][possessbar] hide; show"
+
+--- 当前职业有几个形态（德鲁伊 3、死骑 3、战士 3、盗贼 1、猎人/牧师 0…）。
+--- 0 就是"这个职业没有姿态条"：我们的条不显示，暴雪的壳也放开（它本来就是空的）。
+local function StanceFormCount()
+    -- 本客户端只有复数那个全局（`GetNumShapeshiftForms`，实机返回 3）；单数名不存在。
+    if not GetNumShapeshiftForms then return 0 end
+    local ok, count = pcall(GetNumShapeshiftForms)
+    if ok and type(count) == "number" then return count end
+    return 0
+end
+
+--- 把暴雪 StanceButton1..10 收养进我们自己的条。**幂等**：重复调用只是按当前尺寸重摆一遍，
+--- 玩家关掉自绘条（Apply 里 ReleaseStance）后再打开时也走这里。
+---
+--- 为什么收养而不是像 ElvUI 那样自建 `StanceButtonTemplate` 按钮：ElvUI 的做法在正式服没问题
+--- （模板的 OnClick 调 `StanceBar:Select` → `CastShapeshiftForm`），但它要求"我们自己建的受保护
+--- 按钮点下去能施法"，这恰恰是本客户端踩过坑的地方（自绘 `type="pet"` 按钮属性全对、点击没反应）。
+--- 收养得到的是原生按钮 + 原生施法路径，和宠物条已经验证过的那条完全一致；Ellesmere 在本客户端
+--- 也是这么做的（`EllesmereUIActionBars.lua:3136` "Stance bar: reuse StanceButton1-N"）。
+local function AdoptStanceButtons(bar)
+    local frame = bar.frame
+    local size, spacing = ButtonSize(), Spacing()
+
+    -- 先数一遍一共几个（暴雪固定建 10 个；缺哪个就到此为止，不要在中间留空洞）。
+    local total = 0
+    for i = 1, 10 do
+        if not _G["StanceButton" .. i] then break end
+        total = i
+    end
+    if total == 0 then return 0 end
+
+    -- 只显示当前职业实际有的形态数（暴雪自己也会 SetShown，但它的那一步在战斗里可能被拒，
+    -- 所以我们在**脱战**的这次排布里把状态写对：多出来的格子直接藏掉，不留一排空格子）。
+    local forms = StanceFormCount()
+
+    for i = 1, total do
+        local btn = _G["StanceButton" .. i]
+        bar.buttons[i] = btn
+        pcall(btn.SetParent, btn, frame)
+        pcall(btn.ClearAllPoints, btn)
+        pcall(btn.SetSize, btn, size, size)
+        pcall(btn.SetScale, btn, 1)
+        -- **从右端往左排，最右一格留给最后一个形态**：暴雪只 Show 前 N 格（N = 形态数），
+        -- 这样可见的 1..N 读起来仍是左 → 右，整排永远贴着 3 号条左边；
+        -- 隐藏的 N+1..10 落在更左边，看不见也不响应鼠标。
+        pcall(btn.SetPoint, btn, "RIGHT", frame, "RIGHT", -(total - i) * (size + spacing), 0)
+        if forms > 0 and i > forms then pcall(btn.Hide, btn) else pcall(btn.Show, btn) end
+        SkinAdoptedButton(btn)
+        -- 放开过一次（ReleaseStance 藏了边框）再收养回来时，边框要重新露出来。
+        local border = Marked(btn, "adoptedBorder")
+        if border then pcall(border.Show, border) end
+    end
+    pcall(frame.SetSize, total * size + math.max(total - 1, 0) * spacing, size)
+    return total
+end
+
+--- 姿态条本体（P5' 之后加的，形状照 BuildPetBar）。
+local function BuildStanceBar(bar, frame, def)
+    if AdoptStanceButtons(bar) == 0 then
+        -- 一个按钮都没拿到：**别动暴雪那条**，让它照原生方式显示（宁可丑，不能没有）。
+        pcall(frame.Hide, frame)
+        return nil
+    end
+
+    local shell = _G.StanceBar
+    if shell then
+        pcall(shell.SetAlpha, shell, 0)
+        pcall(shell.EnableMouse, shell, false)
+        pcall(shell.EnableMouseMotion, shell, false)
+        -- 事件不能卸载：图标 / 选中态 / 冷却都是它自己的 UpdateState 在刷（同宠物条）。
+        -- 代价是它的 UpdateShownButtons 会对这几个已搬家的受保护按钮 SetShown，
+        -- 日志里多几条 BLOCKED（只进日志、不弹窗、功能正常）。
+    end
+
+    bar.visibility = STANCE_VISIBILITY
+    if RegisterStateDriver then
+        pcall(RegisterStateDriver, frame, "visibility", STANCE_VISIBILITY)
+    end
+    PositionBar(bar)
+    bar.page = 0
+    return bar
+end
+
+--- 把收养的姿态按钮还给暴雪（外壳也放开）：玩家关掉自绘条时，原生姿态条要能照常显示。
+local function ReleaseStance(bar)
+    local shell = _G.StanceBar
+    if bar then
+        for i, btn in ipairs(bar.buttons) do
+            -- 我们自己的边框子框体藏起来（按钮回到原生样子时不该多一圈）。
+            local border = Marked(btn, "adoptedBorder")
+            if border then pcall(border.Hide, border) end
+            local container = _G["StanceBarButtonContainer" .. i]
+            if container then
+                pcall(btn.SetParent, btn, container)
+                pcall(btn.ClearAllPoints, btn)
+                pcall(btn.SetSize, btn, 30, 30)
+                pcall(btn.SetPoint, btn, "CENTER", container, "CENTER", 0, 0)
+            end
+        end
+    end
+    if shell then
+        pcall(shell.SetAlpha, shell, 1)
+        pcall(shell.EnableMouse, shell, true)
+        pcall(shell.EnableMouseMotion, shell, true)
+    end
 end
 
 local function CreateBar(def)
@@ -1398,6 +1521,11 @@ local function CreateBar(def)
     -- BLOCKED，只进日志、不弹窗）。功能优先，接受这个代价。
     if def.pet then
         return BuildPetBar(bar, frame, def)
+    end
+
+    -- 姿态条同理：收养暴雪 StanceButton1..10（见 BuildStanceBar 的注释）。
+    if def.stance then
+        return BuildStanceBar(bar, frame, def)
     end
 
     for index = 1, (def.count or BUTTONS_PER_BAR) do
@@ -1909,13 +2037,10 @@ end
 local function AdoptAll()
     if not M.own then return end
     if not ADOPT_BLIZZARD_BARS then
-        -- 宠物条是"收养"暴雪按钮做的（见 CreateBar），外壳在 CreateBar 里已经 alpha 0。
-        -- 姿态条（德鲁伊形态 / 死骑灵气 / 战士姿态 / 潜行）**不接管也不收掉**：它是玩家
-        -- 唯一能点的地方，收掉就等于"姿态条不见了"（实机 2026-10-26：德鲁伊 21 级、
-        -- NumShapeshiftForms=3、按钮全在、只有外壳 alpha 被我们压成 0）。
-        -- 它的壳只有 94×30（不是宠物条那种 1303×1193 的大壳），鼠标留着也不会吃掉别处的
-        -- 点击；默认位置正好在 3 号条左边、同一行，玩家还能在编辑模式里自己挪。
-        -- 想要"和自绘条长得一样"再另开一轮（照收养宠物按钮的做法搬 StanceButton1..N）。
+        -- 宠物条 / 姿态条都是"收养暴雪按钮"做的（见 CreateBar / BuildPetBar / BuildStanceBar），
+        -- 外壳在各自的 Build 里处理（宠物条 alpha 0，姿态条看形态数）。这里什么都不做：
+        -- 以前这里对 StanceBar 调过 GhostBar，把玩家唯一能点姿态的地方整条收掉了
+        -- （实机 2026-10-26：德鲁伊 21 级、NumShapeshiftForms=3、按钮全在、只有外壳 alpha 0）。
         return
     end
     if Locked() then
@@ -1962,12 +2087,12 @@ local function ReassignBindings()
     if not (SetOverrideBinding and ClearOverrideBindings) then return end
 
     for _, bar in pairs(bars) do
-        -- 宠物条不走 override binding：宠物技能的键位本来就绑在暴雪的动作命令上
-        -- （BONUSACTIONBUTTON1..10），再包一层会让客户端把整条 `PetActionBar:Show →
-        -- UpdateVisibility → 重排` 的链记成我们的（taint.log 里 19:12:41 那一串：
-        -- BONUSACTIONBUTTON2 → PetActionButtonDown → PetActionBar:Show →
-        -- ClearAllPointsBase BLOCKED）。鼠标点击用我们自己的按钮，键盘交给暴雪。
-        if not (bar.def and bar.def.pet) then
+        -- 宠物条 `/` 姿态条都不走 override binding：它们的键位本来就绑在暴雪的动作命令上
+        -- （BONUSACTIONBUTTON1..10 / SHAPESHIFTBUTTON1..10），再包一层会让客户端把整条
+        -- `PetActionBar:Show → UpdateVisibility → 重排` 的链记成我们的（taint.log 里 19:12:41
+        -- 那一串：BONUSACTIONBUTTON2 → PetActionButtonDown → PetActionBar:Show →
+        -- ClearAllPointsBase BLOCKED）。鼠标点击用我们收养的按钮，键盘交给暴雪。
+        if not IsAdopted(bar) then
             pcall(ClearOverrideBindings, bar.frame)
             for _, button in ipairs(bar.buttons) do
                 local key = BindingFor(button.bindName)
@@ -1988,7 +2113,7 @@ local function ClearBindings()
     end
     if not ClearOverrideBindings then return end
     for _, bar in pairs(bars) do
-        if not (bar.def and bar.def.pet) then
+        if not IsAdopted(bar) then
             pcall(ClearOverrideBindings, bar.frame)
         end
     end
@@ -2070,8 +2195,12 @@ end
 --- 只重画冷却（战斗中也要跑：冷却框是我们自己的贴图，不受保护）。
 function M:UpdateCooldowns()
     for _, bar in pairs(bars) do
-        for index, button in ipairs(bar.buttons) do
-            PaintCooldown(button, SlotOf(button, bar, index))
+        -- 收养来的按钮（宠物 / 姿态）冷却归暴雪：我们的槽位公式算出来是负的，
+        -- GetActionCooldown 读不到 → 只剩 Clear()，等于把原生冷却圈擦掉。
+        if not IsAdopted(bar) then
+            for index, button in ipairs(bar.buttons) do
+                PaintCooldown(button, SlotOf(button, bar, index))
+            end
         end
     end
 end
@@ -2103,16 +2232,23 @@ end
 --- 按下 / 抬起施法的偏好变了：把所有按钮的 useOnKeyDown 重写一遍（属性写入本身不越权）。
 function M:SetClickOptions()
     for _, bar in pairs(bars) do
-        for _, button in ipairs(bar.buttons) do
-            SetUseOnKeyDown(button)
+        -- 收养来的按钮（宠物 / 姿态）身上有暴雪写的 `button.bar = PetActionBar / StanceBar`：
+        -- 我们的 SetUseOnKeyDown 会拿它当"我们自己的条"去 Execute 片段（那条根本没有这个片段），
+        -- 而且它的按下/抬起由暴雪模板决定，不归我们改。
+        if not IsAdopted(bar) then
+            for _, button in ipairs(bar.buttons) do
+                SetUseOnKeyDown(button)
+            end
         end
     end
 end
 
 function M:UpdateHotkeys()
     for _, bar in pairs(bars) do
-        for _, button in ipairs(bar.buttons) do
-            SetHotkey(button)
+        if not IsAdopted(bar) then
+            for _, button in ipairs(bar.buttons) do
+                SetHotkey(button)
+            end
         end
     end
 end
@@ -2126,9 +2262,14 @@ function M:RefreshLayout()
         return
     end
     for _, bar in pairs(bars) do
-        LayoutBar(bar)
+        -- 姿态条收养的按钮是**从右端往左**排的（见 AdoptStanceButtons）：LayoutBar 那套左上是
+        -- 给自绘按钮的，用在这条上会把可见的 1..N 格顶到整条最左边、离 3 号条一大段空隙。
+        if bar.def and bar.def.stance then
+            AdoptStanceButtons(bar)
+        else
+            LayoutBar(bar)
+        end
         PositionBar(bar)
-
     end
     AdoptAll()
     self:UpdateAll()
@@ -2208,6 +2349,17 @@ function M:Apply()
                 -- 宠物条不走"第几条开着"那套：它的显隐只由 [pet] 状态驱动决定
                 -- （CreateBar 里已注册）。自绘动作条关掉时直接藏起来，暴雪那条保持原样。
                 if not own then pcall(bar.frame.Hide, bar.frame) end
+            elseif def.stance then
+                -- 姿态条同理，但两条退路都要把收养的按钮还给暴雪 —— 否则它们留在我们藏起来的
+                -- 框体里，原生姿态条就成了一条空壳（玩家直接没法变形态）：
+                --   ① 玩家关掉自绘动作条；② 这个职业根本没有形态（NumShapeshiftForms = 0）。
+                if own and StanceFormCount() > 0 then
+                    AdoptStanceButtons(bar)
+                    SetBarShown(bar, true)
+                else
+                    SetBarShown(bar, false)
+                    ReleaseStance(bar)
+                end
             else
                 SetBarShown(bar, own and def.index <= count)
             end
@@ -2264,6 +2416,7 @@ function M:SetEnabled(enabled)
         M.own = false
         WatchPages(false)
         for _, bar in pairs(bars) do
+            if bar.def and bar.def.stance then ReleaseStance(bar) end
             pcall(bar.frame.Hide, bar.frame)
         end
         if leaveVehicle then pcall(leaveVehicle.frame.Hide, leaveVehicle.frame) end
