@@ -15,7 +15,13 @@
 4. ✅ `ActionBars/DragDrop.lua`（122 行 move-only，`528b388`）：主文件 2416 → 2297；
    接口 `M.dragdrop.EnsureDropCatcher`，`SlotOf` 经 `M.SlotOf` 共享。**已部署待实机验**（拖放）。
 5. ⏳ `ActionBars/PetBar.lua`（宠物条收养 + 自动施法环）
-6. ⏳ `ActionBars/Blizzard.lua`（暴雪条压制/收养/归还）
+6. ✅ `ActionBars/Blizzard.lua`（暴雪条压制/收养/归还的"压制/归还"这一半，`61b5842`）：
+   284 行 move-only，主文件 2519 → 2264；接口 `M.blizzard.Park/ParkBag/Restore`，
+   `M:ParkBlizzard` / `M:RestoreBlizzard` 搬到新文件（仍是模块方法，调用点零改）。
+   机械核对：删掉的 263 行只有 3 行没原样出现（1 行注释指路 + 2 处调用点改名）。
+   闸门全绿（check 0 错 5 警基线、api-audit 无 HARD、taint 0/0/0、sync-check 同步）。**已部署待实机验**。
+   注：剩下"收养/归还"（`AdoptBar`/`ReleaseBar` 那一套）仍留在主文件 —— 它和宠物/姿态两条的
+   换皮、排布缠在一起，等 `PetBar.lua` 拆完再定归宿。
 7. ✅ 已拆：`UnitFrames/Auras.lua`（`fbf7bd4`）、`UnitFrames/CastBar.lua`（`6d685bf`）
 
 **A2. 实机回归结果（2026-10-26，德鲁伊 21 级）**
