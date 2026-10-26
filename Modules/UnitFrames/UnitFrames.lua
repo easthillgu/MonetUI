@@ -833,36 +833,8 @@ local function RegisterDynamicBorders()
     end
 end
 
-local function CreateUnitFrame(unit, position)
-    local border = FrameChrome()
-    local width, healthHeight, powerHeight = UnitGeometry(unit)
-    -- 配色案（2026-10-25）：目标的目标不画能量条、也不画分隔线，血条吸收这两行，
-    -- 占满原来的"血 + 分隔 + 能量"总高（框体总高不变）。
-    local showPower = true
-    if unit == "targettarget" then
-        showPower = false
-        healthHeight = healthHeight + 1 + powerHeight
-        powerHeight = 0
-    end
-    -- No split: health + 1px separator + power
-    local height = border * 2 + healthHeight + (showPower and (1 + powerHeight) or 0)
-
-    -- 安全单位按钮：和暴雪一样，左键 = 选中（设为目标），右键 = 弹单位菜单
-    -- （设置焦点等）。SecureUnitButtonTemplate 的两个模板写在同一条串里实测可用。
-    -- 受保护的框体上非安全脚本（OnEnter / OnLeave / OnUpdate）照样能设，
-    -- 只有 SetAttribute / RegisterForClicks 这类安全动作在战斗中会被拒。
-    local frame = Widget:CreateFrame("MonetUI" .. unit:gsub("^%l", string.upper) .. "Frame",
-        UIParent, width, height, "SecureUnitButtonTemplate, BackdropTemplate", "CheckButton")
-    frame.unit = unit
-    frame.label = UNIT_LABEL[unit] or unit
-
-    -- 单位按钮的契约：unit + *type1(target) + *type2(togglemenu)。
-    -- 全部在创建时设好（登录时不在战斗中），之后战斗里不需要再改。
-    pcall(frame.SetAttribute, frame, "unit", unit)
-    pcall(frame.SetAttribute, frame, "*type1", "target")
-    pcall(frame.SetAttribute, frame, "*type2", "togglemenu")
-    pcall(frame.RegisterForClicks, frame, "AnyUp")
-
+-- 血条 / 缺失段 / 织纹 / 分隔线 / 能量条。抽自 CreateUnitFrame（P4 拆分，逐条保留语义）。
+local function BuildUnitBars(frame, border, width, healthHeight, powerHeight, showPower)
     local health = Widget:Bar(frame, width - border * 2, healthHeight)
     health:SetPoint("TOPLEFT", frame, "TOPLEFT", border, -border)
     health:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -border, -border)
@@ -903,18 +875,11 @@ local function CreateUnitFrame(unit, position)
     frame.healthLost = lost
     frame.healthSeparator = separator
     frame.power = power
+end
 
-    -- The class resource hangs under the player frame only; it owns Blizzard's class power.
-    if unit == "player" then
-        CreateClassPower(frame)
-    end
-    -- Cast bar for player and target.
-    if unit == "player" or unit == "target" then
-        M.castbar.CreateCastBar(frame)
-    end
-
-    UpdateBarLook(frame)
-
+-- 名字 / 等级 / 血量百分比三处文本（位置与有无由 TEXT_LAYOUT 决定）。
+-- 抽自 CreateUnitFrame（P4 拆分，逐条保留语义）。
+local function BuildUnitTexts(frame, unit)
     local layout = TEXT_LAYOUT[unit] or {}
     frame.nameCap = layout.cap
 
@@ -952,7 +917,11 @@ local function CreateUnitFrame(unit, position)
             frame.healthText:SetPoint("BOTTOMRIGHT", frame, "TOPRIGHT", 0, TEXT_GAP)
         end
     end
+end
 
+-- 收尾：主题 / 单位提示 / 悬停边框 / 拖动登记 / 位置记忆。
+-- 抽自 CreateUnitFrame（P4 拆分，逐条保留语义）。
+local function FinishUnitFrame(frame, unit, position, border)
     Widget:Theme(frame, { thickness = border, bgAlpha = 0.9 })
     Widget:UnitTooltip(frame, unit)
     frame:HookScript("OnEnter", function(self) HoverBorder(self, true) end) -- TAINT-OK: frame 是自建单位框（hover 边框）
@@ -968,6 +937,55 @@ local function CreateUnitFrame(unit, position)
 
     frame.position = position
     frame:Hide()
+end
+
+local function CreateUnitFrame(unit, position)
+    local border = FrameChrome()
+    local width, healthHeight, powerHeight = UnitGeometry(unit)
+    -- 配色案（2026-10-25）：目标的目标不画能量条、也不画分隔线，血条吸收这两行，
+    -- 占满原来的"血 + 分隔 + 能量"总高（框体总高不变）。
+    local showPower = true
+    if unit == "targettarget" then
+        showPower = false
+        healthHeight = healthHeight + 1 + powerHeight
+        powerHeight = 0
+    end
+    -- No split: health + 1px separator + power
+    local height = border * 2 + healthHeight + (showPower and (1 + powerHeight) or 0)
+
+    -- 安全单位按钮：和暴雪一样，左键 = 选中（设为目标），右键 = 弹单位菜单
+    -- （设置焦点等）。SecureUnitButtonTemplate 的两个模板写在同一条串里实测可用。
+    -- 受保护的框体上非安全脚本（OnEnter / OnLeave / OnUpdate）照样能设，
+    -- 只有 SetAttribute / RegisterForClicks 这类安全动作在战斗中会被拒。
+    local frame = Widget:CreateFrame("MonetUI" .. unit:gsub("^%l", string.upper) .. "Frame",
+        UIParent, width, height, "SecureUnitButtonTemplate, BackdropTemplate", "CheckButton")
+    frame.unit = unit
+    frame.label = UNIT_LABEL[unit] or unit
+
+    -- 单位按钮的契约：unit + *type1(target) + *type2(togglemenu)。
+    -- 全部在创建时设好（登录时不在战斗中），之后战斗里不需要再改。
+    pcall(frame.SetAttribute, frame, "unit", unit)
+    pcall(frame.SetAttribute, frame, "*type1", "target")
+    pcall(frame.SetAttribute, frame, "*type2", "togglemenu")
+    pcall(frame.RegisterForClicks, frame, "AnyUp")
+
+    BuildUnitBars(frame, border, width, healthHeight, powerHeight, showPower)
+
+    -- The class resource hangs under the player frame only; it owns Blizzard's class power.
+    if unit == "player" then
+        CreateClassPower(frame)
+    end
+    -- Cast bar for player and target.
+    if unit == "player" or unit == "target" then
+        M.castbar.CreateCastBar(frame)
+    end
+
+    UpdateBarLook(frame)
+
+    BuildUnitTexts(frame, unit)
+
+    FinishUnitFrame(frame, unit, position, border)
+
     return frame
 end
 
