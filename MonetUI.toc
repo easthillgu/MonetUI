@@ -34,7 +34,6 @@ Modules\UnitFrames\UnitFrames.xml
 Modules\Cooldown\Cooldown.xml
 Modules\BuffFrame\BuffFrame.xml
 Modules\Minimap\Minimap.xml
-Modules\BagFrame\BagFrame.xml
 Modules\Bags\Bags.xml
 Modules\QuestTracker\QuestTracker.xml
 Modules\ActionBars\ActionBars.xml

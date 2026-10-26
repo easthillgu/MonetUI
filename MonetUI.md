@@ -40,7 +40,7 @@ MonetUI 是一套**整合 UI 插件**，以**莫奈印象派色彩**为核心设
 | Cooldown | 完成 | 冷却数字/充能/快捷键字体美化 + 技能可用状态着色 |
 | BuffFrame | 完成 | 自绘增益/减益网格，按时长排序，可读性守卫 |
 | Minimap | 完成 | 矩形化 256×190 + 去坐标/时钟 + 主题面板 + 顶部区域名 + 暴雪集群按钮逐项接管 |
-| BagFrame | 完成 | 背包排列整合 + 主题边框 |
+| ~~BagFrame~~ | **已移除**（2026-10-26） | 旧排列式背包，与 `Bags` 抢暴雪 `ContainerFrame` 的显隐；两套只留 `Bags` |
 | QuestTracker | 完成 | 主题边框（圆角九宫格边纹）+ 标题栏拖动 + 位置保存 + 默认锚在小地图面板右上角（宽 264 = 面板宽） |
 | ActionBars | 完成 | 1–8 号自绘动作条（**无库**：SecureActionButtonTemplate + actionpage）+ 接管宠物/姿态条 + 隐藏暴雪动作条/背包条 |
 | Nameplates | 完成 | 挂在暴雪姓名板底座上的细条姓名板：血条/名字等级/百分比/施法条/借用暴雪减益/仇恨与目标描边；CVar 接管 + 点击区同步 + 完整回退 |
@@ -91,7 +91,7 @@ MonetUI/
 │   ├── Cooldown/               # 冷却计时
 │   ├── BuffFrame/              # Buff 框架
 │   ├── Minimap/                # 小地图
-│   ├── BagFrame/               # 背包
+│   ├── Bags/                   # 分类背包（取代已移除的 BagFrame）
 │   ├── QuestTracker/           # 任务追踪
 │   ├── ActionBars/             # 动作条（1–8 号自绘 + 接管宠物/姿态条）
 │   ├── Nameplates/             # 姓名板（暴雪底座 + 自绘细条）

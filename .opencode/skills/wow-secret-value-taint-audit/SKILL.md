@@ -279,7 +279,8 @@ node tools/audit-taint.js --strict # HIGH 也计入退出码（严格模式）
 - 当下基线（2026-10-25 污染审查全清）：**0 BLOCKER / 0 HIGH / 0 SOFT**。历史 22 条 HIGH
   已逐条人工复盘：全是"自建对象上 HookScript/写字段 + 注释文本误报"，已各行内
   `-- TAINT-OK: <原因>` 收档；唯一真违规（BagFrame 往暴雪 `ContainerFrame` 挂
-  OnShow 脚本槽）已改 `Widget:ShowWatch` 轮询。**此后扫描器再报 HIGH = 新增待审**，
+  OnShow 脚本槽）已改 `Widget:ShowWatch` 轮询；该模块本身**已于 2026-10-26 整体移除**
+  （两套背包只留 `Bags`，见 HANDOFF 3.21）。**此后扫描器再报 HIGH = 新增待审**，
   违反点必须定性或豁免；已审行勿动豁免注释。
 
 ---

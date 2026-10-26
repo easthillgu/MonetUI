@@ -28,7 +28,7 @@ local setOffset        -- Build 里定义，Show/Toggle 打开面板时归零
 
 local MODULE_ORDER = {
     "UnitFrames", "Cooldown", "BuffFrame",
-    "Minimap", "BagFrame", "Bags", "QuestTracker", "ActionBars", "Nameplates", "Skins",
+    "Minimap", "Bags", "QuestTracker", "ActionBars", "Nameplates", "Skins",
     "InfoBar", "Tooltip", "Cursor", "Toast", "Durability", "CombatText",
 }
 
@@ -37,7 +37,6 @@ local MODULE_LABEL = {
     Cooldown     = "冷却计时 (Cooldown)",
     BuffFrame    = "增益光环 (BuffFrame)",
     Minimap      = "小地图 (Minimap)",
-    BagFrame     = "背包整合 (BagFrame)",
     Bags         = "分类背包 (Bags)",
     QuestTracker = "任务追踪 (QuestTracker)",
     ActionBars   = "动作条 (ActionBars)",

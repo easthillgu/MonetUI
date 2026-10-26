@@ -18,7 +18,6 @@ local DEFAULTS = {
         Cooldown     = true,
         BuffFrame    = true,
         Minimap      = true,
-        BagFrame     = true,
         Bags         = true,
         QuestTracker = true,
         ActionBars   = true,

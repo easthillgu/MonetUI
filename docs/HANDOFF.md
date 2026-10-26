@@ -71,7 +71,7 @@ node tools/sync-check.js         # 仓库 vs 已安装副本（退出码 0 = 游
 | QuestTracker | 可用 | 自绘追踪框 + 压制暴雪追踪框（alpha 0） |
 | Nameplates | 可用 | 细条血条/施法条/借用暴雪减益 |
 | Bags / InfoBar / Tooltip / Cursor / Toast / Durability / CombatText | 可用，**本轮未动** | 需要一次实机过一遍（见第 6 节的验证清单） |
-| BagFrame（旧排列式背包） | 待退役 | Bags 验证通过后删模块 + 配置面板条目 |
+| ~~BagFrame（旧排列式背包）~~ | **已于 2026-10-26 移除** | 两套背包只留 `Bags`（见 3.21） |
 | Skins | 可用 | 暴雪窗口美化；**只做窗口装饰，不碰里面的按钮/页签脚本** |
 
 ---
@@ -664,6 +664,26 @@ deploy 119 + sync-check 同步。**待实机看**：四周是 1 物理像素主�
 闸门：`api-audit` 0 hard、`audit-taint` 0/0/0、`wuxian check` 0 error / 5 warning（基线）。
 **待实机看**：战斗中悬停单位不再刷这条；脱战后「目标」行照常出现。
 
+### 3.21 2026-10-26：退役 `BagFrame`（两套背包只留 `Bags`）
+
+玩家要求："背包模块做了 2 个，留下分类背包，去掉另一个。"
+
+- **删掉**：`Modules/BagFrame/`（`BagFrame.lua` + `BagFrame.xml`），toc 里的那行、
+  `Core.lua` DEFAULTS.modules 的 `BagFrame = true`、设置面板的模块顺序与标签条目。
+- **为什么可以直接删**：`BagFrame` 只是把暴雪原生容器**排成一行 + 加主题边框**（美术层），
+  而 `Bags` 是完整替代 —— 它自己画分类窗口，并且 **接管暴雪背包**：
+  `HideBlizzardBags()` 藏掉 `ContainerFrame1..13` / `ContainerFrameCombinedBags`，
+  `HookBlizzardBags()` 在暴雪 `Show` 时把我们的窗口顶上来（`C_Timer.After(0)` 延后一帧，
+  避免它自己建格子时拿到 nil）。两套一起开只会互相抢 `ContainerFrame` 的显隐，删掉靠后的那个是唯一正解。
+- 保留的历史价值：`BagFrame` 曾经往暴雪 `ContainerFrame` 上挂 `OnShow`（写脚本槽 = 污染），
+  是 `PLAN-refactor.md:203` 那个"真违规一例"的来源；这条教训留在文档里，
+  `.opencode/skills/wow-secret-value-taint-audit/SKILL.md` 的判例也标注了"该模块已移除"。
+- 存档里可能残留 `MonetUIDB.modules.BagFrame`：没人读它，无害。
+
+闸门：`api-audit` 0 hard（toc 列的文件全部存在）、`audit-taint` 0/0/0、`wuxian check` 0 error / 5 warning、
+deploy（文件数从 119 降到 117）+ sync-check 同步。**待实机看**：`/mui status` 里不再有 BagFrame、
+背包键（B）/ 背包钮仍能打开分类背包。
+
 ---
 
 ## 4. 污染（taint）模型 —— 这个客户端最贵的一课
@@ -833,6 +853,6 @@ end
 4. **小队/团队框**：确认自绘的正常、暴雪的那套按需在编辑模式里隐藏（我们不再代劳）。
 5. **SpellFlyout（技能弹出托盘）**：鼠标点选项必报 `ADDON_ACTION_FORBIDDEN CastSpellByID()`，
    快捷键正常。要么接受"鼠标点不展开、只提示一次"，要么自绘托盘（工作量中等）。
-6. 未动模块的实机过一遍（Bags/BagFrame 退役、InfoBar、Tooltip、Cursor、Toast、Durability、CombatText）。
+6. 未动模块的实机过一遍（Bags、InfoBar、Tooltip、Cursor、Toast、Durability、CombatText）。
 7. 想降噪的话：宠物条每次重载 10 条 `PetActionButton*:SetShown` BLOCKED（不改更稳，见 AGENTS）。
 8. 上线前：push 到 origin，README 里的 `status` 徽章改成正式版。
