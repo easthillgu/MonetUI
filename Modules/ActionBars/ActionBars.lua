@@ -183,8 +183,8 @@ local BAR_DEFS = {
       point = "BOTTOM", relativeTo = "Bar7",     relativePoint = "TOP",    x = 0,   y = 2 },
 
     -- 自绘宠物条：按钮是**收养来的**暴雪 PetActionButton（本客户端没有通用 type="pet" 的安全
-    -- 按钮）。位置：**1 号条下方、右对齐**，并按玩家的要求"鼠标悬停才显示"（hover = true，
-    -- 见 SetupHoverOnly：不是 Hide 而是 alpha 0，帧仍算显示，鼠标因此进得来）。
+    -- 按钮）。位置：**1 号条下方、右对齐**，并按玩家的要求"平时半透明、悬停变清晰"（hover = true，
+    -- 见 SetupHoverOnly：不是 Hide 而是调 alpha，帧仍算显示，鼠标因此进得来）。
     -- 层级 66：高于 1–8 号条的 60/61，低于接住器 70。
     { key = "BarPet", index = 9, page = 0, count = 10, pet = true, hover = true, bind = "BONUSACTIONBUTTON",
       level = 66,
@@ -194,7 +194,8 @@ local BAR_DEFS = {
     -- StanceButton1..10（本客户端没有可用的通用安全按钮；暴雪按钮的施法路径才是原生的）。
     -- 位置：**3 号条正上方、左对齐**（BOTTOMLEFT 对齐 Bar3 的 TOPLEFT），按钮从左往右排；
     -- 只显示当前职业的形态数（1..N），N+1..10 藏起来排在右边。
-    { key = "BarStance", index = 10, page = 0, count = 10, stance = true,
+    -- hover = true：和宠物条同一套"平时 0.3 / 悬停 1"（见 SetupHoverOnly）。
+    { key = "BarStance", index = 10, page = 0, count = 10, stance = true, hover = true,
       level = 66,
       point = "BOTTOMLEFT", relativeTo = "Bar3", relativePoint = "TOPLEFT", x = 0, y = 2 },
 }
@@ -1271,6 +1272,16 @@ local function SkinAdoptedButton(btn)
     fade(btn.Flash)
     fade(btn.AutoCastShine)
 
+    -- 空槽底色：收养来的按钮图标是**铺满整格**的，暴雪自己的灰底（SlotBackground / NormalTexture）
+    -- 又被上面几行关掉了 —— 于是没有动作的槽位（宠物条 8..10 格）整格透明，实机就是玩家说的
+    -- "空白按钮看不到"。补一块和自绘槽位同色的 well（纯黑 0.25，见 RefreshRing），垫在图标
+    -- **下面**：暴雪图标是 BACKGROUND 层，我们取更低的子层级（-8），有图标时被完全盖住，空槽时露出来。
+    local well = btn:CreateTexture(nil, "BACKGROUND", nil, -8)
+    well:SetPoint("TOPLEFT", btn, "TOPLEFT", BORDER, -BORDER)
+    well:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -BORDER, BORDER)
+    well:SetColorTexture(0, 0, 0, 0.25)
+    Mark(btn, "adoptedWell", well)
+
     -- 边框：收养来的按钮**图标是铺满整格的**（我们不能像自绘那样把图标内缩 1px），
     -- 所以底板/边框不能垫在下面（会被图标完全盖住）——改成在按钮**上方**画一圈 1px 的边框。
     -- 必须带 BackdropTemplate：Widget:Theme 走的是 SetBackdrop，没有该模板的面板画不出边。
@@ -1372,32 +1383,36 @@ local function BuildPetBar(bar, frame, def)
     return bar
 end
 
---- 宠物条"悬停才显示"的静默透明度。**用 alpha 而不是 Hide**：alpha 0 的帧在客户端眼里仍然
---- 是"显示着"的，鼠标照样进得来（暴雪自己收 HUD 帧也是这招），也不会和 [pet] 状态驱动的
+--- 宠物条 / 姿态条"悬停高亮"的静默透明度。**用 alpha 而不是 Hide**：alpha 不为 0 的帧在客户端
+--- 眼里仍然是"显示着"的，鼠标照样进得来（暴雪自己收 HUD 帧也是这招），也不会和 [pet] 状态驱动的
 --- Show/Hide 打架（补一刀 Show 会被它顶回来，屏幕上一闪一闪）。
-local HOVER_IDLE_ALPHA = 0
+--- 0.3 而不是 0：玩家 2026-10-26 的要求是"平时看得到、悬停变清晰"，0 会让两个关键条平时完全隐形。
+local HOVER_IDLE_ALPHA = 0.3
 
 --- 判定走轮询（`Widget:HoverWatch`，0.1 秒一次）：**绝不往暴雪的受保护按钮上挂 OnEnter**，
---- 那是往它的脚本槽里写我们的函数（AGENTS 污染模型第一条）。
+--- 那是往它的脚本槽里写我们的函数（AGENTS 污染模型第一条）。宠物条和姿态条共用这一套。
 local function SetupHoverOnly(bar, enabled)
     local frame = bar.frame
     if not enabled then
         -- 关掉悬停模式：恢复常显（配置面板把勾去掉时走这条）。
+        -- 回调是常驻登记的（bar.hoverReady），所以先关开关，否则下次鼠标进出又会被拉回 0.3。
+        bar.hoverOnly = false
         pcall(frame.SetAlpha, frame, 1)
         return
     end
 
+    bar.hoverOnly = true
     if not bar.hoverReady then
         bar.hoverReady = true
         -- 框体自己得开鼠标：不开的话，鼠标落在子按钮上时 `IsMouseOver()` 对父框体不成立。
         -- 这是**我们自己的**框体（按钮只是换了父），不写暴雪的框。
         pcall(frame.EnableMouse, frame, true)
         Widget:HoverWatch(frame,
-            function() pcall(frame.SetAlpha, frame, 1) end,
-            function() pcall(frame.SetAlpha, frame, HOVER_IDLE_ALPHA) end)
+            function() if bar.hoverOnly then pcall(frame.SetAlpha, frame, 1) end end,
+            function() if bar.hoverOnly then pcall(frame.SetAlpha, frame, HOVER_IDLE_ALPHA) end end)
     end
 
-    -- 立刻按当前鼠标位置定一次：鼠标本来就在条上时不会触发 OnEnter，否则一进来是隐形的。
+    -- 立刻按当前鼠标位置定一次：鼠标本来就在条上时不会触发 OnEnter，否则一进来是半透明的。
     local ok, inside = pcall(frame.IsMouseOver, frame)
     local over = ok and Secrets.Bool(inside, false)
     pcall(frame.SetAlpha, frame, over and 1 or HOVER_IDLE_ALPHA)
@@ -2400,6 +2415,8 @@ function M:Apply()
                 if own and StanceFormCount() > 0 then
                     AdoptStanceButtons(bar)
                     SetBarShown(bar, true)
+                    -- 和宠物条同一套"平时 0.3 / 悬停 1"（玩家 2026-10-26 要求，见 SetupHoverOnly）。
+                    SetupHoverOnly(bar, def.hover and Config().stanceHover ~= false)
                 else
                     SetBarShown(bar, false)
                     ReleaseStance(bar)

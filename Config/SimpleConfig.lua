@@ -770,6 +770,13 @@ function SimpleConfig:Build()
             RefreshUnitFrames()
         end)
 
+    MakeCheckbox(content, "宠物框悬停 / 选中才显示", row(30),
+        function() return ns:DB().unitFrames.petHover ~= false end,
+        function(value)
+            ns:DB().unitFrames.petHover = value
+            RefreshUnitFrames()
+        end)
+
     local NUMBER_ITEMS = {
         { value = "auto", text = "自动 (K / M / B)" },
         { value = "cn",   text = "中文 (万 / 亿)" },
@@ -961,10 +968,17 @@ function SimpleConfig:Build()
             RefreshActionBars()
         end)
 
-    MakeCheckbox(content, "宠物条悬停才显示", row(30),
+    MakeCheckbox(content, "宠物动作条悬停高亮（平时 30%）", row(30),
         function() return ns:DB().actionBars.petHover ~= false end,
         function(value)
             ns:DB().actionBars.petHover = value
+            RefreshActionBars()
+        end)
+
+    MakeCheckbox(content, "姿态条悬停高亮（平时 30%）", row(30),
+        function() return ns:DB().actionBars.stanceHover ~= false end,
+        function(value)
+            ns:DB().actionBars.stanceHover = value
             RefreshActionBars()
         end)
 

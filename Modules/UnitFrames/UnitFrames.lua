@@ -99,6 +99,66 @@ local function UnitGeometry(unit)
            Setting(unit, "power")  or 1
 end
 
+-- ---------------------------------------------------------------------------
+-- 宠物框"悬停 / 选中才显示"（玩家 2026-10-26 要求）。
+--
+-- 显隐本身仍归 visibility 状态驱动（SecureUnitButton 战斗里不能 Show/Hide），这里只动 alpha：
+-- alpha 0 的帧在客户端眼里照样是"显示着"的，鼠标进得来，所以"移上去才浮现"不会把自己锁死。
+-- "选中" = 宠物是当前目标或焦点 —— 这两件事不会给我们任何脚本回调，只能轮询。
+-- 判定一律走轮询（Widget:HoverWatch / PollWatch）：绝不往受保护的单位按钮上挂脚本。
+-- ---------------------------------------------------------------------------
+local PET_IDLE_ALPHA = 0
+
+local function PetSelected()
+    if not UnitIsUnit then return false end
+    local units = { "target", "focus" }
+    for i = 1, #units do
+        local ok, is = pcall(UnitIsUnit, units[i], "pet")
+        if ok and Secrets.Bool(is, false) then return true end
+    end
+    return false
+end
+
+local function SetPetAlpha(frame, shown)
+    local value = shown and 1 or PET_IDLE_ALPHA
+    if Marked(frame, "petAlpha") == value then return end
+    -- 只记成功的那个值：受限环境下 SetAlpha 万一被拒，下次轮询还要再试。
+    if pcall(frame.SetAlpha, frame, value) then Mark(frame, "petAlpha", value) end
+end
+
+--- 开关只改标记（回调是常驻登记的，轮询里自己看标记，关掉后不会再被拉回 0）。
+local function ApplyPetHover(frame, enabled)
+    if not frame or frame.unit ~= "pet" then return end
+    Mark(frame, "petHoverOn", enabled and true or false)
+    if not enabled then
+        SetPetAlpha(frame, true)
+        return
+    end
+
+    if not Marked(frame, "petHoverWatched") then
+        Mark(frame, "petHoverWatched", true)
+        -- 悬停 0.1 秒一次（浮现要跟手）；选中 / 取消选中 0.2 秒一次（没有事件可挂）。
+        Widget:HoverWatch(frame,
+            function(f) if Marked(f, "petHoverOn") then SetPetAlpha(f, true) end end,
+            function(f)
+                if Marked(f, "petHoverOn") and not PetSelected() then SetPetAlpha(f, false) end
+            end)
+        Widget:PollWatch(frame, function(f)
+            if not Marked(f, "petHoverOn") then return end
+            local over = false
+            local ok, inside = pcall(f.IsMouseOver, f)
+            if ok then over = Secrets.Bool(inside, false) end
+            SetPetAlpha(f, over or PetSelected())
+        end)
+    end
+
+    -- 立刻定一次：鼠标本来就停在框上时不会触发 OnEnter，否则开局是隐形的。
+    local over = false
+    local ok, inside = pcall(frame.IsMouseOver, frame)
+    if ok then over = Secrets.Bool(inside, false) end
+    SetPetAlpha(frame, over or PetSelected())
+end
+
 local function FrameChrome()
     -- 血条与能量条之间用 1px 独立分隔线（早先的双段拆分已删，不再需要第二个返回值）。
     return Shared("border") or 1
@@ -823,6 +883,8 @@ function M:Apply()
         UpdateHealthColor(frame)
         UpdatePowerColor(frame)
     end
+    -- 宠物框的"悬停 / 选中才显示"也在这里落地：配置面板改勾立刻生效，不用 /reload。
+    ApplyPetHover(frames.pet, Shared("petHover") ~= false)
     self:UpdateAll()
 end
 
@@ -919,6 +981,9 @@ function M:Initialize()
     if ns:DB().unitFrames.hideBlizzard then
         self:SuppressBlizzard(true)
     end
+
+    -- 宠物框默认"悬停 / 选中才显示"（配置可关，见 ApplyPetHover）。
+    ApplyPetHover(frames.pet, Shared("petHover") ~= false)
 
     -- 暴雪的施法条：这一套自己画，暴雪那条藏掉。
     self:HideBlizzardCastBars(true)

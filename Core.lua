@@ -85,6 +85,9 @@ local DEFAULTS = {
         classPower       = true,
         classPowerHeight = 3,
         classPowerGap    = 3,
+        -- petHover：宠物单位框只在"鼠标悬停"或"宠物被选中（当前目标/焦点）"时 alpha 1，
+        -- 其余时间 alpha 0（帧仍是显示状态，靠 visibility 驱动决定有没有宠物，见 UnitFrames）。
+        petHover = true,
         -- Target auras: reparent Blizzard's own TargetFrame aura list onto our target frame (Andromeda's layout, growing up) and anchor it above.  Only the position is borrowed, never the data -- C_UnitAuras is hidden mid-fight, so this is the same ForeverUI trick the Nameplates module uses.
         showTargetAuras = true,
         targetAuraGap   = 22,
@@ -132,9 +135,11 @@ local DEFAULTS = {
         showHotkey   = true,
         showCount    = true,
         showMacro    = true,
-        -- petHover: 宠物条平时 alpha 0，鼠标移上去才显示（帧仍是"显示"状态，所以鼠标进得来，
-        -- 也不会和 [pet] 状态驱动的显隐打架）。见 Modules/ActionBars 的 SetupHoverOnly。
+        -- petHover / stanceHover：收养来的两条（宠物动作条、姿态条）平时半透明 alpha 0.3，
+        -- 鼠标移上去变 1（帧仍是"显示"状态，所以鼠标进得来，也不会和状态驱动的显隐打架）。
+        -- 见 Modules/ActionBars 的 SetupHoverOnly。
         petHover     = true,
+        stanceHover  = true,
         positions    = {},
     },
     -- Nameplates (姓名板, Modules/Nameplates) sit on Blizzard's own plate bases: the base owns targeting/clicks, the module draws a Monet slim bar on it and hides Blizzard's UnitFrame child.  Which units get a plate at all is a CVar, so the show* switches are pushed into nameplateShowFriends/Enemies/... on Apply and put back when the module is off; hideCritters/hideDead filter on top of that.
