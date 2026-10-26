@@ -18,14 +18,18 @@ local Setting = M.Setting
 local Shared  = M.Shared
 
 -- ============================================================================
--- Cast indicator (player & target): NO fill bar, only a red triangle spark (2px)
+-- Cast indicator (player & target): NO fill bar, only a red triangle spark
 -- that moves RIGHT->LEFT (reverse) under the power bar as the cast progresses.
--- CAST_GAP = 1px between power bar and spark.
+-- CAST_GAP = 2 物理像素，能量条下沿到三角墨迹顶端（OUTLINE 会在字身外再扩 1px）。
+--
+-- 锚法（2026-10-26 修）：三角按 **TOP** 挂在 cast 框顶部 —— 从这条线**往下**长。
+-- 以前锚的是 BOTTOM：字体行高比 SPARK_HEIGHT(2) 大（换 PingFangPixel + OUTLINE 之后更明显），
+-- 字身向上溢，顶端直接压到能量条上（玩家报的就是这个）。
 -- ============================================================================
 
-local CAST_GAP       = 1          -- gap between power bar and spark
-local SPARK_HEIGHT   = 2          -- triangle height in pixels (2px)
-local SPARK_WIDTH    = 4          -- triangle width in pixels
+local CAST_GAP       = 2          -- 物理像素：能量条下沿到三角顶端
+local SPARK_HEIGHT   = 2          -- 三角字号（像素）
+local SPARK_WIDTH    = 4          -- 三角宽度参考值（只为说明形状，不参与布局）
 local SPARK_RED      = { 1, 0, 0 }  -- normal / interruptible cast
 
 --- Create a red upward-pointing triangle spark using a FontString (▲ U+25B2).
@@ -52,12 +56,19 @@ local function CreateCastBar(frame)
     -- A plain frame (no StatusBar, no fill, no background) to anchor the spark
     local cast = CreateFrame("Frame", nil, frame)
     cast:SetSize(barWidth, SPARK_HEIGHT)
-    cast:SetPoint("TOPLEFT", frame.power, "BOTTOMLEFT", 0, -CAST_GAP)
+    cast:SetPoint("TOPLEFT", frame.power, "BOTTOMLEFT", 0, -(CAST_GAP * (Media:Mult() or 1)))
 
     -- Red triangle spark (moves RIGHT->LEFT as cast progresses)
     local spark = CreateTriangleSpark(cast)
-    -- Anchor to bottom of the cast frame
-    spark:SetPoint("BOTTOM", cast, "BOTTOM", 0, 0)
+    -- **TOP 锚**：三角从 cast 框顶部往下长，顶端只是贴着能量条下沿（见文件头）。
+    spark:SetPoint("TOP", cast, "TOP", 0, 0)
+
+    -- 行高跟着字身走：字体行高通常大于 2px（OUTLINE 还要再扩 1px），
+    -- 框高按实际字身撑开，免得"框是 2px、三角是 5px"这种靠猜的对齐。
+    local okH, stringH = pcall(function() return spark:GetStringHeight() or spark:GetHeight() end)
+    if okH and type(stringH) == "number" and stringH > SPARK_HEIGHT then
+        cast:SetHeight(stringH)
+    end
 
     cast.spark = spark
     cast:Hide()
@@ -136,7 +147,8 @@ local function UpdateCast(frame)
         frame.cast:Show()
         frame.cast.spark:Show()
         frame.cast.spark:ClearAllPoints()
-        frame.cast.spark:SetPoint("BOTTOM", frame.cast, "BOTTOMLEFT", 0, 0)
+        -- 和常规路径一致：TOP 锚，钉在左端（机密的开始/结束时间不能参与算术）
+        frame.cast.spark:SetPoint("TOP", frame.cast, "TOPLEFT", 0, 0)
         frame.cast:SetScript("OnUpdate", nil)
         return
     end
@@ -178,7 +190,8 @@ local function UpdateCast(frame)
         -- Move spark RIGHT -> LEFT (reverse): at progress=0 (start), spark at RIGHT; at progress=1, spark at LEFT
         local barWidth = cast:GetWidth()
         local x = barWidth * (1 - progress)
-        cast.spark:SetPoint("BOTTOM", cast, "BOTTOMLEFT", x, 0)
+        -- TOP 锚（与创建时一致）：只动横坐标，纵坐标永远贴着能量条下沿
+        cast.spark:SetPoint("TOP", cast, "TOPLEFT", x, 0)
 
         -- Auto-hide when cast ends
         if (cast.channeling and now >= endMS) or (not cast.channeling and now >= endMS) then

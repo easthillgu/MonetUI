@@ -505,6 +505,23 @@ Ellesmere 在本客户端也是收养（`EllesmereUIActionBars.lua:3136` "Stance
 ④ 单位提示多出「目标」行、Att+悬停出 ID 行；⑤ 提示框没有"越加越长 / 反复闪"的迹象（`tipNoAdd` 生效）；
 ⑥ 战斗中不报错、不显示错值。
 
+### 3.14 2026-10-26：施法条红三角压到能量条上（锚点方向错了）
+
+玩家报："玩家施法条的红色三角顶部位置错了，压在了能量条上"。
+
+- **根因是锚点方向**：`CastBar.lua` 把三角（一个 `▲` FontString）按 **BOTTOM** 锚在 2px 高的
+  `cast` 框底部 → 字身**向上**长。字体行高天生大于 2px（`SetFont(..., 2)` 不等于 2px 行高），
+  3.13 那轮把字体换成 PingFangPixel + `OUTLINE` 之后行高和墨迹又各涨了一圈 → 顶端越过
+  `CAST_GAP = 1` 的间隙，直接压在能量条下沿。
+- **修法**：改成 **TOP 锚**（三角从 cast 框顶部**往下**长，顶端永远只是"贴着"能量条下沿），
+  三处一起改 —— 创建时、`OnUpdate` 每帧扫动时、以及机密时间戳那条"钉在左端"的兜底路径。
+  同时 `CAST_GAP` 从 1（UI 单位）改成 **2 物理像素**（`* Media:Mult()`，OUTLINE 会在字身外再扩 1px），
+  并按 `GetStringHeight()`（pcall 探测）把 cast 框高撑到真实字身高度，不再"框 2px、三角 5px"。
+
+闸门：`api-audit` 0 hard、`audit-taint` 0/0/0、`wuxian check` 0 error / 5 warning（基线）、
+deploy 117 + sync-check 同步。**待实机看**：施法/引导时三角顶端在能量条下沿之下、不再压上去，
+扫过整条时不抖；目标框同样。如果还想再离远一点，只改 `CAST_GAP` 一个数。
+
 ---
 
 ## 4. 污染（taint）模型 —— 这个客户端最贵的一课
