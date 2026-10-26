@@ -1464,7 +1464,9 @@ local function ReleaseStance(bar)
             -- 我们自己的边框子框体藏起来（按钮回到原生样子时不该多一圈）。
             local border = Marked(btn, "adoptedBorder")
             if border then pcall(border.Hide, border) end
-            local container = _G["StanceBarButtonContainer" .. i]
+            -- 容器优先用按钮自己记的（`ActionBarMixin:ActionBar_OnLoad` 写的 `actionButton.container`），
+            -- 名字只是兜底：`StanceBarButtonContainer1..10`。
+            local container = btn.container or _G["StanceBarButtonContainer" .. i]
             if container then
                 pcall(btn.SetParent, btn, container)
                 pcall(btn.ClearAllPoints, btn)
