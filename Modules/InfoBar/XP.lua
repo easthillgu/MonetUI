@@ -215,7 +215,8 @@ local function Draw(percent, restEnd)
     if markerX > width - half then markerX = width - half end
 
     marker:ClearAllPoints()
-    marker:SetPoint("BOTTOM", root, "BOTTOMLEFT", markerX, 0)
+    -- 尖端顶在经验条上沿（和 Build 里同一套几何），横坐标跟着进度走
+    marker:SetPoint("BOTTOM", root, "BOTTOMLEFT", markerX, Px(LINE))
 
     -- 悬停区跟着三角走，但不许被屏幕边缘切掉一半
     local zoneX = x
@@ -449,12 +450,13 @@ local function Build(parentBar)
     fill:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
 
     marker = root:CreateTexture(nil, "OVERLAY")
-    -- 三角是贴图（tools/svg/monet_spark_down.svg → Assets/Textures）：**底边就是尖端那一行**，
-    -- 所以锚 BOTTOM 在线身上 = 尖端精确点在线上。以前用字体里的 ▼，位置随字体行高漂，
-    -- 和施法条那颗火花是同一个毛病。
+    -- 三角是贴图（tools/svg/monet_spark_down.svg → Assets/Textures）：**底边就是尖端那一行**。
+    -- 尖端顶的是经验条的**上沿**（`Px(LINE)`，那条 1px 衬线的顶边），不是压在线上 ——
+    -- 三角整个骑在线上面，线的颜色（进度色 / 声望色）一点不被盖住。
+    -- 以前用字体里的 ▼，位置随字体行高漂，和施法条那颗火花是同一个毛病。
     marker:SetTexture(Media:Texture("monet_spark_down"))
     marker:SetSize(MarkerSize(), MarkerHeight())
-    marker:SetPoint("BOTTOM", root, "BOTTOMLEFT", 0, 0)
+    marker:SetPoint("BOTTOM", root, "BOTTOMLEFT", 0, Px(LINE))
 
     -- 只有这一小片认鼠标；悬停它也算悬停条身（M:Hover）
     zone = CreateFrame("Frame", nil, root)

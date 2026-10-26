@@ -539,7 +539,8 @@ deploy 117 + sync-check 同步。**待实机看**：施法/引导时三角顶端
   `SPARK_W/H = 8×4` 物理像素，`CAST_GAP = 0`（尖端正好顶在能量条下沿），**TOP 锚**；
   颜色从 `SetTextColor` 换成 `SetVertexColor`（红 / 主题中性色）。
 - 经验线（`Modules/InfoBar/XP.lua`）：同样的字体三角毛病，`▼` FontString → `monet_spark_down` 贴图，
-  `MARKER` 语义从"字号"改成"宽度"（8 宽 × 4 高），**BOTTOM 锚**在线身上 = 尖端点在线上；
+  `MARKER` 语义从"字号"改成"宽度"（8 宽 × 4 高）；**尖端顶在经验条的上沿**（`Px(LINE)`，
+  那条 1px 衬线的顶边）—— 三角整个骑在线上，进度色一点不被盖住；
   三处 `SetTextColor`（常态 / 白热 / 升级闪）换成 `SetVertexColor`。
 - 材质合规：`tools/audit-pixels.js` 的 `STENCIL` 名单登记这两张（纯白模具，色相 0），
   `Media.texture` 注册 `monet_spark_up` / `monet_spark_down`。像素审计实测两图各
