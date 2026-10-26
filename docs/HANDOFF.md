@@ -392,6 +392,12 @@ end
 | `Modules/Minimap/*` | 矩形小地图、按钮、pin、微型菜单 | 集群不动，只搬 `Minimap`；`GetMinimapShape` 是我们给第三方提供的约定全局 |
 | `Modules/QuestTracker/QuestTracker.lua` | 自绘追踪 + 压制暴雪追踪 | 暴雪追踪是 LoD + 会换对象 |
 | `Modules/UnitFrames/*` | 单位框 / 小队团队 | 暴雪的 Group 框**完全别碰** |
+
+> `Modules/UnitFrames/` 已按子系统拆开（都是 move-only，2026-10-25/26）：
+> `UnitFrames.lua`（主文件，配置/建框/刷新/事件）+ `Auras.lua`（`M.auras.*`）+
+> `CastBar.lua`（`M.castbar.*`）+ `ClassPower.lua`（`M.classpower.*`）+
+> `Blizzard.lua`（方法仍是 `M:SuppressBlizzard` / `M:HideBlizzardCastBars`）+ `Groups.lua`。
+> **子文件要用主文件的局部函数，必须显式挂在 `M` 上**（漏一个 = 初始化静默失败、整模块的框全没）。
 | `Modules/Skins/*` | 暴雪窗口美化（含 `Forever.lua` 客户端专属） | 不给里面的按钮/页签挂钩子 |
 | `Config/SimpleConfig.lua` | 配置面板（滚轮滚动） | — |
 | `tools/` | 部署、API 审计、材质生成、像素审计、taint 闸门 | 材质改完必须 `node tools/audit-pixels.js`；commit 前跑 `node tools/audit-taint.js`；**部署后跑 `node tools/sync-check.js`**（仓库↔已安装副本，MISSING/STALE/EXTRA） |

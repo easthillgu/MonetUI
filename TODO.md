@@ -7,8 +7,10 @@
 
 **A. 文件拆分收尾（P5'）** —— 一块一个 commit、`move-only`、机械 diff 核对、拆完三道闸门 + `sync-check`
 
-1. ⏳ `UnitFrames/ClassPower.lua`（原 419–545：职业资源小格）
-2. ⏳ `UnitFrames/Blizzard.lua`（原 85–177：暴雪框架/施法条压制）
+1. ✅ `UnitFrames/ClassPower.lua`（146 行 move-only，`f72ec5e`）：主文件 1186 → 1044；
+   接口 `M.classpower.*`，资源色表经 `M.POWER_COLOR` 共享。
+2. ✅ `UnitFrames/Blizzard.lua`（89 行 move-only，`4fd510d`）：主文件 1044 → 958；
+   仍是 `M:SuppressBlizzard` / `M:HideBlizzardCastBars` 两个方法，调用点零改动。
 3. ⏳ `ActionBars/Secure.lua`（安全片段生成与注入 —— 全仓最敏感的一段）
 4. ⏳ `ActionBars/DragDrop.lua`（拖放接住器）
 5. ⏳ `ActionBars/PetBar.lua`（宠物条收养 + 自动施法环）

@@ -510,6 +510,26 @@ ActionBars 四个)视试水结果下一轮再定。
 - 结论：**move-only 拆分可行**，其余文件（UF 的 Blizzard/ClassPower、AB 的
   Secure/DragDrop/PetBar/Blizzard 处置）可按同一模式继续，风险点只有"共享局部表"要显式挂到 M。
 
+### P5' 进度（族表照上；一块一个 commit）
+
+| 文件 | 状态 | 行数 | commit | 接口面 |
+|---|---|---|---|---|
+| `UnitFrames/Auras.lua` | ✅ 2026-10-25 | 763 | `fbf7bd4` | `M.auras.*`（入 `M.frames`/`M.Shared`） |
+| `UnitFrames/CastBar.lua` | ✅ 2026-10-25 | 190 | `6d685bf` | `M.castbar.*`（入 `M.Setting`/`M.Shared`） |
+| `UnitFrames/ClassPower.lua` | ✅ 2026-10-26 | 173 | `f72ec5e` | `M.classpower.*`（入 `M.Setting`/`M.Shared`/`M.POWER_COLOR`） |
+| `UnitFrames/Blizzard.lua` | ✅ 2026-10-26 | 108 | `4fd510d` | **仍是 `M:SuppressBlizzard` / `M:HideBlizzardCastBars` 两个方法**（`SimpleConfig:691` 直调，故调用点零改动） |
+| `ActionBars/Secure.lua` | ⏳ | — | — | 安全片段生成与注入（最敏感，独占一轮） |
+| `ActionBars/DragDrop.lua` | ⏳ | — | — | 拖放接住器 |
+| `ActionBars/PetBar.lua` | ⏳ | — | — | 宠物条收养 + 自动施法环 |
+| `ActionBars/Blizzard.lua` | ⏳ | — | — | 暴雪条压制/收养/归还 |
+
+`UnitFrames.lua`：1871（拆分前）→ 1175 → 1186 → **1044**（ClassPower）→ **958**（Blizzard）。
+
+> 拆 `Blizzard.lua` 的形状值得记住：目标函数是**已经挂在 `M` 上的方法**时，把方法体搬到子文件里
+> 继续叫 `function M:...`，外部调用点就一行都不用改（比另起 `M.blizzard.*` 再包一层更省事，
+> 也不会给 `SimpleConfig` 那种跨模块调用制造兼容问题）。而主文件里的**局部函数**
+> （`CreateClassPower` 之类）才需要 `M.classpower.*` 子表 + 改调用点。
+
 
 ## 验证清单(每阶段共用)
 
