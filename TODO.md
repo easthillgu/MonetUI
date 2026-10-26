@@ -33,6 +33,16 @@
   `MonetUIBarPet/BarStance alpha=0.302`、`MonetUIPetFrame alpha=0`、`PetActionButton8` well `shown=true`。
   **待玩家实机看效果**（详见 HANDOFF 3.9）。
 - ⏳ 拖放 / 姿态翻页（`DragDrop.lua` 拆分后先 `/reload` 再测）、切主题后的光环边框颜色。
+- ⏸ **`ADDON_ACTION_BLOCKED MonetUI UNKNOWN()`（暂缓，玩家 2026-10-26 说先不管）**：
+  两次记录的时间戳形状完全一致 —— 重载后约 14 秒第一条，再过 10 秒「5 more times」共 6 条
+  （06:21:41/06:21:51 与 06:30:52/06:31:02），无伴随 Lua 错误。`taintLog=2` 下
+  `Logs\taint.log` 写 **0 字节**（AGENTS 记过：本客户端对 `ADDON_ACTION_BLOCKED` 零记录），
+  所以只剩两条路：装 `ADDON_ACTION_BLOCKED` 事件钩子取 `debugstack`（已试装，需在重现窗口内、
+  期间不能 `/reload`，否则钩子随 Lua 状态消失），或配置级二分（`ns:DB().modules` 逐组关 → 重载）。
+  嫌疑面：最近两个 commit 碰过的 `SetPetAlpha`/`ApplyPetHover`（安全单位框）、`SetupHoverOnly`、
+  `PositionBar` 的姿态分支、catcher 的 `EnableMouse` 轮询、姿态条 `RegisterStateDriver`。
+  另注：该会话启动打印是 `16/17 个模块`，重现那次是 `17/17`，中间有模块迟到初始化，也可能相关。
+  恢复调查时从这里接着走。
 
 **B. 需开游戏（攒着一起验）**
 
