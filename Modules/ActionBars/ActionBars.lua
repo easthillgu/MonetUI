@@ -1079,53 +1079,15 @@ local function InstallDrag(bar, button, index, isPet)
     end)
 end
 
-local function BuildButton(bar, index)
-    local def  = bar.def
-    local name = "MonetUI" .. def.key .. "Button" .. index
-
-    -- 宠物条的按钮要能吃 _onclick 片段（SecureHandlerClickTemplate）；
-    -- 带不上就退回原来的安全按钮模板（那时点击不会生效，但不会崩）。
-    local templates = def.pet
-        and { "", "CheckButton" }   -- 宠物条：普通 CheckButton，点击走 WrapScript 的安全片段
-        or nil
-    local button = CreateSecureButton(name, bar.frame, index, templates)
-    if not button then return nil end
-
-    -- 安全按钮契约（和 Ellesmere 在 12.x 上验证过的写法一致）：
-    --   * SetID(0)：让客户端的 CalculateAction 走"显式 action 属性"这条（path 2），
-    --     而不是 id + actionpage；
-    --   * type / typerelease：鼠标点击走 up 边（客户端对硬件鼠标强制 useOnKeyDown=false），
-    --     键盘走 down 边；
-    --   * useOnKeyDown 跟着玩家的 cvar 走，cvar 变化时由 SetUseOnKeyDown 重写；
-    --   * **action 属性只由安全片段写**（InstallPageChild / _childupdate-mui-page）。
-    --     这是"能不能施法"的分水岭：Lua 写 action → 客户端判插件越权，每次点击弹
-    --     "MonetUI 已被禁用，因为该功能只对暴雪的 UI 开放"；片段写 → 正常施法（已实机验证）。
-    pcall(button.SetID, button, 0)
-    pcall(button.RegisterForClicks, button, "AnyDown", "AnyUp")
-
-    if def.pet then
-        -- 宠物条：**不在我们自己身上施法**（本客户端没有通用安全按钮的 type="pet"）。
-        -- 改成"点击片段去点暴雪自己的 PetActionButton"：
-        --   条（SecureHandlerStateTemplate）用 SetFrameRef 指向 PetActionButtonN，
-        --   按钮的 OnClick 用 WrapScript 包成安全片段，片段里 owner:GetFrameRef(...):Click()。
-        -- 施法 / 冷却 / 自动施法提示全部由暴雪负责，我们只管外观和位置。
-        pcall(button.RegisterForClicks, button, "AnyUp")
-        InstallPageChild(button, index)
-        button.bindName = def.bind .. index
-        button.bar      = bar.frame
-        SkinButton(button)
-        SetHotkey(button)
-        InstallDrag(bar, button, index, true)
-        return button
-    end
-
-    -- 暴雪的 SpellFlyout（多阶法术 / 宠物技能那种"弹出托盘"）要求按钮实现
-    -- FlyoutButtonMixin 的最小一份（Blizzard_Flyout/Flyout.lua:72-116）：
-    --   GetPopupDirection()  托盘朝哪边展开（SpellFlyout.lua:260 要用）
-    --   TogglePopup()        挂上 / 摘掉 SpellFlyout（SpellFlyout.lua:350 要用）
-    --   IsPopupOpen/ClosePopup
-    -- 裸 SecureActionButtonTemplate 一个都没有 → 点开托盘就报
-    -- "SpellFlyout.lua:260/350: attempt to call a nil value"。
+-- 按钮要实现的最小一份 SpellFlyout（弹出托盘）接口。抽自 BuildButton（P4 拆分，逐条保留语义）。
+-- 暴雪的 SpellFlyout（多阶法术 / 宠物技能那种"弹出托盘"）要求按钮实现
+-- FlyoutButtonMixin 的最小一份（Blizzard_Flyout/Flyout.lua:72-116）：
+--   GetPopupDirection()  托盘朝哪边展开（SpellFlyout.lua:260 要用）
+--   TogglePopup()        挂上 / 摘掉 SpellFlyout（SpellFlyout.lua:350 要用）
+--   IsPopupOpen/ClosePopup
+-- 裸 SecureActionButtonTemplate 一个都没有 → 点开托盘就报
+-- "SpellFlyout.lua:260/350: attempt to call a nil value"。
+local function EnsureFlyoutMixin(button)
     button.popupDirection = "UP"
     button.popupOffset = 0
     if not button.GetPopupDirection then
@@ -1171,6 +1133,68 @@ local function BuildButton(bar, index)
             end
         end)
     end
+end
+
+-- 按钮鼠标提示：走轮询（Widget:HoverWatch），**不挂任何脚本钩子**（见 AGENTS 的皮肤原则）。
+-- GameTooltip:SetAction 在本客户端可用（实测 function）。
+local function EnsureButtonTooltip(button, bar, index)
+    if Marked(button, "tooltip") then return end
+    Mark(button, "tooltip", true)
+    Widget:HoverWatch(button, function(self)
+        local slot = SlotOf(self, bar, index)
+        if not slot then return end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        if not pcall(GameTooltip.SetAction, GameTooltip, slot) then
+            GameTooltip:SetText("")
+        end
+        GameTooltip:Show()
+    end, function()
+        GameTooltip:Hide()
+    end)
+end
+
+local function BuildButton(bar, index)
+    local def  = bar.def
+    local name = "MonetUI" .. def.key .. "Button" .. index
+
+    -- 宠物条的按钮要能吃 _onclick 片段（SecureHandlerClickTemplate）；
+    -- 带不上就退回原来的安全按钮模板（那时点击不会生效，但不会崩）。
+    local templates = def.pet
+        and { "", "CheckButton" }   -- 宠物条：普通 CheckButton，点击走 WrapScript 的安全片段
+        or nil
+    local button = CreateSecureButton(name, bar.frame, index, templates)
+    if not button then return nil end
+
+    -- 安全按钮契约（和 Ellesmere 在 12.x 上验证过的写法一致）：
+    --   * SetID(0)：让客户端的 CalculateAction 走"显式 action 属性"这条（path 2），
+    --     而不是 id + actionpage；
+    --   * type / typerelease：鼠标点击走 up 边（客户端对硬件鼠标强制 useOnKeyDown=false），
+    --     键盘走 down 边；
+    --   * useOnKeyDown 跟着玩家的 cvar 走，cvar 变化时由 SetUseOnKeyDown 重写；
+    --   * **action 属性只由安全片段写**（InstallPageChild / _childupdate-mui-page）。
+    --     这是"能不能施法"的分水岭：Lua 写 action → 客户端判插件越权，每次点击弹
+    --     "MonetUI 已被禁用，因为该功能只对暴雪的 UI 开放"；片段写 → 正常施法（已实机验证）。
+    pcall(button.SetID, button, 0)
+    pcall(button.RegisterForClicks, button, "AnyDown", "AnyUp")
+
+    if def.pet then
+        -- 宠物条：**不在我们自己身上施法**（本客户端没有通用安全按钮的 type="pet"）。
+        -- 改成"点击片段去点暴雪自己的 PetActionButton"：
+        --   条（SecureHandlerStateTemplate）用 SetFrameRef 指向 PetActionButtonN，
+        --   按钮的 OnClick 用 WrapScript 包成安全片段，片段里 owner:GetFrameRef(...):Click()。
+        -- 施法 / 冷却 / 自动施法提示全部由暴雪负责，我们只管外观和位置。
+        pcall(button.RegisterForClicks, button, "AnyUp")
+        InstallPageChild(button, index)
+        button.bindName = def.bind .. index
+        button.bar      = bar.frame
+        SkinButton(button)
+        SetHotkey(button)
+        InstallDrag(bar, button, index, true)
+        return button
+    end
+
+    EnsureFlyoutMixin(button)
+
     -- 类型 / 按下抬起 / 槽位全部由安全片段写（见 InstallSecureInit 的注释）。
     InstallSecureInit(button)
     InstallPageChild(button, index)
@@ -1187,22 +1211,7 @@ local function BuildButton(bar, index)
     -- 热键文字（跟着玩家的按键设置走）
     SetHotkey(button)
 
-    -- 鼠标提示：走轮询（Widget:HoverWatch），**不挂任何脚本钩子**（见 AGENTS 的皮肤原则）。
-    -- GameTooltip:SetAction 在本客户端可用（实测 function）。
-    if not Marked(button, "tooltip") then
-        Mark(button, "tooltip", true)
-        Widget:HoverWatch(button, function(self)
-            local slot = SlotOf(self, bar, index)
-            if not slot then return end
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            if not pcall(GameTooltip.SetAction, GameTooltip, slot) then
-                GameTooltip:SetText("")
-            end
-            GameTooltip:Show()
-        end, function()
-            GameTooltip:Hide()
-        end)
-    end
+    EnsureButtonTooltip(button, bar, index)
 
     return button
 end
