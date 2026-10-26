@@ -107,7 +107,7 @@ MonetUI/
 
 - **MonetUI 自身代码**：[MIT](LICENSE)。
 - **随包第三方组件**保留各自许可：`LibStub`（公有领域）。完整清单见 [`Libs/NOTICE.md`](Libs/NOTICE.md)。
-- **随包字体**各自授权：FusionPixel 为 SIL OFL 1.1（全文 `Assets/Fonts/OFL-FusionPixel.txt`）、Super Effective 为 CC BY-SA 3.0；逐条来源见 [`Assets/Fonts/NOTICE.md`](Assets/Fonts/NOTICE.md)。
+- **随包字体**各自授权：正文用 `Pingfangpixel.ttf`（点阵苹方，**无可再分发授权，公开发行前必须替换**，详见 [`Assets/Fonts/NOTICE.md`](Assets/Fonts/NOTICE.md)）、备用 `FusionPixel` 为 SIL OFL 1.1（全文 `Assets/Fonts/OFL-FusionPixel.txt`）、Super Effective 为 CC BY-SA 3.0。
 
 ---
 

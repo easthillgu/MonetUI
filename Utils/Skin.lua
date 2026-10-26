@@ -192,7 +192,8 @@ function Skin:Font(fs, size, key, flags, colorKey)
         end
     end
 
-    -- Default flags come from Media.fontFlags (MONOCHROME): never OUTLINE.
+    -- Default flags come from Media.fontFlags ("OUTLINE, MONOCHROME"): 1px 描边 + 关抗锯齿。
+    -- 暴雪字体对象也走这一条，所以全局统一字体时描边一致。
     pcall(Widget.SetFont, Widget, fs, size or 12, key or "pixel", flags)
     if colorKey then
         self:ColorText(fs, colorKey)

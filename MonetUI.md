@@ -966,9 +966,10 @@ Utils/Skin.lua               皮肤原语（剥皮、底板、按钮/页签/滚�
 
 | 字体 | 文件 | 用途 | 来源 |
 |------|------|------|------|
-| 正文字体 | `fusion-pixel-12.ttf` | 所有自绘文本 + 暴雪共享字体对象（全局统一字体开启时） | Fusion Pixel Font 12px proportional zh-Hans，SIL OFL 1.1 |
+| 正文字体 | `Pingfangpixel.ttf` | 所有自绘文本 + 暴雪共享字体对象（全局统一字体开启时） | 点阵苹方（DynaComware），**无授权声明 / 不可再分发**；cmap 覆盖 20945/20992 CJK |
 | 冷却字体 | `super-effective.ttf` | 动作条冷却计时数字（仅 ASCII 数字） | Super Effective（真·矩形轮廓像素字） |
-| 遗留（无引用） | `Pingfangpixel.ttf` / `roadway.ttf` | 保留作回滚，代码中已无任何引用 | 原随 Andromeda `assets/fonts/` 复制而来 |
+| 备用 | `fusion-pixel-12.ttf` | 目前无引用（`Media.font.pixel` 已指向 PingFangPixel），回滚用 | Fusion Pixel Font 12px proportional zh-Hans，SIL OFL 1.1；覆盖 19317/20992 CJK |
+| 遗留（无引用） | `roadway.ttf` | 保留作回滚，代码中已无任何引用 | 原随 Andromeda `assets/fonts/` 复制而来 |
 
 > **全像素约定（2026-10-15 起）**
 > - `fusion-pixel-12.ttf` 是真正的轮廓像素字（GDI+ 轮廓分析 0 贝塞尔点、纯矩形段），设计网格 =
@@ -979,6 +980,16 @@ Utils/Skin.lua               皮肤原语（剥皮、底板、按钮/页签/滚�
 > - 授权：OFL 全文见 `Assets/Fonts/OFL-FusionPixel.txt`，无 GPL 污染。
 > - 字体路径在 `Utils/Media.lua` 里由 `ADDON_NAME` 拼出，因此**安装目录必须叫 `MonetUI`**。
 > - 取证/预览页：`docs/font-pixel-test.html`（光栅放大对比各字体是否真像素）。
+
+> **2026-10-26 回切：字库覆盖优先于「像素感」**
+> - 玩家反馈 `fusion-pixel-12` 有□占位。实测 cmap：Fusion Pixel 只映射 19317/20992 个 CJK 码位
+>   （缺 1675，生僻人名 / 物品 / 地名会掉方框），PingFangPixel 20945/20992。本插件自己渲染的
+>   794 个非 ASCII 字符两种字体都齐 —— 掉方框的是**游戏数据**里的字。
+> - `Media.font.pixel` / `pingfang` → `Assets/Fonts/Pingfangpixel.ttf`；`Media.fontFlags` 与
+>   `Media.outlineFlags` → `"OUTLINE, MONOCHROME"`（1px 描边 + 关抗锯齿：描边和字身都是硬边）。
+> - 代价：PingFangPixel 是矢量字（贝塞尔轮廓，内嵌点阵位图游戏不读），所以**不再是"像素字"**；
+>   `Media:SnapSize()` 的 12 步长从"网格硬约束"退化成"字号一致性约定"，行为保留。
+> - 授权债：PingFangPixel 无可分发授权，**公开发行前必须换回 OFL 字体**（见 `Assets/Fonts/NOTICE.md`）。
 
 ### 参考与致谢
 
@@ -1158,6 +1169,7 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | 2026-10-16 | 全字体切换到 **Fusion Pixel 12px**（`fusion-pixel-12.ttf`，SIL OFL 1.1，随包 `Assets/Fonts/OFL-FusionPixel.txt`）；删除 `combat.ttf`（全项目零引用），`Pingfangpixel` / `roadway` 留盘作回滚但代码不再引用 | 取证结论（`docs/font-pixel-test.html` + GDI+ 轮廓分析）：PingFang Pixel 的 `glyf` 是平滑贝塞尔+斜线段、内嵌 `bdat/bloc` 位图渲染器游戏不读 → 进游戏渲染并不像素；Fusion Pixel 轮廓 **0 贝塞尔点、纯矩形段**，是真像素字 |
 | 2026-10-16 | 字号统一吸附 12px 网格（`Media:SnapSize()`，全项目只用 12 / 24），姓名板字号下拉随之移除 | Fusion Pixel 设计网格 = em/12，只有 12 的整数倍才让一个设计像素 = 一个屏幕像素；字号选项在网格约束下全部渲染成 12，留着是骗人的控件 |
 | 2026-10-16 | 渲染标志统一 `Media.fontFlags = "MONOCHROME"`，全项目移除 `OUTLINE` | MONOCHROME 关抗锯齿：网格上无副作用，脱网格时把灰边压成硬阶跃（比描边更像像素）；1px 描边会把像素方块糊成一片 |
+| 2026-10-26 | **回切正文到 `Pingfangpixel.ttf`**，`Media.fontFlags` / `outlineFlags` 改 `"OUTLINE, MONOCHROME"`（1px 描边 + 关抗锯齿）；`fusion-pixel-12` 降为备用 | 字库覆盖优先：Fusion Pixel 缺 1675 个 CJK 码位（游戏数据里的生僻字掉□），PingFangPixel 只缺 47 个；代价是不再是"像素字"，所以用 OUTLINE 保住 12px 下的可读性。授权债记在 `Assets/Fonts/NOTICE.md`：公开发行前必须换 OFL 字体 |
 | 2026-10-16 | `skins.font` 默认 `off` → `pixel`，下拉只剩「关闭 / 像素字体」，旧存档 `roadway`/`number`/`combat` 经 `GetFontKey` 归一到 pixel | 全像素目标下默认值决定暴雪窗口是否也是像素字；Blizzard 共享字体对象**保留原生字号不吸附**（它们的排版绑死字号），只换字体与标志 |
 | 2026-10-17 | 冷却倒计时改由插件自绘文字：单位自动缩放（复用 `Math:DurationText`，≥60s→分、≥1h→时、≥24h→天，与光环时长同格式器），剩余 ≤ 紧急阈值（默认 5 秒，面板可调 3/5/8/10）时 danger 红 + 字号 12→18（并以按钮宽度 60% 封顶防溢出）；`hooksecurefunc` 挂 Cooldown 控件共享方法表的 `SetCooldown`（捕获到期时间）与 `SetHideCountdownNumbers`（记录外部显隐意图），另有 0.5s 轮询接管"没看到起点"的冷却 | `SetCooldown` 参数与 `GetCooldownTimes` 在受限状态是**机密值**，插件不能对它做算术；但已捕获的到期时间是普通数、`GetTime` 也普通 → "脱战开的冷却进战后照常走我们的格式"，只有战斗中新开的技能降级回暴雪自己的数字——宁可降级也不猜数 |
 | 2026-10-17 | 冷却文字画在 cooldown 的**子框体**里而不是 region；模块开关/面板改动走 `ApplyDisplay()` 立即重绘；动作条两处样式调用改走 `Cooldown:StyleCooldown`，模块缺席时退回原 `StyleCooldownText` | 子框体避开 `Widget:StyleCooldownText` 重刷（会把字号刷回 12、颜色刷回白色，与紧急放大打架）；共享方法表让暴雪按钮与 LibActionButton 按钮同一条路，`ActionButton1Cooldown` 缺席时用探测帧兜底装钩 |

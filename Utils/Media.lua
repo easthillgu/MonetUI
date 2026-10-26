@@ -13,28 +13,33 @@ Media.asset        = ASSET
 Media.fontsDir     = ASSET .. "Fonts\\"
 Media.texturesDir  = ASSET .. "Textures\\"
 
--- Every font we set is a pixel (bitmap-grid) face, always rendered with MONOCHROME (see Media.fontFlags) so edges stay hard -- no OUTLINE ever, a 1px outline smears the grid blocks of a pixel font.
---   pixel    Fusion Pixel 12px (SIL OFL, license: Assets/Fonts/OFL-FusionPixel.txt).
---            True rectangle outlines on a grid of em/12, so one design pixel equals one screen pixel at the multiples of 12 (12, 24) our call sites use; off-grid text is hardened by MONOCHROME.
---   cooldown Super Effective, a tiny ASCII-only pixel face for countdown digits -- digits only, never pass Chinese to it.
---   pingfang PingFangPixel, a normal (vector) face for numbers that must stay legible when the icon is
---            small: a 12px grid face turns into noise at 8-10px (aura durations on 28px icons).
+-- 全项目只用两种字体，渲染标志统一走 Media.fontFlags（默认）/ Media.outlineFlags（小字号别名）。
+--   pixel / pingfang  PingFangPixel（点阵苹方）：矢量轮廓 + 内嵌点阵位图，29 MB。
+--       为什么换掉 fusion-pixel-12：它是真像素字（纯矩形轮廓、设计网格 em/12），但字库只映射
+--       19317/20992 个 CJK 码位 —— 游戏数据里的生僻字（人名 / 物品 / 地名 / 成就）会掉成 □。
+--       PingFangPixel 覆盖 20945/20992；本插件自己渲染的 794 个非 ASCII 字符两种字体都齐。
+--       **授权**：文件内无 license 字段，苹方系苹果授权字体 —— 私有包里可以用，**公开发行前必须
+--       换字**（见 Assets/Fonts/NOTICE.md；优先 OFL 的 方舟像素 Ark Pixel 12px 一类）。
+--   cooldown          Super Effective，ASCII-only 小数字像素字体，只能给倒计时数字。
 -- Unknown keys fall back to `pixel`, so legacy saved settings that still say "roadway", "number", "combat" or "default" resolve to the pixel font.
 Media.font = {
-    pixel    = ASSET .. "Fonts\\fusion-pixel-12.ttf",
+    pixel    = ASSET .. "Fonts\\Pingfangpixel.ttf",
     cooldown = ASSET .. "Fonts\\super-effective.ttf",
     pingfang = ASSET .. "Fonts\\Pingfangpixel.ttf",
 }
 
--- Default render flags for every FontString we set: MONOCHROME switches antialiasing off -- on the grid it changes nothing, off the grid it turns the grey fringe into hard stair-steps instead of blur.
-Media.fontFlags = "MONOCHROME"
+-- 默认渲染标志：OUTLINE = 1px 描边，MONOCHROME = 关掉抗锯齿。
+-- 两者都用上才是"非抗锯齿描边"：描边和字身都是硬边，12px 下不会被 AA 糊出一圈灰。
+Media.fontFlags = "OUTLINE, MONOCHROME"
 
--- 小字号光环时长专用的硬描边：OUTLINE 给一圈 1px 边，MONOCHROME 关掉抗锯齿（边是硬台阶、不糊）。
--- 像素字体永远不要用它（会把字模格子糊成一片，见上）；PingFangPixel 不在 12px 网格上，用了反而清楚。
+-- 小字号（8–14px：光环时长 / 层数）用的同一套标志。保留别名，BuffFrame / Cooldown 的调用点
+-- 不必改；将来要单独调小字号的描边粗细，只改这一行。
 Media.outlineFlags = "OUTLINE, MONOCHROME"
 
---- Snap a font size onto the pixel grid (multiples of 12) and to a sane floor.
--- Allows 10px as a valid size for compact unit frame text; otherwise snaps to 12px grid.
+--- Snap a font size onto the 12px step (and a sane floor).
+-- 原本是为像素字的 em/12 网格；换成矢量字体（PingFangPixel）后网格不再是硬约束，但字号仍按同一步长
+-- 取整 —— 全项目只有 10 / 12 / 24 这几档，位置和行高才不会因为某个下拉选项跳一档而错位。
+-- Allows 10px as a valid size for compact unit frame text; otherwise snaps to the 12px step.
 function Media:SnapSize(size)
     size = tonumber(size) or 12
     if size <= 10 then return 10 end

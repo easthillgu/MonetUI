@@ -340,7 +340,8 @@ end
 
 --- A FontString using the addon fonts.
 -- @param key font key in Media.font ("pixel", "cooldown", "pingfang"); @param colorKey "edge" | "neutral" | "highlight" | "border" | "health" | "danger" | {r,g,b}
--- @param flags optional render flags (default Media.fontFlags = "MONOCHROME"); pass Media.outlineFlags ("OUTLINE, MONOCHROME") for a hard-edged outline.
+-- @param flags optional render flags (default Media.fontFlags = "OUTLINE, MONOCHROME" — 1px 描边 + 关抗锯齿);
+--        pass Media.outlineFlags when a small size needs the same treatment spelled out.
 function Widget:Font(parent, size, key, colorKey, justify, layer, flags)
     local fs = parent:CreateFontString(nil, layer or "OVERLAY")
     local fontPath = Media:Font(key)
