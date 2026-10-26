@@ -12,6 +12,8 @@ if not M then return end
 
 local SlotOf = M.SlotOf
 
+local Secrets = ns.Secrets
+
 -- ---------------------------------------------------------------------------
 -- 拖放接住器
 --
@@ -115,20 +117,22 @@ local function EnsureDropCatcher(bar)
         local slot = button and SlotOf(button, bar, index)
         if slot and PlaceAction then pcall(PlaceAction, slot) end
     end)
-    -- 10Hz 轮询：只在手里拿着东西（法术/物品/宏）时开鼠标
+    -- 10Hz 轮询：只在"这条条显示着"**并且**手里拿着东西（法术/物品/宏）时才开鼠标。
+    -- 早期写法是"条不显示就直接 return"——那会漏掉最重要的那一拍：接住器是挂在**条的矩形**上的
+    -- （level 70，压过我们的按钮），而模板自带的事件会把它鼠标打开；条隐藏时不给它结算，
+    -- 它就永远停在 mouse=true。实机后果（2026-10-26）：bar4..8 只有 3 组却开着接住器，
+    -- bar4 的接住器正好压在姿态条上，姿态那几格点下去变成"动作条第 1 格"。
+    -- 所以每一拍都算出一个**期望状态**，和当前状态不一致就写过去（包括"关掉"）。
     local acc = 0
     catcher:SetScript("OnUpdate", function(self, elapsed)
         acc = acc + (elapsed or 0)
         if acc < 0.1 then return end
         acc = 0
-        if not frame:IsShown() then
-            if self.holding then self.holding = false; pcall(self.EnableMouse, self, false) end
-            return
-        end
-        local holding = GetCursorInfo() ~= nil
-        if holding ~= self.holding then
-            self.holding = holding
-            pcall(self.EnableMouse, self, holding)
+        -- IsShown 在受限环境可能是机密值：走 Secrets.Bool，读不出来按"没显示"（= 关鼠标，更安全）。
+        local active = Secrets.Bool(frame:IsShown(), false) and (GetCursorInfo() ~= nil)
+        if active ~= self.holding then
+            self.holding = active
+            pcall(self.EnableMouse, self, active)
         end
     end)
     dropCatchers[bar] = catcher
