@@ -711,32 +711,19 @@ deploy（文件数从 119 降到 117）+ sync-check 同步。**待实机看**：
 deploy 117 + sync-check 同步。**待实机看**：连按 B 十几次不会出现"两套同时"；
 正常按一次 B 开、再按一次关；开着银行翻背包时不会自己关掉；关掉模块后暴雪背包照常能开。
 
-### 3.23 2026-10-26：提示框条目按主题色系上色
+### 3.23 2026-10-26：提示框条目配色 —— **已按玩家要求回退**（`853d38f` revert `37e87c0`）
 
-玩家要求：提示框各条目的颜色美化一下，参考 Andromeda 的做法，但色系用我们自己的。
+当天早些时候试过"把提示框条目文字按色相桶映射到 Monet 主题色"（`TintLines` + `MonetColor`：
+红→danger、金→primary、绿→health、蓝→resource、白灰→highlight/neutral，第一行品质色不动）。
+玩家看过后要求回退，已整体还原：`Modules/Tooltip.lua` 的两处调用与两个函数、`tooltip.tint` 默认值、
+面板那一项、README/HANDOFF 的说明全部撤销。
 
-- **Andromeda 的做法**（`modules/tooltip/style.lua`）：按**语义**给色（物品品质染边框、字体统一带阴影），
-  内容不重排；它依赖 `TooltipDataProcessor` 在填充后回调 —— 这个 API 本客户端没有（见 3.13）。
-- **我们的做法**（`Modules/Tooltip.lua` 的 `TintLines` + `MonetColor`）：在已有驱动里每 0.05 秒扫一遍
-  `GameTooltipTextLeft/Right1..N`，读它们**当前的**颜色，按色相桶映射到 Monet 主题槽：
-  | 原色 | 映射 |
-  |---|---|
-  | 无彩（白 / 灰，饱和 < 0.12） | 亮 → `highlight`；暗 → `neutral` |
-  | 红（r 最大、非金） | `danger` |
-  | 金 / 橙（r 最大且 g 明显） | `primary` |
-  | 绿（g 最大） | `health` |
-  | 蓝（b 最大） | `resource` |
-  取色全走 `Color:Get(slot)`，所以**换区域 / 换主题时整张提示框的色调跟着走**。
-- **第一行不动**：那一行是名字 / 物品名，暴雪用品质色（白绿蓝紫橙）表达稀有度，换成主题色就抹掉了信息。
-- 只在色差 > 0.05 时才 `SetTextColor`，不会每拍重写一遍；`GetTextColor` 走 pcall + 数值判定（机密安全）。
-- 开关：设置面板「条目标题色跟主题」＝ `tooltip.tint`（默认开）。关掉后要等下一次悬停才恢复暴雪原色
-  （我们不保存原色 —— 暴雪每次填充都会重刷，没必要记）。
-- **已知边界**：颜色是**写在文本里的转义码**（`|cff...`）而不是 `SetTextColor` 的行，这一层改不到；
-  要改就得重写文本，而文本下一拍又会被引擎重填 —— 不值得。
+- 回退方式：`git checkout 37e87c0~1 -- <文件>` + 手工删掉 `Core.lua` 里那一行（Core 有玩家未提交的
+  WIP，直接 `git revert` 会因工作区脏而中止），剩下 `tint` 键在存档里没人读，无害。
+- 需要时照着 `37e87c0` 的 diff 可以原样捡回来；配套结论仍成立：
+  本客户端没有 `TooltipDataProcessor`，只能在 0.05s 驱动里扫，颜色写在文本转义码里的行改不到。
 
-闸门：`api-audit` 0 hard、`audit-taint` 0/0/0、`wuxian check` 0 error / 5 warning、
-deploy 117 + sync-check 同步。**待实机看**：物品/技能/单位提示的正文与右侧数值都带上主题色调，
-第一行名字仍是品质色；`/mui theme` 或换区域后颜色立即跟着变；关掉开关后回到暴雪原色。
+闸门：`api-audit` 0 hard、`audit-taint` 0/0/0、`wuxian check` 0 error / 5 warning、deploy 117 + sync-check 同步。
 
 ---
 

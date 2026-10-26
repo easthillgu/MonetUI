@@ -45,7 +45,7 @@ local EDGE_H = 320
 --- 内容扫描间隔（秒）。位置是每帧；内容只在"变了"的时候才动，没必要每帧重算。
 local SCAN = 0.05
 
-local mode, enrich, idsByAlt, tint  -- 设置缓存（每帧要读，别去翻 DB）：cursor / minimap / off + 内容开关
+local mode, enrich, idsByAlt       -- 设置缓存（每帧要读，别去翻 DB）：cursor / minimap / off
 local driver, wasShown, scanAcc, cursorKey, mmKey
 
 -- ============================================================================
@@ -376,59 +376,6 @@ local function Enrich(tip)
 end
 
 -- ============================================================================
--- 条目配色：把暴雪自己刷出来的行颜色映射到我们的主题色系
--- 参考 Andromeda 的做法（按语义给色、不重排内容），但取色全走 Color:Get(slot)，
--- 所以换主题 / 换区域时整张提示框的色调跟着走。
--- 注意：**第一行不动** —— 那一行是名字 / 物品名，暴雪用品质色（白/绿/蓝/紫/橙）表达稀有度，
--- 换成主题色就把这个信息抹掉了。
--- ============================================================================
-
-local SIDES = { "TextLeft", "TextRight" }
-local TINT_EPS = 0.05          -- 只在"和我们的目标色差得够明显"时才写，避免每拍刷一遍
-
---- 一条文本颜色 → 我们的色系（保留语义：红=警告、金=价值、绿=可用、蓝=资源）。
-local function MonetColor(r, g, b)
-    local maxc = math.max(r, g, b)
-    local minc = math.min(r, g, b)
-    local sat = maxc > 0 and (maxc - minc) / maxc or 0
-
-    if sat < 0.12 then
-        -- 无彩色（白 / 灰）：亮的是正文，用主题的高光白；暗的是次要信息，用中性色
-        if maxc >= 0.85 then return Color:Get("highlight") end
-        return Color:Get("neutral")
-    end
-    if r >= g and r >= b then
-        -- 红 / 金都在这一支：绿分量够高（黄橙）算"价值色"，否则算警告
-        if g > b + 0.15 and g > 0.45 then return Color:Get("primary") end
-        return Color:Get("danger")
-    end
-    if g >= r and g >= b then return Color:Get("health") end
-    return Color:Get("resource")
-end
-
---- 扫一遍当前显示的行，把颜色换成主题色（第一行跳过）。
-local function TintLines(tip)
-    if not tint then return end
-    local name = tip.GetName and tip:GetName()
-    if not name then return end
-    local n = tip.NumLines and tip:NumLines() or 0
-    for i = 2, n do
-        for s = 1, #SIDES do
-            local fs = _G[name .. SIDES[s] .. i]
-            if type(fs) == "table" and fs.GetTextColor and fs.SetTextColor then
-                local ok, r, g, b = pcall(fs.GetTextColor, fs)
-                if ok and type(r) == "number" then
-                    local tr, tg, tb = MonetColor(r, g, b)
-                    if tr and math.abs(r - tr) + math.abs(g - tg) + math.abs(b - tb) > TINT_EPS then
-                        pcall(fs.SetTextColor, fs, tr, tg, tb)
-                    end
-                end
-            end
-        end
-    end
-end
-
--- ============================================================================
 -- 驱动：一个自建帧，每帧一次；提示框隐藏时立刻返回（没有轮询开销）
 -- ============================================================================
 
@@ -453,12 +400,11 @@ local function Tick(_, elapsed)
     end
 
     if not wasShown then
-        -- 上升沿：当帧摆位 + 补内容 + 上色（暴雪每次填充都会把行颜色刷回它自己的）
+        -- 上升沿：当帧摆位 + 补内容（晚一帧的那一行，就是在这一步补的）
         wasShown = true
         scanAcc = 0
         ApplyPlacement(tip)
         Enrich(tip)
-        TintLines(tip)
         return
     end
 
@@ -470,7 +416,6 @@ local function Tick(_, elapsed)
     if scanAcc < SCAN then return end
     scanAcc = 0
     Enrich(tip)
-    TintLines(tip)     -- 内容可能刚被重填（冷却跳数、Shift 对比），颜色跟着补一遍
 end
 
 local function Install()
@@ -489,7 +434,6 @@ function M:Apply()
     mode     = ResolveMode(self)
     enrich   = self:GetSetting("enrich") and true or false
     idsByAlt = self:GetSetting("idsByAlt") and true or false
-    tint     = self:GetSetting("tint") ~= false
     -- 开关变了：记账清零，下一次扫描按新设置重来。
     -- 注意**不 Hide**（以前的毛病：取消勾选会把正在看的提示框直接收掉）。
     local tip = _G.GameTooltip
@@ -500,7 +444,6 @@ function M:Initialize()
     mode     = ResolveMode(self)
     enrich   = self:GetSetting("enrich") and true or false
     idsByAlt = self:GetSetting("idsByAlt") and true or false
-    tint     = self:GetSetting("tint") ~= false
     Install()
 end
 

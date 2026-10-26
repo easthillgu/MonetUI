@@ -236,7 +236,6 @@ local DEFAULTS = {
         anchor   = "cursor",  -- 位置：cursor=跟随鼠标 / minimap=贴小地图右上角 / off=暴雪默认
         enrich   = true,      -- 单位提示追加「目标: 谁」一行
         idsByAlt = true,      -- 按住 Alt 显示 ID（NPC / 物品 / 法术）
-        tint     = true,      -- 条目文字按主题色系重上色（第一行名字/品质色不动）
     },
     -- 光标拖尾 / 速度星芒 (Modules/Cursor)：纯装饰，拖尾跟主题边框色，星芒用高光色。
     cursor = {
