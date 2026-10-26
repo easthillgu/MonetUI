@@ -684,6 +684,33 @@ deploy 119 + sync-check 同步。**待实机看**：四周是 1 物理像素主�
 deploy（文件数从 119 降到 117）+ sync-check 同步。**待实机看**：`/mui status` 里不再有 BagFrame、
 背包键（B）/ 背包钮仍能打开分类背包。
 
+### 3.22 2026-10-26：连续按 B 会"两套背包一起出来"
+
+玩家报：连续按 B，分类背包和暴雪原生背包同时出现。
+
+- **根因（两个叠加）**：
+  1. 老实现用 `Widget:ShowWatch` 的**上升沿**拦暴雪的背包框，而它是 **0.2 秒轮询** ——
+     两次 B 压在一个间隔里，上升沿直接漏掉；
+  2. 更关键的是**只藏一次**：`Intercept` 里藏完就切自己的窗口，之后暴雪那边
+     （合并框 + 5 个包是一串调用、还有 `BAG_UPDATE` 后的重刷）**还会再 Show 回来**，
+     没人管 → 我们的窗口开着、暴雪的框也留着 = 两套一起出来。
+- **修法**：把"藏暴雪背包框"从**一次动作**改成**持续不变量**：
+  - `SweepBlizzardBags()`：扫一遍 `ContainerFrame1..13` + `ContainerFrameCombinedBags`，见显示就藏；
+  - `StartBlizzardGuard()`：自建帧每 **0.05 秒**跑一次（模块没开就直接 return），
+    扫到就藏；并且把"扫到东西"当成玩家按了一次 B（`M:Toggle()`）——
+    暴雪一旦被我们藏掉，它自己就认为"背包是关的"，所以**下一次 Show 必然是玩家按键**；
+  - `TOGGLE_DEBOUNCE = 0.12`：挡住我们刚藏完那一小段里暴雪的"回光返照"，免得自己切来切去；
+  - `bankOpen` 标记：银行窗口开着时暴雪自己也会开背包框，这时**只藏、不切换**我们的窗口；
+  - `M:Toggle()` 的**关闭分支不再 `HideBlizzardBags(false)`**（那一步会把暴雪的框 Show 回来，
+    守卫下一拍又当成按键再切一次 = 自己弹自己）；"还框"只在 `SetEnabled(false)` 做；
+  - `BANKFRAME_CLOSED` 里的 `HideBlizzardBags(false)` 同样删掉。
+- 顺带：删掉 `HookBlizzardBags()` 与 `ShowWatch` 注册（守卫每次扫的都是 `_G` 实时查表，
+  迟到的 `ContainerFrame` 也能被扫到，不需要"补钩"）。
+
+闸门：`api-audit` 0 hard、`audit-taint` 0/0/0、`wuxian check` 0 error / 5 warning、
+deploy 117 + sync-check 同步。**待实机看**：连按 B 十几次不会出现"两套同时"；
+正常按一次 B 开、再按一次关；开着银行翻背包时不会自己关掉；关掉模块后暴雪背包照常能开。
+
 ---
 
 ## 4. 污染（taint）模型 —— 这个客户端最贵的一课

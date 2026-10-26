@@ -544,45 +544,51 @@ local function HideBlizzardBags(enable)
 end
 
 --- 暴雪的背包框每次被打开都要拦一道：把我们的分类窗口顶上来，暴雪那条继续藏着。
---- 玩家按 B（或点背包钮）时暴雪走的就是 ContainerFrame:Show()，
---- 所以钩 Show / SetShown 就够 —— 不用自己去抢按键。
+--- 玩家按 B（或点背包钮）时暴雪走的就是「Show 它的 ContainerFrame」。
 ---
---- 两件事必须留到**下一帧**再做：
----   1. 藏框 —— 暴雪正在 Show 它的框时我们就把框藏了，它自己的
----      "生成物品格子" 那一步会拿到 nil（ContainerFrame.lua 的 'itemButton' is a nil value）。
----      晚一帧藏，暴雪的流程能正常跑完，只是玩家会看到背包闪一下。
----   2. 开关我们的窗口 —— 暴雪一次开背包会把合并框 Show 六次（背包 + 5 个包），
----      同一帧里的多次触发只能算一次。
-local blizzardHooked = false
-local interceptGuard = false
+--- **不再用 ShowWatch 的上升沿**（2026-10-26 实机 bug：连续按 B 会两套背包一起出来）。原因两条：
+---   1. `ShowWatch` 是 0.2 秒轮询 —— 两次 B 压在一个间隔里，上升沿直接漏掉；
+---   2. 更关键：我们藏掉之后，暴雪那边（合并框 + 5 个包是一串调用）**还会再 Show 回来**，
+---      而老实现只在"切换我们自己的窗口"那一下藏过一次，之后没人管 → 我们的窗口开着、暴雪的框也留着。
+---
+--- 现在的规矩是**持续不变量**：只要模块开着，暴雪那十几个背包框一律不许出现在屏幕上；
+--- 每 0.05 秒扫一次，见到就藏，并把"见到"当成玩家按了一次 B（= 切换我们自己的窗口）。
+--- 连续调用（一次开背包会 Show 六次）会合并成同一个 tick 里的一次；`TOGGLE_DEBOUNCE` 再把
+--- 我们刚藏完那一小段里暴雪的"回光返照"挡掉，免得自己把自己切来切去。
+local blizzardDriver, guardAcc, lastToggle = nil, 0, 0
+local bankOpen = false          -- 银行窗口开着时，暴雪自己也会开背包框：只藏，不当成"玩家按了 B"
+local GUARD_INTERVAL = 0.05
+local TOGGLE_DEBOUNCE = 0.12
 
-local function HookBlizzardBags()
+--- 扫一遍暴雪背包框：见到显示的就藏掉，返回"刚才是不是有东西在显示"。
+local function SweepBlizzardBags()
+    local opened = false
     for _, frame in ipairs(BlizzardBagFrames()) do
-        if not Marked(frame, "bagHook") then
-            Mark(frame, "bagHook", true)
-            local function Intercept(self)
-                if not ns:IsModuleEnabled("Bags") then return end
-                if interceptGuard then return end
-                interceptGuard = true
-                local defer = function()
-                    interceptGuard = false
-                    for _, other in ipairs(BlizzardBagFrames()) do
-                        pcall(other.Hide, other)
-                    end
-                    M:Toggle()
-                end
-                if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
-                    C_Timer.After(0, defer)
-                else
-                    defer()
-                end
-            end
-            -- 不再 hooksecurefunc(frame, "Show"/"SetShown")（写方法槽 = 污染源，见 AGENTS）。
-            -- 改成轮询"从隐藏变显示"：暴雪把合并背包 Show 出来时我们接管并立刻开自己的窗口。
-            ns.Widget:ShowWatch(frame, Intercept)
+        if frame and frame.IsShown and frame:IsShown() then
+            opened = true
+            blizzardHidden[frame] = true
+            pcall(frame.Hide, frame)
         end
     end
-    blizzardHooked = true
+    return opened
+end
+
+local function StartBlizzardGuard()
+    if blizzardDriver then return end
+    blizzardDriver = CreateFrame("Frame")
+    blizzardDriver:SetScript("OnUpdate", function(_, elapsed)
+        if not ns:IsModuleEnabled("Bags") then return end
+        guardAcc = guardAcc + (elapsed or 0)
+        if guardAcc < GUARD_INTERVAL then return end
+        guardAcc = 0
+
+        local opened = SweepBlizzardBags()
+        local now = GetTime()
+        if opened and not bankOpen and (now - lastToggle) >= TOGGLE_DEBOUNCE then
+            lastToggle = now
+            M:Toggle()
+        end
+    end)
 end
 
 local shown = false
@@ -602,16 +608,17 @@ function M:Toggle(force)
         Rebuild("bags")
     else
         for _, win in pairs(windows) do win:Hide() end
-        HideBlizzardBags(false)
+        -- **不要把暴雪的背包框还回来**：那一步会把它 Show 出来，而守卫（0.05s 扫一次）下一拍
+        -- 又会把它当成"玩家按了 B"再切一次我们的窗口 —— 自己把自己弹来弹去。
+        -- 还框只在模块被关掉时做（SetEnabled(false)）。
     end
 end
 
 function M:Initialize()
     if not ns:DB().bags then ns:DB().bags = {} end
 
-    -- 暴雪的背包框（ContainerFrame1…13）一开始可能还没建出来，
-    -- 每次事件都补钩一次（幂等）。
-    HookBlizzardBags()
+    -- 只要模块开着，暴雪的背包框一律不许出现（每 0.05s 扫一次，见 StartBlizzardGuard 的注释）。
+    StartBlizzardGuard()
 
     -- BAG_UPDATE fires often and for every bag: the handler only marks a rebuild, coalesced to one frame by the flag.
     local pending = false
@@ -623,7 +630,6 @@ function M:Initialize()
     end)
 
     local function Mark()
-        HookBlizzardBags()
         if not shown then return end
         pending = true
         driver:Show()
@@ -635,6 +641,7 @@ function M:Initialize()
 
     -- Bank: only while the bank is open.
     EventBus:Register("BANKFRAME_OPENED", function()
+        bankOpen = true
         if Setting("showBank") then
             shown = true
             HideBlizzardBags(true)
@@ -642,13 +649,14 @@ function M:Initialize()
         end
     end)
     EventBus:Register("BANKFRAME_CLOSED", function()
+        bankOpen = false
         -- 银行关了就把背包那几扇窗放回去（原来这里一关就再也不回来了）。
+        -- **不再 HideBlizzardBags(false)**：守卫会把它们立刻又藏起来，而"还框"只属于模块关闭。
         if shown then
             Rebuild("bags")
         else
             for _, win in pairs(windows) do win:Hide() end
         end
-        HideBlizzardBags(false)
     end)
 end
 
@@ -667,9 +675,10 @@ function M:SetEnabled(enabled)
     if not enabled then
         for _, win in pairs(windows) do win:Hide() end
         shown = false
+        -- 模块关掉：把当初藏起来的暴雪背包框还回去（守卫这时会因为 IsModuleEnabled 为假而停手）
         HideBlizzardBags(false)
     else
-        HookBlizzardBags()
+        StartBlizzardGuard()
     end
 end
 
