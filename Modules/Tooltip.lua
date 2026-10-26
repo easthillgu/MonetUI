@@ -8,9 +8,11 @@
 --   off     —— 不动，用暴雪自己的锚点。
 --   偏移按物理像素算（Media:Mult），不随 UI 缩放浮动。
 --
--- 内容（只保留三样，其余在 HANDOFF 3.13 里写了为什么砍）：
---   * 单位：追加一行「目标: <名字>」—— 这个单位正在打谁（名字用职业色，NPC 用高光色）；
---   * Alt：追加一行 ID —— 单位是 NPC ID（GUID 里的 creature 编号）、物品是 itemID、法术是 spellID。
+-- 内容（只保留两样，其余在 HANDOFF 3.13 里写了为什么砍）：
+--   * 单位：一行「目标: <名字>」—— 这个单位正在打谁（名字用职业色，NPC 用高光色）；
+--   * Alt：一行 ID —— 单位是 NPC ID（GUID 里的 creature 编号）、物品是 itemID、法术是 spellID。
+--   这两行画在**我们自己的小框**里（挂在提示框下沿，1px 主题色边框），不用 tooltip:AddLine ——
+--   本客户端的提示框是数据行驱动的，追加的行会被下一次重填抹掉（HANDOFF 3.18）。
 --
 -- 为什么不是钩子：本客户端**没有** TooltipDataProcessor（手册零命中），而 HookScript /
 -- hooksecurefunc 写的是暴雪框的脚本槽 / 方法槽，AGENTS 的污染模型明令禁止（GameTooltip
@@ -186,140 +188,175 @@ local function TooltipUnit(tip)
     return nil
 end
 
---- 某一行左侧文本（TextLeftN）的明文，读不到 / 机密返回 nil。
-local function LineText(tip, index)
-    local name = tip.GetName and tip:GetName()
-    if not name then return nil end
-    local fs = _G[name .. "TextLeft" .. index]
-    if type(fs) ~= "table" or type(fs.GetText) ~= "function" then return nil end
-    local ok, text = pcall(fs.GetText, fs)
-    if not ok then return nil end
-    return Plain(text)
+--- 附加信息画在**我们自己的小框**里，不用 tooltip:AddLine。
+-- 原因（2026-10-26 实机）：本客户端的 GameTooltip 是**数据行驱动**的，动作条冷却 / 信息栏 /
+-- 单位框都会不停地重填整个框，我们追加的行下一拍就被抹掉 —— 表现就是"按下 Alt 只闪一次 ID，
+-- 然后再也看不到"。画在自己的框里，内容、颜色、1px 边框全归我们管，谁也抹不掉。
+local BOX_PAD    = 5      -- 内边距（物理像素）
+local BOX_GAP    = 2      -- 与提示框之间的缝（物理像素）
+local BOX_FONT   = 12     -- 字号（UI 单位）
+local BOX_SLACK  = 3      -- 行间补白（UI 单位）
+
+local box, boxLines = nil, {}
+
+local function EnsureBox()
+    if box then return box end
+    box = ns.Widget:CreateFrame("MonetUITooltipExtra", _G.UIParent, 160, 24)
+    box:SetFrameStrata("TOOLTIP")            -- 和 GameTooltip 同层
+    box:EnableMouse(false)
+    -- 和提示框同一套外观：1px 主题色边框 + 近黑底（边框色由 Widget:Theme 跟主题刷新）
+    ns.Widget:Theme(box, { thickness = 1, bgAlpha = 0.95, borderAlpha = 1 })
+    box:Hide()
+    return box
 end
 
---- 内容指纹：单位 / 物品链接 / 法术 id / 行数 / 首末行 / Alt 状态。
---- 变了才重补内容；没变就什么都不做。
-local function Signature(tip)
-    local parts = {}
-    parts[#parts + 1] = TooltipUnit(tip) or ""
-    local lines = tip:NumLines() or 0
-    parts[#parts + 1] = tostring(lines)
-    parts[#parts + 1] = LineText(tip, 1) or ""
-    if lines > 1 then parts[#parts + 1] = LineText(tip, lines) or "" end
-    if type(tip.GetItem) == "function" then
-        local ok, _, link = pcall(tip.GetItem, tip)
-        if ok and type(link) == "string" then parts[#parts + 1] = Plain(link) or "?" end
-    end
-    if type(tip.GetSpell) == "function" then
-        local ok, _, id = pcall(tip.GetSpell, tip)
-        if ok and id ~= nil then
-            local n = Secrets.Number(id)
-            if n then parts[#parts + 1] = tostring(n) end
-        end
-    end
-    parts[#parts + 1] = (_G.IsAltKeyDown and _G.IsAltKeyDown()) and "1" or "0"
-    return table.concat(parts, "\1")
+local function BoxLine(index)
+    local fs = boxLines[index]
+    if fs then return fs end
+    fs = ns.Widget:Font(box, BOX_FONT, "pixel", "neutral", "LEFT")
+    fs:SetJustifyH("LEFT")
+    fs:SetWordWrap(false)
+    boxLines[index] = fs
+    return fs
 end
 
---- 空行 + 「标签 / 值」两列。值的颜色默认高光色（主题色，和皮肤一致）。
-local function AddPair(tip, label, value, vr, vg, vb)
-    local lr, lg, lb = Color:GetNeutral()
-    if vr == nil then vr, vg, vb = Color:GetHighlight() end
-    tip:AddLine(" ")
-    if type(tip.AddDoubleLine) == "function" then
-        tip:AddDoubleLine(label, value, lr, lg, lb, vr, vg, vb)
-    else
-        tip:AddLine(label .. " " .. tostring(value), lr, lg, lb)
-    end
-end
-
---- 「目标: <名字>」—— 这一行回答"它现在在打谁"，比装等/专精便宜得多，也不碰 inspect。
-local function AddUnitTarget(tip, unit)
-    local target = unit .. "target"
-    if not Secrets.Bool(UnitExists(target), false) then return end
-
-    local ok, name = pcall(UnitName, target)
-    name = ok and Plain(name) or nil
-    if not name or name == "" then
-        -- 战斗中身份是机密：宁可少一行，也不写"目标: ???"骗自己。
+--- 把附加行画到小框里：lines = { { text =, r =, g =, b = }, ... }。
+--- sig 没变就只做对齐，不重写文字（避免每 0.05 秒 SetText 一遍）。
+local function UpdateBox(tip, lines, sig)
+    if #lines == 0 then
+        if box then box:Hide() end
+        Mark(tip, "boxSig", nil)
         return
     end
+    EnsureBox()
 
-    local vr, vg, vb
-    if Secrets.Bool(UnitIsPlayer(target), false) then
-        local okc, classFile = pcall(UnitClassBase, target)
-        classFile = okc and Plain(classFile) or nil
-        if classFile then vr, vg, vb = Color:ClassColor(classFile) end
+    local mult = Media:Mult() or 1
+    local pad  = BOX_PAD * mult
+    local gap  = BOX_GAP * mult
+
+    if Marked(tip, "boxSig") ~= sig then
+        Mark(tip, "boxSig", sig)
+        local y = -pad
+        local widest = 0
+        for i = 1, math.max(#lines, #boxLines) do
+            local fs = BoxLine(i)
+            local line = lines[i]
+            if line then
+                fs:SetText(line.text)
+                fs:SetTextColor(line.r, line.g, line.b)
+                fs:ClearAllPoints()
+                fs:SetPoint("TOPLEFT", box, "TOPLEFT", pad, y)
+                fs:Show()
+                local w = fs:GetStringWidth() or 0
+                local h = fs:GetStringHeight() or BOX_FONT
+                if w > widest then widest = w end
+                y = y - (h + BOX_SLACK)
+            else
+                fs:Hide()
+            end
+        end
+        box:SetSize(math.max(widest + pad * 2, 80), -y + pad)
     end
-    AddPair(tip, TARGET_LABEL, name, vr, vg, vb)
+
+    -- 宽度跟着提示框走：内容变宽时小框不会短一截
+    local tipW = tip:GetWidth() or 0
+    if tipW > 0 and math.abs((box:GetWidth() or 0) - tipW) > 0.5 then
+        box:SetWidth(math.max(tipW, 80))
+    end
+
+    -- 挂提示框下沿；屏幕底部放不下就挂上沿（只看几何，不会来回）
+    local uiH = _G.UIParent and _G.UIParent:GetHeight() or 0
+    local tipBottom = tip:GetBottom() or 0
+    local below = (uiH <= 0) or (tipBottom > (box:GetHeight() or 0) + gap)
+    local side = below and "below" or "above"
+    if Marked(tip, "boxSide") ~= side then
+        Mark(tip, "boxSide", side)
+        box:ClearAllPoints()
+        if below then
+            box:SetPoint("TOPLEFT", tip, "BOTTOMLEFT", 0, -gap)
+        else
+            box:SetPoint("BOTTOMLEFT", tip, "TOPLEFT", 0, gap)
+        end
+    end
+
+    box:Show()
 end
 
---- Alt：单位给 NPC ID，物品给 itemID，法术给 spellID。
-local function AddIDs(tip, unit)
-    if not idsByAlt then return end
-    if not (_G.IsAltKeyDown and _G.IsAltKeyDown()) then return end
-
-    if unit then
-        -- 玩家 GUID 是 Player-xxx，没有数字 ID；Creature-/Vehicle- 才有。
-        local ok, guid = pcall(UnitGUID, unit)
-        guid = ok and Plain(guid) or nil
-        if type(guid) == "string" then
-            local id = guid:match("^Creature%-(%d+)") or guid:match("^Vehicle%-(%d+)")
-            if id then AddPair(tip, NPC_ID_LABEL, id) end
-        end
-        return
-    end
-
-    if type(tip.GetItem) == "function" then
-        local ok, _, link = pcall(tip.GetItem, tip)
-        link = ok and Plain(link) or nil
-        if type(link) == "string" then
-            local id = link:match("item:(%d+)")
-            if id then AddPair(tip, ITEM_ID_LABEL, id) return end
-        end
-    end
-
-    if type(tip.GetSpell) == "function" then
-        local ok, _, spellID = pcall(tip.GetSpell, tip)
-        if ok and spellID ~= nil then
-            local id = Secrets.Number(spellID)
-            if id then AddPair(tip, SPELL_ID_LABEL, tostring(id)) end
-        end
-    end
-end
-
-local function EnrichInto(tip)
+--- 收集要显示的附加行：目标行（开关 enrich）+ Alt 的 ID 行（开关 idsByAlt）。
+local function CollectLines(tip)
+    local lines = {}
     local unit = TooltipUnit(tip)
-    if unit then
-        if enrich then AddUnitTarget(tip, unit) end
-        AddIDs(tip, unit)
-        return
+
+    -- 「目标: 谁」—— 这个单位正在打谁
+    if enrich and unit then
+        local target = unit .. "target"
+        if Secrets.Bool(UnitExists(target), false) then
+            local ok, name = pcall(UnitName, target)
+            name = ok and Plain(name) or nil
+            if name and name ~= "" then
+                local r, g, b = Color:GetHighlight()
+                if Secrets.Bool(UnitIsPlayer(target), false) then
+                    local okc, classFile = pcall(UnitClassBase, target)
+                    classFile = okc and Plain(classFile) or nil
+                    if classFile then
+                        local cr, cg, cb = Color:ClassColor(classFile)
+                        if cr then r, g, b = cr, cg, cb end
+                    end
+                end
+                lines[#lines + 1] = { text = TARGET_LABEL .. ": " .. name, r = r, g = g, b = b }
+            end
+        end
     end
-    AddIDs(tip, nil)
+
+    -- Alt：单位 = NPC ID（GUID 里的 creature/vehicle 编号），物品 = itemID，法术 = spellID
+    if idsByAlt and _G.IsAltKeyDown and _G.IsAltKeyDown() then
+        local label, id
+        if unit then
+            local ok, guid = pcall(UnitGUID, unit)
+            guid = ok and Plain(guid) or nil
+            if type(guid) == "string" then
+                id = guid:match("^Creature%-(%d+)") or guid:match("^Vehicle%-(%d+)")
+                label = NPC_ID_LABEL
+            end
+        else
+            if type(tip.GetItem) == "function" then
+                local ok, _, link = pcall(tip.GetItem, tip)
+                link = ok and Plain(link) or nil
+                if type(link) == "string" then
+                    local itemID = link:match("item:(%d+)")
+                    if itemID then label, id = ITEM_ID_LABEL, itemID end
+                end
+            end
+            if not id and type(tip.GetSpell) == "function" then
+                local ok, _, spellID = pcall(tip.GetSpell, tip)
+                if ok and spellID ~= nil then
+                    local n = Secrets.Number(spellID)
+                    if n then label, id = SPELL_ID_LABEL, tostring(n) end
+                end
+            end
+        end
+        if id then
+            local r, g, b = Color:GetNeutral()
+            lines[#lines + 1] = { text = label .. ": " .. id, r = r, g = g, b = b }
+        end
+    end
+
+    return lines
 end
 
---- 补一次内容（幂等）。三种记账：
----   tipPre  = 补之前的签名    → 用来判断"我们加的行被引擎抹掉了"
----   tipPost = 补之后的签名    → 相等就不用再补
----   tipNoAdd = 本次显示里别再补（引擎在重绘，补了会被抹，反复补就是闪）
+--- 补一次内容：算签名，没变就只对齐小框；变了（换目标 / 按 Alt / 换物品）才重写文字。
 local function Enrich(tip)
-    if not enrich and not idsByAlt then return end
-    if Marked(tip, "tipNoAdd") then return end
-
-    local now = Signature(tip)
-    if Marked(tip, "tipPost") == now then return end
-
-    local pre = Marked(tip, "tipPre")
-    if pre ~= nil and pre == now then
-        -- 同一份内容，我们加过的行却不见了：引擎按数据重绘了整个框。再补就是每 0.05s 闪一次。
-        Mark(tip, "tipNoAdd", true)
-        Mark(tip, "tipPost", nil)
+    if not enrich and not idsByAlt then
+        UpdateBox(tip, {}, nil)
         return
     end
 
-    pcall(EnrichInto, tip)
-    Mark(tip, "tipPre", now)
-    Mark(tip, "tipPost", Signature(tip))
+    local ok, lines = pcall(CollectLines, tip)
+    if not ok or type(lines) ~= "table" then lines = {} end
+
+    local parts = { TooltipUnit(tip) or "" }
+    for i = 1, #lines do parts[#parts + 1] = lines[i].text end
+    UpdateBox(tip, lines, table.concat(parts, "\1"))
 end
 
 -- ============================================================================
@@ -327,9 +364,9 @@ end
 -- ============================================================================
 
 local function Reset(tip)
-    Mark(tip, "tipPre", nil)
-    Mark(tip, "tipPost", nil)
-    Mark(tip, "tipNoAdd", nil)
+    Mark(tip, "boxSig", nil)
+    Mark(tip, "boxSide", nil)
+    if box then box:Hide() end
     cursorKey, mmKey = nil, nil
     scanAcc = 0
 end

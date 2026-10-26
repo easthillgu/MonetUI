@@ -176,9 +176,11 @@ end
 local function PaintNine(frame, nine)
     -- 提示框走了自绘 1px 背板（PlateTooltip）：暴雪这层只留**透明壳**，
     -- 尺寸/排版仍由它算，但视觉全交给我们的细边（它的边是厚贴图，改不了粗细）。
+    -- 颜色和 frame alpha 一起归零：只清顶点色在某些情况下还会漏出贴图本身的边。
     if Marked(frame, "tooltipPlate") then
         nine:SetBorderColor(0, 0, 0, 0)
         nine:SetCenterColor(0, 0, 0, 0)
+        if nine.SetAlpha then nine:SetAlpha(0) end
         return
     end
 
@@ -199,10 +201,12 @@ local function TintNineSlice(frame)
 
         local dr, dg, db, da = nine:GetBorderColor()
         local cr, cg, cb, ca = nine:GetCenterColor()
+        local oldAlpha = nine.GetAlpha and nine:GetAlpha() or 1
 
         Skin:Record(function()
             if dr then nine:SetBorderColor(dr, dg, db, da) end
             if cr then nine:SetCenterColor(cr, cg, cb, ca) end
+            if nine.SetAlpha then nine:SetAlpha(oldAlpha or 1) end
             Mark(frame, "nineTint", nil)
         end)
 
@@ -316,7 +320,8 @@ local function PlateTooltip(tip)
     plate:SetAllPoints(tip)
     plate:SetFrameLevel(math.max(0, tip:GetFrameLevel() - 1))
     plate:EnableMouse(false)
-    Widget:Theme(plate, { thickness = 1, bgAlpha = 0.95 })
+    -- 1px、不透明：边框色取主题边框槽（Color:GetBorderKey，默认 edge），主题一变就跟着重染
+    Widget:Theme(plate, { thickness = 1, bgAlpha = 0.95, borderAlpha = 1 })
     Skin:Track(plate)                       -- 关掉「鼠标提示边框」时一起收走
 end
 
