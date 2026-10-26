@@ -109,12 +109,21 @@ end
 -- ---------------------------------------------------------------------------
 local PET_IDLE_ALPHA = 0
 
+local function Truthy(value) return value and true or false end
+
+--- 宠物是不是"被选中"（当前目标 / 焦点）。
+--- `UnitIsUnit` 标着 SecretWhenUnitComparisonRestricted：受限时拿它的返回值做布尔测试会被客户端
+--- 直接拦成错误（`ADDON_ACTION_BLOCKED UNKNOWN()`）。**读不出来时按"选中"处理** —— 宁可多显示
+--- 一条框，也不要凭空把宠物血条藏掉（藏掉等于看不见血量，代价更大）。
 local function PetSelected()
     if not UnitIsUnit then return false end
     local units = { "target", "focus" }
     for i = 1, #units do
-        local ok, is = pcall(UnitIsUnit, units[i], "pet")
-        if ok and Secrets.Bool(is, false) then return true end
+        local got, is = pcall(UnitIsUnit, units[i], "pet")
+        if got then
+            local ok, yes = pcall(Truthy, is)
+            if not ok or yes then return true end
+        end
     end
     return false
 end
