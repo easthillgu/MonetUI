@@ -364,7 +364,19 @@ Ellesmere 在本客户端也是收养（`EllesmereUIActionBars.lua:3136` "Stance
   有图标时被完全盖住），记在 `Mark(btn, "adoptedWell")`。
 
 实机核对（重载后探针）：`MonetUIBarPet alpha=0.302`、`MonetUIBarStance alpha=0.302`、
-`MonetUIPetFrame alpha=0`（未悬停未选中）、`PetActionButton8` 的 well 区域 `shown=true`。
+`MonetUIPetFrame alpha=0`（未悬停未选中）、`PetActionButton8` 的 well 区域 `shown=true`、26×26、
+`BACKGROUND` 层（1px 内缩，和自绘槽位逐像素同源）。
+
+**同一轮里被这条配置路径带出来的两个修复**：
+
+- `9014767`：改任何单位框颜色 → `M:Apply` 遍历所有框调 `UpdatePowerColor`，而 `targettarget`
+  从 2026-10-25 起没有能量条 → 最后一行 `frame.power:SetStatusBarColor` 抛
+  `attempt to index field 'power' (a nil value)`，Apply 后半段（含 `UpdateAll`）整段不执行。
+  改法：进函数取局部 `bar`，没有就早退（配置面板改颜色走的正是这条路）。
+- `0a37c33`：`UnitIsUnit` 是 `SecretWhenUnitComparisonRestricted`，受限时布尔测试会被客户端
+  拦成 `ADDON_ACTION_BLOCKED UNKNOWN()`。第一版走 `Secrets.Bool(is, false)` → 被拦时落回 false，
+  战斗里宠物当目标时血条会凭空消失。改为自己 pcall 真值测试：**读不出来就当"选中"**（宁可多显示
+  一条框，也不要丢信息）。
 
 **待玩家复核**：鼠标扫过宠物动作条 / 姿态条是否变清晰、宠物框悬停或把宠物设为目标是否浮现、
 宠物条 8..10 格是否和 1–8 号条的空槽长得一样。
