@@ -571,6 +571,32 @@ deploy 117 + sync-check 同步。**待实机看**：施法/引导时三角顶端
 deploy 119 + sync-check 同步。**待实机看**：切目标 / 目标死亡 / 目标是引导法术时，
 三角不会留在左下角；新目标开始读条时施法条正常出现。
 
+### 3.17 2026-10-26：提示框边框改 1px + "位置乱跑"
+
+玩家两条反馈：① 鼠标提示边框改成 1px；② 提示位置会乱跑，怀疑有 bug。
+
+**① 1px 边框**：暴雪的 `GameTooltip.NineSlice` 是**厚边贴图**，`SetBorderColor` 只能改颜色、
+改不了粗细（这也是一直以来"鼠标提示边框"在这个客户端只能改色的原因）。做法：
+- `PlateTooltip()`：在提示框**底下**垫一块 `SetAllPoints` 的 1px 背板（`Widget:Theme(plate,
+  { thickness = 1, bgAlpha = 0.95 })`，frame level = 提示框 − 1，`EnableMouse(false)`），
+  GameTooltip 和 ItemRefTooltip 都套；`Skin:Track` 登记，美化关掉时随 `HideAdded` 收走。
+- `PaintNine()` 看到 `tooltipPlate` 标记就把暴雪那层刷成**全透明**（边框 + 底色 alpha 0），
+  尺寸/排版仍由 NineSlice 算 —— 所以文字位置、padding 都不变，只是视觉换成我们的细边。
+- 颜色照旧跟主题（`Widget:Theme` 会随 `MONETUI_THEME_CHANGED` 重染）。
+
+**② 位置乱跑**：查下来有两个"两套写手"的结构问题，都在本次拆掉：
+- `Frame:SetClampedToScreen(true)`（我们自己在 `Install` 里设的）会由引擎在布局时再挪一次位置，
+  和每帧写的锚点互相拉；已删掉，改成 `PlaceCursor` 自己夹进屏幕。
+- 翻边判断原来依赖**提示框宽高**（"右边放不下就翻左边"），而宽高会被内容改变（Shift 对比、
+  我们追加的 ID 行、暴雪换样式）→ 鼠标停在临界位置时会在两侧之间横跳。
+  改成**只看光标离边缘多远**（`EDGE_W = 420` / `EDGE_H = 320` UI 单位），与宽高无关，因此
+  内容怎么变都不会改变翻边决策；光标进入右侧/下侧边缘带才翻。
+- 顺带：位置去重键保留（光标 + 尺寸 + scale），静止悬停仍然零写入。
+
+闸门：`api-audit` 0 hard、`audit-taint` 0/0/0、`wuxian check` 0 error / 5 warning（基线）、
+deploy 119 + sync-check 同步。**待实机看**：边框是 1 物理像素（不是原来那圈厚边）、颜色跟主题；
+提示框跟着鼠标时**不再左右/上下横跳**，贴右边缘翻到左边、贴下边缘翻到上方，两种都只翻一次。
+
 ---
 
 ## 4. 污染（taint）模型 —— 这个客户端最贵的一课

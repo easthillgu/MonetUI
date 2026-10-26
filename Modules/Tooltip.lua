@@ -35,6 +35,11 @@ ns.Tooltip = M
 local OFFSET = 14
 --- 提示框与小地图面板之间让开的距离（物理像素）。
 local MM_GAP = 8
+--- 翻边阈值（UI 单位）：光标离右边缘不足这么宽就翻到左边、离下边缘不足这么高就翻到上面。
+--- **只和光标位置有关，不看提示框宽高** —— 以前按"放不放得下"翻边，而宽高会被内容
+--- （Shift 对比、我们追加的 ID 行）改变，鼠标停在临界位置就会左右横跳（玩家 2026-10-26 报"位置乱跑"）。
+local EDGE_W = 420
+local EDGE_H = 320
 --- 内容扫描间隔（秒）。位置是每帧；内容只在"变了"的时候才动，没必要每帧重算。
 local SCAN = 0.05
 
@@ -79,7 +84,8 @@ M.ResolveMode = ResolveMode
 -- 位置
 -- ============================================================================
 
---- 把提示框摆到光标旁：默认右下，右边放不下翻左边，上面放不下翻下面，最后顶回屏幕。
+--- 把提示框摆到光标旁：默认右下；光标进入右侧/下侧边缘带就翻到另一边；最后再夹回屏幕内。
+--- **所有判断只看光标位置**（不看提示框宽高），所以内容变化不会让它在两侧之间横跳。
 local function PlaceCursor(tip)
     local ui = _G.UIParent
     if not ui then return end
@@ -88,24 +94,31 @@ local function PlaceCursor(tip)
     local scale = ui:GetEffectiveScale()
     if type(scale) ~= "number" or scale <= 0 then return end
 
-    -- 只在"该动"的时候动：光标没动、尺寸没变就不写布局（静止悬停零开销）。
     local w, h = tip:GetWidth() or 0, tip:GetHeight() or 0
-    local key = string.format("%.2f:%.2f:%.2f:%.2f:%.3f", x, y, w, h, scale)
+    local cx, cy = x / scale, y / scale
+    local uiW, uiH = ui:GetWidth() or 0, ui:GetHeight() or 0
+    local off = OFFSET * (Media:Mult() or 1)
+
+    -- 翻边：只看光标离边缘多远（与宽高无关 → 不会因为内容变宽/变高而反复翻）
+    local left  = uiW > 0 and (uiW - cx) < EDGE_W
+    local below = uiH > 0 and cy < EDGE_H
+
+    local x0 = left  and (cx - w - off) or (cx + off)
+    local y0 = below and (cy - h - off) or (cy + off)
+
+    -- 兜底夹取：真放不下就贴着屏幕边（结果仍是确定的，不会来回）
+    if uiW > 0 and x0 + w > uiW then x0 = uiW - w end
+    if uiH > 0 and y0 + h > uiH then y0 = uiH - h end
+    if x0 < 0 then x0 = 0 end
+    if y0 < 0 then y0 = 0 end
+
+    -- 去重：光标没动、尺寸没变就不写布局（静止悬停零开销）。
+    local key = string.format("%.1f:%.1f:%.1f:%.1f:%.2f", x, y, w, h, scale)
     if key == cursorKey then return end
     cursorKey = key
 
-    local off = OFFSET * (Media:Mult() or 1)
-    local cx, cy = x / scale, y / scale
-    local uiW, uiH = ui:GetWidth() or 0, ui:GetHeight() or 0
-
-    local ox, oy = off, -off                      -- 框的 BOTTOMLEFT 相对光标右下
-    if w > 0 and cx + ox + w > uiW then ox = -(w + off) end   -- 右边放不下 → 翻到左侧
-    if h > 0 and cy + oy + h > uiH then oy = -(h + off) end   -- 上面放不下 → 翻到下方
-    if cx + ox < 0 then ox = -cx end                          -- 左越界
-    if cy + oy < 0 then oy = -cy end                          -- 下越界
-
     tip:ClearAllPoints()
-    tip:SetPoint("BOTTOMLEFT", ui, "BOTTOMLEFT", cx + ox, cy + oy)
+    tip:SetPoint("BOTTOMLEFT", ui, "BOTTOMLEFT", x0, y0)
 end
 
 --- 提示框的**右下角对齐小地图面板的右上角**：贴在地图上沿、右边缘齐平。
@@ -356,12 +369,8 @@ local function Install()
     if driver then return end
     driver = CreateFrame("Frame")
     driver:SetScript("OnUpdate", Tick)
-
-    -- 兜底：翻转算漏了也不会跑出屏幕（GameTooltip 不是受保护框，随时可设）。
-    local tip = _G.GameTooltip
-    if tip and type(tip.SetClampedToScreen) == "function" then
-        pcall(tip.SetClampedToScreen, tip, true)
-    end
+    -- **不设 SetClampedToScreen**：引擎的夹取会和我们每帧写的锚点是两套写手，
+    -- 贴边时位置会互相拉扯（"乱跑"的另一个来源）。夹取在 PlaceCursor 里自己算，结果确定。
 end
 
 -- ============================================================================

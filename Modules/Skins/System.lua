@@ -174,6 +174,14 @@ end
 --- 而是子框架 NineSlice 上各片贴图的顶点色 —— 对它们调 SetBackdropBorderColor 一点反应都没有，
 --- 所以「鼠标提示边框」以前在这个客户端是空转的。返回 true 表示这个框架走的是这条线。
 local function PaintNine(frame, nine)
+    -- 提示框走了自绘 1px 背板（PlateTooltip）：暴雪这层只留**透明壳**，
+    -- 尺寸/排版仍由它算，但视觉全交给我们的细边（它的边是厚贴图，改不了粗细）。
+    if Marked(frame, "tooltipPlate") then
+        nine:SetBorderColor(0, 0, 0, 0)
+        nine:SetCenterColor(0, 0, 0, 0)
+        return
+    end
+
     local r, g, b = ns.Color:GetBorder()
     nine:SetBorderColor(r, g, b, 1)
     local ar, ag, ab = ns.Color:GetAmbient()
@@ -295,7 +303,26 @@ local function WatchTooltipStyle()
     end
 end
 
+--- 提示框改成我们自己的 **1px** 边框：暴雪的 NineSlice 是厚边贴图（能改颜色、改不了粗细），
+--- 所以把它的边框/底色刷成透明，在提示框**底下**垫一块随尺寸伸缩的 1px 背板。
+--- 背板是 frame level - 1 的子框：文字仍在它上面，鼠标事件不受影响（EnableMouse(false)）。
+local function PlateTooltip(tip)
+    if not tip or Marked(tip, "tooltipPlate") then return end
+    if not tip.NineSlice then return end    -- 没有九宫格的框（老客户端 / 别的窗口）不套这一层
+
+    Mark(tip, "tooltipPlate", true)
+
+    local plate = Widget:CreateFrame(nil, tip, 12, 12)
+    plate:SetAllPoints(tip)
+    plate:SetFrameLevel(math.max(0, tip:GetFrameLevel() - 1))
+    plate:EnableMouse(false)
+    Widget:Theme(plate, { thickness = 1, bgAlpha = 0.95 })
+    Skin:Track(plate)                       -- 关掉「鼠标提示边框」时一起收走
+end
+
 local function SkinTooltip()
+    -- 先立背板：PaintNine 看到 tooltipPlate 标记就把暴雪那层刷成透明
+    PlateTooltip(_G.GameTooltip)
     TintPanel(_G.GameTooltip)
     WatchTooltipStyle()
 
@@ -304,6 +331,7 @@ local function SkinTooltip()
     -- player inspects shows stock Blizzard chrome even when the tooltip option is on.
     local ref = _G.ItemRefTooltip
     if ref then
+        PlateTooltip(ref)
         TintPanel(ref)
         if ref.CloseButton then Skin:CloseButton(ref.CloseButton) end
     end
