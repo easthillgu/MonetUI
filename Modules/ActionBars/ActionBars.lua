@@ -1434,6 +1434,48 @@ local function EnsurePetCooldownDriver()
     end)
 end
 
+-- 宠物条本体。抽自 CreateBar（P4 拆分，逐条保留语义）。
+local function BuildPetBar(bar, frame, def)
+    local size, spacing = ButtonSize(), Spacing()
+    for i = 1, 10 do
+        local btn = _G["PetActionButton" .. i]
+        if not btn then break end
+        pcall(btn.SetParent, btn, frame)
+        pcall(btn.ClearAllPoints, btn)
+        pcall(btn.SetSize, btn, size, size)
+        pcall(btn.SetScale, btn, 1)
+        pcall(btn.SetPoint, btn, "TOPLEFT", frame, "TOPLEFT", (i - 1) * (size + spacing), 0)
+        -- 外壳事件被卸载后，没人再替我们把这 10 个按钮 Show 出来（它们可能停在
+        -- 壳隐藏时的 SetShown(false) 状态）——直接显式显示一次。
+        pcall(btn.Show, btn)
+        SkinAdoptedPetButton(btn)
+        bar.buttons[#bar.buttons + 1] = btn
+    end
+    if #bar.buttons == 0 then
+        pcall(frame.Hide, frame)
+        return nil
+    end
+    pcall(frame.SetSize, frame, #bar.buttons * size + math.max(#bar.buttons - 1, 0) * spacing, size)
+
+    local shell = _G.PetActionBar
+    if shell then
+        pcall(shell.SetAlpha, shell, 0)
+        pcall(shell.EnableMouse, shell, false)
+        pcall(shell.EnableMouseMotion, shell, false)
+        -- **事件不能卸载**：实测卸载之后没人再更新这套按钮的图标/冷却（冷却圈直接不转），
+        -- 也没人再 Show 它们。代价就是壳的 Update → UpdateShownButtons 会对这 10 个已经
+        -- 搬家的受保护按钮 SetShown，日志里出现 10 条 BLOCKED（只进日志、不弹窗）。
+        -- 功能优先，接受这个代价。
+    end
+    if RegisterStateDriver then
+        pcall(RegisterStateDriver, frame, "visibility", "[pet] show; hide")
+    end
+    PositionBar(bar)
+    bar.page = 1
+    EnsurePetCooldownDriver()
+    return bar
+end
+
 local function CreateBar(def)
     if buildFailure then return nil end
 
@@ -1474,44 +1516,7 @@ local function CreateBar(def)
     -- 代价：SetParent/SetSize 会把受保护按钮标脏，暴雪自己的 SetShown 会被拒（日志里 10 条
     -- BLOCKED，只进日志、不弹窗）。功能优先，接受这个代价。
     if def.pet then
-        local size, spacing = ButtonSize(), Spacing()
-        for i = 1, 10 do
-            local btn = _G["PetActionButton" .. i]
-            if not btn then break end
-            pcall(btn.SetParent, btn, frame)
-            pcall(btn.ClearAllPoints, btn)
-            pcall(btn.SetSize, btn, size, size)
-            pcall(btn.SetScale, btn, 1)
-            pcall(btn.SetPoint, btn, "TOPLEFT", frame, "TOPLEFT", (i - 1) * (size + spacing), 0)
-            -- 外壳事件被卸载后，没人再替我们把这 10 个按钮 Show 出来（它们可能停在
-            -- 壳隐藏时的 SetShown(false) 状态）——直接显式显示一次。
-            pcall(btn.Show, btn)
-            SkinAdoptedPetButton(btn)
-            bar.buttons[#bar.buttons + 1] = btn
-        end
-        if #bar.buttons == 0 then
-            pcall(frame.Hide, frame)
-            return nil
-        end
-        pcall(frame.SetSize, frame, #bar.buttons * size + math.max(#bar.buttons - 1, 0) * spacing, size)
-
-        local shell = _G.PetActionBar
-        if shell then
-            pcall(shell.SetAlpha, shell, 0)
-            pcall(shell.EnableMouse, shell, false)
-            pcall(shell.EnableMouseMotion, shell, false)
-            -- **事件不能卸载**：实测卸载之后没人再更新这套按钮的图标/冷却（冷却圈直接不转），
-            -- 也没人再 Show 它们。代价就是壳的 Update → UpdateShownButtons 会对这 10 个已经
-            -- 搬家的受保护按钮 SetShown，日志里出现 10 条 BLOCKED（只进日志、不弹窗）。
-            -- 功能优先，接受这个代价。
-        end
-        if RegisterStateDriver then
-            pcall(RegisterStateDriver, frame, "visibility", "[pet] show; hide")
-        end
-        PositionBar(bar)
-        bar.page = 1
-        EnsurePetCooldownDriver()
-        return bar
+        return BuildPetBar(bar, frame, def)
     end
 
     for index = 1, (def.count or BUTTONS_PER_BAR) do
