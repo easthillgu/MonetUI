@@ -1,5 +1,31 @@
 # 待办
 
+## ⏭ 下一轮队列（2026-10-26 起，压缩上下文后的接续点）
+
+> 承接 `docs/PLAN-refactor.md` P5' 与 `docs/CODE-REVIEW-2026-10-24.md` 第 2/3 条。
+> A 段全部离线可做；B 段要开游戏；C 段等你拍板。
+
+**A. 文件拆分收尾（P5'）** —— 一块一个 commit、`move-only`、机械 diff 核对、拆完三道闸门 + `sync-check`
+
+1. ⏳ `UnitFrames/ClassPower.lua`（原 419–545：职业资源小格）
+2. ⏳ `UnitFrames/Blizzard.lua`（原 85–177：暴雪框架/施法条压制）
+3. ⏳ `ActionBars/Secure.lua`（安全片段生成与注入 —— 全仓最敏感的一段）
+4. ⏳ `ActionBars/DragDrop.lua`（拖放接住器）
+5. ⏳ `ActionBars/PetBar.lua`（宠物条收养 + 自动施法环）
+6. ⏳ `ActionBars/Blizzard.lua`（暴雪条压制/收养/归还）
+7. ✅ 已拆：`UnitFrames/Auras.lua`（`fbf7bd4`）、`UnitFrames/CastBar.lua`（`6d685bf`）
+
+**B. 需开游戏（攒着一起验）**
+
+- ⏳ 两天改动一次性回归：动作条施法/翻页/拖放、宠物条自动施法环、单位框血条与文本、
+  姓名板减益、进出编辑模式、`Logs/taint.log` 是否为空。
+- ⏳ `BuffListFrame`（冰冻陷阱那类减益）仍被暴雪 `ApplyFrameOptions` 钉在牌子右端 —— 已知小问题。
+
+**C. 等拍板**
+
+- ⏳ 暴雪队伍/团队框重复：A 共存 / B 关自绘 Groups / C 自动藏（C 有污染风险）。
+- ⏳ SpellFlyout 弹出托盘：鼠标点击只能看，选项必须走快捷键（客户端限制，已实测）。
+
 ## ✅ 2026-10-26 P4 长函数拆分收尾（纯重构，离线验收，待实机回归）
 
 > 来龙去脉写在 `docs/HANDOFF.md` 3.6 节与 `docs/PLAN-refactor.md` P4 节；一个函数一个 commit。
