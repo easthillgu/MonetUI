@@ -841,8 +841,23 @@ end
 
 function M:UpdateUnit(unit, kind, powerType)
     local frame = frames[unit]
+    if not frame then return end
+
+    -- **施法事件不受"框是否显示"的门控**（2026-10-26 玩家报"目标框左下角三角一直在"）：
+    -- 以前这里统一 `IsShown` 早退，于是"目标消失 / 切走时结束的那次施法"收不到收尾，
+    -- cast 框停在显示状态，下次目标出现三角就还挂在那儿（机密时间那条路径还会把它钉在左端）。
+    -- 现在：显示着才去查数据刷新；隐藏着就只收状态，等它重新显示时 RefreshUnit 再按真实情况摆回来。
+    if kind == "cast" then
+        if Secrets.Bool(frame:IsShown(), false) then
+            M.castbar.UpdateCast(frame)
+        else
+            M.castbar.HideCast(frame)
+        end
+        return
+    end
+
     -- IsShown 在 1.60 标了 SecretReturnsForAspect（Shown），受限时会是机密值：用 Secrets.Bool 兜。
-    if not frame or not Secrets.Bool(frame:IsShown(), false) then return end
+    if not Secrets.Bool(frame:IsShown(), false) then return end
     if kind == "health" then
         UpdateHealth(frame)
     elseif kind == "power" then
@@ -851,8 +866,6 @@ function M:UpdateUnit(unit, kind, powerType)
         if M.classpower.ClassPowerIn(frame, powerType) then
             M.classpower.UpdateClassPower(frame)
         end
-    elseif kind == "cast" then
-        M.castbar.UpdateCast(frame)
     else
         UpdateName(frame)
     end
@@ -871,6 +884,8 @@ local function RefreshUnit(unit)
             frame.monetBorderOverride = false
             RestoreDynamicBorder(frame)
         end
+        -- 施法条也要收：这块框可能马上被换给另一个单位，留着的三角会"挂"在新目标上。
+        if M.castbar then M.castbar.HideCast(frame) end
         return
     end
 
@@ -879,6 +894,9 @@ local function RefreshUnit(unit)
     M.classpower.UpdateClassPower(frame)
     UpdateName(frame)
     UpdateThreat(frame)
+    -- 施法条跟着一起对齐：框重新出现时（切目标 / 登录 / 换区域）按"现在真的在打什么"摆，
+    -- 不依赖下一次施法事件 —— 否则中途接手的施法会一直不显示，或者残留旧状态。
+    if M.castbar then M.castbar.UpdateCast(frame) end
     -- A fresh target means a fresh aura list; lift (or re-stack) it above our bar.
     if unit == "target" and M.auras then M.auras.EnsureTargetAuras(frame) end
 end
