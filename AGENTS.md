@@ -257,9 +257,16 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   - **两条退路必须把按钮还回去**（`ReleaseStance`）：玩家关掉自绘条、或 `GetNumShapeshiftForms()==0`
     —— 否则按钮留在我们藏起来的框体里，原生姿态条成了空壳，玩家没法变形态。
   - **收编位置**：姿态条在 3 号条**正上方、左对齐**（按钮左对齐）；宠物条在 1 号条**下方、右对齐**，
-    且**悬停才显示**（`SetupHoverOnly`：平时 alpha 0、悬停 alpha 1，帧仍算"显示"所以鼠标进得来；
-    **不要用 Hide**，那会和 `[pet]` 状态驱动互相顶成"一闪一闪"；判定走 `Widget:HoverWatch` 轮询，
-    绝不往暴雪受保护按钮挂 `OnEnter`）。
+    且两条都**平时 alpha 0.3、悬停 1**（`SetupHoverOnly`；帧仍算"显示"所以鼠标进得来；
+    **不要用 Hide**，那会和 `[pet]` / 姿态的 visibility 状态驱动互相顶成"一闪一闪"；判定走
+    `Widget:HoverWatch` 轮询，绝不往暴雪受保护按钮挂 `OnEnter`）。回调是常驻登记的，所以配置里
+    关掉悬停要连 `bar.hoverOnly` 开关一起关 —— 否则鼠标一进出又会被拉回 0.3。
+  - **收养按钮的空槽底色**：暴雪的 `SlotBackground` / `NormalTexture` 被 `SkinAdoptedButton` 关掉，
+    没有动作的格子会整格透明（宠物条 8..10），玩家看到的就是"空白按钮不见了"。补一块和自绘槽位
+    同色的 well（纯黑 0.25）在 `BACKGROUND/-8`（暴雪图标是 `BACKGROUND/0`，有图标时被盖住）。
+  - **宠物单位框**：悬停或"宠物被选中"（是当前目标/焦点）才 alpha 1，其余 alpha 0
+    （`UnitFrames.lua` 的 `ApplyPetHover`）。显隐仍归 `visibility` 驱动，只动 alpha；
+    `UnitIsUnit` 是机密返回，必须过 `Secrets.Bool`；选中没有事件可挂，只能轮询。
   - **收养来的条（宠物 / 姿态）不进我们那几套循环**：`IsAdopted(bar)` 守 `UpdateCooldowns`
     （自绘槽位公式对它们算出负数 → 只剩 `Clear()`，把原生冷却圈擦掉）、`SetClickOptions`
     （暴雪按钮带 `.bar` 字段，会去 `Execute` 一条没有 `mui-keydown` 片段的受保护条）、

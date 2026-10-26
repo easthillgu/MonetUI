@@ -308,11 +308,12 @@ MISSING（新文件没部署）/ STALE（改过没部署）/ EXTRA（旧部署�
   `AdoptStanceButtons` 而**不是** `LayoutBar`（左下排布是给自绘按钮的）。
 - **宠物条位置**：`BarPet` 锚在 **1 号条下方、右对齐**（`TOPRIGHT → Bar1.BOTTOMRIGHT`，y=-2），
   右端与 1 号条齐平。
-- **宠物条"悬停才显示"**（`SetupHoverOnly`）：平时 `SetAlpha(0)`、悬停 `SetAlpha(1)`。
-  用 alpha **不用 Hide** —— alpha 0 的帧在客户端眼里仍是"显示着"的，鼠标进得来（`EnableMouse(true)`
-  开在**我们自己的**容器上），也不会和 `[pet]` 状态驱动的 Show/Hide 互相顶（顶的结果是
-  "一闪一闪"）。判定走 `Widget:HoverWatch`（0.1 秒轮询），**绝不往暴雪的受保护按钮挂 OnEnter**。
-  配置面板「动作条」里有对应勾（`actionBars.petHover`，默认开）。
+- **宠物条"悬停高亮"**（`SetupHoverOnly`）：平时 `SetAlpha(0.3)`、悬停 `SetAlpha(1)`
+  （2026-10-26 起；见 3.9，原来是 0）。用 alpha **不用 Hide** —— alpha 不为 0 的帧在客户端眼里
+  仍是"显示着"的，鼠标进得来（`EnableMouse(true)` 开在**我们自己的**容器上），也不会和
+  `[pet]` 状态驱动的 Show/Hide 互相顶（顶的结果是"一闪一闪"）。判定走 `Widget:HoverWatch`
+  （0.1 秒轮询），**绝不往暴雪的受保护按钮挂 OnEnter**。配置面板「动作条」里有对应勾
+  （`actionBars.petHover`，默认开），姿态条同一套（`actionBars.stanceHover`）。
 - **形态数**：`GetNumShapeshiftForms()`（本客户端只有复数名，单数版不存在）。>N 的格子 `Hide`；
   =0（猎人/牧师这种没有姿态条的）就不显示我们的条，并把按钮与外壳还给暴雪。
 - **外壳**：`StanceBar` 只 `SetAlpha(0)` + 关鼠标，**事件一条都不卸载** —— 图标 / 选中态 / 冷却
@@ -336,6 +337,37 @@ Ellesmere 在本客户端也是收养（`EllesmereUIActionBars.lua:3136` "Stance
 **待玩家复核**（自动化点不了：注入鼠标不生效，`GetCursorPosition()` 返回常数）：
 点一下三个形态是否都能变、`/reload` 后位置是否还在 3 号条左边、`taint.log` 有没有新的
 "blocked in combat because of taint from MonetUI"。
+
+### 3.9 2026-10-26：悬停显隐三项 + 宠物条空槽底色（`08ce74e`）
+
+玩家三条要求 + 一个缺陷，一次做完：
+
+| 位置 | 行为 | 配置键 |
+| --- | --- | --- |
+| 宠物**单位框** | 悬停或"宠物被选中"（是当前**目标**或**焦点**）→ alpha 1，否则 alpha 0 | `unitFrames.petHover` |
+| 宠物**动作条** | 平时 alpha **0.3**、悬停 1（原来是 0） | `actionBars.petHover` |
+| **姿态条** | 平时 alpha **0.3**、悬停 1（原来没有悬停） | `actionBars.stanceHover` |
+
+- 宠物单位框：显隐**还是** `visibility` 状态驱动（`SecureUnitButton` 战斗里不能 Show/Hide），
+  这里只动 alpha；alpha 0 的帧客户端仍算"显示着"，鼠标进得来，不会把自己锁死。
+  "选中"只能用轮询（`UnitIsUnit` 是 `SecretWhenUnitComparisonRestricted` 返回 → 一律过
+  `Secrets.Bool`），悬停用 `Widget:HoverWatch`（0.1s）、选中用 `Widget:PollWatch`（0.2s）。
+  写在 `UnitFrames.lua` 的 `ApplyPetHover` / `SetPetAlpha` / `PetSelected`，`M:Apply` 与
+  `M:Initialize` 各调一次（改勾立即生效，不用 /reload）。
+- 两条动作条：`HOVER_IDLE_ALPHA = 0.3`，姿态条在 `M:Apply` 的 stance 分支里也调 `SetupHoverOnly`，
+  `BAR_DEFS.BarStance` 补 `hover = true`。
+- **回调是常驻登记的**（`bar.hoverReady`），所以加了 `bar.hoverOnly` 开关：配置里关掉悬停后
+  回调仍在跑，没有这个开关的话鼠标一进出又会被拉回 0.3（关掉=常显 1）。
+- **宠物条空槽（8..10 格）**：暴雪的 `SlotBackground` / `NormalTexture` 被 `SkinAdoptedButton`
+  关掉之后，没有动作的格子整格透明 —— 玩家原话"空白按钮看不到"。补一块和自绘槽位同色的 well
+  （纯黑 0.25，见 `RefreshRing`），`BACKGROUND/-8` 垫在图标下面（暴雪图标是 `BACKGROUND/0`，
+  有图标时被完全盖住），记在 `Mark(btn, "adoptedWell")`。
+
+实机核对（重载后探针）：`MonetUIBarPet alpha=0.302`、`MonetUIBarStance alpha=0.302`、
+`MonetUIPetFrame alpha=0`（未悬停未选中）、`PetActionButton8` 的 well 区域 `shown=true`。
+
+**待玩家复核**：鼠标扫过宠物动作条 / 姿态条是否变清晰、宠物框悬停或把宠物设为目标是否浮现、
+宠物条 8..10 格是否和 1–8 号条的空槽长得一样。
 
 ---
 

@@ -28,6 +28,10 @@
   与宠物条同一套换皮，施法走原生 `CastShapeshiftForm`。位置：3 号条正上方、左对齐。
   宠物条移到 1 号条下方、右对齐，并**悬停才显示**（`74a8ad6`，配置面板可关）。
   **待玩家实机点一下三个形态**（注入鼠标在本机不生效，自动化点不了）。详见 HANDOFF 3.8 后续。
+- ✅ **悬停显隐三项 + 宠物条空槽底色**（`08ce74e`）：宠物单位框"悬停/选中才显示"、宠物条与姿态条
+  "平时 alpha 0.3 / 悬停 1"、收养按钮补空槽 well；三项都进设置菜单。探针已核对
+  `MonetUIBarPet/BarStance alpha=0.302`、`MonetUIPetFrame alpha=0`、`PetActionButton8` well `shown=true`。
+  **待玩家实机看效果**（详见 HANDOFF 3.9）。
 - ⏳ 拖放 / 姿态翻页（`DragDrop.lua` 拆分后先 `/reload` 再测）、切主题后的光环边框颜色。
 
 **B. 需开游戏（攒着一起验）**
