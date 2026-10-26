@@ -622,6 +622,31 @@ deploy 119 + sync-check 同步。**待实机看**：边框是 1 物理像素（�
 deploy 119 + sync-check 同步。**待实机看**：提示框边框是**主题色**的 1px 细边（不是白色厚边）；
 按住 Alt 期间 ID 一直显示、松开就消失、再按又出现；换目标时「目标」行跟着换。
 
+### 3.19 2026-10-26：提示框边框第 3 版——画在提示框自己身上（终版）
+
+玩家反馈"边框还是没有"，要求"用任务追踪那种边框即可"。前两版都没显示出来，根因是
+**在这台客户端上 `SetBackdrop` 的 `edgeFile` 不可靠**（AGENTS 里早就记过：edgeFile 只吃 BLP，
+TGA/WHITE8X8 会渲染成一排虚线；子框上这条更明显）。
+
+任务追踪的边框其实就是 `Widget:Theme` 的 1px 主题边 + 暗底（`Modules/QuestTracker/QuestTracker.lua:445`
+`Widget:Theme(tracker, { thickness = 1, bgAlpha = 0.92 })`）。提示框不是我们的框、也没有
+`BackdropTemplate`，所以用**等价的最稳画法**：
+
+- 在 `GameTooltip` / `ItemRefTooltip` **自己身上**建 5 张我们的贴图（`PaintTooltipPlate`）：
+  `bg`（BACKGROUND 子层 -8、`SetAllPoints`、暗底 `ambient*0.35 @0.95`）+ `top/bottom/left/right`
+  （BORDER 层、各锚一条边、粗细 = 1 物理像素 = `Media:Mult()`）；
+- 颜色 `Color:GetBorder()`（主题边框槽，默认 `edge`），`Skin:OnTheme` 里重染；
+- 都在 ARTWORK（文字）下面，贴图不收鼠标事件；
+- NineSlice 仍整套隐藏（`PaintNine` 的透明分支，含 `SetAlpha(0)`），厚边不再漏出来；
+- 关掉「鼠标提示边框」时 `Skin:Record` 把这 5 张贴图 Hide 并清 Mark。
+
+**下次别再走的两条路**：① 子框 + `Widget:Theme`（edgeFile 不渲染）；② 只把 NineSlice 顶点色刷透明
+（厚边仍有残留）。想改边框粗细只改 `PaintTooltipPlate` 里的 `px`。
+
+闸门：`api-audit` 0 hard、`audit-taint` 0/0/0、`wuxian check` 0 error / 5 warning（基线）、
+deploy 119 + sync-check 同步。**待实机看**：四周是 1 物理像素主题色细边（与任务追踪同色）、
+换主题跟着变；`ItemRefTooltip` 同样。
+
 ---
 
 ## 4. 污染（taint）模型 —— 这个客户端最贵的一课

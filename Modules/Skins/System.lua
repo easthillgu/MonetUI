@@ -307,22 +307,72 @@ local function WatchTooltipStyle()
     end
 end
 
---- 提示框改成我们自己的 **1px** 边框：暴雪的 NineSlice 是厚边贴图（能改颜色、改不了粗细），
---- 所以把它的边框/底色刷成透明，在提示框**底下**垫一块随尺寸伸缩的 1px 背板。
---- 背板是 frame level - 1 的子框：文字仍在它上面，鼠标事件不受影响（EnableMouse(false)）。
+--- 提示框的 1px 边：**直接画在提示框自己的贴图槽上**（4 条边 + 一块底），
+--- 不走 SetBackdrop 的 edgeFile —— 这台客户端的 edgeFile 只吃 BLP，TGA/WHITE8X8 那条路
+--- 在子框上有时整条不显示（实机就发生过"边框还是没有"）。画成提示框自己的 region 最稳：
+--- BACKGROUND(-8) 的底 + BORDER 层的四条线，都在文字下面，也不吃鼠标。
+local function PaintTooltipPlate(tip)
+    local s = Marked(tip, "tooltipEdges")
+    if not s then return end
+
+    local px = 1 * (ns.Media:Mult() or 1)          -- 1 物理像素
+    local r, g, b = ns.Color:GetBorder()           -- 主题边框槽（默认 edge）
+    local ar, ag, ab = ns.Color:GetAmbient()
+
+    s.bg:SetColorTexture(ar * 0.35, ag * 0.35, ab * 0.35, 0.95)
+
+    local top, bottom, left, right = s.top, s.bottom, s.left, s.right
+    top:ClearAllPoints()
+    top:SetPoint("TOPLEFT", tip, "TOPLEFT", 0, 0)
+    top:SetPoint("TOPRIGHT", tip, "TOPRIGHT", 0, 0)
+    top:SetHeight(px)
+    bottom:ClearAllPoints()
+    bottom:SetPoint("BOTTOMLEFT", tip, "BOTTOMLEFT", 0, 0)
+    bottom:SetPoint("BOTTOMRIGHT", tip, "BOTTOMRIGHT", 0, 0)
+    bottom:SetHeight(px)
+    left:ClearAllPoints()
+    left:SetPoint("TOPLEFT", tip, "TOPLEFT", 0, 0)
+    left:SetPoint("BOTTOMLEFT", tip, "BOTTOMLEFT", 0, 0)
+    left:SetWidth(px)
+    right:ClearAllPoints()
+    right:SetPoint("TOPRIGHT", tip, "TOPRIGHT", 0, 0)
+    right:SetPoint("BOTTOMRIGHT", tip, "BOTTOMRIGHT", 0, 0)
+    right:SetWidth(px)
+
+    top:SetColorTexture(r, g, b, 1)
+    bottom:SetColorTexture(r, g, b, 1)
+    left:SetColorTexture(r, g, b, 1)
+    right:SetColorTexture(r, g, b, 1)
+end
+
 local function PlateTooltip(tip)
     if not tip or Marked(tip, "tooltipPlate") then return end
     if not tip.NineSlice then return end    -- 没有九宫格的框（老客户端 / 别的窗口）不套这一层
 
     Mark(tip, "tooltipPlate", true)
 
-    local plate = Widget:CreateFrame(nil, tip, 12, 12)
-    plate:SetAllPoints(tip)
-    plate:SetFrameLevel(math.max(0, tip:GetFrameLevel() - 1))
-    plate:EnableMouse(false)
-    -- 1px、不透明：边框色取主题边框槽（Color:GetBorderKey，默认 edge），主题一变就跟着重染
-    Widget:Theme(plate, { thickness = 1, bgAlpha = 0.95, borderAlpha = 1 })
-    Skin:Track(plate)                       -- 关掉「鼠标提示边框」时一起收走
+    local s = {}
+    s.bg     = tip:CreateTexture(nil, "BACKGROUND", nil, -8)
+    s.bg:SetAllPoints(tip)
+    s.top    = tip:CreateTexture(nil, "BORDER")
+    s.bottom = tip:CreateTexture(nil, "BORDER")
+    s.left   = tip:CreateTexture(nil, "BORDER")
+    s.right  = tip:CreateTexture(nil, "BORDER")
+    Mark(tip, "tooltipEdges", s)
+
+    -- 关掉「鼠标提示边框」时收走（这些是我们自己的贴图，记录里只做 Hide）
+    Skin:Record(function()
+        s.bg:Hide(); s.top:Hide(); s.bottom:Hide(); s.left:Hide(); s.right:Hide()
+        Mark(tip, "tooltipEdges", nil)
+        Mark(tip, "tooltipPlate", nil)
+    end)
+
+    -- 主题换了跟着重染（关掉美化后 Mark 没了，这里自然什么都不做）
+    Skin:OnTheme(function()
+        if Marked(tip, "tooltipPlate") then PaintTooltipPlate(tip) end
+    end)
+
+    PaintTooltipPlate(tip)
 end
 
 local function SkinTooltip()
