@@ -132,6 +132,9 @@ local DEFAULTS = {
         showHotkey   = true,
         showCount    = true,
         showMacro    = true,
+        -- petHover: 宠物条平时 alpha 0，鼠标移上去才显示（帧仍是"显示"状态，所以鼠标进得来，
+        -- 也不会和 [pet] 状态驱动的显隐打架）。见 Modules/ActionBars 的 SetupHoverOnly。
+        petHover     = true,
         positions    = {},
     },
     -- Nameplates (姓名板, Modules/Nameplates) sit on Blizzard's own plate bases: the base owns targeting/clicks, the module draws a Monet slim bar on it and hides Blizzard's UnitFrame child.  Which units get a plate at all is a CVar, so the show* switches are pushed into nameplateShowFriends/Enemies/... on Apply and put back when the module is off; hideCritters/hideDead filter on top of that.

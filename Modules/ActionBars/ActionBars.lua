@@ -183,19 +183,20 @@ local BAR_DEFS = {
       point = "BOTTOM", relativeTo = "Bar7",     relativePoint = "TOP",    x = 0,   y = 2 },
 
     -- 自绘宠物条：按钮是**收养来的**暴雪 PetActionButton（本客户端没有通用 type="pet" 的安全
-    -- 按钮）。位置默认放在 1 号条左侧 —— 原来放 3 号条上方会和 4 号条整条重叠（实测 4 号条的
-    -- 按钮在同一层级更靠前，把点击全吃掉了）。层级 66：高于 1–8 号条的 60/61，低于接住器 70。
-    { key = "BarPet", index = 9, page = 0, count = 10, pet = true, bind = "BONUSACTIONBUTTON",
+    -- 按钮）。位置：**1 号条下方、右对齐**，并按玩家的要求"鼠标悬停才显示"（hover = true，
+    -- 见 SetupHoverOnly：不是 Hide 而是 alpha 0，帧仍算显示，鼠标因此进得来）。
+    -- 层级 66：高于 1–8 号条的 60/61，低于接住器 70。
+    { key = "BarPet", index = 9, page = 0, count = 10, pet = true, hover = true, bind = "BONUSACTIONBUTTON",
       level = 66,
-      point = "BOTTOMRIGHT", relativeTo = "Bar1", relativePoint = "BOTTOMLEFT", x = -8, y = 0 },
+      point = "TOPRIGHT", relativeTo = "Bar1", relativePoint = "BOTTOMRIGHT", x = 0, y = -2 },
 
     -- 姿态条（德鲁伊形态 / 死骑灵气 / 战士姿态 / 潜行）：和宠物条一样**收养**暴雪的
     -- StanceButton1..10（本客户端没有可用的通用安全按钮；暴雪按钮的施法路径才是原生的）。
-    -- 10 格只显示当前职业的形态数（1..N），按钮从**右端**往左排 —— 可见的那几格永远贴着 3 号条。
-    -- 位置沿用原来暴雪默认摆放的那一行（3 号条左边，y 相同），玩家看到的位置和以前一致。
+    -- 位置：**3 号条正上方、左对齐**（BOTTOMLEFT 对齐 Bar3 的 TOPLEFT），按钮从左往右排；
+    -- 只显示当前职业的形态数（1..N），N+1..10 藏起来排在右边。
     { key = "BarStance", index = 10, page = 0, count = 10, stance = true,
       level = 66,
-      point = "BOTTOMRIGHT", relativeTo = "Bar3", relativePoint = "BOTTOMLEFT", x = -8, y = 0 },
+      point = "BOTTOMLEFT", relativeTo = "Bar3", relativePoint = "TOPLEFT", x = 0, y = 2 },
 }
 
 -- 接管的那几条暴雪动作条：不重画，只搬最外层容器（只搬内层的话，暴雪一 Hide 外层，我们的条就留在
@@ -1371,6 +1372,37 @@ local function BuildPetBar(bar, frame, def)
     return bar
 end
 
+--- 宠物条"悬停才显示"的静默透明度。**用 alpha 而不是 Hide**：alpha 0 的帧在客户端眼里仍然
+--- 是"显示着"的，鼠标照样进得来（暴雪自己收 HUD 帧也是这招），也不会和 [pet] 状态驱动的
+--- Show/Hide 打架（补一刀 Show 会被它顶回来，屏幕上一闪一闪）。
+local HOVER_IDLE_ALPHA = 0
+
+--- 判定走轮询（`Widget:HoverWatch`，0.1 秒一次）：**绝不往暴雪的受保护按钮上挂 OnEnter**，
+--- 那是往它的脚本槽里写我们的函数（AGENTS 污染模型第一条）。
+local function SetupHoverOnly(bar, enabled)
+    local frame = bar.frame
+    if not enabled then
+        -- 关掉悬停模式：恢复常显（配置面板把勾去掉时走这条）。
+        pcall(frame.SetAlpha, frame, 1)
+        return
+    end
+
+    if not bar.hoverReady then
+        bar.hoverReady = true
+        -- 框体自己得开鼠标：不开的话，鼠标落在子按钮上时 `IsMouseOver()` 对父框体不成立。
+        -- 这是**我们自己的**框体（按钮只是换了父），不写暴雪的框。
+        pcall(frame.EnableMouse, frame, true)
+        Widget:HoverWatch(frame,
+            function() pcall(frame.SetAlpha, frame, 1) end,
+            function() pcall(frame.SetAlpha, frame, HOVER_IDLE_ALPHA) end)
+    end
+
+    -- 立刻按当前鼠标位置定一次：鼠标本来就在条上时不会触发 OnEnter，否则一进来是隐形的。
+    local ok, inside = pcall(frame.IsMouseOver, frame)
+    local over = ok and Secrets.Bool(inside, false)
+    pcall(frame.SetAlpha, frame, over and 1 or HOVER_IDLE_ALPHA)
+end
+
 --- 姿态条的可见性：宠物对战 / 载具 / 超控条时交给暴雪自己藏（它不比我们少算一步）。
 local STANCE_VISIBILITY = "[petbattle][overridebar][vehicleui][possessbar] hide; show"
 
@@ -1415,18 +1447,12 @@ local function AdoptStanceButtons(bar)
         pcall(btn.ClearAllPoints, btn)
         pcall(btn.SetSize, btn, size, size)
         pcall(btn.SetScale, btn, 1)
-        -- 排布：**第 N 个形态（最后一个可见格）贴右端**，1..N 从右往左依次排开 —— 这样可见的
-        -- 那几格读起来仍是左 → 右，且整组永远贴着 3 号条左边；藏起来的 N+1..10 排在更左边
-        -- （看不见也不响应鼠标），不占可见区。
+        -- 排布：**左对齐**，第 1 个形态贴条的左端，后面依次往右；藏起来的 N+1..10 排在更右边
+        -- （会被 Hide，看不见也不响应鼠标），所以可见的那几格左端永远和 3 号条左边对齐。
         local step = size + spacing
-        local offset
-        if forms >= 1 and i <= forms then
-            offset = -(forms - i) * step
-        else
-            offset = -(i - 1) * step
-        end
+        local offset = (i - 1) * step
         -- 竖直方向锚**底边**对齐条底边（不是中心）：这样即使条的尺寸没设上，这一排也和 3 号条同一行。
-        pcall(btn.SetPoint, btn, "BOTTOMRIGHT", frame, "BOTTOMRIGHT", offset, 0)
+        pcall(btn.SetPoint, btn, "BOTTOMLEFT", frame, "BOTTOMLEFT", offset, 0)
         if forms >= 1 and i > forms then pcall(btn.Hide, btn) else pcall(btn.Show, btn) end
         SkinAdoptedButton(btn)
         -- 放开过一次（ReleaseStance 藏了边框）再收养回来时，边框要重新露出来。
@@ -1435,7 +1461,9 @@ local function AdoptStanceButtons(bar)
     end
     -- pcall 的第一个参数是**函数**，`self` 还得显式再传一遍（漏了就是静默失败：实机表现为
     -- 这条条宽高停在 2×2、按钮全挂在框外 —— 反而是"按钮位置看着对、条的矩形是错的"）。
-    pcall(frame.SetSize, frame, total * size + math.max(total - 1, 0) * spacing, size)
+    -- 宽度只算**可见的**形态数：藏起来的格子挂在框外更右边，不用占地方。
+    local visible = (forms >= 1) and forms or total
+    pcall(frame.SetSize, frame, visible * size + math.max(visible - 1, 0) * spacing, size)
     return total
 end
 
@@ -2360,7 +2388,11 @@ function M:Apply()
             if def.pet then
                 -- 宠物条不走"第几条开着"那套：它的显隐只由 [pet] 状态驱动决定
                 -- （CreateBar 里已注册）。自绘动作条关掉时直接藏起来，暴雪那条保持原样。
-                if not own then pcall(bar.frame.Hide, bar.frame) end
+                if not own then
+                    pcall(bar.frame.Hide, bar.frame)
+                else
+                    SetupHoverOnly(bar, def.hover and Config().petHover ~= false)
+                end
             elseif def.stance then
                 -- 姿态条同理，但两条退路都要把收养的按钮还给暴雪 —— 否则它们留在我们藏起来的
                 -- 框体里，原生姿态条就成了一条空壳（玩家直接没法变形态）：

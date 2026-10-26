@@ -961,6 +961,13 @@ function SimpleConfig:Build()
             RefreshActionBars()
         end)
 
+    MakeCheckbox(content, "宠物条悬停才显示", row(30),
+        function() return ns:DB().actionBars.petHover ~= false end,
+        function(value)
+            ns:DB().actionBars.petHover = value
+            RefreshActionBars()
+        end)
+
     sec.bodyHeight = -row.y + 4
 
     sec = BeginSection("姓名板", false)
