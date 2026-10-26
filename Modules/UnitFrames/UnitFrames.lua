@@ -326,6 +326,11 @@ local POWER_COLOR = {
 
 local function UpdatePowerColor(frame)
     local unit = frame.unit
+    local bar = frame.power
+    -- 目标的目标没有能量条（2026-10-25 起血条吃掉那两行），这个函数是 Apply 遍历所有框时
+    -- 无条件调的：不早退就会在最后一行抛 "attempt to index field 'power' (a nil value)"，
+    -- 于是配置面板改任何一个单位框颜色都报错、后半段（含平滑/文本）全不生效。
+    if not bar then return end
     -- player / target / targettarget 的能量条提亮，和压暗后的血条拉开层次。
     -- 自己的条再高一档：玩家血条现在是统一的暗奶油色（不再染职业色），
     -- 身上唯一的"亮点"就是这条能量，不提亮就显得比目标那条暗。
@@ -335,7 +340,7 @@ local function UpdatePowerColor(frame)
     if Setting(unit, "powerColor") == "theme" then
         local r, g, b = Color:GetResource()
         r, g, b = Brighten(r, g, b, brighten)
-        frame.power:SetStatusBarColor(r, g, b)
+        bar:SetStatusBarColor(r, g, b)
         return
     end
 
@@ -348,7 +353,7 @@ local function UpdatePowerColor(frame)
             local cr, cg, cb = Color:ClassColor(classFile)
             if cr then
                 cr, cg, cb = Brighten(cr, cg, cb, brighten)
-                frame.power:SetStatusBarColor(cr, cg, cb)
+                bar:SetStatusBarColor(cr, cg, cb)
                 return
             end
         end
@@ -360,14 +365,14 @@ local function UpdatePowerColor(frame)
                   and POWER_COLOR[token] or nil
     if tuned then
         local tr, tg, tb = Brighten(tuned[1], tuned[2], tuned[3], brighten)
-        frame.power:SetStatusBarColor(tr, tg, tb)
+        bar:SetStatusBarColor(tr, tg, tb)
         return
     end
 
     local nr, ng, nb = Secrets.Number(r), Secrets.Number(g), Secrets.Number(b)
     if nr and ng and nb and (nr + ng + nb) > 0 then
         nr, ng, nb = Brighten(nr, ng, nb, brighten)
-        frame.power:SetStatusBarColor(nr, ng, nb)
+        bar:SetStatusBarColor(nr, ng, nb)
         return
     end
 
