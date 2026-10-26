@@ -27,7 +27,7 @@ local Secrets  = ns.Secrets
 local Media    = ns.Media
 
 local LINE    = 1     -- line thickness in physical pixels: the bottom hairline is always 1px
-local MARKER  = 8     -- ▼ glyph height in physical pixels; anything smaller stops reading as a triangle
+local MARKER  = 8     -- 三角**宽度**（物理像素）；贴图是 16×8 的 2:1 三角，所以高 = 宽 / 2
 local HOVER_W = 24    -- hover zone width around the triangle
 local HOVER_H = 10    -- only the lower half of the strip, so a data block above keeps its own tooltip
 
@@ -49,12 +49,16 @@ local function Px(length)
     return length * Media:Mult()
 end
 
---- ▼ 的字号（UI 单位）。物理像素走，和底边衬线同一个规矩；极端缩放 / 4K 下夹一个下限，
---- 否则 SetFont 会拿到小到画不出来的字号。
+--- 三角的**宽度**（UI 单位）。物理像素走，和底边衬线同一个规矩；极端缩放 / 4K 下夹一个下限。
 local function MarkerSize()
     local size = Px(MARKER)
     if size < 4 then size = 4 end
     return size
+end
+
+--- 三角高度（UI 单位）：贴图是 16×8，宽高比 2:1。
+local function MarkerHeight()
+    return MarkerSize() / 2
 end
 
 local function Format(number)
@@ -183,7 +187,7 @@ local function Tint(data)
     local r, g, b = ColourOf(data)
     fill:SetVertexColor(r, g, b, 1)
     rested:SetVertexColor(r, g, b, 0.35)
-    if marker.SetTextColor then marker:SetTextColor(r, g, b, 1) end
+    marker:SetVertexColor(r, g, b, 1)
 end
 
 --- 把线、三角、悬停区摆到某个百分比上。restEnd 是休息经验那一截的终点（声望模式传 nil）。
@@ -247,14 +251,14 @@ local function Tick(_, elapsed)
 
         -- 三角越接近终点越白（白热），落定回本色
         local hot = (1 - eased) * 0.8
-        marker:SetTextColor(anim.r + (1 - anim.r) * hot,
-                            anim.g + (1 - anim.g) * hot,
-                            anim.b + (1 - anim.b) * hot, 1)
+        marker:SetVertexColor(anim.r + (1 - anim.r) * hot,
+                              anim.g + (1 - anim.g) * hot,
+                              anim.b + (1 - anim.b) * hot, 1)
     else
         -- 升级：整段短促地闪两下，alpha 呼吸而不是变色
         local pulse = 0.35 + 0.65 * math.abs(math.cos(t * math.pi * 1.5))
         fill:SetVertexColor(anim.r, anim.g, anim.b, pulse)
-        marker:SetTextColor(anim.r, anim.g, anim.b, pulse)
+        marker:SetVertexColor(anim.r, anim.g, anim.b, pulse)
         rested:SetVertexColor(anim.r, anim.g, anim.b, 0.35 * pulse)
     end
 
@@ -444,13 +448,12 @@ local function Build(parentBar)
     fill:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 0, 0)
     fill:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
 
-    marker = root:CreateFontString(nil, "OVERLAY")
-    -- SetFont 直连：Widget:Font 的 SnapSize 会把 12 以下的字号抬到 12，三角形会顶出条外。
-    -- 施法条那颗火花也是这么做的。
-    marker:SetFont(Media:Font("pixel"), MarkerSize(), Media.fontFlags)
-    if marker.SetShadowOffset then marker:SetShadowOffset(0, 0) end
-    marker:SetJustifyH("CENTER")
-    marker:SetText("▼")   -- U+25BC: the tip points DOWN at the XP line under it
+    marker = root:CreateTexture(nil, "OVERLAY")
+    -- 三角是贴图（tools/svg/monet_spark_down.svg → Assets/Textures）：**底边就是尖端那一行**，
+    -- 所以锚 BOTTOM 在线身上 = 尖端精确点在线上。以前用字体里的 ▼，位置随字体行高漂，
+    -- 和施法条那颗火花是同一个毛病。
+    marker:SetTexture(Media:Texture("monet_spark_down"))
+    marker:SetSize(MarkerSize(), MarkerHeight())
     marker:SetPoint("BOTTOM", root, "BOTTOMLEFT", 0, 0)
 
     -- 只有这一小片认鼠标；悬停它也算悬停条身（M:Hover）

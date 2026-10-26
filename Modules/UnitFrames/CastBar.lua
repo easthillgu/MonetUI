@@ -20,27 +20,24 @@ local Shared  = M.Shared
 -- ============================================================================
 -- Cast indicator (player & target): NO fill bar, only a red triangle spark
 -- that moves RIGHT->LEFT (reverse) under the power bar as the cast progresses.
--- CAST_GAP = 2 物理像素，能量条下沿到三角墨迹顶端（OUTLINE 会在字身外再扩 1px）。
 --
--- 锚法（2026-10-26 修）：三角按 **TOP** 挂在 cast 框顶部 —— 从这条线**往下**长。
--- 以前锚的是 BOTTOM：字体行高比 SPARK_HEIGHT(2) 大（换 PingFangPixel + OUTLINE 之后更明显），
--- 字身向上溢，顶端直接压到能量条上（玩家报的就是这个）。
+-- 三角是**贴图**（Assets/Textures/monet_spark_up.tga，SVG 手绘，见 tools/svg/），不是字体里的 ▲。
+-- 以前用 FontString 画三角，位置受字体行高摆布：字身比 2px 的框高，顶端会溢出压到能量条上
+-- （玩家 2026-10-26 报的就是这个）。
+-- **契约**：贴图最上面那一行就是三角的尖，所以把贴图的 TOP 锚在能量条下沿（CAST_GAP = 0）
+-- 尖端就精确顶在条上，横向扫动时也不会上下漂。
 -- ============================================================================
 
-local CAST_GAP       = 2          -- 物理像素：能量条下沿到三角顶端
-local SPARK_HEIGHT   = 2          -- 三角字号（像素）
-local SPARK_WIDTH    = 4          -- 三角宽度参考值（只为说明形状，不参与布局）
+local SPARK_W        = 8          -- 三角宽（物理像素）
+local SPARK_H        = 4          -- 三角高（物理像素）
+local CAST_GAP       = 0          -- 能量条下沿到三角尖端（物理像素）：0 = 尖端正好顶在条上
 local SPARK_RED      = { 1, 0, 0 }  -- normal / interruptible cast
 
---- Create a red upward-pointing triangle spark using a FontString (▲ U+25B2).
+--- 三角火花：一张染色模具贴图，颜色全靠 SetVertexColor。
 local function CreateTriangleSpark(parent)
-    local spark = parent:CreateFontString(nil, "OVERLAY")
-    local fontPath = Media:Font("pixel")
-    spark:SetFont(fontPath, SPARK_HEIGHT, Media.fontFlags)
-    if spark.SetShadowOffset then spark:SetShadowOffset(0, 0) end
-    spark:SetText("▲")  -- U+25B2 BLACK UP-POINTING TRIANGLE
-    spark:SetTextColor(1, 0, 0, 1)  -- solid red
-    spark:SetJustifyH("CENTER")
+    local spark = parent:CreateTexture(nil, "OVERLAY")
+    spark:SetTexture(Media:Texture("monet_spark_up"))
+    spark:SetVertexColor(SPARK_RED[1], SPARK_RED[2], SPARK_RED[3], 1)
     spark:Hide()
     return spark
 end
@@ -54,21 +51,18 @@ local function CreateCastBar(frame)
     local barWidth = width - border * 2
 
     -- A plain frame (no StatusBar, no fill, no background) to anchor the spark
+    local mult = Media:Mult() or 1
+    local sparkW, sparkH = SPARK_W * mult, SPARK_H * mult
+
     local cast = CreateFrame("Frame", nil, frame)
-    cast:SetSize(barWidth, SPARK_HEIGHT)
-    cast:SetPoint("TOPLEFT", frame.power, "BOTTOMLEFT", 0, -(CAST_GAP * (Media:Mult() or 1)))
+    cast:SetSize(barWidth, sparkH)
+    cast:SetPoint("TOPLEFT", frame.power, "BOTTOMLEFT", 0, -(CAST_GAP * mult))
 
     -- Red triangle spark (moves RIGHT->LEFT as cast progresses)
     local spark = CreateTriangleSpark(cast)
-    -- **TOP 锚**：三角从 cast 框顶部往下长，顶端只是贴着能量条下沿（见文件头）。
+    spark:SetSize(sparkW, sparkH)
+    -- TOP 锚 = 贴图最上面那一行（三角的尖）压在 cast 框顶边，而 cast 框顶边就是能量条下沿。
     spark:SetPoint("TOP", cast, "TOP", 0, 0)
-
-    -- 行高跟着字身走：字体行高通常大于 2px（OUTLINE 还要再扩 1px），
-    -- 框高按实际字身撑开，免得"框是 2px、三角是 5px"这种靠猜的对齐。
-    local okH, stringH = pcall(function() return spark:GetStringHeight() or spark:GetHeight() end)
-    if okH and type(stringH) == "number" and stringH > SPARK_HEIGHT then
-        cast:SetHeight(stringH)
-    end
 
     cast.spark = spark
     cast:Hide()
@@ -128,13 +122,14 @@ local function UpdateCast(frame)
     -- (interruptible) cast stays red.
     -- 机密布尔直接落回 false（灰 = 不可断路径不会误点亮；细档实锤同族发源之一，
     -- 值级判定不触发客户端拦截，真值测试才触发）。
+    -- 贴图是纯白模具，颜色走 SetVertexColor（和边框 / 图标同一套语法）。
     if Secrets.IsSecret(notInterruptible) then
-        frame.cast.spark:SetTextColor(SPARK_RED[1], SPARK_RED[2], SPARK_RED[3], 1)
+        frame.cast.spark:SetVertexColor(SPARK_RED[1], SPARK_RED[2], SPARK_RED[3], 1)
     elseif Secrets.Bool(notInterruptible, false) then
         local nr, ng, nb = Color:GetNeutral()
-        frame.cast.spark:SetTextColor(nr, ng, nb, 1)
+        frame.cast.spark:SetVertexColor(nr, ng, nb, 1)
     else
-        frame.cast.spark:SetTextColor(SPARK_RED[1], SPARK_RED[2], SPARK_RED[3], 1)
+        frame.cast.spark:SetVertexColor(SPARK_RED[1], SPARK_RED[2], SPARK_RED[3], 1)
     end
 
     -- 受限时 startMS / endMS 是保密值（Secret number），OnUpdate 里的减法会抛

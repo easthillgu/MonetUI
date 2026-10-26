@@ -522,6 +522,34 @@ Ellesmere 在本客户端也是收养（`EllesmereUIActionBars.lua:3136` "Stance
 deploy 117 + sync-check 同步。**待实机看**：施法/引导时三角顶端在能量条下沿之下、不再压上去，
 扫过整条时不抖；目标框同样。如果还想再离远一点，只改 `CAST_GAP` 一个数。
 
+### 3.15 2026-10-26：三角改成手绘贴图（尖端精确顶住），施法条与经验线共用
+
+3.14 只是把锚点方向掰正了，但**字形里的三角**永远受字体支配：行高、墨迹高度、抗锯齿都不由我们定，
+换个字体就又漂一次。玩家要求"精确地把尖尖顶在条上"，所以干脆**不用字体画三角**：
+
+- 新增两张 SVG（Inkscape 手绘，`tools/svg/`）：`monet_spark_up.svg` / `monet_spark_down.svg`。
+  画布 **16×8**（两个维度都是 2 的幂），纯白染色模具，`node tools/svg-to-tga.js` 导出
+  `Assets/Textures/monet_spark_{up,down}.tga`。
+- **布局契约（写在两个 SVG 的头部注释里）**：三角的**尖端那一行就是画布边缘** ——
+  up 的尖在第 0 行、down 的尖在最后一行。于是"把贴图那条边锚在条上"就等于"尖端精确顶住"，
+  再也不用算字体高度。**改图时不许在尖端那侧留白**；要间隙就改代码里的 `CAST_GAP`。
+- 尖端做成 2 单位宽**平头**：16→8 缩一半后正好落成 1 个实心像素。纯数学尖点在 4px 高的小图上
+  会被 AA 摊成半透明，看着像"没顶到"。
+- 施法条（`Modules/UnitFrames/CastBar.lua`）：FontString → `CreateTexture`，
+  `SPARK_W/H = 8×4` 物理像素，`CAST_GAP = 0`（尖端正好顶在能量条下沿），**TOP 锚**；
+  颜色从 `SetTextColor` 换成 `SetVertexColor`（红 / 主题中性色）。
+- 经验线（`Modules/InfoBar/XP.lua`）：同样的字体三角毛病，`▼` FontString → `monet_spark_down` 贴图，
+  `MARKER` 语义从"字号"改成"宽度"（8 宽 × 4 高），**BOTTOM 锚**在线身上 = 尖端点在线上；
+  三处 `SetTextColor`（常态 / 白热 / 升级闪）换成 `SetVertexColor`。
+- 材质合规：`tools/audit-pixels.js` 的 `STENCIL` 名单登记这两张（纯白模具，色相 0），
+  `Media.texture` 注册 `monet_spark_up` / `monet_spark_down`。像素审计实测两图各
+  `半覆盖 28 / 孤立 0 / 软边 6 / 色相 0 / 非纯白衬底 0`（软边是斜边的 AA，符合判据）。
+
+闸门：`api-audit` 0 hard、`audit-taint` 0/0/0、`wuxian check` 0 error / 5 warning（基线）、
+`audit-pixels` 0/35 未通过、deploy 119 文件（+2 张 TGA）+ sync-check 同步。
+**待实机看**：施法条三角尖端与能量条下沿严丝合缝（`CAST_GAP = 0` 时是"顶住"，要 1px 缝就改 1）、
+扫动时不上下跳；经验线三角尖端落在发丝线上、涨经验滑动时跟得上、白热/升级闪烁仍是顶点色。
+
 ---
 
 ## 4. 污染（taint）模型 —— 这个客户端最贵的一课
