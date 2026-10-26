@@ -1112,11 +1112,25 @@ function SimpleConfig:Build()
                 tooltip:Apply()
             end)
 
+        MakeCheckbox(content, "单位提示补一行「目标」（它正在打谁）", row(26),
+            function() return tooltip:GetSetting("enrich") end,
+            function(value)
+                tooltip:Settings().enrich = value and true or false
+                tooltip:Apply()
+            end)
+
+        MakeCheckbox(content, "按住 Alt 显示 ID（NPC / 物品 / 法术）", row(26),
+            function() return tooltip:GetSetting("idsByAlt") end,
+            function(value)
+                tooltip:Settings().idsByAlt = value and true or false
+                tooltip:Apply()
+            end)
+
         local tipHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
         tipHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(44))
         tipHint:SetWidth(328)
         tipHint:SetJustifyH("LEFT")
-        tipHint:SetText("关＝停在暴雪默认位置（右下角锚点，编辑模式可移动）。边框与底色在上方「界面美化 → 系统 → 鼠标提示边框」。")
+        tipHint:SetText("关＝停在暴雪默认位置（右下角锚点，编辑模式可移动）。贴到屏幕右/上边缘会自动翻到光标另一侧。边框与底色在上方「界面美化 → 系统 → 鼠标提示边框」。")
 
         -- 光标装饰（Modules/Cursor）：纯视觉，跟着主题色走；用模块开关整体关掉。
         local cursor = ns:GetModule("Cursor")

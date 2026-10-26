@@ -233,7 +233,9 @@ local DEFAULTS = {
     -- 跟着鼠标走 —— 默认开，因为暴雪的默认锚点在屏幕右下角，那正好是 MonetUI 放小地图集群的地方；
     -- 关掉就退回暴雪的默认容器（编辑模式下可移动）。
     tooltip = {
-        follow = true,
+        follow   = true,   -- 提示框跟随光标（关掉＝停在暴雪默认锚点）
+        enrich   = true,   -- 单位提示追加「目标: 谁」一行
+        idsByAlt = true,   -- 按住 Alt 显示 ID（NPC / 物品 / 法术）
     },
     -- 光标拖尾 / 速度星芒 (Modules/Cursor)：纯装饰，拖尾跟主题边框色，星芒用高光色。
     cursor = {

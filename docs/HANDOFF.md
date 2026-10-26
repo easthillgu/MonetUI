@@ -452,6 +452,55 @@ Ellesmere 在本客户端也是收养（`EllesmereUIActionBars.lua:3136` "Stance
 **待实机看**：① 姓名板确实一个光环都不显示（连自己的 proc 也没有）；② 切目标时金边 + 1.1x 跟得上，
 战斗中（机密期）不闪；③ 1.1 倍只是视觉，暴雪点击区没跟着放大，最外圈 10% 仍然点不到。
 
+### 3.13 2026-10-26：鼠标提示重做（位置修缺陷 + 精简版 Andromeda 内容增强）
+
+参考 `Andromeda/modules/tooltip/`（10 个文件、约 60 KB）重写 `Modules/Tooltip.lua`。
+**结论先说**：它的**挂法**在我们这台客户端上一条都用不了，只能用"自建驱动帧"重做。
+
+**为什么不能照抄它的挂法**
+- `TooltipDataProcessor`（它 `tooltip.lua:456`、`style.lua:117` 的主路径）在 1.60.1.70450 **不存在**
+  （`docs/api` 快照 + API 手册双查零命中）。
+- 它剩下全是 `hooksecurefunc` / `HookScript`（`id.lua` 11 处、`style.lua` 十余处）—— 写暴雪框的
+  方法槽 / 脚本槽，AGENTS 的污染模型明令禁止（`GameTooltip` 也一样，`SharedTooltip_SetBackdropStyle`
+  我们都没敢 hook，见 `Modules/Skins/System.lua:285`）。
+- 它的 `KindOf()` 用的 `GetPrimaryTooltipData` / `GetTooltipData` 也不在快照里；只有
+  `Enum.TooltipDataType`（28 项）和 `TOOLTIP_DATA_UPDATE` 存在，后者是"稀疏/缓存解析完成"，不是"填了内容"。
+
+**保留（这次实现的）**
+1. **位置**（顺手修掉上一轮审计列出的缺陷）：跟随光标改成**每帧**（以前是 0.2 s 的 `PollWatch`
+   + `ShowWatch` 双轮询，结果每次悬停先在暴雪锚点闪一下、移动时 5 fps 阶梯）；贴到右/上边缘
+   **翻到光标另一侧**再顶回屏幕内；偏移改物理像素（`Media:Mult`）；`SetClampedToScreen(true)` 兜底。
+   还删掉了 `Apply()` 里"取消跟随就把正在看的提示框 Hide 掉"那一记。
+2. **单位提示补一行「目标: 谁」** —— Andromeda `TOOLTIP:GetTarget` 的等价物，不碰 inspect、不扫团队。
+3. **Alt 显示 ID** —— 单位 = GUID 里的 `Creature-/Vehicle-` 编号、物品 = 链接里的 itemID、
+   法术 = `GetSpell` 的 spellID（Andromeda `id.lua` 的内容，但改成"显示"而不是挂 11 个钩子）。
+
+**砍掉（以及理由）**
+| Andromeda 功能 | 不做的原因 |
+|---|---|
+| 专精 / 装等（`specilvl.lua` 17 KB） | 要 `NotifyInspect` 发网络包 + 缓存 + 队列，17 KB 换一行数字，性价比最低 |
+| 名字重涂 / 公会 / 头衔 / 服务器后缀 | 和客户端自己的名字行打架，且要处理 4 种 realm relationship |
+| 等级行改写（职业 / 生物类型 / PVP / 死亡） | 本客户端 tooltip 是数据行驱动（`Enum.TooltipDataLineType` 51 项），改写会被下一次重绘覆盖 |
+| 团队标记图标、TargetedBy、挂载来源、成就 / 图标 / 超链接 / M+ / 盟约 | 场景太窄或依赖不存在的 C_*；M+/盟约本客户端根本没有 |
+| `style.lua` 整套外观 | 我们已有 `Modules/Skins/System.lua` 的 tooltip 皮肤包（九宫格染色 + ItemRefTooltip） |
+| ItemRefTooltip 拖动 / 关闭钮（`itemref.lua`） | 只在聊天物品链接窗口上划算，和本次目标无关，留待以后 |
+
+**实现要点（无钩子怎么保证正确）**
+- 一个**自建**驱动帧（我们的框，`OnUpdate` 不污染任何暴雪框），每帧看 `GameTooltip:IsVisible()`；
+  隐藏时直接 return（零开销）。显示**上升沿**那一帧就摆位 + 补内容。
+- 幂等靠 `ns:Mark` 旁表记三个签名：`tipPre`（补前）/ `tipPost`（补后）/ `tipNoAdd`（本次显示别再补）。
+  内容变了（换目标、Shift 比对、按下 Alt —— Alt 也进签名）才重补。
+- **防闪**：如果同一份内容下我们加的行又不见了，说明引擎按数据重绘了整个框 → 记 `tipNoAdd`，
+  本次显示不再补（否则每 0.05 s 加一行，提示框会一直长/一直闪）。
+- 机密值全过 `Plain()` / `Secrets.Number` / `Secrets.Bool`：战斗中身份是机密时**宁可少一行**，
+  不写 "目标: ???"。`UnitGUID` / `UnitName` / `UnitClassBase` 都是机密标记 API。
+
+闸门：`api-audit` 0 hard（`NumLines` 是唯一 INFO：FrameXML 方法，快照不覆盖，Andromeda 也用）、
+`audit-taint` 0/0/0、`wuxian check(live:false)` 0 error / 5 warning（基线）。
+**待实机看**：① 悬停时不再有"先出现在按钮右边再跳过来"的闪；② 拖鼠标跟手；③ 屏幕右/上边缘翻转；
+④ 单位提示多出「目标」行、Att+悬停出 ID 行；⑤ 提示框没有"越加越长 / 反复闪"的迹象（`tipNoAdd` 生效）；
+⑥ 战斗中不报错、不显示错值。
+
 ---
 
 ## 4. 污染（taint）模型 —— 这个客户端最贵的一课
