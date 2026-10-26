@@ -35,6 +35,7 @@ Config\SimpleConfig.lua
 Modules\UnitFrames\UnitFrames.lua
 Modules\UnitFrames\Auras.lua
 Modules\UnitFrames\CastBar.lua
+Modules\UnitFrames\ClassPower.lua
 Modules\UnitFrames\Groups.lua
 Modules\Cooldown\Cooldown.lua
 Modules\BuffFrame\BuffFrame.lua
