@@ -14,7 +14,13 @@
 3. ⏳ `ActionBars/Secure.lua`（安全片段生成与注入 —— 全仓最敏感的一段）
 4. ✅ `ActionBars/DragDrop.lua`（122 行 move-only，`528b388`）：主文件 2416 → 2297；
    接口 `M.dragdrop.EnsureDropCatcher`，`SlotOf` 经 `M.SlotOf` 共享。**已部署待实机验**（拖放）。
-5. ⏳ `ActionBars/PetBar.lua`（宠物条收养 + 自动施法环）
+5. ✅ `ActionBars/PetBar.lua`（宠物条收养 + 自动施法环，`3e3bd40`）：290 行 move-only，
+   主文件 2264 → 2029。输入 = 主文件尾导出的 9 个共享件（`ButtonSize`/`Spacing`/`PositionBar`/
+   `SkinAdoptedButton`/`STYLE_ADOPTED_BARS`/`ResolveContainer`/`bars`/`adopted`/`PET_DEF`，同名别名接走
+   所以搬走的函数体一行没改）；输出 = `M.petbar.BuildPetBar/SyncPetGlow/SyncPetGlowNow/TeardownPetGlow`。
+   机械核对：删的 245 行只有 5 行不是原样（5 处调用点改名）。闸门全绿。**已部署待实机验**。
+   ⏳ 顺手发现：`RefreshPetContent` 全仓**零调用点**（自绘宠物条拆掉后的遗留），按 move-only 原样搬进
+   新文件了 —— 下次单独一个 commit 删掉它，别混进重构。
 6. ✅ `ActionBars/Blizzard.lua`（暴雪条压制/收养/归还的"压制/归还"这一半，`61b5842`）：
    284 行 move-only，主文件 2519 → 2264；接口 `M.blizzard.Park/ParkBag/Restore`，
    `M:ParkBlizzard` / `M:RestoreBlizzard` 搬到新文件（仍是模块方法，调用点零改）。
