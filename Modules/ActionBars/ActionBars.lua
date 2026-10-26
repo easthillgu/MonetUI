@@ -1912,24 +1912,67 @@ local function SyncEmptySlot(button)
     if slot.sheen then slot.sheen:SetShown(empty) end
 end
 
-local function AdoptBar(def)
-    local bar, name = ResolveContainer(def)
-    if not bar then return nil end
-
+-- 收养条的记忆化记录：换过容器（比如暴雪这次才把外层建出来）就把缩放的基准丢掉重算。
+-- 抽自 AdoptBar（P4 拆分，逐条保留语义）。
+local function EnsureAdoptedEntry(def, bar, name)
     local entry = adopted[def.key]
     if not entry then
         entry = {}
         adopted[def.key] = entry
     end
 
-    -- 换过容器（比如暴雪这次才把外层建出来）就把缩放的基准丢掉重算。
     if entry.frame ~= bar then
         if entry.frame then pcall(entry.frame.SetScale, entry.frame, 1) end
         entry.base = nil
     end
-    entry.def  = def
+    entry.def   = def
     entry.frame = bar
     entry.name  = name
+    return entry
+end
+
+-- 缩放到自绘按钮的尺寸，暴雪条内部的排布原样不动；基准宽度只量一次（量时缩放还是 1），
+-- 免得每次乘一遍自己设的缩放。抽自 AdoptBar（P4 拆分，逐条保留语义）。
+local function AdoptScaleBase(entry, def)
+    local firstButton = _G[def.pattern:format(1)]
+    if not entry.base and firstButton then
+        local base = firstButton:GetWidth()
+        if base and base > 8 then entry.base = base end
+    end
+    local size = ButtonSize()
+    return (entry.base and (size / entry.base)) or 1
+end
+
+-- 真正的受保护写操作：换缩放 / 摆容器。只在"真的要变"或"暴雪把位置改回去了"时调用
+-- （判断在 AdoptInPlace）。抽自 AdoptBar（P4 拆分，逐条保留语义）。
+local function WriteAdoptLayout(entry, bar, def, containers, point, scale, stored)
+    entry.signature = AdoptSignature(point, scale, stored, #(containers or {}))
+    pcall(bar.SetScale, bar, scale)
+    entry.scale = scale
+
+    local first = containers and containers[1]
+
+    -- 外层壳（PetActionBar / StanceBar）我们不动它，只搬里面的按钮容器。但它是**开鼠标**的：
+    -- 宠物条那个实测 1303×1193、贴 UIParent，正好盖住屏幕中间一大块 —— 表现就是
+    -- 世界里点不中、按住左/右键都转不了视角，而外圈的 UI（动作条、小地图）照常能点。
+    -- 壳自己没有美术也没有按钮（按钮在 ButtonContainer 里各自收鼠标），所以把它的鼠标关掉。
+    if first and first ~= bar then
+        pcall(bar.EnableMouse, bar, false)
+        pcall(bar.EnableMouseMotion, bar, false)
+
+        -- 一个容器只装一个按钮：整串跟着 1 号排开，否则只有 1 号搬过去、其余留在壳的老位置。
+        Anchor(first, stored, def)
+        ChainContainers(containers, point, scale)
+    else
+        Anchor(first or bar, stored, def)
+    end
+end
+
+local function AdoptBar(def)
+    local bar, name = ResolveContainer(def)
+    if not bar then return nil end
+
+    local entry = EnsureAdoptedEntry(def, bar, name)
 
     -- 只让它"能用"，不排版：原位置、原大小，仅关掉外壳的鼠标（那壳 1303×1193，
     -- 会把屏幕中间整块的点击吃掉）。排版相关的 SetScale / SetPoint 一律不做 ——
@@ -1944,17 +1987,10 @@ local function AdoptBar(def)
     -- 受保护的框体弄成"强污染"，暴雪的编辑模式再想给它们挪一下就被拒（ADDON_ACTION_BLOCKED
     -- 刷屏）。现在只是隐藏，不再搬动它们。
 
-    -- 缩放到自绘按钮的尺寸，暴雪条内部的排布原样不动；基准宽度只量一次（量时缩放还是 1），免得每次乘一遍自己设的缩放。
-    local firstButton = _G[def.pattern:format(1)]
-    if not entry.base and firstButton then
-        local base = firstButton:GetWidth()
-        if base and base > 8 then entry.base = base end
-    end
-    local size  = ButtonSize()
-    local scale = entry.base and (size / entry.base) or 1
+    -- 缩放到自绘按钮的尺寸（基准只量一次，见 AdoptScaleBase）。
+    local scale = AdoptScaleBase(entry, def)
 
     local containers = ButtonContainers(bar)
-    local first = containers and containers[1]
     local stored = StoredPosition(def, def.key)
     local point = stored.point or def.point or "CENTER"
 
@@ -1964,24 +2000,7 @@ local function AdoptBar(def)
     -- "StanceBar:SetPointBase()" / "PetActionBar:SetShownBase()" 这类 BLOCKED（只进日志、不弹窗）。
     -- 现在只在"真的要变"或"暴雪把位置改回去了"时才写。
     if not AdoptInPlace(entry, bar, containers, point, scale, stored, def) then
-        entry.signature = AdoptSignature(point, scale, stored, #(containers or {}))
-        pcall(bar.SetScale, bar, scale)
-        entry.scale = scale
-
-        -- 外层壳（PetActionBar / StanceBar）我们不动它，只搬里面的按钮容器。但它是**开鼠标**的：
-        -- 宠物条那个实测 1303×1193、贴 UIParent，正好盖住屏幕中间一大块 —— 表现就是
-        -- 世界里点不中、按住左/右键都转不了视角，而外圈的 UI（动作条、小地图）照常能点。
-        -- 壳自己没有美术也没有按钮（按钮在 ButtonContainer 里各自收鼠标），所以把它的鼠标关掉。
-        if first and first ~= bar then
-            pcall(bar.EnableMouse, bar, false)
-            pcall(bar.EnableMouseMotion, bar, false)
-
-            -- 一个容器只装一个按钮：整串跟着 1 号排开，否则只有 1 号搬过去、其余留在壳的老位置。
-            Anchor(first, stored, def)
-            ChainContainers(containers, point, scale)
-        else
-            Anchor(first or bar, stored, def)
-        end
+        WriteAdoptLayout(entry, bar, def, containers, point, scale, stored)
     end
 
     -- **不再碰暴雪的按钮**（这里原本会给它们套 ControlBg / 渐隐边框 / ButtonMaterial /
