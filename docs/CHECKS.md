@@ -40,8 +40,11 @@ tools.wuxian.logs({since=0, limit=300})            # 看 ERR / BLOCKED
 tools.wuxian.snap({region={0,0,400,200}})          # 截图核对视觉
 ```
 
-> **新增文件或改了 `.toc`**：`/reload` 不够，必须**整启动游戏**（客户端启动时才发现新文件）。
-> 这种情况用 `load` 顶班，或直接重启后再 `/reload`。
+> **新增文件或改了 `.toc`**：本客户端实测 `/reload` **会**重读 `.toc` 并加载新增文件
+> （2026-10-25 18:48 新建的 `CastBar.lua` 里的 nil 报错当晚 18:54 就实机报出来了），
+> 所以 `/reload` 够用；**别被 `wuxian load` 文档里"新文件要整启动"那句误导** —— 那说的是热装载
+> （`load`）一条路。反过来，`wuxian history` 的版本号**只记 `load`/`checkpoint`**，
+> 拿"没有新版本"当"没部署"的证据是错的（2026-10-26 踩过一次，见 HANDOFF 3.7）。
 
 **没有 MCP 时**：`deploy-retail.ps1` 之后让玩家 `/console scriptErrors 1` → `/reload` → 复现 → 贴红字/截图。
 

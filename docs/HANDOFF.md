@@ -248,26 +248,29 @@ NamePlateAuras.lua:366     boolean test on 'isFullUpdate' (secret)
 
 ---
 
-## 3.7 2026-10-26：昨天的改动**从来没进过游戏**（部署链断裂）
+## 3.7 2026-10-26：昨天的改动"没生效" —— 一次**错误归因**与更正
 
-症状（作者报的）："昨天的修改似乎没有读取到"。
+作者报"昨天的修改似乎没有读取到"。我先用 `wuxian history` 查到"最后保留的版本 v23 = 10-25 16:11、
+里面没有 `Auras.lua` / `CastBar.lua`"，当场写下"16:11 之后的 8 个提交从未部署"。
+**这条结论是错的，已作废**（`e66a4e5` 里写的那段不要再用）。
 
-查法：`tools.wuxian.history({addon="MonetUI"})` —— 最后保留的版本是 **v23，时间 2026-10-25 16:11**，
-内容里**根本没有 `Modules/UnitFrames/Auras.lua` / `CastBar.lua`**（这两个是昨天 16:59 / 19:48 的
-P5 拆分新建的文件），`BuffFrame` / `Nameplates` / `Groups` / `Utils/Secrets` 也都是 16:11 之前的版本。
+为什么错：`wuxian history` 的版本**只由热装载（`load` / `checkpoint`）产生**，普通的
+`deploy-retail.ps1` + `/reload` 根本不建版本。拿"没有新版本"推"没有部署"，是把缺证据当反证。
 
-**结论：昨天 16:11 之后的 8 个提交（Auras/CastBar 拆分、BuffFrame 三修、TargetFrame 彻底压制、
-Groups StyleButton 拆、Nameplates 减益修复）一次都没部署过。** 客户端加载的一直是 16:11 的旧代码，
-所以"改了看不到"，而且**没有任何报错** —— 因为离线闸门（`api-audit` / `audit-taint` / `check`）
-审的是源码或（按 addon 名跑 `check` 时）**已安装副本**，两条路都不会喊"你没部署"。
+2026-10-26 复核出来的真事实（三条都能重跑）：
 
-修法与防呆：
-1. `node tools/sync-check.js`（新增）：逐文件 MD5 比对仓库 ↔ 已安装副本，三类报
-   MISSING / STALE / EXTRA，不同步退出码 1。**每次 commit 后、每次开游戏前跑一次。**
-2. `deploy-retail.ps1` 是 `/MIR` 镜像：这次顺带清掉了游戏目录里 25 个
-   `Assets/Textures.bak/*.tga` 残留（仓库里早就没有这些文件，是更早一次部署留下的；游戏不引用）。
-3. 记住这个组合判据：**新文件 + toc 改动需要整启动游戏才生效**（`/reload` 不够，见 wuxian `load`
-   的说明），所以"昨天加的 Auras.lua 没生效"很可能同时踩了"没部署"和"没重启"两条。
+| 事实 | 取法 | 意义 |
+|---|---|---|
+| 昨天 `deploy-retail.ps1` 跑了 60+ 次，最后一次 **21:15:13** | 昨天会话导出的 shell 调用时间戳 | 最后一个提交 21:17:35 只是把 21:15 已部署的工作树内容记录进 git，没有遗漏 |
+| 客户端整晚**没重启**：`Logs/General.log` 是一段连续时间轴 **10-25 15:42:29 → 21:18:56**（0 次时间回退） | 该日志每次启动重写 | 15:42 之后的一切改动全靠 `/reload` 生效 |
+| **新增文件确实被加载**：`CastBar.lua`（18:48 新建）漏声明 `Shared` 导致 `CreateCastBar` 第 48 行 nil，实机在 18:54 以"头像模块失效"报出来 | 用户 18:54 反馈；那一行在 `CastBar.lua` 内部 | 本客户端 `/reload` **会**重读 `.toc` 并加载新增文件（"新文件必须整启动"只对 wuxian `load` 成立） |
+
+所以"改了看不到"这次**不是**部署链的问题，要继续查就必须落到**具体哪一项行为**上，再沿那条链取证。
+
+仍然保留的防呆：`node tools/sync-check.js` —— 逐文件 MD5 比对仓库 ↔ 已安装副本，分
+MISSING（新文件没部署）/ STALE（改过没部署）/ EXTRA（旧部署残留）三类，不同步退出码 1；
+**commit 后、开游戏前各跑一次**。本次跑它顺手清掉了游戏目录里 25 个 `Assets/Textures.bak/*.tga`
+残留（仓库已无这些文件、游戏不引用）。
 
 ---
 
