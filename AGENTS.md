@@ -40,6 +40,11 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   `if Secrets.IsSecret(v) then ... else ... end`。
   诊断这类拦截**只认** `Secrets.BoolBlocks()`（失败路径自记 `debugstack`）——本客户端
   taint.log 对"布尔测试被拦"会记、对 `ADDON_ACTION_BLOCKED` 却**零记录**（旗子开着实测 0 字节）。
+- **字符串同理，而且 `type()` 判不出来**（2026-10-26 判例）：受限时 `GameTooltip:GetUnit()` 会把
+  **unit 令牌本身**标成机密，而机密串的 `type(x)` 照样是 `"string"`——只判类型就放行，
+  接着 `unit .. "target"` / `table.concat` 直接抛 `invalid value (secret)`（实机就这样刷了 3 条）。
+  **规矩：凡是"从游戏拿到、之后要进 concat / format / 比较"的值（unit 令牌、name、guid、link），
+  判完类型必须再过一次 `issecretvalue`**，宁可少显示一行。
 
 ## 污染（taint）模型 —— 本客户端最贵的一课
 

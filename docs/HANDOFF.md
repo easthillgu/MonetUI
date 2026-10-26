@@ -647,6 +647,23 @@ TGA/WHITE8X8 会渲染成一排虚线；子框上这条更明显）。
 deploy 119 + sync-check 同步。**待实机看**：四周是 1 物理像素主题色细边（与任务追踪同色）、
 换主题跟着变；`ItemRefTooltip` 同样。
 
+### 3.20 2026-10-26：`invalid value (secret)` —— 机密单位令牌进了 table.concat
+
+实机报错（Count: 3）：`Modules/Tooltip.lua:359: invalid value (secret) at index 1 in table for 'concat'`，
+栈 `concat ← Enrich ← Tick`。
+
+- **根因**：受限时 `GameTooltip:GetUnit()` 把 **unit 令牌**也标成机密，而我们的
+  `TooltipUnit()` 只判了 `type(unit) == "string"` —— **机密串的类型照样是 string**，于是它被塞进
+  签名数组第 1 项，`table.concat` 当场抛。`CollectLines` 里 `unit .. "target"` 其实也抛，
+  只是那条被 pcall 吞掉（表现为"目标行有时不出现"），签名这行没 pcall 就冒出来了。
+- **修法**：`TooltipUnit()` 补 `Secrets.IsSecret(unit)` → 机密令牌当"读不到"返回 nil（少一行）；
+  新增 `SafeSig(parts)`：签名拼接前把任何机密值换成 `"?"` 再 `table.concat`。
+  `Tick` 是每帧驱动，这里抛一次就是每帧一条报错，所以这层兜底必须留。
+- AGENTS「安全边界」补了一条规矩：**判完类型必须再过 `issecretvalue`** 才能进 concat / format。
+
+闸门：`api-audit` 0 hard、`audit-taint` 0/0/0、`wuxian check` 0 error / 5 warning（基线）。
+**待实机看**：战斗中悬停单位不再刷这条；脱战后「目标」行照常出现。
+
 ---
 
 ## 4. 污染（taint）模型 —— 这个客户端最贵的一课

@@ -181,11 +181,27 @@ local function Plain(value)
 end
 
 --- 提示框当前是哪个单位（本客户端的 GameTooltip:GetUnit() 返回 name, unit）。
+--- **机密单位令牌一律当"读不到"**：受限时 GetUnit 会把 unit 也标成机密，
+--- `type(x) == "string"` 对它照样成立（所以不能只判类型），而机密串一旦进
+--- `table.concat` / `..` 就会抛 `invalid value (secret)`（2026-10-26 实机报的就是这条）。
 local function TooltipUnit(tip)
     if type(tip.GetUnit) ~= "function" then return nil end
     local ok, _, unit = pcall(tip.GetUnit, tip)
-    if ok and type(unit) == "string" then return unit end
-    return nil
+    if not ok or type(unit) ~= "string" then return nil end
+    if Secrets.IsSecret(unit) then return nil end
+    return unit
+end
+
+--- 指纹用的安全拼接：机密值换成 "?"，永远不让 concat 碰到它。
+local function SafeSig(parts)
+    local out = {}
+    for i = 1, #parts do
+        local v = parts[i]
+        if type(v) ~= "string" then v = tostring(v) end
+        if Secrets.IsSecret(v) then v = "?" end
+        out[#out + 1] = v
+    end
+    return table.concat(out, "\1")
 end
 
 --- 附加信息画在**我们自己的小框**里，不用 tooltip:AddLine。
@@ -356,7 +372,7 @@ local function Enrich(tip)
 
     local parts = { TooltipUnit(tip) or "" }
     for i = 1, #lines do parts[#parts + 1] = lines[i].text end
-    UpdateBox(tip, lines, table.concat(parts, "\1"))
+    UpdateBox(tip, lines, SafeSig(parts))
 end
 
 -- ============================================================================
