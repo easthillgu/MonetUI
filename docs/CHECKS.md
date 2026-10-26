@@ -14,8 +14,10 @@ git status --short
 # 2) 离线闸门：C_* 名字 / 事件名 / Enum 值 是否对得上本客户端快照（HARD 项 = 退出码 1）
 node tools/api-audit.js
 
-# 3) 有 wuxian MCP 时（0 error 0 warning 才算完）
-#    tools.wuxian.check({ target = "MonetUI", live = false })
+# 3) 有 wuxian MCP 时（0 error 才算完）
+#    **传仓库绝对路径**：按 addon 名查的是"已安装副本"，审不到还没部署的源码
+#    tools.wuxian.check({ target = "C:\\Users\\EastHillGu\\Documents\\wowaddonsdev\\MonetUI-refactor", live = false })
+#    （按名字跑会多一条 toc-interface 警告：部署脚本才会把 ## Interface 改成客户端号，不是缺陷）
 ```
 
 改了材质还要跑：
@@ -31,11 +33,15 @@ node tools/audit-pixels.js     # 2 的幂 / 纯白衬底 / 染色模具无色相
 ```
 tools.wuxian.status()                              # link.state 必须是 online
 powershell -File tools/deploy-retail.ps1           # 拷文件 + 按客户端改写 toc 的 Interface
+node tools/sync-check.js                           # 必须 "in sync"（否则游戏加载的是旧代码）
 tools.wuxian.check({target="MonetUI", live=true})  # 再确认一次
 tools.wuxian.reload({reason="一句话说明这次改了什么"})   # 弹按钮，玩家点
 tools.wuxian.logs({since=0, limit=300})            # 看 ERR / BLOCKED
 tools.wuxian.snap({region={0,0,400,200}})          # 截图核对视觉
 ```
+
+> **新增文件或改了 `.toc`**：`/reload` 不够，必须**整启动游戏**（客户端启动时才发现新文件）。
+> 这种情况用 `load` 顶班，或直接重启后再 `/reload`。
 
 **没有 MCP 时**：`deploy-retail.ps1` 之后让玩家 `/console scriptErrors 1` → `/reload` → 复现 → 贴红字/截图。
 
@@ -52,7 +58,11 @@ tools.wuxian.snap({region={0,0,400,200}})          # 截图核对视觉
       编辑模式里拖小地图不会带走我们的显示
 - [ ] 任务追踪：只有自绘那一块（接任务 / 换地图 / 重载后各看一次）
 - [ ] 动作条 1–8 号：施法 / 翻页 / 拖放；宠物条左右键 / 冷却 / 自动施法
+- [ ] 单位框（玩家 / 目标 / 目标的目标 / 焦点）：血条、名字与等级/百分比位置、
+      目标的目标**没有能量条也没有分隔线**、施法条
 - [ ] 无新增 `taint.log`（见 D-5）
+
+> 2026-10-26 P4 拆分动过动作条与单位框的**创建路径**（登录时就会跑），上面两条是本轮的回归重点。
 
 ---
 

@@ -1,5 +1,31 @@
 # 待办
 
+## ✅ 2026-10-26 P4 长函数拆分收尾（纯重构，离线验收，待实机回归）
+
+> 来龙去脉写在 `docs/HANDOFF.md` 3.6 节与 `docs/PLAN-refactor.md` P4 节；一个函数一个 commit。
+
+1. ✅ `ActionBars.BuildButton` 126 → 62（`4780b91`，`EnsureFlyoutMixin` / `EnsureButtonTooltip`）。
+2. ✅ `ActionBars.SkinButton` 79 → 11（`9f19c8c`，Icon / Fonts / Cooldown / Feedback 四个子件）。
+3. ✅ `ActionBars.AdoptBar` 100 → 63（`d616e35`，记录 / 量基准 / 受保护写三段）。
+4. ✅ `ActionBars.CreateBar` 123 → 71（`f7fe0a7` 抽 `BuildPetBar`）+ 删死代码（`8b43996`）。
+5. ✅ `UnitFrames.CreateUnitFrame` 137 → 48（`e2283e9`，Bars / Texts / Finish 三段）。
+6. ⏳ **实机回归**：动作条施法/翻页/拖放、宠物条自动施法环、单位框血条与文本、进出编辑模式。
+7. ✅ 记：`wuxian check` 按 addon 名查的是**已安装副本**，校验源码要传仓库路径（HANDOFF 第 0 节）。
+
+## ✅ 2026-10-26 部署链断裂（"昨天的修改没读取到"）
+
+> 详见 `docs/HANDOFF.md` 3.7 节。
+
+1. ✅ **查明**：游戏目录最后一次部署是 **2026-10-25 16:11**（`wuxian history` 最后版本 v23），
+   昨天 16:59–21:17 的 8 个提交从未部署 —— 已安装副本里连 `Modules/UnitFrames/Auras.lua` /
+   `CastBar.lua` 都不存在。客户端一直在跑 16:11 的旧代码，且**零报错**。
+2. ✅ **已部署**：`deploy-retail.ps1` 跑完，现在仓库 ↔ 已安装副本逐文件 MD5 一致
+   （仅 toc 的 `## Interface` 由脚本改写为 120105）。
+3. ✅ **防呆**：新增 `node tools/sync-check.js`（MISSING / STALE / EXTRA 三类，不同步退出码 1），
+   已写进 CHECKS.md 的 B 段与 HANDOFF 第 0 节标准动作。
+4. ⏳ 下次开游戏是一次性验证**两天全部改动**（昨天 8 个提交 + 今天 P4 的 5 个提交），
+   出错要按"先二分模块、再看 taint.log"的老路走。
+
 ## ✅ 2026-10-24 污染链收尾批次（已实机验证，全是本地 commit，未推远端）
 
 > 来龙去脉写在 `docs/HANDOFF.md` 第 3 节；硬规则沉淀进 `AGENTS.md`。

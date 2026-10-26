@@ -345,18 +345,28 @@ UpdateMaxHealth / UpdateHealPrediction` → 秘值比较被拦 → 整条 compac
    - 实机目检:团队框名字截断、名牌 debuff 边框颜色(驱散色/主题色)、光环按钮边框。
 4. 事件注册骨架不单开:与 P1 迁移一起消化(评估后如仍有大块重复再说)。
 
-## P4 · 长函数拆分(review #5,一个函数一个 commit)
+## P4 · 长函数拆分(review #5,一个函数一个 commit) —— ✅ 完成(2026-10-26)
 
 按子件抽 `EnsureXxx(frame)`:
 
-- [ ] UnitFrames `StyleAuraButton`(~159 行)
-- [ ] Groups `StyleButton`(~130)
-- [ ] Nameplates `DressDebuffButton`(~128)
-- [ ] ActionBars `BuildButton`(~128)
-- [ ] UnitFrames `CreateUnitFrame`(~126)
-- [ ] ActionBars `CreateBar`(~124)
-- [ ] ActionBars `AdoptBar`(~107)
-- [ ] ActionBars `SkinButton`(~81)
+- [x] UnitFrames `StyleAuraButton`(~159 → 52) —— 子件 `EnsureAuraBorder` / `EnsureAuraIcon` /
+      `EnsureAuraCooldown` / `EnsureAuraTexts`（ArcAuras 那一轮顺手拆完，必需件先注册）
+- [x] Groups `StyleButton`(~130 → 14 组合) —— `StyleHealthBars` / `StyleOverlay` / `StylePowerBar` /
+      `StyleTexts` / `StyleRoleIcon`（`48224d4`）
+- [x] Nameplates `DressDebuffButton`(~128) —— `Build` / `Reapply` 两段（`001a49f`）
+- [x] ActionBars `BuildButton`(126 → 62) —— `EnsureFlyoutMixin` / `EnsureButtonTooltip`（`4780b91`）
+- [x] ActionBars `SkinButton`(79 → 11) —— `BuildButtonIcon` / `BuildButtonFonts` /
+      `BuildButtonCooldown` / `BuildButtonFeedback`（`9f19c8c`）
+- [x] ActionBars `AdoptBar`(100 → 63) —— `EnsureAdoptedEntry` / `AdoptScaleBase` /
+      `WriteAdoptLayout`（`d616e35`）
+- [x] ActionBars `CreateBar`(123 → 86 → 71) —— 抽出 `BuildPetBar`（`f7fe0a7`），
+      并清掉"自绘宠物条"那段**永远走不到**的分支（`8b43996`，收养方案之前的遗留）
+- [x] UnitFrames `CreateUnitFrame`(137 → 48) —— `BuildUnitBars` / `BuildUnitTexts` /
+      `FinishUnitFrame`（`e2283e9`）
+
+**验收方式（离线）**：`tools.wuxian.check` 指向**仓库目录**跑（0 error），
+并用 diff 机械核对 move-only —— 新增语句只应有那几条调用、删除语句必须全部在新增里复现。
+ActionBars 那四个的实机回归项见第 6 节（施法/翻页/拖放/宠物条/自动施法环）。
 
 ## P5 · 文件拆分(本轮只试水一个,review #2 部分)
 

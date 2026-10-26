@@ -25,8 +25,19 @@
 node tools/api-audit.js          # 撞 docs/api 快照（HARD 项退出码 1）
 node tools/audit-taint.js        # 秘值/taint 机械闸门（BLOCKER≠0 退出码 1；HIGH=人工复核清单）
 powershell -File tools/deploy-retail.ps1
+node tools/sync-check.js         # 仓库 vs 已安装副本（退出码 0 = 游戏加载的就是这份代码）
 # 游戏内 /reload（有 wuxian MCP 时用 tools.wuxian.reload）
 ```
+
+> **`node tools/sync-check.js`（2026-10-26 新增）**：逐文件 MD5 比对仓库与
+> `Interface/AddOns/MonetUI`，分三类报 —— MISSING（新文件没部署，客户端根本不会加载）/
+> STALE（改过没部署）/ EXTRA（旧部署残留）。**"改了但游戏里看不到"这类事故先跑它**，
+> 比翻日志快。toc 的 `## Interface` 由部署脚本改写，比对时已排除。
+
+> **`wuxian check` 的路径陷阱（2026-10-26 记）**：`check({target="MonetUI"})` 查的是**游戏里的
+> 已安装副本**（`Interface/AddOns/MonetUI`），不是仓库。想在校验**当前源码**（部署之前）就把
+> `target` 写成仓库绝对路径（`...\MonetUI-refactor`），否则审的是上一版。按 addon 名跑时
+> 还会多一条 `toc-interface`（部署脚本会改 `## Interface`），那不是缺陷。
 
 `wuxian check`（有 MCP 时）等价于"客户端侧的语法 + 未解析名字 + 受保护调用"体检，**0 error 才算改完**；`api-audit.js` 离线也能跑，是它拦住了大部分"名字写错/事件名不存在"的错；`audit-taint.js` 是 2026-10-25 新增的**commit 前 taint 自查**（规则 = `.opencode/skills/wow-secret-value-taint-audit/SKILL.md`，已审行用 `-- TAINT-OK: <原因>` 行内豁免，两边规则变更要同步）。
 
@@ -207,6 +218,59 @@ NamePlateAuras.lua:366     boolean test on 'isFullUpdate' (secret)
 
 ---
 
+## 3.6 2026-10-26：P4 长函数拆分收尾（纯重构，行为零变化）
+
+一句话：**review 开出来的 8 个长函数全部拆完**，每个函数一个 commit，ActionBars 与 UnitFrames
+里那些 100+ 行的"装配 + 事件 + 写属性"混在一起的块，现在都能一眼看出责任边界。
+
+| 函数 | 行数 | 抽出的子件 |
+|---|---|---|
+| `ActionBars.BuildButton` | 126 → 62 | `EnsureFlyoutMixin`（托盘接口）、`EnsureButtonTooltip`（HoverWatch 提示） |
+| `ActionBars.SkinButton` | 79 → 11 | `BuildButtonIcon` / `Fonts` / `Cooldown` / `Feedback` |
+| `ActionBars.AdoptBar` | 100 → 63 | `EnsureAdoptedEntry`（记忆化记录）、`AdoptScaleBase`、`WriteAdoptLayout`（受保护写） |
+| `ActionBars.CreateBar` | 123 → 71 | `BuildPetBar`（整段宠物条收养）＋删掉一段**永远走不到**的自绘宠物条分支 |
+| `UnitFrames.CreateUnitFrame` | 137 → 48 | `BuildUnitBars` / `BuildUnitTexts` / `FinishUnitFrame` |
+| `UnitFrames.StyleAuraButton` | 159 → 52 | `EnsureAuraBorder` / `Icon` / `Cooldown` / `Texts`（此前已拆） |
+| `Groups.StyleButton` | ~130 → 14 | `StyleHealthBars` / `Overlay` / `PowerBar` / `Texts` / `RoleIcon`（`48224d4`） |
+| `Nameplates.DressDebuffButton` | ~128 | `Build` / `Reapply`（`001a49f`） |
+
+**这轮的唯一"非 move-only"**：`CreateBar` 里第二个 `if def.pet then` 是死代码 —— 函数开头
+`if def.pet then return BuildPetBar(...) end` 已无条件返回，那段"自绘 `type="pet"` 安全按钮"
+（收养方案之前的老路）永远不会执行，已删净（`8b43996`）。
+
+**新增的验收手法（可复用）**：拆完用 diff 做机械核对 —— 把 `git diff -U0` 的增删行去掉注释
+与函数头后比对，**新增语句只应是那几条调用，删除语句必须全部在新增里复现**。这次
+`CreateUnitFrame` 的核对结果就是"ONLY ADDED: 3 个调用 / ONLY DELETED: 空"。
+
+**待实机回归**（本轮改的是动作条与单位框的创建路径，登录时就会跑）：
+动作条 1–8 施法/翻页/拖放、宠物条收养 + 自动施法环、单位框（玩家/目标/目标的目标/焦点）
+血条与文本位置、进出编辑模式、`/reload` 后无新增 BLOCKED。
+
+---
+
+## 3.7 2026-10-26：昨天的改动**从来没进过游戏**（部署链断裂）
+
+症状（作者报的）："昨天的修改似乎没有读取到"。
+
+查法：`tools.wuxian.history({addon="MonetUI"})` —— 最后保留的版本是 **v23，时间 2026-10-25 16:11**，
+内容里**根本没有 `Modules/UnitFrames/Auras.lua` / `CastBar.lua`**（这两个是昨天 16:59 / 19:48 的
+P5 拆分新建的文件），`BuffFrame` / `Nameplates` / `Groups` / `Utils/Secrets` 也都是 16:11 之前的版本。
+
+**结论：昨天 16:11 之后的 8 个提交（Auras/CastBar 拆分、BuffFrame 三修、TargetFrame 彻底压制、
+Groups StyleButton 拆、Nameplates 减益修复）一次都没部署过。** 客户端加载的一直是 16:11 的旧代码，
+所以"改了看不到"，而且**没有任何报错** —— 因为离线闸门（`api-audit` / `audit-taint` / `check`）
+审的是源码或（按 addon 名跑 `check` 时）**已安装副本**，两条路都不会喊"你没部署"。
+
+修法与防呆：
+1. `node tools/sync-check.js`（新增）：逐文件 MD5 比对仓库 ↔ 已安装副本，三类报
+   MISSING / STALE / EXTRA，不同步退出码 1。**每次 commit 后、每次开游戏前跑一次。**
+2. `deploy-retail.ps1` 是 `/MIR` 镜像：这次顺带清掉了游戏目录里 25 个
+   `Assets/Textures.bak/*.tga` 残留（仓库里早就没有这些文件，是更早一次部署留下的；游戏不引用）。
+3. 记住这个组合判据：**新文件 + toc 改动需要整启动游戏才生效**（`/reload` 不够，见 wuxian `load`
+   的说明），所以"昨天加的 Auras.lua 没生效"很可能同时踩了"没部署"和"没重启"两条。
+
+---
+
 ## 4. 污染（taint）模型 —— 这个客户端最贵的一课
 
 完整版在 `AGENTS.md` 的「污染（taint）模型」一节，这里只列**判断用的最短版本**：
@@ -327,7 +391,7 @@ end
 | `Modules/UnitFrames/*` | 单位框 / 小队团队 | 暴雪的 Group 框**完全别碰** |
 | `Modules/Skins/*` | 暴雪窗口美化（含 `Forever.lua` 客户端专属） | 不给里面的按钮/页签挂钩子 |
 | `Config/SimpleConfig.lua` | 配置面板（滚轮滚动） | — |
-| `tools/` | 部署、API 审计、材质生成、像素审计、taint 闸门 | 材质改完必须 `node tools/audit-pixels.js`；commit 前跑 `node tools/audit-taint.js` |
+| `tools/` | 部署、API 审计、材质生成、像素审计、taint 闸门 | 材质改完必须 `node tools/audit-pixels.js`；commit 前跑 `node tools/audit-taint.js`；**部署后跑 `node tools/sync-check.js`**（仓库↔已安装副本，MISSING/STALE/EXTRA） |
 | `docs/api/` | 本客户端 API 快照（**效力高于 hated-wow MCP**） | `node tools/api-lookup.js <名字>` |
 | `.opencode/skills/` | 项目级 agent skill | `wow-secret-value-taint-audit`（秘值/taint 审查，含三起实机案情档案）与 `wow-petbar-autocast-pixel-glow` |
 
@@ -350,10 +414,16 @@ end
 
 ## 9. 建议的下一步（按价值排序）
 
-1. **回归一遍编辑模式**（本轮改动最密集的地方），确认 `oldR` 与 BLOCKED 都不再出现。
-2. **小队/团队框**：确认自绘的正常、暴雪的那套按需在编辑模式里隐藏（我们不再代劳）。
-3. **SpellFlyout（技能弹出托盘）**：鼠标点选项必报 `ADDON_ACTION_FORBIDDEN CastSpellByID()`，
+1. **实机回归这一轮的 P4 拆分**（动作条 + 单位框的创建路径全都动过）：
+   动作条 1–8 施法/翻页/拖放、宠物条（收养十按钮 + 自动施法像素环 + 冷却转圈）、
+   单位框（玩家/目标/目标的目标/焦点）血条与文本位置、进出编辑模式、`/reload` 后无新增 BLOCKED。
+2. **回归一遍编辑模式**（改动最密集的地方），确认 `oldR` 与 BLOCKED 都不再出现。
+3. **P5 剩余文件拆分**：Auras/CastBar 试水已通过，按同一模式拆
+   `UnitFrames` 的 Blizzard/ClassPower、`ActionBars` 的 Secure/DragDrop/PetBar/暴雪条处置
+   （注意：子文件用到的共享局部表必须显式挂到 `M` 上，否则静默失败）。
+4. **小队/团队框**：确认自绘的正常、暴雪的那套按需在编辑模式里隐藏（我们不再代劳）。
+5. **SpellFlyout（技能弹出托盘）**：鼠标点选项必报 `ADDON_ACTION_FORBIDDEN CastSpellByID()`，
    快捷键正常。要么接受"鼠标点不展开、只提示一次"，要么自绘托盘（工作量中等）。
-4. 未动模块的实机过一遍（Bags/BagFrame 退役、InfoBar、Tooltip、Cursor、Toast、Durability、CombatText）。
-5. 想降噪的话：宠物条每次重载 10 条 `PetActionButton*:SetShown` BLOCKED（不改更稳，见 AGENTS）。
-6. 上线前：push 到 origin，README 里的 `status` 徽章改成正式版。
+6. 未动模块的实机过一遍（Bags/BagFrame 退役、InfoBar、Tooltip、Cursor、Toast、Durability、CombatText）。
+7. 想降噪的话：宠物条每次重载 10 条 `PetActionButton*:SetShown` BLOCKED（不改更稳，见 AGENTS）。
+8. 上线前：push 到 origin，README 里的 `status` 徽章改成正式版。
