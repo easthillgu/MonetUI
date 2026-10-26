@@ -276,6 +276,10 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
 - **拖放落点**：普通 `Frame` 收不到 `OnReceiveDrag`（实机 0 次；`IsMouseEnabled` 也开着、`GetMouseFoci`
   也显示它在最上层）。可行做法是用 `ActionBarButtonTemplate` 建一个"只在 `GetCursorInfo()` 有货时才
   开鼠标"的透明接住器，**`OnMouseUp`** 里按光标坐标算出目标格再 `PlaceAction(slot)`。
+  **它的鼠标状态必须无条件每拍结算**（`条显示着 and 手里有东西`），不能"宿主隐藏就早退"：
+  接住器是挂在条矩形上的独立框体，宿主隐藏时它不会自己失效，模板事件还会把它鼠标打开 ——
+  实机就是 bar4 的接住器（level 70）一直 mouse=true，压在同 y 的姿态条上，点姿态放出"动作条第 1 格"。
+  同理：**我们的条之间不能同 y 重叠**，姿态条的默认锚点按当前条数算（`SyncStanceAnchor`）。
 - **弹出托盘（SpellFlyout）：鼠标点开只能看，选项必须用快捷键点。** 我们的按钮需要补
   `GetPopupDirection` / `TogglePopup` / `popupCrossAxisSize` 三样（缺一个就报
   `SpellFlyout.lua:260` / `:350` / `Flyout.lua:322`）。但托盘一旦挂到插件按钮上，
