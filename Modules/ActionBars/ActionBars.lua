@@ -1531,22 +1531,6 @@ local function CreateBar(def)
         return nil
     end
 
-    if def.pet then
-        -- 自绘宠物条：显隐只由"有宠物"决定；页号恒为 1（子片段据此写 action = 本格序号）；
-        -- 不装拖放接住器（宠物槽不是动作条槽位）。
-        if RegisterStateDriver then
-            pcall(RegisterStateDriver, frame, "visibility", "[pet] show; hide")
-            pcall(RegisterStateDriver, frame, "page", "1")
-        end
-        LayoutBar(bar)
-        PositionBar(bar)
-        bar.page = 1
-        PushPageToChildren(bar)
-        PushSecureInit(bar, "pet")
-        RefreshBar(bar)
-        return bar
-    end
-
     -- 翻页驱动：1 号条按客户端状态换页，其余条固定在自己那一页。
     if RegisterStateDriver then
         pcall(RegisterStateDriver, frame, "page", def.paged and FULL_PAGE or tostring(def.page))
