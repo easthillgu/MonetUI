@@ -77,6 +77,7 @@
 MonetUI/
 ├── MonetUI.toc          入口清单：只列各组 xml + 单文件模块（顺序即加载顺序）
 ├── Core.lua             SavedVariables / 模块注册与生命周期 / 主题管线 / 斜杠命令
+├── LICENSE / THIRD-PARTY-NOTICES.txt   自身 MIT + 随包第三方与字体的许可清单
 ├── Libs/                随包库 + NOTICE.md（第三方许可清单）+ Libs.xml
 ├── Utils/               基础工具（Math Secrets Media EventBus Color Widget Layout Mover Skin）+ Utils.xml
 ├── Config/              设置面板（SimpleConfig）+ Config.xml
@@ -106,8 +107,8 @@ MonetUI/
 ## 📄 协议
 
 - **MonetUI 自身代码**：[MIT](LICENSE)。
-- **随包第三方组件**保留各自许可：`LibStub`（公有领域）。完整清单见 [`Libs/NOTICE.md`](Libs/NOTICE.md)。
-- **随包字体**各自授权：正文用 `Pingfangpixel.ttf`（点阵苹方，**无可再分发授权，公开发行前必须替换**，详见 [`Assets/Fonts/NOTICE.md`](Assets/Fonts/NOTICE.md)）、备用 `FusionPixel` 为 SIL OFL 1.1（全文 `Assets/Fonts/OFL-FusionPixel.txt`）、Super Effective 为 CC BY-SA 3.0。
+- **随包第三方组件**保留各自许可：`LibStub`（公有领域）。逐条清单见 [`THIRD-PARTY-NOTICES.txt`](THIRD-PARTY-NOTICES.txt)（发行时随包分发），细节见 [`Libs/NOTICE.md`](Libs/NOTICE.md) 与 [`Assets/Fonts/NOTICE.md`](Assets/Fonts/NOTICE.md)。
+- **随包字体**各自授权：正文用 `Pingfangpixel.ttf`（点阵苹方，**无可再分发授权，公开发行前必须替换**）、备用 `FusionPixel` 为 SIL OFL 1.1（全文 `Assets/Fonts/OFL-FusionPixel.txt`）、Super Effective 为 CC BY-SA 3.0。
 
 ---
 
