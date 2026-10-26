@@ -155,3 +155,19 @@ M:OnEvent("QUEST_LOG_UPDATE", function()
     M:Apply(M.byKey.questlog)
     M:Apply(M.byKey.questframe)
 end)
+
+-- 书籍 / 信件正文阅读窗：UIPanels_Game 的 [Family] ItemTextFrame 无 game-type 门控，本客户端存在。
+local function SkinItemText()
+    local frame = _G.ItemTextFrame
+    if not frame then return end
+
+    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
+    M:Buttons({ "ItemTextCloseButton", "ItemTextNextPageButton", "ItemTextPrevPageButton" })
+    M:Scrolls({ "ItemTextScrollFrame" })
+end
+
+M:Panel("itemtext", { label = "书籍 / 阅读", group = "任务", apply = SkinItemText,
+    frames = {
+        "ItemTextFrame", "ItemTextCloseButton",
+        "ItemTextNextPageButton", "ItemTextPrevPageButton", "ItemTextScrollFrame",
+    } })

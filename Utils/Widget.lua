@@ -428,12 +428,14 @@ end
 -- The rounded-border art, in three ring widths.  Each entry is fixed by the texture, not by taste:
 --   ring   = the ring's width in texels, which 9-slice maps 1:1 into UI units  -> also the background inset
 --   slice  = the outer arc radius in texels, which is also the smallest edgeSize that shows the whole arc
--- The generated files are Assets/Textures/monet_round_edge{,_thin,_thick}.tga; the three numbers have to
--- stay in step with tools/regen-textures.js (ROUND_EDGES) or the border drifts or gets clipped.
+-- The generated files are Assets/Textures/monet_round_edge{,_thin,_thick}.tga (+ .blp via tga-to-blp.js);
+-- the three numbers have to stay in step with tools/regen-textures.js (ROUND_EDGES) or the border drifts or
+-- gets clipped.  Each entry carries the matching .blp key for SetBackdrop's edgeFile (retail/Forever
+-- SetBackdrop cannot ingest TGA/PNG as an edge file -- it renders them as a row of dashes).
 local ROUND_EDGES = {
-    { key = "monet_round_edge_thin",  ring = 1, slice = 2 },
-    { key = "monet_round_edge",       ring = 2, slice = 3 },
-    { key = "monet_round_edge_thick", ring = 3, slice = 4 },
+    { key = "monet_round_edge_thin",   blpKey = "monet_round_edge_thin_blp",   ring = 1, slice = 2 },
+    { key = "monet_round_edge",        blpKey = "monet_round_edge_blp",        ring = 2, slice = 3 },
+    { key = "monet_round_edge_thick",  blpKey = "monet_round_edge_thick_blp", ring = 3, slice = 4 },
 }
 
 --- Pick the ring whose width is nearest the physical thickness asked for.
@@ -466,18 +468,17 @@ function Widget:ApplyBackdrop(frame, opts)
     end
     bd.bgFile = Media.texture.blank
     if opts.round then
-        -- MonetUI: the client's 9-slice (the backdrop's edge file) only works with Blizzard's
-        -- own BLP edge art.  On retail (12.x) a TGA/PNG edge file comes out as a row of
-        -- dashes -- the missing-texture pattern -- so the rounded frame came out broken
-        -- (the minimap panel and the quest tracker had a dotted border).  The border is
-        -- therefore drawn flat: a continuous line of the theme's border colour, square
-        -- corners.  The round art (monet_round_edge*) stays in the assets.
-        local edge = math.max(1, (opts.thickness or 1) * Media:Mult())
+        -- 尝试过用 monet_round_edge*.blp 走 SetBackdrop 的 edgeFile 做 9-slice 圆角，
+        -- 正式服 12.1.5 / Forever 16001 上效果都很差（edgeFile 在这个引擎里只能喂 BLP，
+        -- 即使 RAW3 无压缩也渲染破碎）。直接回退到直角——theme borderColor + WHITE8X8 足够。
+        local edge = (opts.thickness or 1) * Media:Mult()
         bd.edgeFile = Media.texture.blank
         bd.edgeSize = edge
         bd.insets = { left = edge, right = edge, top = edge, bottom = edge }
     else
-        -- edgeSize / insets are physical pixels (thickness * Media:Mult()), so the line stays crisp at any UI scale instead of softening when scale ~= 1.
+        -- Square corners: a continuous line of WHITE8X8.  edgeSize / insets are physical pixels
+        -- (thickness * Media:Mult()), so the line stays crisp at any UI scale instead of softening
+        -- when scale ~= 1.
         local edge = opts.thickness * Media:Mult()
         bd.edgeFile = Media.texture.blank
         bd.edgeSize = edge

@@ -50,10 +50,10 @@ local DEFAULTS = {
         iconSize       = 34,
         gap            = 4,
         columns        = 10,
-        windowsPerRow  = 2,
+        windowsPerRow  = 1,
         showReagentBag = true,
         showBank       = true,
-        anchor         = { frame = "UIParent", x = 24, y = -140 },
+        anchor         = { frame = "MonetUIQuestTracker", side = "right", x = -18, y = -28 },
         positions      = {},   -- per-category window spots the user dragged to
     },
     -- Cooldown countdown text (Modules/Cooldown): the renderer scales the unit itself (60s -> minutes, 1h -> hours, 24h -> days, via Math:DurationText) and treats the last alertSeconds as "tight".  false for scale hands the numbers back to Blizzard; false for alert keeps one colour and one size.

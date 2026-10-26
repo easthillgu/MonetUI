@@ -9,7 +9,6 @@ local Skin = ns.Skin
 local COLLECTIONS_TABS = {
     "CollectionsJournalTab1", "CollectionsJournalTab2", "CollectionsJournalTab3",
     "CollectionsJournalTab4", "CollectionsJournalTab5", "CollectionsJournalTab6",
-    "CollectionsJournalTab7",
 }
 
 local COLLECTIONS_PANELS = {
@@ -149,11 +148,8 @@ M:Panel("collections", {
         "CollectionsJournal", "CollectionsJournalCloseButton",
         "CollectionsJournalTab1", "CollectionsJournalTab2", "CollectionsJournalTab3",
         "CollectionsJournalTab4", "CollectionsJournalTab5", "CollectionsJournalTab6",
-        "CollectionsJournalTab7",
         "MountJournal", "PetJournal", "ToyBox", "HeirloomsJournal",
         "WardrobeCollectionFrame", "CampsitesJournal",
-        "CollectionsJournalSearchBox", "MountJournalSearchBox", "PetJournalSearchBox",
-        "ToyBoxSearchBox", "HeirloomsJournalSearchBox", "WardrobeCollectionFrameSearchBox",
         "MountJournalFilterButton", "PetJournalFilterButton", "ToyBoxFilterButton",
         "HeirloomsJournalFilterButton", "CollectionsJournalFilterButton",
     },
@@ -181,5 +177,53 @@ M:Panel("encounterjournal", {
         "EncounterJournalTab1", "EncounterJournalTab2", "EncounterJournalTab3",
         "EncounterJournalInstanceSelect",
         "EncounterJournalBossButton1", "EncounterJournalBossButton2", "EncounterJournalBossButton3",
+    },
+})
+
+-- 幻化：Blizzard_Transmog 是 AllowLoad: Game（不限 game-type），本客户端有幻化（外观/试衣间数据齐全）。
+-- 装备格子带图标，SkinButtonsIn 自动跳过。
+local function SkinTransmog()
+    local frame = _G.TransmogFrame
+    if not frame then return end
+
+    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
+    M:SkinButtonsIn(frame)
+    M:SkinScrollsIn(frame)
+end
+
+M:Panel("transmog", {
+    label = "幻化",
+    group = "收藏",
+    apply = SkinTransmog,
+    addons = { Blizzard_Transmog = true },
+    frames = {
+        "TransmogFrame", "TransmogFrameCloseButton",
+    },
+})
+
+-- 试衣间：camelot 在 UIPanels_Game 里带 DressUpFramesOverrides.lua（本客户端专属覆写），窗口存在。
+-- 3D 模型区是内容，不动；只收拾窗口壳与动作按钮。
+local function SkinDressUp()
+    local frame = _G.DressUpFrame
+    if not frame then return end
+
+    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
+    M:Buttons({ "DressUpFrameResetButton", "DressUpFrameCancelButton" })
+    -- Link / 外观切换是 parentKey 成员，不是全局名；表构造不能有 nil 空洞，逐个有再加。
+    local members = {}
+    if frame.LinkButton then members[#members + 1] = frame.LinkButton end
+    if frame.ToggleOutfitDetailsButton then members[#members + 1] = frame.ToggleOutfitDetailsButton end
+    M:Controls(members, function(button)
+        Skin:Button(button)
+    end)
+end
+
+M:Panel("dressup", {
+    label = "试衣间",
+    group = "收藏",
+    apply = SkinDressUp,
+    frames = {
+        "DressUpFrame", "DressUpFrameCloseButton",
+        "DressUpFrameResetButton", "DressUpFrameCancelButton",
     },
 })

@@ -45,7 +45,17 @@ local Q_POOR = 0
 
 local function Setting(key)
     local stored = (ns:DB().bags or {})[key]
-    if stored ~= nil then return stored end
+    if stored ~= nil then
+        -- 迁移：anchor 的默认值我们控制，玩家不需要手工调 anchor.x/y（那是布局内部量）。
+        -- 所以只要 anchor 存在，**无条件覆盖成最新默认值**。这是第三次迭代了，
+        -- 每次改默认值都要写一次迁移逻辑太蠢——直接统一。
+        -- （玩家显式拖过的窗口 WindowPosition 不受影响，RestoreDragged 单独路径。）
+        if key == "anchor" then
+            return { frame = "MonetUIQuestTracker", side = "right",
+                     x = -18, y = -28 }
+        end
+        return stored
+    end
     return (ns.DEFAULTS.bags or {})[key]
 end
 
@@ -382,7 +392,7 @@ local function EnsureWindow(key)
     local name = "MonetUIBagWindow_" .. key
     win = Widget:CreateFrame(name, UIParent, 120, 60)
     win.catKey = key
-    Widget:Theme(win, { thickness = 2, bgAlpha = 0.92 })
+    Widget:Theme(win, { thickness = 1, bgAlpha = 0.92 })
 
     win.title = Widget:Font(win, 12, "pixel", "edge", "LEFT")
     win.title:SetPoint("TOPLEFT", win, "TOPLEFT", 18, -5)  -- clear of the TL ornament
@@ -445,36 +455,61 @@ local function FillWindow(win, items)
 end
 
 --- Tile the visible, not-yet-dragged windows in category order from the anchor.
---- 锚点是 **UIParent 的左上角**（x 向右、y 向下），窗口向右排、向下堆。
---- 原来 anchor.x = -33 被当成"离右边 33"来用，套在 TOPLEFT 上就是"离左边 33"，
---- 第一个窗口整个跑到屏幕外，只剩一两个看得见。
+--- 首选布局：side="right" —— 分类背包的 RIGHT 对齐 QuestTracker 的 LEFT，
+--- 间隔 anchor.x（负数 = QuestTracker 左边），垂直从 anchor.y 起一列堆下来。
+--- 如果 anchor.frame 不存在（QuestTracker 模块关了 / 还没初始化），降级到
+--- "屏幕中间 x=屏幕宽度-280，顶部 y=-28 往下堆" —— 保证无论如何都不会跑出屏幕。
 local function LayoutWindows()
     local anchor = Setting("anchor") or {}
-    local perRow = Setting("windowsPerRow") or 2
     local spacing = 14
 
-    local base = _G[anchor.frame] or UIParent
-    local originX = anchor.x or 24
-    local originY = anchor.y or -140
+    local base = _G[anchor.frame]
+    local sideRight = (anchor.side == "right" and base)
 
-    local col, x, rowW, rowH, rowBottom = 0, 0, 0, 0, 0
+    if sideRight then
+        -- 贴 base 左边，垂直一列。
+        local x = anchor.x or -18
+        local y = anchor.y or -28
+        local rowH = 0
+        for _, cat in ipairs(CATEGORIES) do
+            local win = windows[cat.key]
+            if win and win:IsShown() and not WindowPosition(cat.key) then
+                local w, h = win:GetWidth(), win:GetHeight()
+                win:ClearAllPoints()
+                win:SetPoint("TOPRIGHT", base, "TOPLEFT", x, y - rowH)
+                rowH = rowH + h + spacing
+            end
+        end
+        return
+    end
+
+    -- 降级：QuestTracker 帧不在，屏幕中间一列。
+    local UIParent = _G.UIParent
+    local screenW = UIParent and UIParent.GetWidth and UIParent:GetWidth() or 1920
+    local originX = screenW - 300   -- 屏幕右边往里 300px（约 Minimap 列 + 一点）
+    local originY  = anchor.y or -28
+    local rowH = 0
     for _, cat in ipairs(CATEGORIES) do
         local win = windows[cat.key]
         if win and win:IsShown() and not WindowPosition(cat.key) then
             local w, h = win:GetWidth(), win:GetHeight()
-            if col >= perRow then
-                -- 这一排排满了：整排往右挪一格（按这一排最宽的），再整排往下挪一格
-                -- （按上一排最高的）。每扇窗高度不同，用当前窗的高度会让下一排压上来。
-                x = x + rowW + spacing
-                rowBottom = rowBottom + rowH + spacing
-                col, rowW, rowH = 0, 0, 0
-            end
             win:ClearAllPoints()
-            win:SetPoint("TOPLEFT", base, "TOPLEFT", originX + x, originY - rowBottom)
+            win:SetPoint("TOPLEFT", UIParent, "TOPLEFT", originX, originY - rowH)
+            rowH = rowH + h + spacing
+        end
+    end
 
-            col = col + 1
-            rowW = math.max(rowW, w)
-            rowH = math.max(rowH, h)
+    -- 降级布局：说明 QuestTracker 帧还没出生。PollWatch 低频轮询，帧一出来
+    -- （锚框是 UIParent，所以每 2s 跑一次）就重新 LayoutWindows 贴回正确位置。
+    if not _G.MonetUIQuestTracker then
+        if not Marked(_G.UIParent, "bagsRetry") then
+            Mark(_G.UIParent, "bagsRetry", true)
+            Widget:PollWatch(_G.UIParent, function()
+                if _G.MonetUIQuestTracker and shown then
+                    LayoutWindows()
+                    RestoreDragged()
+                end
+            end, 2)
         end
     end
 end

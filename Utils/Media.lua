@@ -271,6 +271,15 @@ Media.texture = {
     ["monet_round_edge_thin"]   = ASSET .. "Textures\\monet_round_edge_thin",     -- 环宽 1，外弧 2
     ["monet_round_edge_thick"]  = ASSET .. "Textures\\monet_round_edge_thick",    -- 环宽 3，外弧 4
 
+    -- BLP2 versions of the above three (tga-to-blp.js, format=raw3, 16x16 identical pixels).
+    -- TGA works fine with SetTexture/SetStatusBarTexture; SetBackdrop edgeFile is the sole customer
+    -- that cannot handle TGA (retail 12.x/Forever: comes out as a row of dashes), so BLP2 exists only
+    -- to unblock that single path.  Kept here rather than overwriting the .tga keys because 99% of
+    -- consumers never go through SetBackdrop and those should keep reading TGA.
+    ["monet_round_edge_blp"]        = ASSET .. "Textures\\monet_round_edge.blp",
+    ["monet_round_edge_thin_blp"]   = ASSET .. "Textures\\monet_round_edge_thin.blp",
+    ["monet_round_edge_thick_blp"]  = ASSET .. "Textures\\monet_round_edge_thick.blp",
+
     -- 小地图内的三个 3:4 按钮图标（追踪 / 插件收纳 / 难度）。纯白模具：颜色全在运行期
     -- 由 SetVertexColor 染（追踪=中性色、收纳=边缘色、难度=副本难度色），贴图里不带色相。
     -- 底板是 Widget:Theme 画的同一块 15×20 平边框，三个按钮的"框"因此是同一套材质。

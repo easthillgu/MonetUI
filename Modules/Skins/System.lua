@@ -421,11 +421,11 @@ M:Panel("gamemenu", { label = "游戏菜单", group = "系统", apply = SkinGame
     } })
 
 M:Panel("settings", { label = "设置面板", group = "系统", apply = SkinSettings,
-    frames = { "SettingsPanel", "SettingsPanelCloseButton" } })
+    frames = { "SettingsPanel", "SettingsPanel.CloseButton" } })
 
 M:Panel("editmode", { label = "编辑模式", group = "系统", apply = SkinEditMode,
     frames = {
-        "EditModeManager", "EditModeManagerFrameAcceptChanges", "EditModeManagerFrameCancelChanges",
+        "EditModeManagerFrame", "EditModeManagerFrameAccept", "EditModeManagerFrameCancel",
         "EditModeSystemSettingsDialog", "EditModeUnsavedChangesDialog", "EditModeLayoutDialog",
         "EditModeSystemSettingsDialogAccept", "EditModeSystemSettingsDialogCancel",
         "EditModeUnsavedChangesDialogOkay", "EditModeUnsavedChangesDialogCancel",
@@ -434,8 +434,8 @@ M:Panel("editmode", { label = "编辑模式", group = "系统", apply = SkinEdit
 
 M:Panel("addonlist", { label = "插件列表", group = "系统", apply = SkinAddonList,
     frames = {
-        "AddonList", "AddonListEnableAllButton", "AddonListDisableAllButton",
-        "AddonListFilterButton", "AddonListScrollFrame",
+        "AddonList", "AddonList.EnableAllButton", "AddonList.DisableAllButton",
+        "AddonList.FilterButton", "AddonList.ScrollFrame",
     } })
 
 M:Panel("menus", { label = "下拉菜单", group = "系统", apply = SkinMenus, default = false,
@@ -446,3 +446,94 @@ M:Panel("menus", { label = "下拉菜单", group = "系统", apply = SkinMenus, 
 M:Panel("tooltip", { label = "鼠标提示边框", group = "系统", apply = SkinTooltip, default = true,
     -- Same for ItemRefTooltipCloseButton: reached as ref.CloseButton (a member), not a global.
     frames = { "GameTooltip", "ItemRefTooltip" } })
+
+-- 宏编辑器：Blizzard_MacroUI 无 game-type 门控（wow-ui-source forever 分支），本客户端存在。
+-- 图标选择弹窗（MacroPopupFrame）是独立的 LoD 窗口，名字/图标网格是内容，不动。
+local function SkinMacroPopup()
+    local popup = _G.MacroPopupFrame
+    if not popup then return end
+    if Marked(popup, "macroPopupSkinned") then return end
+    Mark(popup, "macroPopupSkinned", true)
+
+    M:SkinWindow(popup, { panel = { bgAlpha = 0.97 } })
+    M:SkinButtonsIn(popup)
+end
+
+local function SkinMacros()
+    local frame = _G.MacroFrame
+    if not frame then return end
+
+    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
+    M:Tabs({ "MacroFrameTab1", "MacroFrameTab2" })
+    M:SkinButtonsIn(frame)
+    M:SkinScrollsIn(frame)
+    M:Controls({ "MacroEditBox" }, function(box) Skin:EditBox(box) end)
+
+    -- MacroPopupFrame 是点"选图标"时才创建的：那时主窗口一定开着，所以挂在主窗口的
+    -- PollWatch 上等它出现（主窗口关着时轮询不跑，零成本）。
+    SkinMacroPopup()
+    ns.Widget:PollWatch(frame, SkinMacroPopup)
+end
+
+M:Panel("macros", { label = "宏编辑器", group = "系统", apply = SkinMacros,
+    addons = { Blizzard_MacroUI = true },
+    frames = {
+        "MacroFrame", "MacroFrameTab1", "MacroFrameTab2",
+        "MacroFrameEditBox",
+        "MacroPopupFrame",
+    } })
+
+-- 时钟 / 秒表：Blizzard_TimeManager 带 camelot 专属覆写文件（Camelot\Blizzard_TimeManagerOverrides.lua）。
+-- 秒表是独立小窗（StopwatchFrame）；关闭按钮的全局名是 TimeManagerCloseButton
+-- （不带 Frame 后缀，SkinWindow 的 name.."CloseButton" 推导够不到，显式接）。
+local function SkinTimeManager()
+    local frame = _G.TimeManagerFrame
+    if frame then
+        M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
+        M:SkinButtonsIn(frame)
+    end
+    -- 正式服 12.1.5 TimeManagerFrame.CloseButton 是成员不是全局名
+    if frame and frame.CloseButton then Skin:CloseButton(frame.CloseButton) end
+    M:Controls({ "StopwatchFrame" }, function(watch)
+        M:SkinWindow(watch, { panel = { bgAlpha = 0.96 } })
+    end)
+end
+
+M:Panel("timemanager", { label = "时钟 / 秒表", group = "系统", apply = SkinTimeManager,
+    addons = { Blizzard_TimeManager = true },
+    frames = { "TimeManagerFrame", "TimeManagerFrame.CloseButton", "StopwatchFrame" } })
+
+-- 帮助 / 客服：Blizzard_HelpFrame 是 AllowLoad: Game。关闭按钮同理显式接全局名。
+local function SkinHelp()
+    local frame = _G.HelpFrame
+    if not frame then return end
+
+    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
+    M:SkinButtonsIn(frame)
+    M:SkinScrollsIn(frame)
+    -- 正式服 12.1.5 HelpFrame.CloseButton 是成员不是全局名
+    if frame.CloseButton then Skin:CloseButton(frame.CloseButton) end
+end
+
+M:Panel("help", { label = "帮助", group = "系统", apply = SkinHelp,
+    addons = { Blizzard_HelpFrame = true },
+    frames = { "HelpFrame", "HelpFrame.CloseButton" } })
+
+-- 拾色器：设置面板等处弹出，无门控。12.1.5 正式服按钮是 Footer 成员 + ColorPickerFrameOkay/ColorPickerFrameCancel 全局名。
+local function SkinColorPicker()
+    local frame = _G.ColorPickerFrame
+    if not frame then return end
+
+    M:SkinWindow(frame, { panel = { bgAlpha = 0.97 } })
+    M:Buttons({ "ColorPickerFrameOkay", "ColorPickerFrameCancel" })
+    local footer = frame.Footer
+    if footer then
+        local members = {}
+        if footer.OkayButton then members[#members + 1] = footer.OkayButton end
+        if footer.CancelButton then members[#members + 1] = footer.CancelButton end
+        M:Controls(members, function(button) Skin:Button(button) end)
+    end
+end
+
+M:Panel("colorpicker", { label = "拾色器", group = "系统", apply = SkinColorPicker,
+    frames = { "ColorPickerFrame", "ColorPickerFrameOkay", "ColorPickerFrameCancel" } })

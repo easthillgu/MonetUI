@@ -201,3 +201,47 @@ M:Panel("calendar", {
         "CalendarFrame", "GameCalendarFrame", "GameCalendarFrameSet",
     },
 })
+
+-- 签名请愿（公会/战队登记表）：UIPanels_Game 的 [Family] PetitionFrame 无 game-type 门控。
+local function SkinPetition()
+    local frame = _G.PetitionFrame
+    if not frame then return end
+
+    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
+    M:Buttons({
+        "PetitionFrameSignButton", "PetitionFrameRequestButton",
+        "PetitionFrameRenameButton", "PetitionFrameCancelButton",
+    })
+    M:SkinScrollsIn(frame)
+end
+
+M:Panel("petition", {
+    label = "签名请愿",
+    group = "社交",
+    apply = SkinPetition,
+    frames = {
+        "PetitionFrame", "PetitionFrameCloseButton",
+        "PetitionFrameSignButton", "PetitionFrameRequestButton",
+        "PetitionFrameRenameButton", "PetitionFrameCancelButton",
+    },
+})
+
+-- 战袍设计（公会注册官处）：[Family] TabardFrame 无门控。
+-- 自定义区的箭头/图标按钮带贴图内容，不做 SkinButtonsIn，只收拾确定/取消。
+local function SkinTabard()
+    local frame = _G.TabardFrame
+    if not frame then return end
+
+    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
+    M:Buttons({ "TabardFrameAcceptButton", "TabardFrameCancelButton" })
+end
+
+M:Panel("tabard", {
+    label = "战袍设计",
+    group = "社交",
+    apply = SkinTabard,
+    frames = {
+        "TabardFrame", "TabardFrameCloseButton",
+        "TabardFrameAcceptButton", "TabardFrameCancelButton",
+    },
+})

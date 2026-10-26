@@ -8,11 +8,10 @@ local Skin = ns.Skin
 
 local CHARACTER_TABS = {
     "CharacterFrameTab1", "CharacterFrameTab2", "CharacterFrameTab3",
-    "CharacterFrameTab4", "CharacterFrameTab5",
 }
 
 local CHARACTER_PANELS = {
-    "PaperDollFrame", "ReputationFrame", "TokenFrame", "SkillFrame", "PVPFrame",
+    "PaperDollFrame", "ReputationFrame", "TokenFrame",
 }
 
 local INSPECT_TABS = { "InspectFrameTab1", "InspectFrameTab2" }
@@ -56,8 +55,7 @@ M:Panel("character", {
     frames = {
         "CharacterFrame", "CharacterFrameCloseButton",
         "CharacterFrameTab1", "CharacterFrameTab2", "CharacterFrameTab3",
-        "CharacterFrameTab4", "CharacterFrameTab5",
-        "PaperDollFrame", "ReputationFrame", "TokenFrame", "SkillFrame", "PVPFrame",
+        "PaperDollFrame", "ReputationFrame", "TokenFrame",
     },
 })
 

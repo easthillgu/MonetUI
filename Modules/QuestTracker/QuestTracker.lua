@@ -38,8 +38,10 @@ local YELLOW  = { r = 0.85, g = 0.75, b = 0.35 }
 local GREY    = { r = 0.55, g = 0.55, b = 0.55 }
 
 local enabled = true       -- Core only calls SetEnabled on runtime toggles
-local tracker
+local tracker, scrollFrame, content, scrollBar
 local LINE_H  = 12         -- measured line pitch of the pixel font
+local minH = HEADER_H + PAD   -- 最小化后只剩标题栏
+local minimized = false
 
 local titlePool, objPool, foldPool = {}, {}, {}
 local entries = {}         -- per-quest records for the current render pass
@@ -117,11 +119,11 @@ end
 local function AcquireFont(pool)
     local fs = table.remove(pool)
     if not fs then
-        fs = Widget:Font(tracker, 12, "pingfang", "neutral", "LEFT", nil, Media.outlineFlags)
+        fs = Widget:Font(content or tracker, 12, "pingfang", "neutral", "LEFT", nil, Media.outlineFlags)
         fs:SetWordWrap(true)
         fs:SetNonSpaceWrap(true)   -- CJK has no spaces: must wrap mid-"word"
     end
-    fs:SetParent(tracker)
+    fs:SetParent(content or tracker)
     fs:SetWidth(TEXT_W)
     fs:SetMaxLines(BIG)
     fs:Show()
@@ -148,14 +150,14 @@ end
 local function AcquireFold(questID, expanded)
     local btn = table.remove(foldPool)
     if not btn then
-        btn = CreateFrame("Button", nil, tracker)
+        btn = CreateFrame("Button", nil, content or tracker)
         btn:SetSize(13, 13)
         Widget:Theme(btn, { thickness = 1, bgAlpha = 0.7 })
         btn.glyph = Widget:Font(btn, 12, "pingfang", "edge", "CENTER", nil, Media.outlineFlags)
         btn.glyph:SetPoint("CENTER", btn, "CENTER", 0, 0)
         Widget:Highlight(btn, 0.9)
     end
-    btn:SetParent(tracker)
+    btn:SetParent(content or tracker)
     btn:SetScript("OnClick", function() ToggleFold(questID) end)
     btn.glyph:SetText(expanded and "-" or "+")
     btn:Show()
@@ -278,7 +280,7 @@ Render = function(settle)
                 budget = budget - r
             end
             fs:ClearAllPoints()
-            fs:SetPoint("TOPLEFT", tracker, "TOPLEFT", PAD, y)
+            fs:SetPoint("TOPLEFT", content, "TOPLEFT", PAD, y)
             fs:Show()
             return r
         end
@@ -291,14 +293,39 @@ Render = function(settle)
         if showFold then
             local btn = AcquireFold(questID, expanded)
             btn:ClearAllPoints()
-            btn:SetPoint("TOPRIGHT", tracker, "TOPRIGHT", -PAD, titleTop)
+            btn:SetPoint("TOPRIGHT", content, "TOPRIGHT", -PAD, titleTop)
             entry.fold = btn
         end
 
         y = y - ENTRY_GAP
     end
 
-    tracker:SetHeight(math.max(HEADER_H + PAD, -y + PAD))
+    -- content 是 ScrollChild，高度 = 全部追踪内容 + 标题栏占位
+    local contentH = math.max(HEADER_H + PAD, -y + PAD)
+    content:SetHeight(contentH)
+
+    -- tracker 外壳高度：最小化时只留标题栏，否则 min(内容总高, 屏幕一半 - buff 容器)
+    local screenH = (_G.UIParent and _G.UIParent.GetHeight and _G.UIParent:GetHeight()) or 1080
+    local maxH = screenH / 2 - AURA_TOP
+    local trackH
+    if minimized then
+        trackH = minH
+        scrollFrame:Hide()
+    else
+        trackH = math.min(contentH, maxH)
+        if contentH > trackH then
+            scrollFrame:Show()
+            local range = math.max(0, contentH - trackH)
+            scrollBar:SetMinMaxValues(0, range)
+            scrollBar:SetValueStep(LINE_H)
+            scrollBar:Show()
+            scrollBar.ScrollUpButton:Show()
+            scrollBar.ScrollDownButton:Show()
+        else
+            scrollFrame:Hide()
+        end
+    end
+    tracker:SetHeight(trackH)
 
     if #entries == 0 then
         tracker:Hide()
@@ -415,17 +442,47 @@ function M:Skin()
     if not Widget or not C_QuestLog then return false end
 
     tracker = Widget:CreateFrame("MonetUIQuestTracker", UIParent, WIDTH, HEADER_H + PAD)
-    -- round: the border is the 9-slice edge art, so it stays correct at any height the tracker grows to
-    -- (a mask is applied pixel for pixel, so its radius would stretch with the window instead).  The
-    -- content is inset by PAD, far inside the 3px corner arc, so nothing else has to change.
-    Widget:Theme(tracker, { thickness = 2, bgAlpha = 0.92, round = true })
+    Widget:Theme(tracker, { thickness = 1, bgAlpha = 0.92 })
     tracker:SetMovable(true)
     tracker:SetClampedToScreen(true)
 
-    -- The header row doubles as the drag handle; the title above it is non-mouse.
+    -- Minimize / Restore glyph button.  Clicking it flips minimized state and triggers a re-render.
+    -- 必须先创建，handle 会锚在它左边（handle 不覆盖它的点击区）。
+    local toggleBtn = CreateFrame("Button", nil, tracker)
+    toggleBtn:SetSize(13, 13)
+    Widget:Theme(toggleBtn, { thickness = 1, bgAlpha = 0.7 })
+    toggleBtn:SetPoint("TOPRIGHT", tracker, "TOPRIGHT", -PAD, -3)
+    local toggleGlyph = Widget:Font(toggleBtn, 12, "pingfang", "edge", "CENTER", nil, Media.outlineFlags)
+    toggleGlyph:SetPoint("CENTER", toggleBtn, "CENTER", 0, 0)
+    Widget:Highlight(toggleBtn, 0.9)
+    toggleBtn:SetScript("OnClick", function()
+        local sv = ns:DB(); sv.questTracker = sv.questTracker or {}
+        local db = sv.questTracker
+        minimized = not minimized
+        db.minimized = minimized or nil
+        toggleGlyph:SetText(minimized and "+" or "–")
+        QueueRender()
+    end)
+    -- 从 DB 恢复 minimized 状态
+    local qtDB = ns:DB().questTracker or {}
+    minimized = not not qtDB.minimized
+    toggleGlyph:SetText(minimized and "+" or "–")
+
+    -- Lock glyph: clicking toggles movable / locked.  Locked = SetMovable(false), handle 不响应拖动。
+    -- 和 toggleBtn 同高度左对齐。
+    local lockBtn = CreateFrame("Button", nil, tracker)
+    lockBtn:SetSize(13, 13)
+    Widget:Theme(lockBtn, { thickness = 1, bgAlpha = 0.7 })
+    lockBtn:SetPoint("RIGHT", toggleBtn, "LEFT", -4, 0)
+    local lockGlyph = Widget:Font(lockBtn, 12, "pingfang", "edge", "CENTER", nil, Media.outlineFlags)
+    lockGlyph:SetPoint("CENTER", lockBtn, "CENTER", 0, 0)
+    Widget:Highlight(lockBtn, 0.9)
+
+    -- The header row doubles as the drag handle.  End anchor is lockBtn.LEFT so handle
+    -- never covers the two glyph buttons on the right.
     local handle = CreateFrame("Button", nil, tracker)
     handle:SetPoint("TOPLEFT", tracker, "TOPLEFT", 0, 0)
-    handle:SetPoint("TOPRIGHT", tracker, "TOPRIGHT", 0, 0)
+    handle:SetPoint("TOPRIGHT", lockBtn, "LEFT", -4, 0)
     handle:SetHeight(HEADER_H)
     handle:RegisterForDrag("LeftButton")
     handle:SetScript("OnDragStart", function() tracker:StartMoving() end)
@@ -435,8 +492,38 @@ function M:Skin()
     headText:SetPoint("TOPLEFT", tracker, "TOPLEFT", PAD, -3)
     headText:SetText("任务追踪")
 
+    local function ApplyLock()
+        if not tracker then return end
+        local locked = not not (ns:DB().questTracker or {}).locked
+        -- 本客户端没有 UnregisterForDrag —— SetMovable(false) 后 StartMoving 被拒就够了，
+        -- 不需要从 handle 上卸 drag 注册。
+        tracker:SetMovable(not locked)
+        lockGlyph:SetText(locked and "L" or "U")
+    end
+
+    lockBtn:SetScript("OnClick", function()
+        local sv = ns:DB(); sv.questTracker = sv.questTracker or {}
+        local db = sv.questTracker
+        db.locked = not db.locked or nil
+        ApplyLock()
+    end)
+    ApplyLock()
+
+    -- ScrollFrame 占满标题栏下方的内容区。
+    scrollFrame = CreateFrame("ScrollFrame", nil, tracker, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", tracker, "TOPLEFT", 0, -HEADER_H)
+    scrollFrame:SetPoint("BOTTOMRIGHT", tracker, "BOTTOMRIGHT", -20, 0)
+    scrollBar = scrollFrame.ScrollBar
+    -- 右侧滚动条样式（ns.Skin:ScrollBar 只 Strip + 换 chevron）
+    ns.Skin:ScrollBar(scrollBar)
+
+    -- content 是 ScrollChild，所有字体和 foldBtn 的父元素都挂它。
+    content = CreateFrame("Frame", nil, scrollFrame)
+    content:SetSize(WIDTH - PAD * 2, HEADER_H + PAD)
+    scrollFrame:SetScrollChild(content)
+
     -- measure the pixel font's real line pitch (the wrap math needs it)
-    local probe = Widget:Font(tracker, 12, "pingfang", "neutral", "LEFT", nil, Media.outlineFlags)
+    local probe = Widget:Font(content, 12, "pingfang", "neutral", "LEFT", nil, Media.outlineFlags)
     probe:SetText("字")
     local h = probe:GetHeight()
     if h and h > 0 then LINE_H = h end

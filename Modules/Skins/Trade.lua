@@ -56,6 +56,9 @@ local function SkinMail()
         "InboxFrameOpenButton", "InboxFrameReplyButton", "InboxFrameDeleteButton",
         "InboxPrevPageButton", "InboxNextPageButton",
         "SendMailMailButton", "SendMailCancelButton",
+        -- 70450 起邮件收取走 C_SecureTransfer（TakeMailMoney + MAIL_OPEN_ALL_CANCELED），
+        -- 收件箱多了"一键收取"按钮 OpenAllMail（全局名，Ellesmere 同客户端实机名单佐证）。
+        "OpenAllMail",
     })
 end
 
@@ -140,6 +143,7 @@ M:Panel("mail", { label = "邮箱", group = "交易", apply = SkinMail,
         "InboxFrameOpenButton", "InboxFrameReplyButton", "InboxFrameDeleteButton",
         "InboxPrevPageButton", "InboxNextPageButton",
         "SendMailMailButton", "SendMailCancelButton",
+        "OpenAllMail",
     } })
 
 M:Panel("merchant", { label = "商贩", group = "交易", apply = SkinMerchant,
@@ -172,3 +176,37 @@ M:Panel("professions", { label = "专业 / 制造", group = "交易", apply = Sk
 
 M:Panel("bank", { label = "银行", group = "交易", apply = SkinBank,
     frames = { "BankFrame", "WarbandBankFrame" } })
+
+-- 宝石镶嵌：无 game-type 门控（wow-ui-source forever 分支），本客户端存在。
+-- 宝石格子是带图标的槽位，SkinButtonsIn 会自动跳过。
+local function SkinSocketing()
+    local frame = _G.ItemSocketingFrame
+    if not frame then return end
+
+    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
+    M:SkinScrollsIn(frame)
+    M:Buttons({ "ItemSocketingSocketButton" })
+end
+
+M:Panel("socket", { label = "宝石镶嵌", group = "交易", apply = SkinSocketing,
+    addons = { Blizzard_ItemSocketingUI = true },
+    frames = {
+        "ItemSocketingFrame", "ItemSocketingFrameCloseButton",
+        "ItemSocketingScrollFrame", "ItemSocketingSocketButton",
+    } })
+
+-- 制造订单：Blizzard_ProfessionsCustomerOrders 无 game-type 门控。
+local function SkinCraftOrders()
+    local frame = _G.ProfessionsCustomerOrdersFrame
+    if not frame then return end
+
+    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
+    M:SkinButtonsIn(frame)
+    M:SkinScrollsIn(frame)
+end
+
+M:Panel("craftorders", { label = "制造订单", group = "交易", apply = SkinCraftOrders,
+    addons = { Blizzard_ProfessionsCustomerOrders = true },
+    frames = {
+        "ProfessionsCustomerOrdersFrame", "ProfessionsCustomerOrdersFrameCloseButton",
+    } })

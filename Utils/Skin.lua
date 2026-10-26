@@ -478,11 +478,12 @@ function Skin:Tab(tab, opts)
         underline:SetPoint("BOTTOMLEFT", tab, "BOTTOMLEFT", Media:SnapUnit(4), Media:SnapUnit(1))
         underline:SetPoint("BOTTOMRIGHT", tab, "BOTTOMRIGHT", -Media:SnapUnit(4), Media:SnapUnit(1))
         underline:SetHeight(Media:SnapUnit(2))
+        underline:SetTexture(Media.texture["monet_hairline"])
         Mark(tab, "tabBar", underline)
         self:Track(underline)
         WatchTab(self, tab)        self:OnTheme(function()
             local r, g, b = Color:GetBorder()
-            underline:SetColorTexture(r, g, b, 1)
+            underline:SetVertexColor(r, g, b, 1)
             Skin:UpdateTabState(tab)
         end)
     end
@@ -495,12 +496,42 @@ function Skin:ScrollBar(scrollbar)
     if not scrollbar then return scrollbar end
 
     self:Strip(scrollbar, { regions = true })
-    local fadeButtons = { "ScrollUpButton", "ScrollDownButton", "ScrollUp", "ScrollDown" }
-    for i = 1, #fadeButtons do
-        local button = scrollbar[fadeButtons[i]]
+
+    -- Vertical scroll bars (UIPanelScrollFrameTemplate): up/down arrows -> chevrons.
+    -- Horizontal variants (seen on the auction browse sort bar): left/right -> arrow left/right.
+    local arrowMap = {
+        ScrollUpButton    = "monet_chevron_up",
+        ScrollDownButton  = "monet_chevron_down",
+        ScrollUp          = "monet_chevron_up",
+        ScrollDown        = "monet_chevron_down",
+        ScrollLeftButton  = "monet_arrow_left",
+        ScrollRightButton = "monet_arrow_right",
+        ScrollLeft        = "monet_arrow_left",
+        ScrollRight       = "monet_arrow_right",
+    }
+    for member, key in pairs(arrowMap) do
+        local button = scrollbar[member]
         if button then
             self:Strip(button, { regions = true })
+            -- FadeButtonArt zeros every art; then SwapArt puts our glyph back.
             self:FadeButtonArt(button)
+            local normal = self:SwapArt(button.GetNormalTexture and button:GetNormalTexture(), key)
+            local pushed = self:SwapArt(button.GetPushedTexture and button:GetPushedTexture(), key)
+            -- Run the same border tint cycle Skin:CloseButton uses -- the glyph sits on a
+            -- strip of Monet plate, so it reads as a control belonging to this skin.
+            if normal and normal.SetVertexColor then
+                local r, g, b = Color:GetBorder()
+                normal:SetVertexColor(r, g, b)
+                if pushed and pushed.SetVertexColor then pushed:SetVertexColor(r, g, b) end
+                if not Marked(button, "arrowTint") then
+                    Mark(button, "arrowTint", true)
+                    self:OnTheme(function()
+                        local nr, ng, nb = Color:GetBorder()
+                        if normal.SetVertexColor then normal:SetVertexColor(nr, ng, nb) end
+                        if pushed and pushed.SetVertexColor then pushed:SetVertexColor(nr, ng, nb) end
+                    end)
+                end
+            end
         end
     end
 
@@ -833,15 +864,17 @@ function Skin:TitleBar(frame, text, size)
     end
 end
 
---- A 1px themed divider the caller anchors itself.
+--- A themed divider the caller anchors itself.  Uses monet_hairline (256×1 single opaque row);
+--- height = whatever the caller gives via SetHeight, or 1 default.
 function Skin:Divider(parent)
     local line = parent:CreateTexture(nil, "ARTWORK")
+    line:SetTexture(Media.texture["monet_hairline"])
     local r, g, b = Color:GetNeutral()
-    line:SetColorTexture(r, g, b, 0.3)
+    line:SetVertexColor(r, g, b, 0.3)
     self:Track(line)
     self:OnTheme(function()
         local nr, ng, nb = Color:GetNeutral()
-        line:SetColorTexture(nr, ng, nb, 0.3)
+        line:SetVertexColor(nr, ng, nb, 0.3)
     end)
     return line
 end
