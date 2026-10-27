@@ -220,6 +220,9 @@ local BOX_FONT   = 12     -- 字号（UI 单位）
 local BOX_SLACK  = 3      -- 行间补白（UI 单位）
 
 local box, boxLines = nil, {}
+local boxW, boxH    -- 小框尺寸由我们自己 SetSize 写入，这里记账；**不问客户端** ——
+                    -- 小框锚在 GameTooltip 上，锚定链受限时 box:GetWidth/GetHeight 会变机密，
+                    -- 而 tip:GetWidth 同一时刻可以是明文（机密按"锚"判，不按上游宽度判，2026-10-27 实机）。
 
 local function EnsureBox()
     if box then return box end
@@ -284,15 +287,18 @@ local function UpdateBox(tip, lines, sig)
             end
         end
         if measured then
-            box:SetSize(math.max(widest + pad * 2, 80), -y + pad)
+            boxW, boxH = math.max(widest + pad * 2, 80), -y + pad
+            box:SetSize(boxW, boxH)
         end
     end
 
-    -- 宽度跟着提示框走：内容变宽时小框不会短一截
+    -- 宽度跟着提示框走：内容变宽时小框不会短一截。
+    -- 比较用**记账值** boxW（我们自己写的尺寸），不读 box:GetWidth —— 它会变机密（见上）。
     local tipW = tip:GetWidth() or 0
     if Secrets.IsSecret(tipW) then tipW = 0 end   -- 机密时不同步宽度（0 → 跳过）
-    if tipW > 0 and math.abs((box:GetWidth() or 0) - tipW) > 0.5 then
-        box:SetWidth(math.max(tipW, 80))
+    if tipW > 0 and boxW and math.abs(boxW - tipW) > 0.5 then
+        boxW = math.max(tipW, 80)
+        box:SetWidth(boxW)
     end
 
     -- 挂提示框下沿；屏幕底部放不下就挂上沿（只看几何，不会来回）
@@ -302,7 +308,7 @@ local function UpdateBox(tip, lines, sig)
     if Secrets.IsSecret(tipBottom) then
         below = true   -- 机密时固定挂提示框下方，避免对机密值比较
     else
-        below = (uiH <= 0) or (tipBottom > (box:GetHeight() or 0) + gap)
+        below = (uiH <= 0) or (tipBottom > (boxH or 0) + gap)
     end
     local side = below and "below" or "above"
     if Marked(tip, "boxSide") ~= side then
