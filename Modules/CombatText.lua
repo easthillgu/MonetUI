@@ -8,8 +8,8 @@
 --   * 盾 + 双剑 + 大字，参考 Andromeda modules/combat/combat-alert.lua 的编排
 --     （剑先滑入交叉、盾随后压上、大字升起），贴图是自绘 SVG
 --     （tools/svg/monet_combat_{sword,shield}.svg）。
---   * 配色（玩家 2026-10-27 两轮调整：先要"加色"，再要"进出有别"）：
---       进入 = 暖金剑（剑压盾前）+ 红盾 + 红字
+--   * 配色（玩家 2026-10-27 三轮调整：先要"加色"，再要"进出有别"，再定红剑金盾）：
+--       进入 = 红剑（剑压盾前）+ 金盾 + 红字
 --       离开 = 青蓝剑（盾压剑前、盾 0.82 半透明让剑透出来）+ 绿盾 + 绿字
 --     剑是插画件用烘死的美术色（主题签名槽是边框用的低饱和色，染大块剑刃必发灰）；
 --     盾 / 字用 danger / health 语义色。
@@ -280,7 +280,7 @@ local ALERT_LEAVE = 1.4
 
 local SWORD_SIZE  = 168     -- 剑贴图显示边长（画布 256，缩着画）
 local SHIELD_SIZE = 124     -- 盾贴图显示边长
-local SWORD_SLIDE = 105     -- 进入时剑从画面上角滑入的起始偏移
+local SWORD_SLIDE = 150     -- 进入时剑从画面上角滑入的起始偏移（原 105，太小看不出"飞入"）
 local SWORD_OUT   = 26      -- 淡出时剑继续向外漂的距离
 -- 离开专用：盾 124px 居中在前会把 168px 的交叉剑盖得只剩角尖（实机 2026-10-27 看到的
 -- 就是"一坨绿盾"）。所以离开时剑画大到 200px、盾给 0.82 半透明 —— 青蓝的剑从盾四角
@@ -305,6 +305,14 @@ end
 
 local function EaseOut(p)
     return 1 - (1 - p) ^ 3
+end
+
+--- 三角形脉冲：t0 处 0 → 中点 1 → t1 回到 0。给"撞到位"的过冲回弹用。
+local function Pulse(t, t0, t1)
+    local mid = (t0 + t1) * 0.5
+    if t <= t0 or t >= t1 then return 0 end
+    if t < mid then return (t - t0) / (mid - t0) end
+    return (t1 - t) / (t1 - mid)
 end
 
 local function EnsureAlert()
@@ -347,20 +355,22 @@ end
 --- t = 已播放秒数；全部关键帧都是绝对时间，进出两套各画各的。
 local function RenderAlert(kind, t)
     if kind == "enter" then
-        -- 剑：从画面上角滑入交叉 → 停 → 向外漂着淡出
-        local swordIn  = EaseOut(Prog(0, 0.35, t))
+        -- 剑：从画面外上角快速滑入交叉，撞到位时有一下过冲回弹 → 停 → 向外漂着淡出
+        local swordIn  = EaseOut(Prog(0, 0.28, t))
         local swordOut = Prog(1.05, ALERT_ENTER, t)
         local slide    = (1 - swordIn) * SWORD_SLIDE + swordOut * SWORD_OUT
         local swordA   = swordIn * (1 - swordOut)
-        local swordS   = 0.85 + 0.15 * swordIn + 0.10 * swordOut
+        local swordS   = 0.72 + 0.28 * swordIn + 0.16 * Pulse(t, 0.26, 0.62)
         Place(aSwordR, swordA, swordS,  slide, slide, SWORD_SIZE)
         Place(aSwordL, swordA, swordS, -slide, slide, SWORD_SIZE)
 
-        -- 盾：剑到位后从中心弹出 → 停 → 放大着淡出
-        local shIn  = EaseOut(Prog(0.30, 0.55, t))
+        -- 盾：剑交叉到位后从上方轻轻压下 + 弹出过冲 → 停 → 放大着淡出
+        local shIn  = EaseOut(Prog(0.26, 0.52, t))
         local shOut = Prog(1.15, ALERT_ENTER, t)
-        Place(aShield, shIn * (1 - shOut), 0.25 + 0.75 * shIn + 0.12 * shOut,
-              0, 0, SHIELD_SIZE)
+        local shDrop = (1 - shIn) * 26
+        Place(aShield, shIn * (1 - shOut),
+              0.15 + 0.85 * shIn + 0.18 * Pulse(t, 0.44, 0.84),
+              0, shDrop, SHIELD_SIZE)
 
         -- 大字：升起 → 停 → 上飘着淡出
         local txIn  = EaseOut(Prog(0.15, 0.50, t))
@@ -440,8 +450,8 @@ Play = function(kind)
     -- 盾 / 大字继续走 danger/health 语义色（固定鲜艳，和进出战斗语义一致）。
     local sr, sg, sb, hr, hg, hb
     if kind == "enter" then
-        sr, sg, sb = 0.85, 0.66, 0.36            -- 暖金（Monet 赭金）
-        hr, hg, hb = Color:GetDanger()
+        sr, sg, sb = Color:GetDanger()           -- 剑：危险红
+        hr, hg, hb = 0.92, 0.70, 0.28            -- 盾：暖金（烘死美术色）
         -- 剑压到盾前面（OVERLAY > ARTWORK）：进入的主角是交叉的双剑
         aSwordR:SetDrawLayer("OVERLAY")
         aSwordL:SetDrawLayer("OVERLAY")
