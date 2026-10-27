@@ -258,7 +258,10 @@ local function AcquireButton(parent)
     -- 模板自有美术层压平（建钮时第一遍；每次重绘还会再跑，见 UpdateButton）。
     FlattenSlotArt(btn)
 
-    local quest = Widget:Font(btn, 12, "pixel", { r = 1, g = 0.82, b = 0 }, "CENTER")
+    -- 任务标 '!'：像素字没有 BOLD 标志，**THICKOUTLINE** 就是它的加粗档（实机三版对比：
+    -- OUTLINE 太细、叠印糊成一坨、THICKOUTLINE 粗细正好 —— 玩家 2026-10-27 反馈"太细"）。
+    local quest = Widget:Font(btn, 12, "pixel", { r = 1, g = 0.82, b = 0 }, "CENTER", nil,
+                              "THICKOUTLINE, MONOCHROME")
     quest:SetPoint("CENTER", btn, "CENTER", 0, 0)
     Mark(shell, "questF", quest)
 

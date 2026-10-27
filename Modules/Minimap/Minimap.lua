@@ -587,12 +587,21 @@ local function EnsureBlocker(minimap)
     end
 
     if not zoneText then
-        -- 区域名条画在覆盖层上（地图内部，中间靠上），不是面板的标题条
-        zoneText = Widget:Font(blocker, 12, "pixel", "edge", "CENTER")
-        zoneText:SetPoint("TOP", blocker, "TOP", 0, -6)
+        -- 区域名条画在覆盖层上（地图内部，中间靠上），不是面板的标题条。
+        -- 悬停才显示 → 要够醒目：24px（12 网格上的下一档）+ THICKOUTLINE 加粗
+        -- （玩家 2026-10-27："字体也加大加粗"；像素字没有 BOLD，粗描边就是加粗档）。
+        zoneText = Widget:Font(blocker, 24, "pixel", "edge", "CENTER", nil, "THICKOUTLINE, MONOCHROME")
+        zoneText:SetPoint("TOP", blocker, "TOP", 0, -8)
+        zoneText:SetWordWrap(false)
         -- 地图上是花背景，1px 阴影让字读得出来
         if zoneText.SetShadowOffset then zoneText:SetShadowOffset(1, -1) end
         zoneText:Hide()
+    end
+
+    -- 限宽：长地名在 24px 下会顶出小地图边缘（每次都按当前可见宽重算；机密值跳过）
+    local bw = blocker:GetWidth()
+    if type(bw) == "number" and not Secrets.IsSecret(bw) and bw > 0 then
+        zoneText:SetWidth(bw - 12)
     end
 end
 

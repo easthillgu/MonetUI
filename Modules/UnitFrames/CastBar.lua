@@ -28,43 +28,40 @@ local Shared  = M.Shared
 -- 尖端就精确顶在条上，横向扫动时也不会上下漂。
 -- ============================================================================
 
-local SPARK_W        = 10         -- 三角宽（物理像素）：原 8 太细，施法条下沿几乎看不见
-local SPARK_H        = 5          -- 三角高（物理像素）
+local SPARK_W        = 6          -- 三角总宽（物理像素）
+local SPARK_H        = 3          -- 三角**总高**（物理像素）：玩家 2026-10-27 定 —— 含描边总共 3px
 local CAST_GAP       = 0          -- 能量条下沿到三角尖端（物理像素）：0 = 尖端正好顶在条上
--- 施法火花配色（玩家 2026-10-27："需要比较明显的视觉差才能提起注意"）：
---   内芯白热 + 外圈危险红晕、外晕呼吸 → 在任何条色（职业色 / resource / neutral）上都跳出来。
--- 两个色都是**美术色白名单**条目（见 MonetUI.md 的「美术色白名单」）；不可断施法整体转中性灰。
-local SPARK_CORE     = { 1.00, 0.96, 0.86 }   -- 白热芯
-local SPARK_GLOW     = { 1.00, 0.18, 0.10 }   -- 危险红晕
-local SPARK_GLOW_K   = 2.8        -- 外晕相对内芯的放大倍数
-local SPARK_GLOW_A0  = 0.22       -- 外晕呼吸的下限
-local SPARK_GLOW_A1  = 0.52       -- 外晕呼吸的上限
+-- 红芯 + 深描边（玩家 2026-10-27："红色和边框都要"）。贴图源按 64×32 画（4 倍），界面缩到
+-- 6×3 显示 —— **先画大再缩小**，3px 高才有干净边缘。整枚轻微呼吸（0.72↔1.00），小也抢眼。
+local SPARK_FILL     = { 1.00, 0.18, 0.10 }   -- 内芯：危险红
+local SPARK_EDGE     = { 0.10, 0.03, 0.03 }   -- 描边：近黑暖灰
+local SPARK_PULSE_A0 = 0.72       -- 整枚呼吸的下限
+local SPARK_PULSE_A1 = 1.00       -- 整枚呼吸的上限
 
---- 三角火花：**双层**染色模具（外晕 + 内芯），颜色全靠 SetVertexColor。
---- 返回一个宿主框（尺寸 = 内芯，外晕靠贴图不裁切自由外扩），.core / .glow 供换色。
+--- 三角火花：**双层**染色模具（深描边垫底 + 红色内芯居中），颜色全靠 SetVertexColor。
+--- 返回宿主框（尺寸 = 整枚 6×3）；.fill / .edge 供换色与呼吸。
 local function CreateTriangleSpark(parent)
     local host = CreateFrame("Frame", nil, parent)
 
-    local glow = host:CreateTexture(nil, "OVERLAY", nil, 1)
-    glow:SetTexture(Media:Texture("monet_spark_up"))
-    glow:SetVertexColor(SPARK_GLOW[1], SPARK_GLOW[2], SPARK_GLOW[3], 1)
-    glow:SetAlpha(SPARK_GLOW_A1)
-    glow:SetPoint("CENTER", host, "CENTER", 0, 0)
+    local edge = host:CreateTexture(nil, "OVERLAY", nil, 1)
+    edge:SetTexture(Media:Texture("monet_spark_up"))
+    edge:SetVertexColor(SPARK_EDGE[1], SPARK_EDGE[2], SPARK_EDGE[3], 1)
+    edge:SetPoint("CENTER", host, "CENTER", 0, 0)
 
-    local core = host:CreateTexture(nil, "OVERLAY", nil, 2)
-    core:SetTexture(Media:Texture("monet_spark_up"))
-    core:SetVertexColor(SPARK_CORE[1], SPARK_CORE[2], SPARK_CORE[3], 1)
-    core:SetPoint("CENTER", host, "CENTER", 0, 0)
+    local fill = host:CreateTexture(nil, "OVERLAY", nil, 2)
+    fill:SetTexture(Media:Texture("monet_spark_up"))
+    fill:SetVertexColor(SPARK_FILL[1], SPARK_FILL[2], SPARK_FILL[3], 1)
+    fill:SetPoint("CENTER", host, "CENTER", 0, 0)
 
-    host.core, host.glow = core, glow
+    host.fill, host.edge = fill, edge
     host:Hide()
     return host
 end
 
---- 给火花上下层分别上色（内芯 / 外晕）。
-local function TintSpark(spark, cr, cg, cb, gr, gg, gb)
-    if spark.core then pcall(spark.core.SetVertexColor, spark.core, cr, cg, cb, 1) end
-    if spark.glow then pcall(spark.glow.SetVertexColor, spark.glow, gr, gg, gb, 1) end
+--- 给火花上下层分别上色（内芯 / 描边）。
+local function TintSpark(spark, fr, fg, fb, er, eg, eb)
+    if spark.fill then pcall(spark.fill.SetVertexColor, spark.fill, fr, fg, fb, 1) end
+    if spark.edge then pcall(spark.edge.SetVertexColor, spark.edge, er, eg, eb, 1) end
 end
 
 --- Build the cast indicator: a simple frame holding only the spark.
@@ -83,11 +80,12 @@ local function CreateCastBar(frame)
     cast:SetSize(barWidth, sparkH)
     cast:SetPoint("TOPLEFT", frame.power, "BOTTOMLEFT", 0, -(CAST_GAP * mult))
 
-    -- 白热三角 + 红晕（随施法向右→左扫动）
+    -- 红芯 + 深描边（随施法向右→左扫动）
     local spark = CreateTriangleSpark(cast)
     spark:SetSize(sparkW, sparkH)
-    spark.core:SetSize(sparkW, sparkH)
-    spark.glow:SetSize(sparkW * SPARK_GLOW_K, sparkH * SPARK_GLOW_K)
+    spark.edge:SetSize(sparkW, sparkH)
+    -- 芯比描边小一圈：左右各 1px、上下各 0.5px（总高 3px → 芯 2px）
+    spark.fill:SetSize(sparkW - 2 * mult, sparkH - mult)
     -- TOP 锚 = 贴图最上面那一行（三角的尖）压在 cast 框顶边，而 cast 框顶边就是能量条下沿。
     spark:SetPoint("TOP", cast, "TOP", 0, 0)
 
@@ -145,18 +143,17 @@ local function UpdateCast(frame)
         return
     end
 
-    -- 可断施法：白热芯 + 红色呼吸晕（在任何条色上都跳出来）；
-    -- 不可断施法：内芯与外晕一起转中性灰（"这条断不了"的信号）。
+    -- 可断施法：红芯 + 近黑描边；不可断施法：两层一起转中性灰（"这条断不了"的信号）。
     -- 机密布尔直接落回"可断"路径（值级判定不触发客户端拦截，真值测试才触发）。
     if Secrets.IsSecret(notInterruptible) then
-        TintSpark(frame.cast.spark, SPARK_CORE[1], SPARK_CORE[2], SPARK_CORE[3],
-                  SPARK_GLOW[1], SPARK_GLOW[2], SPARK_GLOW[3])
+        TintSpark(frame.cast.spark, SPARK_FILL[1], SPARK_FILL[2], SPARK_FILL[3],
+                  SPARK_EDGE[1], SPARK_EDGE[2], SPARK_EDGE[3])
     elseif Secrets.Bool(notInterruptible, false) then
         local nr, ng, nb = Color:GetNeutral()
-        TintSpark(frame.cast.spark, nr, ng, nb, nr, ng, nb)
+        TintSpark(frame.cast.spark, nr, ng, nb, nr * 0.45, ng * 0.45, nb * 0.45)
     else
-        TintSpark(frame.cast.spark, SPARK_CORE[1], SPARK_CORE[2], SPARK_CORE[3],
-                  SPARK_GLOW[1], SPARK_GLOW[2], SPARK_GLOW[3])
+        TintSpark(frame.cast.spark, SPARK_FILL[1], SPARK_FILL[2], SPARK_FILL[3],
+                  SPARK_EDGE[1], SPARK_EDGE[2], SPARK_EDGE[3])
     end
 
     -- 受限时 startMS / endMS 是保密值（Secret number），OnUpdate 里的减法会抛
@@ -215,12 +212,13 @@ local function UpdateCast(frame)
         -- TOP 锚（与创建时一致）：只动横坐标，纵坐标永远贴着能量条下沿
         cast.spark:SetPoint("TOP", cast, "TOPLEFT", x, 0)
 
-        -- 外晕呼吸（约 1 秒一个来回）：只动 alpha，不碰几何；施法条平时很窄，这点明暗让它更抓眼
-        local glow = cast.spark.glow
-        if glow then
-            glow:SetAlpha(SPARK_GLOW_A0 + (SPARK_GLOW_A1 - SPARK_GLOW_A0)
-                * (0.5 + 0.5 * math.sin(GetTime() * 6)))
-        end
+        -- 整枚呼吸（约 1 秒一个来回）：两层 alpha 同步，只动 alpha 不碰几何；
+        -- 3px 的小标记靠这点明暗变化才抓得住眼睛
+        local spark = cast.spark
+        local a = SPARK_PULSE_A0 + (SPARK_PULSE_A1 - SPARK_PULSE_A0)
+            * (0.5 + 0.5 * math.sin(GetTime() * 6))
+        if spark.fill then pcall(spark.fill.SetAlpha, spark.fill, a) end
+        if spark.edge then pcall(spark.edge.SetAlpha, spark.edge, a) end
 
         -- Auto-hide when cast ends
         if (cast.channeling and now >= endMS) or (not cast.channeling and now >= endMS) then
