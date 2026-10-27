@@ -97,6 +97,10 @@ local function PlaceCursor(tip)
     if type(scale) ~= "number" or scale <= 0 then return end
 
     local w, h = tip:GetWidth() or 0, tip:GetHeight() or 0
+    -- 战斗中提示框宽高可能是机密值（内容源自战斗数据）：机密时按 0 处理，
+    -- 只跟随光标、跳过宽度偏移与屏幕夹取，避免对机密值做算术/比较。
+    if Secrets.IsSecret(w) then w = 0 end
+    if Secrets.IsSecret(h) then h = 0 end
     local cx, cy = x / scale, y / scale
     local uiW, uiH = ui:GetWidth() or 0, ui:GetHeight() or 0
     local off = OFFSET * (Media:Mult() or 1)
@@ -138,6 +142,8 @@ local function PlaceMinimap(tip)
     local ui = _G.UIParent
     local gap = MM_GAP * (Media:Mult() or 1)
     local w, h = tip:GetWidth() or 0, tip:GetHeight() or 0
+    if Secrets.IsSecret(w) then w = 0 end
+    if Secrets.IsSecret(h) then h = 0 end
     local right, top = panel:GetRight() or 0, panel:GetTop() or 0
     local uiH = ui and ui:GetHeight() or 0
 
@@ -276,6 +282,7 @@ local function UpdateBox(tip, lines, sig)
 
     -- 宽度跟着提示框走：内容变宽时小框不会短一截
     local tipW = tip:GetWidth() or 0
+    if Secrets.IsSecret(tipW) then tipW = 0 end   -- 机密时不同步宽度（0 → 跳过）
     if tipW > 0 and math.abs((box:GetWidth() or 0) - tipW) > 0.5 then
         box:SetWidth(math.max(tipW, 80))
     end
@@ -283,7 +290,12 @@ local function UpdateBox(tip, lines, sig)
     -- 挂提示框下沿；屏幕底部放不下就挂上沿（只看几何，不会来回）
     local uiH = _G.UIParent and _G.UIParent:GetHeight() or 0
     local tipBottom = tip:GetBottom() or 0
-    local below = (uiH <= 0) or (tipBottom > (box:GetHeight() or 0) + gap)
+    local below
+    if Secrets.IsSecret(tipBottom) then
+        below = true   -- 机密时固定挂提示框下方，避免对机密值比较
+    else
+        below = (uiH <= 0) or (tipBottom > (box:GetHeight() or 0) + gap)
+    end
     local side = below and "below" or "above"
     if Marked(tip, "boxSide") ~= side then
         Mark(tip, "boxSide", side)

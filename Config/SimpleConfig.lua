@@ -1238,19 +1238,6 @@ function SimpleConfig:Build()
                 combatText:Apply()
             end)
 
-        MakeDropdown(content, row(28), "战斗数字区域", {
-            { value = "center", text = "屏幕中央（默认）" },
-            { value = "up",     text = "中央偏上" },
-            { value = "down",   text = "中央偏下" },
-            { value = "left",   text = "偏左" },
-            { value = "right",  text = "偏右" },
-        },
-            function() return combatText:GetSetting("area") end,
-            function(value)
-                combatText:Settings().area = value or "center"
-                combatText:Apply()
-            end)
-
         MakeCheckbox(content, "自己的数字：受到伤害（可选，默认关）", row(26),
             function() return combatText:GetSetting("damage") end,
             function(value)

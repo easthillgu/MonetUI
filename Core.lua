@@ -258,13 +258,11 @@ local DEFAULTS = {
     --   * 战斗数字默认**用暴雪自己的** —— 本客户端 C_CombatText.GetCurrentEventInfo 是
     --     SecretReturns，我们自己画的数字拿不到明文，所以 damage/heal/avoid 默认关（开了才接管）。
     --   * alert = 进出战斗醒目提示（剑 + 盾 + 大字，自绘贴图）。
-    --   * area  = 暴雪战斗数字的显示区域偏移（只写纯几何，涉及机密值就整段放弃）。
     combatText = {
         damage = false,
         heal   = false,
         avoid  = false,
         alert  = true,
-        area   = "center",
     },
 }
 ns.DEFAULTS = DEFAULTS
@@ -286,7 +284,7 @@ local function MergeDefaults(dst, src)
 end
 
 --- Database schema.  Bumping this re-applies the settings that changed their meaning in the shipped defaults (see Migrate).
-local SCHEMA = 6
+local SCHEMA = 7
 
 --- One-off adjustments to a database written by an older MonetUI: MergeDefaults only fills in *missing* keys, so a value whose number changed has to be pushed explicitly.  Stored positions are the player's and are never touched here.
 local function Migrate(db)
@@ -337,6 +335,15 @@ local function Migrate(db)
             db.combatText.heal   = false
             db.combatText.avoid  = false
             db.combatText.combat = nil
+        end
+    end
+
+    -- v7: 撤销"战斗数字显示区域偏移" —— 该功能往 CombatText.textLocations 写值，会污染
+    -- 暴雪在机密比较里读的字段（CombatText.lua:364 比较机密的 lowestMessage 时读
+    -- textLocations.startY），按玩家规矩"涉及机密值则不改"作废，键删掉。
+    if (db.schema or 1) < 7 then
+        if type(db.combatText) == "table" then
+            db.combatText.area = nil
         end
     end
 

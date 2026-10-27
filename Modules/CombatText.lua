@@ -4,21 +4,19 @@
 -- SecretReturns，战斗中我们自己画的数字拿不到明文（FormatAmount 直接 nil，整条不画），
 -- 所以"自己的数字"降级为**可选**（默认关，开了才接管暴雪对应 CVar、关掉还原）。
 --
--- 模块常驻做两件事（玩家 2026-10-27 定的方向）：
---   1. **进出战斗醒目提示** —— 盾 + 双剑 + 大字，参考 Andromeda modules/combat/combat-alert.lua
---      的编排（剑先滑入交叉、盾随后压上、大字升起），贴图是自绘 SVG
---      （tools/svg/monet_combat_{sword,shield}.svg），颜色全走主题槽。
---      只吃 PLAYER_REGEN_* 事件 —— 纯事件载荷，不碰任何战斗数据，无机密值问题。
---   2. **暴雪战斗数字的显示区域偏移** —— 暴雪的数字锚在 `CombatText.textLocations`
---      （Blizzard_CombatText/Shared/CombatText.lua:425，按 1024×768 设计单位算）。
---      我们只往这张**纯数据表**里写偏移后的几何值：
---        * 不读战斗数据、不碰机密值 —— 读到机密 / 非数值就整段放弃（玩家规矩："涉及
---          机密值则不改"）；
---        * 不写 CombatText 帧字段、不挂任何钩子 —— 暴雪重算表（换分辨率 / 切开关）会
---          换一张新表，我们靠 1 秒轮询认出"新表"再把偏移补回去（拉锯的解法见 HANDOFF）。
+-- 模块常驻主体是进出战斗醒目提示（玩家 2026-10-27 定的方向）：
+--   * 盾 + 双剑 + 大字，参考 Andromeda modules/combat/combat-alert.lua 的编排
+--     （剑先滑入交叉、盾随后压上、大字升起），贴图是自绘 SVG
+--     （tools/svg/monet_combat_{sword,shield}.svg），颜色全走主题槽。
+--     只吃 PLAYER_REGEN_* 事件 —— 纯事件载荷，不碰任何战斗数据，无机密值问题。
 --
--- 常驻成本：自己数字的容器（无浮字时 OnUpdate 摘掉）+ 一个驱动帧（1 秒一轮的区域检查，
--- 提示播放时兼做补间）；提示帧只有第一次播放才创建。
+-- 注：曾实现"暴雪战斗数字显示区域偏移"（往 CombatText.textLocations 写几何值），但暴雪
+--     在机密比较里读该字段（CombatText.lua:364 用机密的 lowestMessage 比较
+--     textLocations.startY），我们一写就把那段执行标成"tainted by MonetUI"，机密比较被拦
+--     报错。按玩家规矩"涉及机密值则不改"，此功能已撤销（见 HANDOFF 3.25）。
+--
+-- 常驻成本：自己数字的容器（无浮字时 OnUpdate 摘掉）+ 一个驱动帧（提示播放时做补间）；
+-- 提示帧只有第一次播放才创建。
 
 local ADDON_NAME, ns = ...
 
@@ -269,72 +267,6 @@ local function OnCombatText(_, msgType)
 end
 
 -- ================================================================
--- 暴雪战斗数字的显示区域（只写纯几何偏移，不碰机密值）
--- ================================================================
-
--- 预设值按 1024×768 设计单位给，应用时乘暴雪同款的屏幕缩放（WorldFrame/1024·768）。
-local AREA_PRESETS = {
-    center = { 0, 0 },
-    up     = { 0, 150 },
-    down   = { 0, -150 },
-    left   = { -230, 0 },
-    right  = { 230, 0 },
-}
-
-local AREA_POLL = 1        -- 轮询间隔（秒）：暴雪重算后最多 1 秒把偏移补回去
-local areaAcc = 0
-local locTable             -- 我们正在其上生效的 textLocations 实例
-local locPristine          -- 那张表的原始值快照 { startX, startY, endX, endY }
-
---- 与暴雪同款的屏幕缩放；读不到（或读到机密值）返回 nil —— 调用方就放弃这次偏移。
-local function ScreenScale()
-    local wf = _G.WorldFrame
-    if not (wf and type(wf.GetWidth) == "function") then return nil end
-    local ok, w, h = pcall(function() return wf:GetWidth(), wf:GetHeight() end)
-    if not ok then return nil end
-    if type(w) ~= "number" or type(h) ~= "number" then return nil end
-    if Secrets.IsSecret(w) or Secrets.IsSecret(h) then return nil end
-    if w <= 0 or h <= 0 then return nil end
-    return w / 1024, h / 768
-end
-
-local function ApplyArea()
-    local ct = _G.CombatText
-    local ts = ct and ct.textLocations
-    if type(ts) ~= "table" then return end       -- 帧还没建 / 还没初始化（空表走不进来）
-
-    if ts ~= locTable then
-        -- 暴雪换了一张表（重算）或第一次见到：先快照原值。
-        -- 任何一项不是普通数值（含机密值）→ 按玩家规矩"涉及机密值则不改"，整段放弃。
-        local a, b, c, d = ts.startX, ts.startY, ts.endX, ts.endY
-        if type(a) ~= "number" or type(b) ~= "number"
-        or type(c) ~= "number" or type(d) ~= "number" then return end
-        if Secrets.IsSecret(a) or Secrets.IsSecret(b)
-        or Secrets.IsSecret(c) or Secrets.IsSecret(d) then return end
-        locPristine = { a, b, c, d }
-        locTable = ts
-    end
-    if not locPristine then return end
-
-    local dx, dy = 0, 0
-    if M.active then
-        local preset = M:GetSetting("area") or "center"
-        local off = AREA_PRESETS[preset] or AREA_PRESETS.center
-        local sx, sy = ScreenScale()
-        if not sx then return end
-        dx, dy = off[1] * sx, off[2] * sy
-    end
-
-    -- 幂等：每次都从快照算目标值，值没变就不写（偏移为 0 时这就是"还原"）。
-    local nx, ny = locPristine[1] + dx, locPristine[2] + dy
-    local ex, ey = locPristine[3] + dx, locPristine[4] + dy
-    if ts.startX ~= nx then ts.startX = nx end
-    if ts.startY ~= ny then ts.startY = ny end
-    if ts.endX   ~= ex then ts.endX   = ex end
-    if ts.endY   ~= ey then ts.endY   = ey end
-end
-
--- ================================================================
 -- 进出战斗醒目提示（参考 Andromeda combat-alert，编排简化、贴图自绘）
 -- ================================================================
 
@@ -513,12 +445,6 @@ local function DriverTick(_, elapsed)
         end
     end
 
-    -- 暴雪换表（重算 textLocations）后把偏移补回去
-    areaAcc = areaAcc + elapsed
-    if areaAcc >= AREA_POLL then
-        areaAcc = 0
-        ApplyArea()
-    end
 end
 
 -- ================================================================
@@ -570,7 +496,6 @@ function M:Apply()
         StopAlert()
     end
 
-    ApplyArea()
 end
 
 function M:SetEnabled(value)
@@ -582,10 +507,9 @@ function M:SetEnabled(value)
         return
     end
 
-    -- 关掉：暴雪的浮动文字全还回去，提示停掉，显示区域写回原值。
+    -- 关掉：暴雪的浮动文字全还回去，提示停掉。
     for key in pairs(CVARS) do Restore(key) end
     StopAlert()
-    ApplyArea()
 
     if not container then return end
     container:SetScript("OnUpdate", nil)

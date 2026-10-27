@@ -75,7 +75,7 @@ node tools/sync-check.js         # 仓库 vs 已安装副本（退出码 0 = 游
 | InfoBar | 可用（实机验收 2026-10-26） | 底边经验线 + 三角标记（尖端顶在线的上沿，见 3.15） |
 | Tooltip | 可用（实机验收 2026-10-26） | 三摆法（跟随 / 小地图右上角 / 暴雪默认）、1px 主题边、边缘翻转、Alt 常显 ID；见 3.13/3.18/3.19 |
 | Cursor / Toast / Durability | 可用 | 纯装饰 / 提示类，实机过过一遍 |
-| CombatText（战斗辅助） | 可用（提示/迁移已实机验 2026-10-27，区域待玩家开 FCT） | 默认用暴雪数字；进出战斗剑+盾提示已验；显示区域偏移待验（需开「浮动战斗文字」） |
+| CombatText（战斗辅助） | 可用（实机验 2026-10-27） | 默认用暴雪数字；进出战斗剑+盾提示已验；**区域偏移功能已撤销**（涉及机密值，见 3.25） |
 | ~~BagFrame（旧排列式背包）~~ | **已于 2026-10-26 移除** | 两套背包只留 `Bags`（见 3.21） |
 | Skins | 可用 | 暴雪窗口美化；**只做窗口装饰，不碰里面的按钮/页签脚本** |
 
@@ -779,34 +779,40 @@ deploy 117 + sync-check 同步。**待实机看**：连按 B 十几次不会出�
 - 提示开着时压掉暴雪自己的进出战斗小字（`floatingCombatTextCombatState_v2`），
   避免两份；关掉提示就还原。这条沿用模块原有的 CVar 存档/还原机制。
 
-**战斗数字区域（改了，判定"不涉及机密值"）**：
+**战斗数字区域（已撤销 —— 实机证明"确实涉及机密值"）**：
 
-- 暴雪的数字锚在 `CombatText.textLocations`（`Blizzard_CombatText/Shared/CombatText.lua:501-527`），
-  一张**纯数据表** `{ startX, startY, endX, endY }`，值 = 1024×768 设计单位 × 屏幕缩放。
-  消费点只有 `:425` 的 `SetPoint("TOP", WorldFrame, "BOTTOM", ...)` —— 全是几何，
-  **不读任何战斗数据**；也没有位置 CVar（只有 `floatingCombatTextFloatMode_v2` 上/下/喷泉）。
-- 做法：往这张表里写偏移后的值（`AREA_PRESETS` 中央/上/下/左/右 五档）。
-  - **机密闸**：快照原值时任一项 `type ~= number` 或 `issecretvalue` 为真 → 整段放弃
-    （玩家规矩："涉及机密值则不改"）；`ScreenScale()` 同样两道检查。
-  - **不碰帧字段、不挂钩子**：只写 `textLocations` 这张表（不是 CombatText 帧）。
-    暴雪在换分辨率 / 切开关 / 载入时会**换一张新表**重算 —— 靠 1 秒轮询认出新表、
-    重新快照、再把偏移补回去（轮询不产生调用栈，没有拉锯；hooksecurefunc 才会）。
-  - **幂等**：每次都从快照算目标值，值没变一个字节都不写；偏移 0 = 还原。
-- 常驻成本：驱动帧 1 秒一轮的表检查（模块关掉即停）。
+- 当初判断"暴雪数字锚在 `CombatText.textLocations`（一张纯几何表），不读战斗数据，改它
+  不碰机密值"。**实机打脸**：暴雪 `CombatText.lua:364` 在战斗中拿**机密的** `lowestMessage`
+  与 `self.textLocations.startY` 做比较 —— 我们只要往这张表写过值，暴雪读该字段的那一段
+  执行就被记成"tainted by 'MonetUI'"，机密比较直接抛
+  `attempt to compare local 'lowestMessage' (a secret number value, while execution tainted by 'MonetUI')`。
+- **判定**：写 `textLocations` = 污染暴雪的机密比较 → 按玩家规矩"涉及机密值则不改"，
+  **整段功能撤销**（`SCHEMA` 6 → 7，`Migrate` v7 删掉作废的 `area` 键）。撤销范围：
+  `CombatText.lua` 的 `AREA_PRESETS`/`ScreenScale`/`ApplyArea`/区域轮询、`Core.lua` 默认值、
+  `SimpleConfig.lua` 区域下拉。
+- **教训**：这客户端里"纯数据表"也会被机密比较读到 —— 只要暴雪在**机密上下文**里读我们
+  写过的字段，就算污染。判断"碰一样东西安不安全"要看**暴雪在哪读它**，不是看它本身存什么。
 
-**面板**：段名 "自身战斗文字" → "战斗辅助"（含模块开关标签），提示复选框 +
-区域下拉 + 三个"自己的数字"复选框（标注"可选，默认关"）+ 新说明。
+**面板**：段名 "自身战斗文字" → "战斗辅助"；提示复选框 + 三个"自己的数字"复选框
+（标注"可选，默认关"）+ 说明（区域下拉已随功能移除）。
 
 **实机验证（2026-10-27，12.1.5.70575）**：
 
-- ✅ schema 5→6 迁移生效：探针确认 `alert=true / area=center / combat 键已删`。
+- ✅ schema 迁移：v6（combat 键删）与 v7（area 键删）均生效，探针 `schema=7 / area=nil`。
 - ✅ 提示帧正常播放：`PLAYER_REGEN_*` 触发 `Play` 跑完整段补间（shown→false，末帧收尾）。
 - ✅ 美术 + 配色：手动复刻峰值构图截图确认两剑交叉 + 盾 + 大字，主题色正确
   （剑=highlight 银灰、盾=primary 蓝灰、字=danger 红）。
-- ✅ 重载后 0 ERR / 0 BLOCKED / 0 WARN；`taint.log` 零 MonetUI 记录（尾部全是 WoWBridge 自身）。
-- ⏸️ **五档区域挪数字**：玩家的 `enableFloatingCombatText=false`，暴雪 `Blizzard_CombatText`
-  是 `LoadOnDemand` 没加载（`_G.CombatText=nil`），区域代码安全 no-op。**要玩家先在游戏设置里
-  开「浮动战斗文字」**才能验；开启后数字应随预设偏移，且无 taint。
+- ✅ 撤销后 `textLocations` 恢复暴雪原值（384/609）且不再被写；重载后 0 ERR / 0 BLOCKED /
+  0 WARN；`taint.log` 零 MonetUI 记录。
+- ✅ 玩家的「浮动战斗文字」已打开（`enableFloatingCombatText=true`，暴雪数字正常显示）。
+
+**顺带修的 Tooltip 机密报错**（本轮实机新暴露，`×91` 刷屏）：`Tooltip.lua` 的
+`PlaceCursor`/`PlaceMinimap`/`UpdateBox` 裸读 `tip:GetWidth/GetHeight/GetBottom` —— 战斗中
+悬停单位时提示框尺寸是**机密值**，对它做算术/比较就抛
+`attempt to perform arithmetic on local 'w' (a secret number value ... tainted by 'MonetUI')`。
+修法：读完尺寸先 `issecretvalue` 判一次，机密时降级（宽高按 0 只跟随光标 / 跳过宽度同步 /
+固定挂下方），绝不对机密值算术。四处 `PlaceCursor(99)`、`PlaceMinimap(140)`、
+`UpdateBox(278,285)` 全加防护。
 
 > 实机踩点：负 fileID（-4733 / -36）是本客户端贴图的正常内部 ID，不是加载失败；
 > `wuxian` ping ~0.74s，`try` 触发→抓图总延迟逼近 1.5s 动画末尾，抓峰值要用确定性
