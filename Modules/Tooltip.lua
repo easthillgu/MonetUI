@@ -260,6 +260,7 @@ local function UpdateBox(tip, lines, sig)
         Mark(tip, "boxSig", sig)
         local y = -pad
         local widest = 0
+        local measured = false   -- 只要有一行拿到明文尺寸就算测过
         for i = 1, math.max(#lines, #boxLines) do
             local fs = BoxLine(i)
             local line = lines[i]
@@ -271,13 +272,20 @@ local function UpdateBox(tip, lines, sig)
                 fs:Show()
                 local w = fs:GetStringWidth() or 0
                 local h = fs:GetStringHeight() or BOX_FONT
+                -- 战斗受限时提示框几何是机密值，而小框锚在它上面 —— GetStringWidth/Height
+                -- 标着 SecretWhenAnchoringSecret，会跟着变机密。机密就放弃这一行的测量：
+                -- 宽度不参与 widest（框宽保留上一次的），行高退回字号（布局不塌）。
+                if Secrets.IsSecret(w) then w = 0 else measured = true end
+                if Secrets.IsSecret(h) then h = BOX_FONT end
                 if w > widest then widest = w end
                 y = y - (h + BOX_SLACK)
             else
                 fs:Hide()
             end
         end
-        box:SetSize(math.max(widest + pad * 2, 80), -y + pad)
+        if measured then
+            box:SetSize(math.max(widest + pad * 2, 80), -y + pad)
+        end
     end
 
     -- 宽度跟着提示框走：内容变宽时小框不会短一截

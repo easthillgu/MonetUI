@@ -806,13 +806,19 @@ deploy 117 + sync-check 同步。**待实机看**：连按 B 十几次不会出�
   0 WARN；`taint.log` 零 MonetUI 记录。
 - ✅ 玩家的「浮动战斗文字」已打开（`enableFloatingCombatText=true`，暴雪数字正常显示）。
 
-**顺带修的 Tooltip 机密报错**（本轮实机新暴露，`×91` 刷屏）：`Tooltip.lua` 的
-`PlaceCursor`/`PlaceMinimap`/`UpdateBox` 裸读 `tip:GetWidth/GetHeight/GetBottom` —— 战斗中
-悬停单位时提示框尺寸是**机密值**，对它做算术/比较就抛
-`attempt to perform arithmetic on local 'w' (a secret number value ... tainted by 'MonetUI')`。
-修法：读完尺寸先 `issecretvalue` 判一次，机密时降级（宽高按 0 只跟随光标 / 跳过宽度同步 /
-固定挂下方），绝不对机密值算术。四处 `PlaceCursor(99)`、`PlaceMinimap(140)`、
-`UpdateBox(278,285)` 全加防护。
+**顺带修的 Tooltip 机密报错**（本轮实机新暴露）：本客户端 `ScriptRegion:GetWidth/GetHeight/GetBottom`
+与 `FontString:GetStringWidth/GetStringHeight` 全部标着 **`SecretWhenAnchoringSecret`**
+（`docs/api` 快照实证）—— 不是"值本身机密"，而是**锚定链摸到机密几何就跟着机密**。
+- 第一处（×91 刷屏）：`PlaceCursor`/`PlaceMinimap`/`UpdateBox` 裸读**提示框**尺寸，
+  战斗中悬停时是机密值。修法：读完先 `issecretvalue`，机密就降级（宽高按 0 只跟随光标 /
+  跳过宽度同步 / 固定挂下方）。
+- 第二处（漏网，Count 1）：`UpdateBox` 里 `fs:GetStringWidth()/GetStringHeight()` ——
+  小框锚在 GameTooltip 上，**锚定链**把机密传给了我们自己 FontString 的测量值（`Tooltip.lua:274`
+  `attempt to compare local 'w' (a secret number value ...)`）。修法：机密时该行不参与
+  `widest`（框宽保留上一次）、行高退回字号，且**一行都没测到明文就跳过 `SetSize`**（布局不塌不崩）。
+- 排查口径：**测量任何帧之前先想"它的锚定链通到哪"** —— 通到 GameTooltip / 战斗单位框这类
+  几何可能机密的帧，`GetWidth` 一族就会返回机密值。全仓已扫：其余测量点的链都是
+  UIParent / 我们自己的帧（InfoBar/QuestTracker/UnitFrames/Minimap 等），安全。
 
 > 实机踩点：负 fileID（-4733 / -36）是本客户端贴图的正常内部 ID，不是加载失败；
 > `wuxian` ping ~0.74s，`try` 触发→抓图总延迟逼近 1.5s 动画末尾，抓峰值要用确定性
