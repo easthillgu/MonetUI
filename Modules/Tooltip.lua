@@ -324,6 +324,18 @@ local function UpdateBox(tip, lines, sig)
     box:Show()
 end
 
+--- Creature / Vehicle / Pet 的 GUID 里，NPC ID 在第 6 段：
+---   Creature-0-3922-1-12685-167032-00005FF815  →  167032
+--- 旧的 `^Creature%-(%d+)` 抓的是第 2 段的固定 "0"，所以所有 NPC 都显示 NPC ID: 0
+--- （玩家 2026-10-27 实机报的就是这个）。段数对不上就返回 nil，宁可少显示一行。
+local function NPCIdFromGUID(guid)
+    if type(guid) ~= "string" then return nil end
+    local kind, id = guid:match("^(%a+)%-%d+%-%d+%-%d+%-%d+%-(%d+)")
+    if type(id) ~= "string" then return nil end
+    if kind == "Creature" or kind == "Vehicle" or kind == "Pet" then return id end
+    return nil
+end
+
 --- 收集要显示的附加行：目标行（开关 enrich）+ Alt 的 ID 行（开关 idsByAlt）。
 local function CollectLines(tip)
     local lines = {}
@@ -357,7 +369,7 @@ local function CollectLines(tip)
             local ok, guid = pcall(UnitGUID, unit)
             guid = ok and Plain(guid) or nil
             if type(guid) == "string" then
-                id = guid:match("^Creature%-(%d+)") or guid:match("^Vehicle%-(%d+)")
+                id = NPCIdFromGUID(guid)
                 label = NPC_ID_LABEL
             end
         else
@@ -444,7 +456,23 @@ local function Tick(_, elapsed)
     Enrich(tip)
 end
 
+--- 收掉提示框底部的绿色生命条（GameTooltipStatusBar）。
+-- 玩家 2026-10-27：它贴在提示框最下沿，正好和我们补的「目标 / ID」小框抢位置。
+-- 手法按本仓规矩：**SetAlpha(0) + 关鼠标，不 Hide** —— Hide 会被暴雪自己的 Show 顶回来
+-- （一有更新就 Show 一次），屏幕上一闪一闪；alpha 0 的框一直算"显示着"，拉锯就没了。
+-- 只调方法、不写字段；ns:Mark 记开关，模块关掉时还原。
+local function SuppressHealthBar(on)
+    local bar = _G.GameTooltipStatusBar
+    if not bar then return end
+    local now = Marked(bar, "hbHidden") and true or false
+    if now == (on and true or false) then return end
+    Mark(bar, "hbHidden", on and true or nil)
+    bar:SetAlpha(on and 0 or 1)
+    bar:EnableMouse(false)
+end
+
 local function Install()
+    SuppressHealthBar(true)
     if driver then return end
     driver = CreateFrame("Frame")
     driver:SetScript("OnUpdate", Tick)
@@ -480,6 +508,7 @@ function M:SetEnabled(value)
         Install()
     else
         mode, enrich, idsByAlt = "off", false, false
+        SuppressHealthBar(false)
         local tip = _G.GameTooltip
         if tip then Reset(tip) end
     end
