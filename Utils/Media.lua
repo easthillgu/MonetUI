@@ -240,6 +240,10 @@ Media.texture = {
     ["monet_spark_down"]    = ASSET .. "Textures\\monet_spark_down",
     ["monet_search"]        = ASSET .. "Textures\\monet_search",
 
+    -- 插件图标（睡莲，.toc IconTexture 同一张）：128×128 **整图烘焙彩色**，不是染色模具 ——
+    -- 只调 alpha，绝不 SetVertexColor（引擎是 贴图 × 顶点色 相乘，会把池水的深绿洗掉）。
+    ["monet_addon_icon"]    = ASSET .. "Textures\\monet_addon_icon",
+
     -- 进出战斗提示的剑 / 盾（SVG 手绘，tools/svg/monet_combat_{sword,shield}.svg）：
     -- 无色相灰阶模具，运行期 SetVertexColor 染主题高光 / 主题色（CombatText.lua 的提示编排）。
     ["monet_combat_sword"]  = ASSET .. "Textures\\monet_combat_sword",

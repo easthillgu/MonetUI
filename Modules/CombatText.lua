@@ -7,7 +7,12 @@
 -- 模块常驻主体是进出战斗醒目提示（玩家 2026-10-27 定的方向）：
 --   * 盾 + 双剑 + 大字，参考 Andromeda modules/combat/combat-alert.lua 的编排
 --     （剑先滑入交叉、盾随后压上、大字升起），贴图是自绘 SVG
---     （tools/svg/monet_combat_{sword,shield}.svg），颜色全走主题槽。
+--     （tools/svg/monet_combat_{sword,shield}.svg）。
+--   * 配色（玩家 2026-10-27 两轮调整：先要"加色"，再要"进出有别"）：
+--       进入 = 暖金剑（剑压盾前）+ 红盾 + 红字
+--       离开 = 青蓝剑（盾压剑前、盾 0.82 半透明让剑透出来）+ 绿盾 + 绿字
+--     剑是插画件用烘死的美术色（主题签名槽是边框用的低饱和色，染大块剑刃必发灰）；
+--     盾 / 字用 danger / health 语义色。
 --     只吃 PLAYER_REGEN_* 事件 —— 纯事件载荷，不碰任何战斗数据，无机密值问题。
 --
 -- 注：曾实现"暴雪战斗数字显示区域偏移"（往 CombatText.textLocations 写几何值），但暴雪
@@ -277,6 +282,11 @@ local SWORD_SIZE  = 168     -- 剑贴图显示边长（画布 256，缩着画）
 local SHIELD_SIZE = 124     -- 盾贴图显示边长
 local SWORD_SLIDE = 105     -- 进入时剑从画面上角滑入的起始偏移
 local SWORD_OUT   = 26      -- 淡出时剑继续向外漂的距离
+-- 离开专用：盾 124px 居中在前会把 168px 的交叉剑盖得只剩角尖（实机 2026-10-27 看到的
+-- 就是"一坨绿盾"）。所以离开时剑画大到 200px、盾给 0.82 半透明 —— 青蓝的剑从盾四角
+-- 伸出来、又从盾面上透出来（水彩叠色），层次仍是盾在剑前。
+local SWORD_LEAVE_K = 1.19
+local SHIELD_LEAVE_A = 0.82
 local TEXT_BASE   = -2      -- 大字锚点（alert 底边下 2px）
 local TEXT_RISE   = 26      -- 进入时大字从下方升起的高度
 local TEXT_DRIFT  = 16      -- 淡出时大字上飘的距离
@@ -366,9 +376,9 @@ local function RenderAlert(kind, t)
         local alpha   = appear * (1 - shrink)
         local scale   = 1 + 0.06 * grow - 0.45 * shrink
         local outward = 40 * shrink
-        Place(aShield, alpha, scale, 0, 0, SHIELD_SIZE)
-        Place(aSwordR, alpha, scale,  outward, outward, SWORD_SIZE)
-        Place(aSwordL, alpha, scale, -outward, outward, SWORD_SIZE)
+        Place(aShield, alpha * SHIELD_LEAVE_A, scale, 0, 0, SHIELD_SIZE)
+        Place(aSwordR, alpha, scale * SWORD_LEAVE_K,  outward, outward, SWORD_SIZE)
+        Place(aSwordL, alpha, scale * SWORD_LEAVE_K, -outward, outward, SWORD_SIZE)
 
         local txIn  = EaseOut(Prog(0, 0.30, t))
         local txOut = Prog(0.85, 1.35, t)
@@ -419,11 +429,34 @@ Play = function(kind)
         aText:SetTextColor(r, g, b, 1)
     end
 
-    local r, g, b = Color:Get("primary")      -- 盾：主题色
-    aShield:SetVertexColor(r, g, b, 1)
-    r, g, b = Color:Get("highlight")          -- 剑：主题高光
-    aSwordR:SetVertexColor(r, g, b, 1)
-    aSwordL:SetVertexColor(r, g, b, 1)
+    -- 图标配色与大字同语义（玩家 2026-10-27：太素，加色）：
+    --   进入战斗 = 战危：金剑（edge，威胁辉光同款暖金）+ 红盾（danger）
+    --   离开战斗 = 平息：灰剑（neutral，冷却下来的钢）+ 绿盾（health）
+    -- 剑/盾贴图都是无色相灰阶模具，顶点色即最终色；danger/health 是 UI 管的固定色，
+    -- edge 跟主题引擎走 —— 全部走 5+3 功能槽，不烘死色。
+    -- 剑是"插画件"，用烘死的美术色（暖金 / 冷钢蓝）：主题的签名槽（edge / neutral / primary）
+    -- 在本客户端是给边框用的低饱和色（实测 edge=rgb(.41,.47,.53)、neutral=rgb(.51,.49,.49)），
+    -- 染 168px 的大块剑刃只会发灰（玩家 2026-10-27 实机："剑一直是灰色"）。
+    -- 盾 / 大字继续走 danger/health 语义色（固定鲜艳，和进出战斗语义一致）。
+    local sr, sg, sb, hr, hg, hb
+    if kind == "enter" then
+        sr, sg, sb = 0.85, 0.66, 0.36            -- 暖金（Monet 赭金）
+        hr, hg, hb = Color:GetDanger()
+        -- 剑压到盾前面（OVERLAY > ARTWORK）：进入的主角是交叉的双剑
+        aSwordR:SetDrawLayer("OVERLAY")
+        aSwordL:SetDrawLayer("OVERLAY")
+        aShield:SetDrawLayer("ARTWORK")
+    else
+        sr, sg, sb = 0.45, 0.78, 0.90            -- 青蓝（池水色，和绿盾同属冷调）
+        hr, hg, hb = Color:GetHealth()
+        -- 盾压回剑前面：离开的主角是"安全了"的盾
+        aSwordR:SetDrawLayer("ARTWORK")
+        aSwordL:SetDrawLayer("ARTWORK")
+        aShield:SetDrawLayer("OVERLAY")
+    end
+    aShield:SetVertexColor(hr, hg, hb, 1)
+    aSwordR:SetVertexColor(sr, sg, sb, 1)
+    aSwordL:SetVertexColor(sr, sg, sb, 1)
 
     alert:Show()
     RenderAlert(kind, 0)

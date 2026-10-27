@@ -292,6 +292,13 @@ function SimpleConfig:Build()
     title:SetPoint("TOP", panel, "TOP", 0, -16)
     title:SetText("MonetUI")
 
+    -- Logo：就是插件列表那张睡莲图标，挂标题左侧、垂直居中（边中点对边中点）。
+    -- 整图烘焙彩色（见 Media 注册处），只给 alpha，不染色。
+    local logo = panel:CreateTexture(nil, "ARTWORK")
+    logo:SetTexture(Media:Texture("monet_addon_icon"))
+    logo:SetSize(24, 24)
+    logo:SetPoint("RIGHT", title, "LEFT", -8, 0)
+
     local subtitle = Widget:Font(panel, 12, "pixel", "neutral", "CENTER")
     subtitle:SetPoint("TOP", title, "BOTTOM", 0, -4)
     subtitle:SetText("v" .. ns.version .. " · 印象派自适应界面")
