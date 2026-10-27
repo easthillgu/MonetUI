@@ -365,6 +365,52 @@ function Widget:SetFont(fs, size, key, flags, exact)
     return fs
 end
 
+--- 把文本塞进 `maxWidth`：超宽就**逐档缩小字号**（1px 步进），绝不裁字。
+-- 用途（玩家 2026-10-27 定的规则）：名字最多占姓名条 70%，超了就缩字号 ——
+-- 姓名板 / 单位框 / 小队框全部走这一个入口，旧的按字数截断（Shorten/AbbrName）停用。
+-- 机密文本、或宽度读回来是机密（FontString 锚在机密几何上时 GetStringWidth 会变机密）→
+-- 不测不缩，原样按 baseSize 显示（宁可溢出也不瞎猜，见 AGENTS 秘密值规矩）。
+-- @param fs FontString；text 要显示的文本；maxWidth 允许的最大宽度（UI 单位）
+-- @return 最终字号（像素字符串，未吸附网格 —— 缩字需要连续档）
+function Widget:FitText(fs, text, maxWidth, baseSize, flags, minSize)
+    if not (fs and fs.SetText) then return baseSize end
+    baseSize = tonumber(baseSize) or 12
+    minSize  = tonumber(minSize) or 6
+    local Secrets = ns.Secrets
+    local fontPath = Media:Font("pixel")
+    local useFlags = flags or Media.fontFlags
+
+    local function apply(size)
+        if fs.SetFont then fs:SetFont(fontPath, size, useFlags) end
+    end
+
+    apply(baseSize)
+    fs:SetText(text or "")
+
+    if Secrets and Secrets.IsSecret(text) then return baseSize end
+    if not (maxWidth and maxWidth > 0) then return baseSize end
+
+    -- 文本框本身比限额还窄时以文本框为准（否则缩了字也仍会被裁）
+    if fs.GetWidth then
+        local bw = fs:GetWidth()
+        if type(bw) == "number" and not (Secrets and Secrets.IsSecret(bw)) and bw > 0 and bw < maxWidth then
+            maxWidth = bw
+        end
+    end
+
+    local width = fs.GetStringWidth and fs:GetStringWidth() or 0
+    if type(width) ~= "number" or (Secrets and Secrets.IsSecret(width)) then return baseSize end
+
+    local size = baseSize
+    while width > maxWidth and size > minSize do
+        size = size - 1
+        apply(size)
+        width = fs:GetStringWidth()
+        if type(width) ~= "number" or (Secrets and Secrets.IsSecret(width)) then return size end
+    end
+    return size
+end
+
 function Widget:ColorText(fs, colorKey)
     if not fs or not fs.SetTextColor then return fs end
 
