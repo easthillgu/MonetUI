@@ -22,15 +22,21 @@ local PADDING   = 16    -- horizontal breathing room inside a block
 local MIN_WIDTH = 40    -- a block never shrinks below this
 local FADE      = 4     -- backdrop / block alpha per second while fading
 local PULSE     = 1.6   -- combat pulse cycles per second
+local PULSE_A0  = 0.35  -- 脉冲最暗（正弦绝对值）
+local PULSE_A1  = 1.00  -- 脉冲最亮
 
 -- Live animation state: one OnUpdate drives fade and pulse together from these numbers.
 local bar
 local blockAlpha, targetBlockAlpha = 0, 0
 local barAlpha,   targetBarAlpha   = 0, 0
 local pulseColor                   -- nil = no pulse; {r,g,b} = pulsing edge
+local pulseFrame, pulseEdges       -- 闪烁专用覆盖层（bar 的子框，压在 XP 线与其它子框之上）
 local pulsePhase = 0
 local hoverDepth = 0
 local hiddenForPetBattle = false
+-- 战斗状态不在这里维护：统一用 `ns:InCombat()`（Core 用 PLAYER_REGEN_* 事件维护）。
+-- 本客户端在事件派发当拍 InCombatLockdown() 还是旧值（2026-10-27 实机：disabled 里读到 false），
+-- 直接读它会让战斗脉冲一次都不亮 —— 这就是"闪烁效果看不到"的真正原因（不是被遮挡）。
 
 function M:Settings()
     local db = ns:DB()
@@ -58,6 +64,46 @@ function M:BlockEnabled(key)
     return value and true or false
 end
 
+--- 闪烁专用覆盖层：bar 的子框，帧级压在 XP 进度线（bar 的另一个子框，画在底边）与其它子框之上。
+-- 为什么不能只靠 SetBackdropBorderColor：
+--   * 底边 2px 边框被 XP 线（子框，永远画在父框贴图之上）盖掉一半；
+--   * 顶边正好贴在屏幕最上沿，只有 1px 露在可见区；
+--   * 左右两条又细又贴屏幕边缘。
+-- 结果就是"战斗脉冲实际看不见"（玩家 2026-10-27 报"看不见，是不是被遮盖了"）。
+-- 覆盖层只画 4 条 2px 边、只负责闪烁这一件事，脉冲一停就整层隐藏。
+local function EnsurePulseOverlay()
+    if pulseFrame or not bar then return pulseFrame end
+    pulseFrame = CreateFrame("Frame", nil, bar)
+    pulseFrame:SetAllPoints(bar)
+    pulseFrame:SetFrameLevel((bar:GetFrameLevel() or 1) + 4)
+    pulseFrame:EnableMouse(false)
+
+    local function mk()
+        local t = pulseFrame:CreateTexture(nil, "OVERLAY")
+        t:SetTexture(Media.texture.blank)
+        t:SetVertexColor(1, 1, 1, 0)
+        return t
+    end
+
+    local top, bottom, left, right = mk(), mk(), mk(), mk()
+    top:SetPoint("TOPLEFT", pulseFrame, "TOPLEFT", 0, 0)
+    top:SetPoint("TOPRIGHT", pulseFrame, "TOPRIGHT", 0, 0)
+    top:SetHeight(2)
+    bottom:SetPoint("BOTTOMLEFT", pulseFrame, "BOTTOMLEFT", 0, 0)
+    bottom:SetPoint("BOTTOMRIGHT", pulseFrame, "BOTTOMRIGHT", 0, 0)
+    bottom:SetHeight(2)
+    left:SetPoint("TOPLEFT", pulseFrame, "TOPLEFT", 0, 0)
+    left:SetPoint("BOTTOMLEFT", pulseFrame, "BOTTOMLEFT", 0, 0)
+    left:SetWidth(2)
+    right:SetPoint("TOPRIGHT", pulseFrame, "TOPRIGHT", 0, 0)
+    right:SetPoint("BOTTOMRIGHT", pulseFrame, "BOTTOMRIGHT", 0, 0)
+    right:SetWidth(2)
+
+    pulseEdges = { top, bottom, left, right }
+    pulseFrame:Hide()
+    return pulseFrame
+end
+
 --- Push the current animation state onto the bar; the only place colours/alpha are written, so values cannot drift from what the tick believes.
 local function ApplyColors()
     if not bar then return end
@@ -81,6 +127,20 @@ local function ApplyColors()
     for i = 1, #blocks do
         local frame = blocks[i].frame
         if frame then frame:SetAlpha(blockAlpha) end
+    end
+
+    -- 闪烁画在覆盖层上（见 EnsurePulseOverlay）：永远压在 XP 线与所有子框之上
+    if pulseColor then
+        EnsurePulseOverlay()
+        if pulseFrame then
+            local a = PULSE_A0 + (PULSE_A1 - PULSE_A0) * math.abs(math.sin(pulsePhase * math.pi))
+            for i = 1, #pulseEdges do
+                pulseEdges[i]:SetVertexColor(pulseColor[1], pulseColor[2], pulseColor[3], a)
+            end
+            pulseFrame:Show()
+        end
+    elseif pulseFrame then
+        pulseFrame:Hide()
     end
 end
 
@@ -498,7 +558,7 @@ function M:Initialize()
     local function RefreshPulse()
         if Setting("combatPulse") ~= true then
             pulseColor = nil
-        elseif _G.InCombatLockdown and _G.InCombatLockdown() then
+        elseif ns:InCombat() then
             local r, g, b = Color:GetDanger()
             pulseColor = { r, g, b }
         elseif _G.C_Calendar and _G.C_Calendar.GetNumPendingInvites
@@ -512,6 +572,7 @@ function M:Initialize()
     end
     self.RefreshPulse = RefreshPulse
 
+    -- 事件就是脉冲的触发点（战斗状态本身由 Core 维护，见 ns:InCombat()）。
     EventBus:Register("PLAYER_REGEN_DISABLED", function() if M.active then RefreshPulse() end end)
     EventBus:Register("PLAYER_REGEN_ENABLED",  function() if M.active then RefreshPulse() end end)
     if _G.C_Calendar and _G.C_Calendar.GetNumPendingInvites then

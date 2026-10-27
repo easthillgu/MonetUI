@@ -156,7 +156,9 @@ local DEFAULTS = {
 
         width        = 120,
         height       = 12,
-        nameSize     = 12,
+        -- 10：暴雪自己的名牌名是 9.6 号，我们原来跟它用 12 反而更大（玩家 2026-10-27 要求缩小）。
+        -- SnapSize 的紧凑档就是 10 / 12，10 = 比暴雪原版略小、比 12 收一档。
+        nameSize     = 10,
         showName     = true,
         showLevel    = true,
         showPercent  = true,
@@ -284,7 +286,7 @@ local function MergeDefaults(dst, src)
 end
 
 --- Database schema.  Bumping this re-applies the settings that changed their meaning in the shipped defaults (see Migrate).
-local SCHEMA = 7
+local SCHEMA = 8
 
 --- One-off adjustments to a database written by an older MonetUI: MergeDefaults only fills in *missing* keys, so a value whose number changed has to be pushed explicitly.  Stored positions are the player's and are never touched here.
 local function Migrate(db)
@@ -344,6 +346,14 @@ local function Migrate(db)
     if (db.schema or 1) < 7 then
         if type(db.combatText) == "table" then
             db.combatText.area = nil
+        end
+    end
+
+    -- v8: 姓名板名字 12 → 10。暴雪自己的名牌名是 9.6 号，我们原来跟它平级用 12 反而更大
+    -- （玩家 2026-10-27："名字字体缩小到 10 或 12"）。只降"还是旧默认 12"的库，玩家自己改过的不动。
+    if (db.schema or 1) < 8 then
+        if type(db.nameplates) == "table" and db.nameplates.nameSize == 12 then
+            db.nameplates.nameSize = 10
         end
     end
 
@@ -442,6 +452,26 @@ local afterCombatOrder   = {}   -- 排队顺序（pairs 无序，这里保插入
 local afterCombatWarned  = {}   -- key -> true（该 key 的失败提示打过了）
 local afterCombatHooked  = false
 
+-- ---- 战斗状态的唯一来源：PLAYER_REGEN_* 事件 ----------------------------------
+-- **不要**在 PLAYER_REGEN_* 的回调里直接读 InCombatLockdown()：本客户端先把事件派给插件、
+-- 之后才翻那个标志（2026-10-27 实机探针：disabled 事件里读到的还是 false，enabled 里还是 true）。
+-- 所以这里用事件维护一份状态：Core 在文件加载时就注册，早于所有模块的回调，模块问
+-- `ns:InCombat()` 拿到的永远是"派发当拍正确"的值。
+local combatState = nil    -- nil = 还没收到过 regen 事件（登录/重载时可能就在战斗中）
+
+--- 现在是否在战斗中。事件派发当拍也正确（见 combatState 注释）；没收到过事件时退回实时标志。
+function ns:InCombat()
+    if combatState ~= nil then return combatState end
+    return (InCombatLockdown and InCombatLockdown()) and true or false
+end
+
+ns.EventBus:Register("PLAYER_REGEN_DISABLED", function() combatState = true end)
+ns.EventBus:Register("PLAYER_REGEN_ENABLED",  function() combatState = false end)
+-- 登录 / 重载时可能已经在战斗里（事件不会补发）：用实时标志定初值。
+ns.EventBus:Register("PLAYER_ENTERING_WORLD", function()
+    combatState = (InCombatLockdown and InCombatLockdown()) and true or false
+end)
+
 local function RunAfterCombat(key, fn)
     local ok, res = pcall(fn)
     if ok and res == false then
@@ -478,7 +508,7 @@ function ns:AfterCombat(key, fn, mode)
         ns.EventBus:Register("PLAYER_REGEN_ENABLED", FlushAfterCombat)
     end
 
-    if mode ~= "regen" and not (InCombatLockdown and InCombatLockdown()) then
+    if mode ~= "regen" and not ns:InCombat() then
         RunAfterCombat(key, fn)
         return
     end
