@@ -28,18 +28,43 @@ local Shared  = M.Shared
 -- 尖端就精确顶在条上，横向扫动时也不会上下漂。
 -- ============================================================================
 
-local SPARK_W        = 8          -- 三角宽（物理像素）
-local SPARK_H        = 4          -- 三角高（物理像素）
+local SPARK_W        = 10         -- 三角宽（物理像素）：原 8 太细，施法条下沿几乎看不见
+local SPARK_H        = 5          -- 三角高（物理像素）
 local CAST_GAP       = 0          -- 能量条下沿到三角尖端（物理像素）：0 = 尖端正好顶在条上
-local SPARK_RED      = { 1, 0, 0 }  -- normal / interruptible cast
+-- 施法火花配色（玩家 2026-10-27："需要比较明显的视觉差才能提起注意"）：
+--   内芯白热 + 外圈危险红晕、外晕呼吸 → 在任何条色（职业色 / resource / neutral）上都跳出来。
+-- 两个色都是**美术色白名单**条目（见 MonetUI.md 的「美术色白名单」）；不可断施法整体转中性灰。
+local SPARK_CORE     = { 1.00, 0.96, 0.86 }   -- 白热芯
+local SPARK_GLOW     = { 1.00, 0.18, 0.10 }   -- 危险红晕
+local SPARK_GLOW_K   = 2.8        -- 外晕相对内芯的放大倍数
+local SPARK_GLOW_A0  = 0.22       -- 外晕呼吸的下限
+local SPARK_GLOW_A1  = 0.52       -- 外晕呼吸的上限
 
---- 三角火花：一张染色模具贴图，颜色全靠 SetVertexColor。
+--- 三角火花：**双层**染色模具（外晕 + 内芯），颜色全靠 SetVertexColor。
+--- 返回一个宿主框（尺寸 = 内芯，外晕靠贴图不裁切自由外扩），.core / .glow 供换色。
 local function CreateTriangleSpark(parent)
-    local spark = parent:CreateTexture(nil, "OVERLAY")
-    spark:SetTexture(Media:Texture("monet_spark_up"))
-    spark:SetVertexColor(SPARK_RED[1], SPARK_RED[2], SPARK_RED[3], 1)
-    spark:Hide()
-    return spark
+    local host = CreateFrame("Frame", nil, parent)
+
+    local glow = host:CreateTexture(nil, "OVERLAY", nil, 1)
+    glow:SetTexture(Media:Texture("monet_spark_up"))
+    glow:SetVertexColor(SPARK_GLOW[1], SPARK_GLOW[2], SPARK_GLOW[3], 1)
+    glow:SetAlpha(SPARK_GLOW_A1)
+    glow:SetPoint("CENTER", host, "CENTER", 0, 0)
+
+    local core = host:CreateTexture(nil, "OVERLAY", nil, 2)
+    core:SetTexture(Media:Texture("monet_spark_up"))
+    core:SetVertexColor(SPARK_CORE[1], SPARK_CORE[2], SPARK_CORE[3], 1)
+    core:SetPoint("CENTER", host, "CENTER", 0, 0)
+
+    host.core, host.glow = core, glow
+    host:Hide()
+    return host
+end
+
+--- 给火花上下层分别上色（内芯 / 外晕）。
+local function TintSpark(spark, cr, cg, cb, gr, gg, gb)
+    if spark.core then pcall(spark.core.SetVertexColor, spark.core, cr, cg, cb, 1) end
+    if spark.glow then pcall(spark.glow.SetVertexColor, spark.glow, gr, gg, gb, 1) end
 end
 
 --- Build the cast indicator: a simple frame holding only the spark.
@@ -58,9 +83,11 @@ local function CreateCastBar(frame)
     cast:SetSize(barWidth, sparkH)
     cast:SetPoint("TOPLEFT", frame.power, "BOTTOMLEFT", 0, -(CAST_GAP * mult))
 
-    -- Red triangle spark (moves RIGHT->LEFT as cast progresses)
+    -- 白热三角 + 红晕（随施法向右→左扫动）
     local spark = CreateTriangleSpark(cast)
     spark:SetSize(sparkW, sparkH)
+    spark.core:SetSize(sparkW, sparkH)
+    spark.glow:SetSize(sparkW * SPARK_GLOW_K, sparkH * SPARK_GLOW_K)
     -- TOP 锚 = 贴图最上面那一行（三角的尖）压在 cast 框顶边，而 cast 框顶边就是能量条下沿。
     spark:SetPoint("TOP", cast, "TOP", 0, 0)
 
@@ -118,18 +145,18 @@ local function UpdateCast(frame)
         return
     end
 
-    -- An uninterruptible cast turns the spark grey; a normal
-    -- (interruptible) cast stays red.
-    -- 机密布尔直接落回 false（灰 = 不可断路径不会误点亮；细档实锤同族发源之一，
-    -- 值级判定不触发客户端拦截，真值测试才触发）。
-    -- 贴图是纯白模具，颜色走 SetVertexColor（和边框 / 图标同一套语法）。
+    -- 可断施法：白热芯 + 红色呼吸晕（在任何条色上都跳出来）；
+    -- 不可断施法：内芯与外晕一起转中性灰（"这条断不了"的信号）。
+    -- 机密布尔直接落回"可断"路径（值级判定不触发客户端拦截，真值测试才触发）。
     if Secrets.IsSecret(notInterruptible) then
-        frame.cast.spark:SetVertexColor(SPARK_RED[1], SPARK_RED[2], SPARK_RED[3], 1)
+        TintSpark(frame.cast.spark, SPARK_CORE[1], SPARK_CORE[2], SPARK_CORE[3],
+                  SPARK_GLOW[1], SPARK_GLOW[2], SPARK_GLOW[3])
     elseif Secrets.Bool(notInterruptible, false) then
         local nr, ng, nb = Color:GetNeutral()
-        frame.cast.spark:SetVertexColor(nr, ng, nb, 1)
+        TintSpark(frame.cast.spark, nr, ng, nb, nr, ng, nb)
     else
-        frame.cast.spark:SetVertexColor(SPARK_RED[1], SPARK_RED[2], SPARK_RED[3], 1)
+        TintSpark(frame.cast.spark, SPARK_CORE[1], SPARK_CORE[2], SPARK_CORE[3],
+                  SPARK_GLOW[1], SPARK_GLOW[2], SPARK_GLOW[3])
     end
 
     -- 受限时 startMS / endMS 是保密值（Secret number），OnUpdate 里的减法会抛
@@ -187,6 +214,13 @@ local function UpdateCast(frame)
         local x = barWidth * (1 - progress)
         -- TOP 锚（与创建时一致）：只动横坐标，纵坐标永远贴着能量条下沿
         cast.spark:SetPoint("TOP", cast, "TOPLEFT", x, 0)
+
+        -- 外晕呼吸（约 1 秒一个来回）：只动 alpha，不碰几何；施法条平时很窄，这点明暗让它更抓眼
+        local glow = cast.spark.glow
+        if glow then
+            glow:SetAlpha(SPARK_GLOW_A0 + (SPARK_GLOW_A1 - SPARK_GLOW_A0)
+                * (0.5 + 0.5 * math.sin(GetTime() * 6)))
+        end
 
         -- Auto-hide when cast ends
         if (cast.channeling and now >= endMS) or (not cast.channeling and now >= endMS) then

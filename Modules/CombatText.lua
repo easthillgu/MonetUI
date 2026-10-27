@@ -190,11 +190,12 @@ local function Tick(_, elapsed)
     end
 end
 
-local function Emit(text, r, g, b, big)
+local function Emit(text, r, g, b)
     if not (container and text and text ~= "") then return end
 
     local fs = Acquire()
-    Widget:SetFont(fs, big and 16 or 12, "pingfang", Media.outlineFlags)
+    -- 字号固定 12：原来的 `big and 16 or 12` 是死分支（SnapSize 把 16 也吸到 12），已删。
+    Widget:SetFont(fs, 12, "pingfang", Media.outlineFlags)
     fs:SetText(text)
     fs:SetTextColor(r, g, b, 1)
     fs:SetAlpha(1)
@@ -251,23 +252,21 @@ local function OnCombatText(_, msgType)
     local ok, data, arg3 = pcall(api.GetCurrentEventInfo)
     if not ok then return end
 
-    local big = msgType:find("_CRIT") ~= nil
-
     if isDamage then
         local amount = FormatAmount(data)
         if not amount then return end
         local r, g, b = Color:GetDanger()
-        Emit("-" .. amount, r, g, b, big)
+        Emit("-" .. amount, r, g, b)
     elseif isHeal then
         local amount = FormatAmount(arg3)
         if not amount then return end
         local r, g, b = Color:GetHealth()
-        Emit("+" .. amount, r, g, b, big)
+        Emit("+" .. amount, r, g, b)
     else
         local label = _G[msgType]
         if type(label) ~= "string" then label = msgType end
         local r, g, b = Color:GetNeutral()
-        Emit(label, r, g, b, false)
+        Emit(label, r, g, b)
     end
 end
 

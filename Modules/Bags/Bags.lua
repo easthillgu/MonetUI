@@ -258,9 +258,17 @@ local function AcquireButton(parent)
     -- 模板自有美术层压平（建钮时第一遍；每次重绘还会再跑，见 UpdateButton）。
     FlattenSlotArt(btn)
 
-    local quest = Widget:Font(btn, 14, "pixel", { r = 1, g = 0.82, b = 0 }, "CENTER")
+    local quest = Widget:Font(btn, 12, "pixel", { r = 1, g = 0.82, b = 0 }, "CENTER")
     quest:SetPoint("CENTER", btn, "CENTER", 0, 0)
     Mark(shell, "questF", quest)
+
+    -- 物品数量：**我们自己画**。模板的 SetItemButtonCount 写的是它自己的 Count 字体串，
+    -- 而 FlattenSlotArt 把图标抬到 OVERLAY 7 层 —— 计数被图标整个盖住（玩家 2026-10-27 报的
+    -- "数量不显示"）。这里补一条 OVERLAY 9 层的白字，位置与模板默认一致（右下角内缩）。
+    local count = Widget:Font(btn, 12, "pixel", { r = 1, g = 1, b = 1 }, "RIGHT", "OVERLAY")
+    count:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 2)
+    count:SetDrawLayer("OVERLAY", 9)
+    Mark(shell, "countF", count)
 
     local cd = Widget:Cooldown(btn)
     Mark(shell, "cdF", cd)
@@ -307,6 +315,7 @@ local function UpdateButton(shell, rec)
     if not btn then return end
     Mark(btn, "bagRec", rec)
     local quest = Marked(shell, "questF")
+    local count = Marked(shell, "countF")
     local cd = Marked(shell, "cdF")
 
     if not rec then
@@ -315,6 +324,7 @@ local function UpdateButton(shell, rec)
         pcall(SetItemButtonTexture, btn, nil)
         pcall(SetItemButtonCount, btn, 0)
         if quest then quest:SetText("") end
+        if count then count:SetText("") end
         if cd then cd:Hide() end
         Widget:SetBorderState(shell, nil)
         btn:Hide() -- 模板按钮出生即隐藏；空槽连钮带壳一起藏
@@ -327,6 +337,16 @@ local function UpdateButton(shell, rec)
     btn:SetID(rec.slot or 0)
     pcall(SetItemButtonTexture, btn, rec.texture)
     pcall(SetItemButtonCount, btn, (rec.count and rec.count > 1) and rec.count or 0)
+    -- 数量：我们自己的白字（模板那条被图标盖住，见 AcquireButton）。1 个不写数字。
+    -- 走 Secrets.Number：机密/非数字一律当"读不到"（同一行下面的冷却代码就是这个口径）。
+    if count then
+        local n = Secrets.Number(rec.count)
+        if n and n > 1 then
+            count:SetText((n > 999) and "999+" or tostring(n))
+        else
+            count:SetText("")
+        end
+    end
     pcall(SetItemButtonDesaturated, btn, rec.locked and true or false)
     -- SetItemButton* 会把蒙版/顶点色/槽底美术重新带上（实机：蒙版回来了就是缺纹理
     -- 斜纹方块），每次重绘后再平一次 —— 全是幂等方法调用，开销可忽略（几十格）。
