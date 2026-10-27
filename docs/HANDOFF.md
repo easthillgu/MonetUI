@@ -74,7 +74,8 @@ node tools/sync-check.js         # 仓库 vs 已安装副本（退出码 0 = 游
 | Bags | 可用（实机验收 2026-10-26） | 分类背包；**连按 B 不会再冒出暴雪背包**（见 3.21/3.22） |
 | InfoBar | 可用（实机验收 2026-10-26） | 底边经验线 + 三角标记（尖端顶在线的上沿，见 3.15） |
 | Tooltip | 可用（实机验收 2026-10-26） | 三摆法（跟随 / 小地图右上角 / 暴雪默认）、1px 主题边、边缘翻转、Alt 常显 ID；见 3.13/3.18/3.19 |
-| Cursor / Toast / Durability / CombatText | 可用 | 纯装饰 / 提示类，实机过过一遍 |
+| Cursor / Toast / Durability | 可用 | 纯装饰 / 提示类，实机过过一遍 |
+| CombatText（战斗辅助） | 改向完成，**待实机验**（3.25） | 默认用暴雪数字；新增进出战斗剑+盾提示；显示区域可偏移五档 |
 | ~~BagFrame（旧排列式背包）~~ | **已于 2026-10-26 移除** | 两套背包只留 `Bags`（见 3.21） |
 | Skins | 可用 | 暴雪窗口美化；**只做窗口装饰，不碰里面的按钮/页签脚本** |
 
@@ -749,6 +750,55 @@ deploy 117 + sync-check 同步。**待实机看**：连按 B 十几次不会出�
 > 仍开着、但都不是本轮改动引入的：`ADDON_ACTION_BLOCKED MonetUI UNKNOWN()`（玩家说先不管）、
 > P5' 的 `ActionBars/Secure.lua` 拆分、字体授权债（发行前换 OFL 字体）、
 > `BuffListFrame` 那条被暴雪 `ApplyFrameOptions` 钉在牌子右端的已知小问题。
+
+---
+
+### 3.25 2026-10-27：战斗辅助改向 —— 默认用暴雪的数字 + 进出战斗醒目提示
+
+玩家定的方向（原话）："战斗辅助模块由于机密值问题，默认使用暴雪的，只需要增加进入战斗和
+脱离战斗的醒目提示，参考 andromeda 的实现，增加必要的图形；战斗数字区域尝试更改，如果也涉及
+机密值，则不改。"
+
+**为什么默认回到暴雪的**：`C_CombatText.GetCurrentEventInfo()` 在本客户端标着
+`SecretReturns`（本地 API 快照，1.60.1.70450）。我们自己画数字时拿不到明文 ——
+`FormatAmount` 一律返回 nil，整条不画，等于"开了也没效果"。所以 `damage / heal / avoid`
+三个默认翻成 `false`（自己的数字降级为**可选**，开了才接管暴雪对应 CVar、关掉还原）；
+`SCHEMA` 5 → 6，`Migrate` 的 v6 块强制翻位 + 删掉作废的 `combat` 键。
+
+**进出战斗醒目提示（新增，`alert` 默认开）**：
+
+- 参考 Andromeda `modules/combat/combat-alert.lua` 的编排（来自 ElvUI_WindTools）：
+  两把剑从画面上角滑入交叉 → 盾从中心压上交点 → 大字升起，淡出时剑向外漂、盾放大、字上飘。
+  我们简化成**手动 OnUpdate 补间**（项目里没有 AnimationGroup 先例，不引新模式），
+  连环进出战斗排队播（最多 3 条，超了丢最老的）。
+- 贴图自绘：`tools/svg/monet_combat_{sword,shield}.svg`（Inkscape 可改）→
+  `node tools/svg-to-tga.js` 导出 2 张新 TGA（其余 TGA 字节不变）。
+  无色相灰阶模具，运行期 `SetVertexColor` 染主题色（盾=primary，剑=highlight，
+  大字=danger/health），已加进 `tools/audit-pixels.js` 的 STENCIL（0/37 通过）。
+- 只吃 `PLAYER_REGEN_*` 事件 —— 纯事件载荷，不碰任何战斗数据，**无机密值问题**。
+- 提示开着时压掉暴雪自己的进出战斗小字（`floatingCombatTextCombatState_v2`），
+  避免两份；关掉提示就还原。这条沿用模块原有的 CVar 存档/还原机制。
+
+**战斗数字区域（改了，判定"不涉及机密值"）**：
+
+- 暴雪的数字锚在 `CombatText.textLocations`（`Blizzard_CombatText/Shared/CombatText.lua:501-527`），
+  一张**纯数据表** `{ startX, startY, endX, endY }`，值 = 1024×768 设计单位 × 屏幕缩放。
+  消费点只有 `:425` 的 `SetPoint("TOP", WorldFrame, "BOTTOM", ...)` —— 全是几何，
+  **不读任何战斗数据**；也没有位置 CVar（只有 `floatingCombatTextFloatMode_v2` 上/下/喷泉）。
+- 做法：往这张表里写偏移后的值（`AREA_PRESETS` 中央/上/下/左/右 五档）。
+  - **机密闸**：快照原值时任一项 `type ~= number` 或 `issecretvalue` 为真 → 整段放弃
+    （玩家规矩："涉及机密值则不改"）；`ScreenScale()` 同样两道检查。
+  - **不碰帧字段、不挂钩子**：只写 `textLocations` 这张表（不是 CombatText 帧）。
+    暴雪在换分辨率 / 切开关 / 载入时会**换一张新表**重算 —— 靠 1 秒轮询认出新表、
+    重新快照、再把偏移补回去（轮询不产生调用栈，没有拉锯；hooksecurefunc 才会）。
+  - **幂等**：每次都从快照算目标值，值没变一个字节都不写；偏移 0 = 还原。
+- 常驻成本：驱动帧 1 秒一轮的表检查（模块关掉即停）。
+
+**面板**：段名 "自身战斗文字" → "战斗辅助"（含模块开关标签），提示复选框 +
+区域下拉 + 三个"自己的数字"复选框（标注"可选，默认关"）+ 新说明。
+
+**待实机验证**（游戏没开，`wuxian` link offline）：进/出战斗提示动画与配色、暴雪小字
+确实被压掉、五档区域真的挪动数字、区域改动无 taint 弹窗。
 
 ---
 

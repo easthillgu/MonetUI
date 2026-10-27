@@ -1,16 +1,24 @@
--- Modules/CombatText.lua
--- 自身战斗文字 (self combat text): 玩家受到的伤害 / 治疗 / 闪避招架，以及（可选）进出战斗，
--- 在玩家框上方浮起、上飘淡出。
+-- Modules/CombatText.lua —— 战斗辅助
 --
--- 数据来源：事件 COMBAT_TEXT_UPDATE（载荷 = 类型字符串）+ C_CombatText.GetCurrentEventInfo()，
--- 后者按暴雪自己的用法返回 `data, arg3, arg4`（Blizzard_CombatText/Shared/CombatText.lua:104）。
--- 注意它在本客户端标着 SecretReturns：数值一律过 Secrets.Number，拿不到明文就整条不画 ——
--- 宁可少一行，也不让战斗里因为机密值运算崩掉。
+-- **默认用暴雪自己的浮动战斗文字**：本客户端 C_CombatText.GetCurrentEventInfo 标着
+-- SecretReturns，战斗中我们自己画的数字拿不到明文（FormatAmount 直接 nil，整条不画），
+-- 所以"自己的数字"降级为**可选**（默认关，开了才接管暴雪对应 CVar、关掉还原）。
 --
--- 替代暴雪自己的浮动战斗文字：开模块时把暴雪「对玩家造成伤害 / 治疗 / 进出战斗」三条 CVar 存下原值
--- 并置 0，关掉时还原（找不到的 CVar 直接跳过，不动别的设置）。
+-- 模块常驻做两件事（玩家 2026-10-27 定的方向）：
+--   1. **进出战斗醒目提示** —— 盾 + 双剑 + 大字，参考 Andromeda modules/combat/combat-alert.lua
+--      的编排（剑先滑入交叉、盾随后压上、大字升起），贴图是自绘 SVG
+--      （tools/svg/monet_combat_{sword,shield}.svg），颜色全走主题槽。
+--      只吃 PLAYER_REGEN_* 事件 —— 纯事件载荷，不碰任何战斗数据，无机密值问题。
+--   2. **暴雪战斗数字的显示区域偏移** —— 暴雪的数字锚在 `CombatText.textLocations`
+--      （Blizzard_CombatText/Shared/CombatText.lua:425，按 1024×768 设计单位算）。
+--      我们只往这张**纯数据表**里写偏移后的几何值：
+--        * 不读战斗数据、不碰机密值 —— 读到机密 / 非数值就整段放弃（玩家规矩："涉及
+--          机密值则不改"）；
+--        * 不写 CombatText 帧字段、不挂任何钩子 —— 暴雪重算表（换分辨率 / 切开关）会
+--          换一张新表，我们靠 1 秒轮询认出"新表"再把偏移补回去（拉锯的解法见 HANDOFF）。
 --
--- 常驻成本：只有一个容器帧；没有浮字时 OnUpdate 是摘掉的。
+-- 常驻成本：自己数字的容器（无浮字时 OnUpdate 摘掉）+ 一个驱动帧（1 秒一轮的区域检查，
+-- 提示播放时兼做补间）；提示帧只有第一次播放才创建。
 
 local ADDON_NAME, ns = ...
 
@@ -22,6 +30,10 @@ local EventBus = ns.EventBus
 
 local M = { name = "CombatText" }
 ns.CombatText = M
+
+-- ================================================================
+-- 可选：我们自己的数字（默认关 —— 关着的时候一个字都不画、一个 CVar 都不动）
+-- ================================================================
 
 local POOL_MAX    = 14      -- 同时最多几行
 local LIFE        = 1.15    -- 一行活多久（秒）
@@ -42,16 +54,19 @@ local AVOID = {
 }
 
 -- 暴雪的对应 CVar：存在就接管，不存在就跳过（不写任何找不到的名字）。
+-- "combat" 现在跟醒目提示联动：有提示就压掉暴雪自己的进出战斗小字（免得两份），关掉还原。
 local CVARS = {
     damage = { "floatingCombatTextCombatDamage_v2", "floatingCombatTextCombatDamage" },
     heal   = { "floatingCombatTextCombatHealing_v2", "floatingCombatTextCombatHealing" },
+    avoid  = { "floatingCombatTextDodgeParryMiss_v2", "floatingCombatTextDodgeParryMiss" },
     combat = { "floatingCombatTextCombatState_v2", "floatingCombatTextCombatState" },
 }
+local OWN_KEYS = { "damage", "heal", "avoid" }   -- 自己数字的三类（area/alert 不属于 CVar 接管）
 
 local container
 local active = {}       -- 正在飘的：{ fs=, t=, dx= }
 local spare = {}        -- 回收的 FontString
-local running           -- OnUpdate 是否挂着
+local running           -- 自己数字的 OnUpdate 是否挂着
 
 function M:Settings()
     local db = ns:DB()
@@ -109,7 +124,7 @@ local function Restore(key)
     end
 end
 
--- ---------------------------------------------------------------- 渲染
+-- ---------------------------------------------------------------- 自己数字的渲染
 local function EnsureContainer()
     if container then return end
     container = CreateFrame("Frame", "MonetUICombatText", _G.UIParent)
@@ -253,14 +268,263 @@ local function OnCombatText(_, msgType)
     end
 end
 
-local function OnCombatState(_, entering)
-    if not (M.active and container) then return end
-    if M:GetSetting("combat") == false then return end
-    local r, g, b = Color:GetBorder()
-    Emit(entering and (_G.ENTERING_COMBAT or "+战斗") or (_G.LEAVING_COMBAT or "-战斗"), r, g, b, false)
+-- ================================================================
+-- 暴雪战斗数字的显示区域（只写纯几何偏移，不碰机密值）
+-- ================================================================
+
+-- 预设值按 1024×768 设计单位给，应用时乘暴雪同款的屏幕缩放（WorldFrame/1024·768）。
+local AREA_PRESETS = {
+    center = { 0, 0 },
+    up     = { 0, 150 },
+    down   = { 0, -150 },
+    left   = { -230, 0 },
+    right  = { 230, 0 },
+}
+
+local AREA_POLL = 1        -- 轮询间隔（秒）：暴雪重算后最多 1 秒把偏移补回去
+local areaAcc = 0
+local locTable             -- 我们正在其上生效的 textLocations 实例
+local locPristine          -- 那张表的原始值快照 { startX, startY, endX, endY }
+
+--- 与暴雪同款的屏幕缩放；读不到（或读到机密值）返回 nil —— 调用方就放弃这次偏移。
+local function ScreenScale()
+    local wf = _G.WorldFrame
+    if not (wf and type(wf.GetWidth) == "function") then return nil end
+    local ok, w, h = pcall(function() return wf:GetWidth(), wf:GetHeight() end)
+    if not ok then return nil end
+    if type(w) ~= "number" or type(h) ~= "number" then return nil end
+    if Secrets.IsSecret(w) or Secrets.IsSecret(h) then return nil end
+    if w <= 0 or h <= 0 then return nil end
+    return w / 1024, h / 768
 end
 
--- ---------------------------------------------------------------- 模块接口
+local function ApplyArea()
+    local ct = _G.CombatText
+    local ts = ct and ct.textLocations
+    if type(ts) ~= "table" then return end       -- 帧还没建 / 还没初始化（空表走不进来）
+
+    if ts ~= locTable then
+        -- 暴雪换了一张表（重算）或第一次见到：先快照原值。
+        -- 任何一项不是普通数值（含机密值）→ 按玩家规矩"涉及机密值则不改"，整段放弃。
+        local a, b, c, d = ts.startX, ts.startY, ts.endX, ts.endY
+        if type(a) ~= "number" or type(b) ~= "number"
+        or type(c) ~= "number" or type(d) ~= "number" then return end
+        if Secrets.IsSecret(a) or Secrets.IsSecret(b)
+        or Secrets.IsSecret(c) or Secrets.IsSecret(d) then return end
+        locPristine = { a, b, c, d }
+        locTable = ts
+    end
+    if not locPristine then return end
+
+    local dx, dy = 0, 0
+    if M.active then
+        local preset = M:GetSetting("area") or "center"
+        local off = AREA_PRESETS[preset] or AREA_PRESETS.center
+        local sx, sy = ScreenScale()
+        if not sx then return end
+        dx, dy = off[1] * sx, off[2] * sy
+    end
+
+    -- 幂等：每次都从快照算目标值，值没变就不写（偏移为 0 时这就是"还原"）。
+    local nx, ny = locPristine[1] + dx, locPristine[2] + dy
+    local ex, ey = locPristine[3] + dx, locPristine[4] + dy
+    if ts.startX ~= nx then ts.startX = nx end
+    if ts.startY ~= ny then ts.startY = ny end
+    if ts.endX   ~= ex then ts.endX   = ex end
+    if ts.endY   ~= ey then ts.endY   = ey end
+end
+
+-- ================================================================
+-- 进出战斗醒目提示（参考 Andromeda combat-alert，编排简化、贴图自绘）
+-- ================================================================
+
+local ALERT_ENTER = 1.5     -- 提示总时长（秒）
+local ALERT_LEAVE = 1.4
+
+local SWORD_SIZE  = 168     -- 剑贴图显示边长（画布 256，缩着画）
+local SHIELD_SIZE = 124     -- 盾贴图显示边长
+local SWORD_SLIDE = 105     -- 进入时剑从画面上角滑入的起始偏移
+local SWORD_OUT   = 26      -- 淡出时剑继续向外漂的距离
+local TEXT_BASE   = -2      -- 大字锚点（alert 底边下 2px）
+local TEXT_RISE   = 26      -- 进入时大字从下方升起的高度
+local TEXT_DRIFT  = 16      -- 淡出时大字上飘的距离
+
+local alert                -- 主帧（第一次播放才建）
+local aSwordR, aSwordL, aShield, aText
+local playing              -- nil | "enter" | "leave"
+local playT, playDur
+local queue = {}
+
+local function Prog(t0, t1, t)
+    if t <= t0 then return 0 end
+    if t >= t1 then return 1 end
+    return (t - t0) / (t1 - t0)
+end
+
+local function EaseOut(p)
+    return 1 - (1 - p) ^ 3
+end
+
+local function EnsureAlert()
+    if alert then return end
+    alert = CreateFrame("Frame", "MonetUICombatAlert", _G.UIParent)
+    alert:SetSize(240, 170)
+    alert:SetPoint("CENTER", _G.UIParent, "CENTER", 0, 200)
+    alert:SetFrameStrata("HIGH")
+    alert:EnableMouse(false)
+    alert:Hide()
+
+    -- 层序：两把剑（ARTWORK）→ 盾压住交点（OVERLAY）→ 大字（OVERLAY 后建 = 最上）
+    aSwordR = alert:CreateTexture(nil, "ARTWORK")
+    aSwordR:SetTexture(Media:Texture("monet_combat_sword"))
+    aSwordR:SetSize(SWORD_SIZE, SWORD_SIZE)
+    aSwordR:SetPoint("CENTER", alert, "CENTER", 0, 0)
+
+    aSwordL = alert:CreateTexture(nil, "ARTWORK")
+    aSwordL:SetTexture(Media:Texture("monet_combat_sword"))
+    aSwordL:SetSize(SWORD_SIZE, SWORD_SIZE)
+    aSwordL:SetPoint("CENTER", alert, "CENTER", 0, 0)
+    aSwordL:SetTexCoord(1, 0, 0, 1)     -- 水平镜像 = 左边那把
+
+    aShield = alert:CreateTexture(nil, "OVERLAY")
+    aShield:SetTexture(Media:Texture("monet_combat_shield"))
+    aShield:SetSize(SHIELD_SIZE, SHIELD_SIZE)
+    aShield:SetPoint("CENTER", alert, "CENTER", 0, 0)
+
+    aText = Widget:Font(alert, 24, "pingfang", "danger", "CENTER", "OVERLAY", Media.outlineFlags)
+    aText:SetPoint("TOP", alert, "BOTTOM", 0, TEXT_BASE)
+    aText:SetWordWrap(false)
+end
+
+local function Place(tex, alpha, scale, ox, oy, base)
+    tex:SetAlpha(alpha)
+    tex:SetSize(base * scale, base * scale)
+    tex:SetPoint("CENTER", alert, "CENTER", ox or 0, oy or 0)
+end
+
+--- t = 已播放秒数；全部关键帧都是绝对时间，进出两套各画各的。
+local function RenderAlert(kind, t)
+    if kind == "enter" then
+        -- 剑：从画面上角滑入交叉 → 停 → 向外漂着淡出
+        local swordIn  = EaseOut(Prog(0, 0.35, t))
+        local swordOut = Prog(1.05, ALERT_ENTER, t)
+        local slide    = (1 - swordIn) * SWORD_SLIDE + swordOut * SWORD_OUT
+        local swordA   = swordIn * (1 - swordOut)
+        local swordS   = 0.85 + 0.15 * swordIn + 0.10 * swordOut
+        Place(aSwordR, swordA, swordS,  slide, slide, SWORD_SIZE)
+        Place(aSwordL, swordA, swordS, -slide, slide, SWORD_SIZE)
+
+        -- 盾：剑到位后从中心弹出 → 停 → 放大着淡出
+        local shIn  = EaseOut(Prog(0.30, 0.55, t))
+        local shOut = Prog(1.15, ALERT_ENTER, t)
+        Place(aShield, shIn * (1 - shOut), 0.25 + 0.75 * shIn + 0.12 * shOut,
+              0, 0, SHIELD_SIZE)
+
+        -- 大字：升起 → 停 → 上飘着淡出
+        local txIn  = EaseOut(Prog(0.15, 0.50, t))
+        local txOut = Prog(1.10, ALERT_ENTER, t)
+        aText:SetAlpha(txIn * (1 - txOut))
+        aText:SetPoint("TOP", alert, "BOTTOM", 0,
+            TEXT_BASE - TEXT_RISE * (1 - txIn) + TEXT_DRIFT * txOut)
+    else
+        -- 离开：整体微微涨开 → 缩没淡出；大字独立淡入淡出
+        local appear  = EaseOut(Prog(0, 0.18, t))
+        local grow    = Prog(0, 0.35, t)
+        local shrink  = EaseOut(Prog(0.35, 0.95, t))
+        local alpha   = appear * (1 - shrink)
+        local scale   = 1 + 0.06 * grow - 0.45 * shrink
+        local outward = 40 * shrink
+        Place(aShield, alpha, scale, 0, 0, SHIELD_SIZE)
+        Place(aSwordR, alpha, scale,  outward, outward, SWORD_SIZE)
+        Place(aSwordL, alpha, scale, -outward, outward, SWORD_SIZE)
+
+        local txIn  = EaseOut(Prog(0, 0.30, t))
+        local txOut = Prog(0.85, 1.35, t)
+        aText:SetAlpha(txIn * (1 - txOut))
+        aText:SetPoint("TOP", alert, "BOTTOM", 0,
+            TEXT_BASE - 18 * (1 - txIn) + TEXT_DRIFT * txOut)
+    end
+end
+
+local Play   -- 前置声明（FinishAlert 会回调）
+
+local function FinishAlert()
+    alert:Hide()
+    playing = nil
+    if queue[1] then
+        Play(table.remove(queue, 1))
+    end
+end
+
+local function StopAlert()
+    wipe(queue)
+    playing = nil
+    if alert then alert:Hide() end
+end
+
+Play = function(kind)
+    if playing then
+        -- 连环进出战斗（恐惧 / 读条打断）：排队播，最多存 3 条，超了丢最老的
+        if #queue >= 3 then table.remove(queue, 1) end
+        queue[#queue + 1] = kind
+        return
+    end
+
+    EnsureAlert()
+    playing = kind
+    playT = 0
+    playDur = (kind == "enter") and ALERT_ENTER or ALERT_LEAVE
+
+    if kind == "enter" then
+        local s = _G.ENTERING_COMBAT
+        aText:SetText((type(s) == "string" and s) or "进入战斗")
+        local r, g, b = Color:GetDanger()
+        aText:SetTextColor(r, g, b, 1)
+    else
+        local s = _G.LEAVING_COMBAT
+        aText:SetText((type(s) == "string" and s) or "离开战斗")
+        local r, g, b = Color:GetHealth()
+        aText:SetTextColor(r, g, b, 1)
+    end
+
+    local r, g, b = Color:Get("primary")      -- 盾：主题色
+    aShield:SetVertexColor(r, g, b, 1)
+    r, g, b = Color:Get("highlight")          -- 剑：主题高光
+    aSwordR:SetVertexColor(r, g, b, 1)
+    aSwordL:SetVertexColor(r, g, b, 1)
+
+    alert:Show()
+    RenderAlert(kind, 0)
+end
+
+-- ---------------------------------------------------------------- 驱动帧
+local driver
+
+local function DriverTick(_, elapsed)
+    if not M.active then return end
+    elapsed = elapsed or 0
+
+    if playing then
+        playT = playT + elapsed
+        if playT >= playDur then
+            FinishAlert()
+        else
+            RenderAlert(playing, playT)
+        end
+    end
+
+    -- 暴雪换表（重算 textLocations）后把偏移补回去
+    areaAcc = areaAcc + elapsed
+    if areaAcc >= AREA_POLL then
+        areaAcc = 0
+        ApplyArea()
+    end
+end
+
+-- ================================================================
+-- 模块接口
+-- ================================================================
+
 function M:Initialize()
     self.active = true
     EnsureContainer()
@@ -269,29 +533,48 @@ function M:Initialize()
     EventBus:Register("COMBAT_TEXT_UPDATE", function(_, msgType)
         if M.active then OnCombatText(nil, msgType) end
     end)
-    EventBus:Register("PLAYER_REGEN_DISABLED", function() if M.active then OnCombatState(nil, true) end end)
-    EventBus:Register("PLAYER_REGEN_ENABLED", function() if M.active then OnCombatState(nil, false) end end)
+
+    -- 只吃事件本身，载荷不读任何战斗数据 —— 无机密值问题
+    EventBus:Register("PLAYER_REGEN_DISABLED", function()
+        if M.active and M:GetSetting("alert") then Play("enter") end
+    end)
+    EventBus:Register("PLAYER_REGEN_ENABLED", function()
+        if M.active and M:GetSetting("alert") then Play("leave") end
+    end)
 
     -- 玩家框可能比我们晚建 / 被拖动：进场时重新贴一次锚点。
     EventBus:Register("PLAYER_ENTERING_WORLD", function() if M.active then Anchor() end end)
+
+    driver = CreateFrame("Frame")
+    driver:SetScript("OnUpdate", DriverTick)
 
     self:Apply()
 end
 
 function M:Apply()
     if not self.active then return end
-    for key in pairs(CVARS) do
+
+    for _, key in ipairs(OWN_KEYS) do
         if self:GetSetting(key) == false then
             Restore(key)
         else
             Suppress(key)
         end
     end
+
+    -- 有醒目提示就不让暴雪再画一份进出战斗小字；关掉提示就把原设置还回去。
+    if self:GetSetting("alert") then
+        Suppress("combat")
+    else
+        Restore("combat")
+        StopAlert()
+    end
+
+    ApplyArea()
 end
 
 function M:SetEnabled(value)
     self.active = value and true or false
-    if not container then return end
 
     if self.active then
         Anchor()
@@ -299,8 +582,12 @@ function M:SetEnabled(value)
         return
     end
 
-    -- 关掉：把暴雪的浮动文字还回去，并清掉屏幕上的浮字。
+    -- 关掉：暴雪的浮动文字全还回去，提示停掉，显示区域写回原值。
     for key in pairs(CVARS) do Restore(key) end
+    StopAlert()
+    ApplyArea()
+
+    if not container then return end
     container:SetScript("OnUpdate", nil)
     running = false
     for i = #active, 1, -1 do

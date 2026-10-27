@@ -47,7 +47,7 @@ local MODULE_LABEL = {
     Cursor       = "光标拖尾 (Cursor)",
     Toast        = "通知横幅 (Toast)",
     Durability   = "耐久警告 (Durability)",
-    CombatText   = "自身战斗文字 (CombatText)",
+    CombatText   = "战斗辅助 (CombatText)",
 }
 
 local function MakeCheckbox(parent, label, yOffset, getter, setter)
@@ -1227,43 +1227,56 @@ function SimpleConfig:Build()
 
     local combatText = ns:GetModule("CombatText")
     if combatText then
-        sec = BeginSection("自身战斗文字", false)
+        sec = BeginSection("战斗辅助", false)
         content = sec.body
         row = LayoutCursor(0)
 
-        MakeCheckbox(content, "受到伤害（暴击更大更亮）", row(26),
+        MakeCheckbox(content, "进出战斗醒目提示（剑 + 盾 + 大字）", row(26),
+            function() return combatText:GetSetting("alert") end,
+            function(value)
+                combatText:Settings().alert = value and true or false
+                combatText:Apply()
+            end)
+
+        MakeDropdown(content, row(28), "战斗数字区域", {
+            { value = "center", text = "屏幕中央（默认）" },
+            { value = "up",     text = "中央偏上" },
+            { value = "down",   text = "中央偏下" },
+            { value = "left",   text = "偏左" },
+            { value = "right",  text = "偏右" },
+        },
+            function() return combatText:GetSetting("area") end,
+            function(value)
+                combatText:Settings().area = value or "center"
+                combatText:Apply()
+            end)
+
+        MakeCheckbox(content, "自己的数字：受到伤害（可选，默认关）", row(26),
             function() return combatText:GetSetting("damage") end,
             function(value)
                 combatText:Settings().damage = value and true or false
                 combatText:Apply()
             end)
 
-        MakeCheckbox(content, "受到治疗", row(26),
+        MakeCheckbox(content, "自己的数字：受到治疗（可选，默认关）", row(26),
             function() return combatText:GetSetting("heal") end,
             function(value)
                 combatText:Settings().heal = value and true or false
                 combatText:Apply()
             end)
 
-        MakeCheckbox(content, "闪避 / 招架 / 格挡 / 抵抗", row(26),
+        MakeCheckbox(content, "自己的数字：闪避/招架/格挡（可选，默认关）", row(26),
             function() return combatText:GetSetting("avoid") end,
             function(value)
                 combatText:Settings().avoid = value and true or false
                 combatText:Apply()
             end)
 
-        MakeCheckbox(content, "进入 / 离开战斗", row(26),
-            function() return combatText:GetSetting("combat") end,
-            function(value)
-                combatText:Settings().combat = value and true or false
-                combatText:Apply()
-            end)
-
         local ctHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-        ctHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(34))
+        ctHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(48))
         ctHint:SetWidth(328)
         ctHint:SetJustifyH("LEFT")
-        ctHint:SetText("文字浮在玩家框上方。打开哪一类，就接管暴雪对应的浮动战斗文字（关闭时还原原设置），所以不会出现两份数字。")
+        ctHint:SetText("战斗数字默认用暴雪自己的（机密值原因，我们画的拿不到明文）。打开哪一类，就接管暴雪对应的浮动文字，关闭时还原，不会出现两份数字。")
         sec.bodyHeight = -row.y + 4
     end
 

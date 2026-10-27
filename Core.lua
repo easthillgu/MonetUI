@@ -254,13 +254,17 @@ local DEFAULTS = {
         warn      = true,
         threshold = 30,
     },
-    -- 自身战斗文字 (Modules/CombatText)：玩家受到的伤害 / 治疗 / 闪避，外加可选的进出战斗。
-    -- 开哪一类就接管暴雪对应的浮动文字 CVar，关掉时还原。
+    -- 战斗辅助 (Modules/CombatText)：
+    --   * 战斗数字默认**用暴雪自己的** —— 本客户端 C_CombatText.GetCurrentEventInfo 是
+    --     SecretReturns，我们自己画的数字拿不到明文，所以 damage/heal/avoid 默认关（开了才接管）。
+    --   * alert = 进出战斗醒目提示（剑 + 盾 + 大字，自绘贴图）。
+    --   * area  = 暴雪战斗数字的显示区域偏移（只写纯几何，涉及机密值就整段放弃）。
     combatText = {
-        damage = true,
-        heal   = true,
-        avoid  = true,
-        combat = false,
+        damage = false,
+        heal   = false,
+        avoid  = false,
+        alert  = true,
+        area   = "center",
     },
 }
 ns.DEFAULTS = DEFAULTS
@@ -282,7 +286,7 @@ local function MergeDefaults(dst, src)
 end
 
 --- Database schema.  Bumping this re-applies the settings that changed their meaning in the shipped defaults (see Migrate).
-local SCHEMA = 5
+local SCHEMA = 6
 
 --- One-off adjustments to a database written by an older MonetUI: MergeDefaults only fills in *missing* keys, so a value whose number changed has to be pushed explicitly.  Stored positions are the player's and are never touched here.
 local function Migrate(db)
@@ -322,6 +326,17 @@ local function Migrate(db)
     if (db.schema or 1) < 5 then
         if type(db.minimap) == "table" then
             db.minimap.shape = nil
+        end
+    end
+
+    -- v6: 战斗辅助换方向 —— 战斗数字默认回到暴雪自己的（机密值拿不到明文），我们自己的
+    -- 三类从"开"强制翻成"关"；"combat"（压暴雪进出战斗小字）这个键由 alert 接管，作废删除。
+    if (db.schema or 1) < 6 then
+        if type(db.combatText) == "table" then
+            db.combatText.damage = false
+            db.combatText.heal   = false
+            db.combatText.avoid  = false
+            db.combatText.combat = nil
         end
     end
 

@@ -240,6 +240,11 @@ Media.texture = {
     ["monet_spark_down"]    = ASSET .. "Textures\\monet_spark_down",
     ["monet_search"]        = ASSET .. "Textures\\monet_search",
 
+    -- 进出战斗提示的剑 / 盾（SVG 手绘，tools/svg/monet_combat_{sword,shield}.svg）：
+    -- 无色相灰阶模具，运行期 SetVertexColor 染主题高光 / 主题色（CombatText.lua 的提示编排）。
+    ["monet_combat_sword"]  = ASSET .. "Textures\\monet_combat_sword",
+    ["monet_combat_shield"] = ASSET .. "Textures\\monet_combat_shield",
+
     -- role icons: the art is DELIBERATELY GREYSCALE (every pixel R==G==B), so all hue comes from
     -- SetVertexColor at the call site.  Color:RoleTint() is the only place that decides it: a leader /
     -- assistant is tinted with the highlight slot, everyone else stays a single colour.  Do not bake a
