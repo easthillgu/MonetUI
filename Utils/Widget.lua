@@ -340,12 +340,13 @@ end
 
 --- A FontString using the addon fonts.
 -- @param key font key in Media.font ("pixel", "cooldown", "pingfang"); @param colorKey "edge" | "neutral" | "highlight" | "border" | "health" | "danger" | {r,g,b}
--- @param flags optional render flags (default Media.fontFlags = "OUTLINE, MONOCHROME" — 1px 描边 + 关抗锯齿);
---        pass Media.outlineFlags when a small size needs the same treatment spelled out.
+-- @param flags optional render flags；传 Media.fontFlags / Media.outlineFlags（"默认口径"的
+--        两种拼写）或不传时，按字号换挡（Media:EffectiveFlags：<12px 点阵苹方硬边、
+--        ≥12px 文楷抗锯齿）；自定义 flags 尊重调用方。
 function Widget:Font(parent, size, key, colorKey, justify, layer, flags)
     local fs = parent:CreateFontString(nil, layer or "OVERLAY")
-    local fontPath = Media:Font(key)
-    fs:SetFont(fontPath, Media:SnapSize(size), flags or Media.fontFlags)
+    local finalSize = Media:SnapSize(size)
+    fs:SetFont(Media:FontFor(key, finalSize), finalSize, Media:EffectiveFlags(flags, finalSize))
     if fs.SetShadowOffset then fs:SetShadowOffset(0, 0) end
     fs:SetJustifyH(justify or "LEFT")
     Widget:ColorText(fs, colorKey)
@@ -361,7 +362,7 @@ end
 function Widget:SetFont(fs, size, key, flags, exact)
     if not fs or not fs.SetFont then return fs end
     local finalSize = exact and (tonumber(size) or 12) or Media:SnapSize(size)
-    pcall(fs.SetFont, fs, Media:Font(key), finalSize, flags or Media.fontFlags)
+    pcall(fs.SetFont, fs, Media:FontFor(key, finalSize), finalSize, Media:EffectiveFlags(flags, finalSize))
     return fs
 end
 
@@ -377,11 +378,13 @@ function Widget:FitText(fs, text, maxWidth, baseSize, flags, minSize, boxWidth)
     baseSize = tonumber(baseSize) or 12
     minSize  = tonumber(minSize) or 6
     local Secrets = ns.Secrets
-    local fontPath = Media:Font("pixel")
-    local useFlags = flags or Media.fontFlags
 
+    -- 字体按**当档字号**换挡：FitText 会逐档缩字号、跨过 12 的边界时要从小字轨（点阵苹方
+    -- 硬边）切到大字轨（文楷 AA）或切回去，所以不能在外面定死一个 fontPath。
     local function apply(size)
-        if fs.SetFont then fs:SetFont(fontPath, size, useFlags) end
+        if fs.SetFont then
+            fs:SetFont(Media:FontFor("pixel", size), size, Media:EffectiveFlags(flags, size))
+        end
     end
 
     apply(baseSize)
@@ -458,7 +461,7 @@ function Widget:StyleCooldownText(cd, size, key, color, flags, exact)
     for _, region in ipairs({ cd:GetRegions() }) do
         if region and region.GetObjectType and region:GetObjectType() == "FontString" then
             local px = exact and (tonumber(size) or 12) or Media:SnapSize(size)
-            pcall(region.SetFont, region, Media:Font(key or "cooldown"), px, flags or Media.fontFlags)
+            pcall(region.SetFont, region, Media:FontFor(key or "cooldown", px), px, Media:EffectiveFlags(flags, px))
             local r, g, b = 1, 1, 1
             if type(color) == "table" then r, g, b = color.r, color.g, color.b end
             pcall(region.SetTextColor, region, r, g, b, 1)

@@ -174,7 +174,7 @@ local DEFAULTS = {
         smooth          = true,
         forcePlateSize  = true,
     },
-    -- Blizzard panel beautification (Modules/Skins): each window is a switch under `panels`.  `font` is an optional global override: "off" (Blizzard faces) or "pixel" (PingFangPixel everywhere -- Media:SnapSize keeps sizes on the 12px step, Media.fontFlags adds the 1px non-AA outline).
+    -- Blizzard panel beautification (Modules/Skins): each window is a switch under `panels`.  `font` is an optional global override: "off" (Blizzard faces) or "pixel" (dual-track per Media's funnel: WenKai + AA at >=12px, PingFangPixel hard-edged below).
     skins = {
         font   = "pixel",
         panels = {},

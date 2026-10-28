@@ -13,13 +13,16 @@ Media.asset        = ASSET
 Media.fontsDir     = ASSET .. "Fonts\\"
 Media.texturesDir  = ASSET .. "Textures\\"
 
--- 全项目只用两种字体，渲染标志统一走 Media.fontFlags（默认）/ Media.outlineFlags（小字号别名）。
---   pixel / wenkai    LXGW WenKai（霞鹜文楷）：矢量楷体，OFL 1.1（可分发，全文见
---       Assets/Fonts/OFL-LXGWWenKai.txt），24.7 MB，CJK 覆盖远超游戏数据所需。
---       2026-10-28 换上：前主字体 PingFangPixel（点阵苹方）**无授权声明**（苹方系苹果授权
---       字体，衍生品不得再分发），是公开发行的阻塞项；文楷是第一条"覆盖够 + 授权干净"
---       同时满足的。键名保留 `pixel`（全项目调用点引用的是键，不是文件；未知键也回落到它）。
---   cooldown          Super Effective，ASCII-only 小数字像素字体，只能给倒计时数字。
+-- 字体双轨制（2026-10-28 定）：按**字号**换字体与渲染标志，Media:FontFor / Media:FlagsFor /
+-- Media:EffectiveFlags 是唯一漏斗（Widget:Font / SetFont / FitText / Cooldown / Nameplates /
+-- Skins 全走它）。字号与字体必须同源解析，否则楷体会被塞进小字号发虚。
+--   ≥12px   LXGW WenKai（霞鹜文楷）+ OUTLINE（抗锯齿）：楷体笔画有粗细与笔锋，大字号
+--           抗锯齿才舒展；OFL 1.1 可分发（全文见 Assets/Fonts/OFL-LXGWWenKai.txt）。
+--   <12px   点阵苹方（PingFangPixel）+ OUTLINE, MONOCHROME（硬边）：楷体小字号 + AA 实机
+--           发虚（2026-10-28 判例：12 以下整体糊），点阵苹方就是为小尺寸设计的。
+--           **无授权声明**，只许私有包携带（NOTICE.md 记档），转公开前必须处理。
+--   cooldown 键例外：Super Effective 只给倒计时数字，任何字号都用它自己。
+-- 键名保留 `pixel` / `pingfang`（15+ 调用点引用的是键不是文件；未知键回落到 pixel）。
 Media.font = {
     pixel    = ASSET .. "Fonts\\LXGWWenKai-Regular.ttf",
     cooldown = ASSET .. "Fonts\\super-effective.ttf",
@@ -28,13 +31,22 @@ Media.font = {
     pingfang = ASSET .. "Fonts\\LXGWWenKai-Regular.ttf",
 }
 
--- 默认渲染标志：OUTLINE = 1px 描边，MONOCHROME = 关掉抗锯齿。
--- 两者都用上才是"非抗锯齿描边"：描边和字身都是硬边，12px 下不会被 AA 糊出一圈灰。
-Media.fontFlags = "OUTLINE, MONOCHROME"
+-- 小字轨（<12px）专用文件与标志；大字轨不引用它。
+Media.smallFont = ASSET .. "Fonts\\Pingfangpixel.ttf"
 
--- 小字号（8–14px：光环时长 / 层数）用的同一套标志。保留别名，BuffFrame / Cooldown 的调用点
--- 不必改；将来要单独调小字号的描边粗细，只改这一行。
-Media.outlineFlags = "OUTLINE, MONOCHROME"
+-- 大字轨（≥12px）渲染标志：OUTLINE = 1px 描边 + 灰度抗锯齿（不写 MONOCHROME）。
+-- 楷体笔画有粗细与笔锋，MONOCHROME 会把曲线边缘打成锯齿。
+Media.fontFlags = "OUTLINE"
+
+-- 小字轨（<12px）渲染标志：点阵苹方 + 硬边，见文件头"字体双轨制"。
+Media.smallFlags = "OUTLINE, MONOCHROME"
+
+-- Media.outlineFlags 是历史别名（多个调用点还传它）。换挡逻辑在 Media:EffectiveFlags：
+-- 调用点传 fontFlags / outlineFlags（"默认口径"的两种拼写）都会被按字号替换成对应轨的标志。
+Media.outlineFlags = "OUTLINE"
+
+-- 双轨分界：低于此字号走小字轨（SnapSize 地板 10，exact 模式可到 8）。
+Media.smallSizeCutoff = 12
 
 --- Snap a font size onto the 12px step (and a sane floor).
 -- 原本是为像素字的 em/12 网格；换成矢量字体（PingFangPixel）后网格不再是硬约束，但字号仍按同一步长
@@ -300,6 +312,32 @@ Media.texture = {
 --- Resolve a font key to a path (unknown keys fall back to the pixel font).
 function Media:Font(key)
     return self.font[key] or self.font.pixel
+end
+
+--- 双轨漏斗①：按字号解析字体路径（≥12px 走 Media.font 的键，<12px 一律点阵苹方；
+--- cooldown 键例外，任何字号都是 Super Effective）。所有 SetFont 调用点都该走这个，
+--- 不要直接 Media:Font —— 字号与字体必须同源，否则楷体会被塞进小字号发虚。
+function Media:FontFor(key, size)
+    size = tonumber(size) or 12
+    if key == "cooldown" then return self.font.cooldown end
+    if size < self.smallSizeCutoff then return self.smallFont end
+    return self:Font(key)
+end
+
+--- 双轨漏斗②：按字号解析渲染标志（<12px 硬边，≥12px 抗锯齿）。
+function Media:FlagsFor(size)
+    size = tonumber(size) or 12
+    if size < self.smallSizeCutoff then return self.smallFlags end
+    return self.fontFlags
+end
+
+--- 双轨漏斗③：调用方传"默认口径"（fontFlags / outlineFlags 两种拼写）或不传时，
+--- 按字号换挡；显式自定义的 flags 尊重调用方。
+function Media:EffectiveFlags(flags, size)
+    if flags == nil or flags == self.fontFlags or flags == self.outlineFlags then
+        return self:FlagsFor(size)
+    end
+    return flags
 end
 
 --- Resolve a texture key to a path (unknown keys fall back to the blank texture).

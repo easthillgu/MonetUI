@@ -109,7 +109,7 @@ local savedPlateSize
 
 local function VisualSize()
     local width  = Setting("width")  or 120
-    local height = Setting("height") or 12
+    local height = Setting("height") or 4
 
     local textRow = 0
     if Setting("showName") ~= false or Setting("showLevel") ~= false then
@@ -280,7 +280,7 @@ local CLASSIFICATION_MARK = {
 }
 
 local function PlateWidth()  return Setting("width")  or 120 end
-local function PlateHeight() return Setting("height") or 12  end
+local function PlateHeight() return Setting("height") or 4  end
 
 --- One plate: health box, name/level row above, cast bar under -- all off Blizzard's base frame.
 local function Build(base)
@@ -355,7 +355,7 @@ end
 local function Layout(plate)
     local width, height = PlateWidth(), PlateHeight()
     local nameSize = ns.Media:SnapSize(Setting("nameSize"))
-    local castHeight = Setting("castHeight") or 13
+    local castHeight = Setting("castHeight") or 6
 
     plate:SetSize(width, height)
     plate.health:SetPoint("TOPLEFT", plate, "TOPLEFT", BORDER, -BORDER)
@@ -367,9 +367,9 @@ local function Layout(plate)
 
     plate.name:SetShown(Setting("showName") ~= false)
     plate.level:SetShown(Setting("showLevel") ~= false)
-    plate.name:SetFont(ns.Media:Font("pixel"), nameSize, ns.Media.fontFlags)
-    plate.level:SetFont(ns.Media:Font("pixel"), nameSize, ns.Media.fontFlags)
-    plate.percent:SetFont(ns.Media:Font("pixel"), nameSize, ns.Media.fontFlags)
+    plate.name:SetFont(ns.Media:FontFor("pixel", nameSize), nameSize, ns.Media:EffectiveFlags(ns.Media.fontFlags, nameSize))
+    plate.level:SetFont(ns.Media:FontFor("pixel", nameSize), nameSize, ns.Media:EffectiveFlags(ns.Media.fontFlags, nameSize))
+    plate.percent:SetFont(ns.Media:FontFor("pixel", nameSize), nameSize, ns.Media:EffectiveFlags(ns.Media.fontFlags, nameSize))
     plate.percent:SetShown(Setting("showPercent") ~= false)
 
     plate.cast:SetSize(width, castHeight)

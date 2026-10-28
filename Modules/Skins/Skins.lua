@@ -318,7 +318,6 @@ end
 function M:ApplyFont()
     local key = self:GetFontKey()
     if not key then return end
-    local path = Media:Font(key)
 
     for i = 1, #FONT_OBJECTS do
         local fs = _G[FONT_OBJECTS[i]]
@@ -334,8 +333,10 @@ function M:ApplyFont()
                 end
             end
             local _, size = fs:GetFont()
-            -- Keep Blizzard's own size (their layouts are built around it); only the flags are ours, so the pixel font renders with hard edges.
-            pcall(fs.SetFont, fs, path, size or 12, Media.fontFlags)
+            -- Keep Blizzard's own size (their layouts are built around it); 字体与标志按字号
+            -- 换挡（<12px 点阵苹方硬边，≥12px 文楷抗锯齿），见 Media 双轨漏斗。
+            size = size or 12
+            pcall(fs.SetFont, fs, Media:FontFor(key, size), size, Media:EffectiveFlags(Media.fontFlags, size))
         end
     end
 end

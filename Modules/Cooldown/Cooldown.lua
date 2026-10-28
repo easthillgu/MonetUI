@@ -144,8 +144,9 @@ local function EnsureText(cd, state)
     fs:SetAllPoints()
     fs:SetJustifyH("CENTER")
     fs:SetJustifyV("MIDDLE")
-    pcall(fs.SetFont, fs, Media:Font(state.font or "cooldown"),
-        state.fontPx or Media:SnapSize(state.size), state.flags or Media.fontFlags)
+    local px = state.fontPx or Media:SnapSize(state.size)
+    pcall(fs.SetFont, fs, Media:FontFor(state.font or "cooldown", px),
+        px, Media:EffectiveFlags(state.flags, px))
     fs:SetTextColor(1, 1, 1, 1)
     fs:Hide()
 
@@ -191,11 +192,11 @@ local function ApplyLook(cd, state, tight)
             -- Small bars would rather keep the readable size than overflow.
             size = math.min(size, math.max(base, math.floor(width * ALERT_WIDTH)))
         end
-        pcall(fs.SetFont, fs, Media:Font(state.font or "cooldown"), size, state.flags or Media.fontFlags)
+        pcall(fs.SetFont, fs, Media:FontFor(state.font or "cooldown", size), size, Media:EffectiveFlags(state.flags, size))
         local r, g, b = Color:GetDanger()
         fs:SetTextColor(r, g, b, 1)
     else
-        pcall(fs.SetFont, fs, Media:Font(state.font or "cooldown"), base, state.flags or Media.fontFlags)
+        pcall(fs.SetFont, fs, Media:FontFor(state.font or "cooldown", base), base, Media:EffectiveFlags(state.flags, base))
         fs:SetTextColor(1, 1, 1, 1)
     end
 end
