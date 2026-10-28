@@ -1,5 +1,20 @@
 # 待办
 
+## 📦 交付状态（2026-10-29 收口）
+
+- **交付分支 `square-blp@44a4334`（直角版 BLP）**：四处 `Widget:Theme` 去掉 `round`、遮罩 `rx=0`、
+  32 张 BLP 重出为 `enc=3 alphaDepth=8 alphaType=8 mips=1`。已部署到 `WOWFOREVER` 客户端,
+  待实机确认:直角 / 图标透明 / 遮罩裁切 / 斜纹。
+- `main@6e233ed` = **r=8 圆角留档**（背景改 9-slice 的正解 + 遮罩 rx=6 + 填充生成器改有符号距离），
+  视觉未通过,未交付;要重试从该提交起。
+- **BLP 头必须自查**:raw3 带透明 = `enc=3 alphaDepth=8 alphaType=8 mips=1`。
+  `wow-blp-web` 默认写 `alphaType=0`,客户端会把整张图当不透明（图标变实心方块、遮罩不裁切）。
+- 待办:
+  1. 把 `tools/` 三处改动同步到 Debian（`tools/tga-to-blp.js` 的 alphaType、`tools/regen-textures.js`
+     的填充公式、`tools/svg/minimap_rect_mask.svg` 的 rx=0）—— `tools/` 不进库,只能手工带。
+  2. 实机确认后由作者决定是否合并到 main / 推送（runbook:上线前不 push）。
+  3. 可选加固:把 `alphaType=8` 的检查加进 `tools/sync-check.js`,让门禁自动拦住同类回归。
+
 ## ⏭ 下一轮队列（2026-10-26 起，压缩上下文后的接续点）
 
 > 承接 `docs/PLAN-refactor.md` P5' 与 `docs/CODE-REVIEW-2026-10-24.md` 第 2/3 条。

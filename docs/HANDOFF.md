@@ -1166,7 +1166,7 @@ Assets/Textures/*.blp       交付：进游戏（由源同步生成）
   `tools/regen-textures.js` 必须同步。
 - 接入：小地图面板、任务追踪、配置面板、微型菜单（`round = true`）。
 
-### 待实机验收（下次开工先做这三条）
+### 待实机验收（下次开工先做这三条）—— 2026-10-29 已验，结论见 8.5.1
 
 1. **圆角**：1× / 1.25× UI 缩放下四角是否仍对齐（1 纹素 = 1 UI 单元的映射）、
    小地图面板圆角与矩形遮罩之间那圈缝、Config 面板 2px 环的观感。
@@ -1178,6 +1178,55 @@ Assets/Textures/*.blp       交付：进游戏（由源同步生成）
 
 `d5c242d` 素材迁移+重出+重画 · `7d207e3` 注册键清理 · `5ca1f54` 规范文档 ·
 `7f42c5b` 圆角功能+资产 · `14b0d83` 圆角文档
+
+### 8.5.1 2026-10-29 实机结论：BLP 的 `alphaType` 是元凶，圆角改回直角
+
+**一句话**：第 2 条（BLP 与 TGA 显示一致）**不过**，但问题不在像素、在一个头字段；第 1 条（圆角）
+判定"视觉不通过"，交付改为**直角版 BLP**；第 3 条（图标可读性）随 alpha 修复一并解决。
+
+#### 元凶：BLP2 头的 `alphaType = 0`
+
+`wow-blp-web 0.7.2` 给 raw3 **固定写 `alphaType=0`**（`alphaBits`/`hasAlpha` 选项对 raw3 无效，
+四种组合实测头字节一模一样）。这个客户端的加载器认这个字段：`alphaType=0` = **无 alpha**，
+整张图按不透明画。于是四个"互不相干"的缺陷是同一个原因：
+
+| 实机现象 | 真相 |
+|---|---|
+| 图标 / 关闭钮全是实心小方块 | 透明区被当不透明 |
+| 小地图是正方形、"遮罩失效" | 遮罩透明区失效，上下两条带没被裁掉 |
+| 圆角处一小块方块 | 圆环弧**外**的透明区变实心 |
+| 动作条"不是清晰斜纹" | 斜纹的 alpha 明暗被抹平，只剩白底 |
+
+取证：同机真实素材 `NDui/Media/bgTex.blp`、`Andromeda/assets/textures/bag/bag-config.blp` 的无压缩
+BLP 都是 `enc=3 alphaDepth=8 **alphaType=8**`；我们 32 张全是 `alphaType=0`。修法：`tools/tga-to-blp.js`
+编码后强制写 `alphaDepth=8 / alphaType=8`（只对 raw3），输出里会打印 `alphaType=8`。
+
+> **纪律**：转换器"成功"不等于客户端能画。任何新增/重出的 BLP，先看头 4 个字节
+> —— raw3 带透明必须是 `enc=3 / alphaDepth=8 / alphaType=8 / mips=1`。
+
+#### 圆角：必须做成 9-slice 背景，不是"补块"
+
+- `SetBackdrop` 的方底角点落在 8 半径外弧的**外面**；任何"填充块"只能画在弧内，**几何上盖不住**方角。
+  旧实现（`monet_round_fill` 当补块）方向就是错的，公式还写成了 1px 描边（用了无符号距离）。
+- 正解：方底内缩到 slice(8)，外面那圈由 4 块实心圆角 + 4 条背景色边条补齐，三者不重叠。
+  该实现留在 `main@6e233ed`（含遮罩 `rx=6`、填充生成器改有符号距离），**未交付**，仅留档；
+  要重试圆角从那个提交起。
+
+#### 交付：直角版 BLP
+
+- 分支 `square-blp`，`44a4334`（基线 `6288692`）：四处 `Widget:Theme` 去掉 `round = true`，
+  遮罩回 `rx=0`，32 张 BLP 全部按 `alphaType=8` 重出。
+- 门禁：`audit-pixels` 未通过 **0/32**、`luac -p` 5 个改动文件全过、mip0 与 TGA **逐像素一致**。
+- 部署目标：`...\Blizzards\WOWFOREVER\World of Warcraft\_retail_\Interface\AddOns\MonetUI`。
+  `tools/deploy-retail.ps1` 的默认 `-Dest` 指向旧的 `Blizzards\World of Warcraft`，**必须显式传 `-Dest`**。
+
+#### 仍需人工同步（`tools/` 不进库）
+
+`.gitignore` 排除了 `tools/` 与 `tools/svg/`，以下三处改动**不在 commit 里**，换平台要手工带过去：
+
+1. `tools/tga-to-blp.js` —— raw3 强制 `alphaType=8`
+2. `tools/regen-textures.js` —— `drawRoundFill` 改有符号距离（仅 r=8 留档用）
+3. `tools/svg/minimap_rect_mask.svg` —— `rx=0`（直角口径）
 
 ---
 
