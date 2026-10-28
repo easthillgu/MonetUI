@@ -874,7 +874,8 @@ local function EnsurePanel(minimap)
     end
 
     -- 边框固定 1 物理像素（不再跟着设置走）；底色给足，不然地图外面那一圈是"空的"。
-    Widget:Theme(panel, { thickness = BORDER_PX, bgAlpha = 0.85, round = true })
+    -- 直角版（square-blp）：不带 round，走 SetBackdrop 的直角边框。
+    Widget:Theme(panel, { thickness = BORDER_PX, bgAlpha = 0.85 })
 
     panel:ClearAllPoints()
     -- 可见区是画布中间那条带子（上下各裁 33），面板要对齐可见区而不是画布

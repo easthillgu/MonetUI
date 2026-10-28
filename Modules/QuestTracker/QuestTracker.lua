@@ -442,7 +442,8 @@ function M:Skin()
     if not Widget or not C_QuestLog then return false end
 
     tracker = Widget:CreateFrame("MonetUIQuestTracker", UIParent, WIDTH, HEADER_H + PAD)
-    Widget:Theme(tracker, { thickness = 1, bgAlpha = 0.92, round = true })
+    -- 直角版（square-blp）：不带 round，走 SetBackdrop 的直角边框。
+    Widget:Theme(tracker, { thickness = 1, bgAlpha = 0.92 })
     tracker:SetMovable(true)
     tracker:SetClampedToScreen(true)
 

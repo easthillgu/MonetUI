@@ -85,7 +85,8 @@ local function Build()
     if frame then return frame end
 
     frame = Widget:CreateFrame("MonetUIMinimapMicroMenu", UIParent, MENU_W, 40)
-    Widget:Theme(frame, { thickness = 1, bgAlpha = 0.96, borderAlpha = 1, round = true })
+    -- 直角版（square-blp）：不带 round，走 SetBackdrop 的直角边框。
+    Widget:Theme(frame, { thickness = 1, bgAlpha = 0.96, borderAlpha = 1 })
     frame:SetFrameStrata("DIALOG")
     frame:SetFrameLevel(20)
     frame:EnableMouse(true)

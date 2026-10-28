@@ -550,14 +550,6 @@ local function LayoutRoundBorder(st)
     span(st.edge.left, "TOPLEFT", "TOPLEFT", 0, -s, "BOTTOMLEFT", "BOTTOMLEFT", 0, s, w, true)
     span(st.edge.right, "TOPRIGHT", "TOPRIGHT", 0, -s, "BOTTOMRIGHT", "BOTTOMRIGHT", 0, s, w, true)
 
-    -- 背景板：角 = 圆角填充块（上面的 fill，s×s），边 = 平的背景色条。
-    -- 只铺在两角之间，与 SetBackdrop 内缩过的方底（insets = ROUND_SLICE）在 8 单位处对接，
-    -- 三者互不重叠 —— 重叠会让半透明的底色叠加成一块深色方块。
-    span(st.bgEdge.top, "TOPLEFT", "TOPLEFT", s, 0, "TOPRIGHT", "TOPRIGHT", -s, 0, ROUND_SLICE, false)
-    span(st.bgEdge.bottom, "BOTTOMLEFT", "BOTTOMLEFT", s, 0, "BOTTOMRIGHT", "BOTTOMRIGHT", -s, 0, ROUND_SLICE, false)
-    span(st.bgEdge.left, "TOPLEFT", "TOPLEFT", 0, -s, "BOTTOMLEFT", "BOTTOMLEFT", 0, s, ROUND_SLICE, true)
-    span(st.bgEdge.right, "TOPRIGHT", "TOPRIGHT", 0, -s, "BOTTOMRIGHT", "BOTTOMRIGHT", 0, s, ROUND_SLICE, true)
-
     -- 纹理区间：角 = 九宫格的四个角；边 = 两角之间的那条带
     st.corner.tl:SetTexCoord(0, u1, 0, v1)
     st.corner.tr:SetTexCoord(1 - u1, 1, 0, v1)
@@ -568,7 +560,7 @@ local function LayoutRoundBorder(st)
     st.edge.left:SetTexCoord(0, ru, v1, 1 - v1)
     st.edge.right:SetTexCoord(1 - ru, 1, v1, 1 - v1)
 
-    -- 背景板的四个圆角（monet_round_fill）：外沿与环重合，实心，补的就是方底让出来的那 8 单位角
+    -- 圆角填充的角：与环同形（同一个外沿），只负责补住方底
     for _, key in ipairs({ "tl", "tr", "bl", "br" }) do
         st.fill[key]:ClearAllPoints()
         st.fill[key]:SetPoint(({ tl = "TOPLEFT", tr = "TOPRIGHT", bl = "BOTTOMLEFT", br = "BOTTOMRIGHT" })[key], frame,
@@ -587,7 +579,7 @@ function Widget:RoundBorder(frame, opts)
 
     local st = Marked(frame, "roundBorder")
     if not st then
-        st = { frame = frame, ringKey = edge.key, corner = {}, edge = {}, fill = {}, bgEdge = {} }
+        st = { frame = frame, ringKey = edge.key, corner = {}, edge = {}, fill = {} }
         Mark(frame, "roundBorder", st)
         local ringTex = Media.texture[edge.key]
         local fillTex = Media.texture.monet_round_fill
@@ -604,12 +596,6 @@ function Widget:RoundBorder(frame, opts)
             local tex = frame:CreateTexture(nil, "BORDER", nil, 1)
             tex:SetTexture(ringTex)
             st.edge[key] = tex
-        end
-        -- 背景板的四条边：平的背景色条（WHITE8X8 由顶点色染色），只铺在两角之间
-        for _, key in ipairs({ "top", "bottom", "left", "right" }) do
-            local tex = frame:CreateTexture(nil, "BACKGROUND", nil, 0)
-            tex:SetTexture(Media.texture.blank)
-            st.bgEdge[key] = tex
         end
         -- 尺寸变化时重排。只挂**我们自己的**框（名字前缀 MonetUI）——挂到暴雪框上等于插进它的
         -- 事件链，一样会污染；没名字的框靠 Refresh 里的尺寸比对兜底（见下）。
@@ -648,16 +634,12 @@ function Widget:ApplyBackdrop(frame, opts)
     bd.bgFile = Media.texture.blank
     if opts.round then
         -- 圆角：SetBackdrop 的 edgeFile 在本引擎上不可用（连 RAW3 BLP 都渲染成碎线，见
-        -- Widget:RoundBorder 的注释），所以边框完全自绘 9-slice。
-        --
-        -- 背景也必须内缩到 **slice**（8），不是环宽：SetBackdrop 的方底角点落在弧**外**，
-        -- 在圆角处戳出一小块方角；方角在弧外面，任何"补块"都只能画在弧内，盖不住它
-        -- （2026-10-29 实机反馈的"圆角处都是小方框"就是这个）。所以方底让到 8 单位的
-        -- 内框，外面那圈 8 单位的带子由 RoundBorder 的背景板补齐：4 块圆角填充（monet_round_fill）
-        -- + 4 条平背景条，三块背景拼起来就是真正的圆角矩形，互不重叠。
+        -- Widget:RoundBorder 的注释），所以边框完全自绘 9-slice；这里只留下背景，并把背景
+        -- 内缩到环的内沿，别让方底盖住我们的边框。
+        local ring = PickRoundEdge(opts.thickness or 1)
         bd.edgeFile = nil
         bd.edgeSize = 0
-        bd.insets = { left = ROUND_SLICE, right = ROUND_SLICE, top = ROUND_SLICE, bottom = ROUND_SLICE }
+        bd.insets = { left = ring.ring, right = ring.ring, top = ring.ring, bottom = ring.ring }
         frame:SetBackdrop(bd)
         Widget:RoundBorder(frame, opts)
         return
@@ -739,9 +721,6 @@ function Widget:Refresh(frame, opts)
             end
             for _, key in ipairs({ "top", "bottom", "left", "right" }) do
                 st.edge[key]:SetVertexColor(kr, kg, kb, ka)
-                if st.bgEdge and st.bgEdge[key] then
-                    st.bgEdge[key]:SetVertexColor(ar * 0.35, ag * 0.35, ab * 0.35, a)
-                end
             end
         end
     end
