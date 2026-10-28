@@ -14,18 +14,18 @@ Media.fontsDir     = ASSET .. "Fonts\\"
 Media.texturesDir  = ASSET .. "Textures\\"
 
 -- 全项目只用两种字体，渲染标志统一走 Media.fontFlags（默认）/ Media.outlineFlags（小字号别名）。
---   pixel / pingfang  PingFangPixel（点阵苹方）：矢量轮廓 + 内嵌点阵位图，29 MB。
---       为什么换掉 fusion-pixel-12：它是真像素字（纯矩形轮廓、设计网格 em/12），但字库只映射
---       19317/20992 个 CJK 码位 —— 游戏数据里的生僻字（人名 / 物品 / 地名 / 成就）会掉成 □。
---       PingFangPixel 覆盖 20945/20992；本插件自己渲染的 794 个非 ASCII 字符两种字体都齐。
---       **授权**：文件内无 license 字段，苹方系苹果授权字体 —— 私有包里可以用，**公开发行前必须
---       换字**（见 Assets/Fonts/NOTICE.md；优先 OFL 的 方舟像素 Ark Pixel 12px 一类）。
+--   pixel / wenkai    LXGW WenKai（霞鹜文楷）：矢量楷体，OFL 1.1（可分发，全文见
+--       Assets/Fonts/OFL-LXGWWenKai.txt），24.7 MB，CJK 覆盖远超游戏数据所需。
+--       2026-10-28 换上：前主字体 PingFangPixel（点阵苹方）**无授权声明**（苹方系苹果授权
+--       字体，衍生品不得再分发），是公开发行的阻塞项；文楷是第一条"覆盖够 + 授权干净"
+--       同时满足的。键名保留 `pixel`（全项目调用点引用的是键，不是文件；未知键也回落到它）。
 --   cooldown          Super Effective，ASCII-only 小数字像素字体，只能给倒计时数字。
--- Unknown keys fall back to `pixel`, so legacy saved settings that still say "roadway", "number", "combat" or "default" resolve to the pixel font.
 Media.font = {
-    pixel    = ASSET .. "Fonts\\Pingfangpixel.ttf",
+    pixel    = ASSET .. "Fonts\\LXGWWenKai-Regular.ttf",
     cooldown = ASSET .. "Fonts\\super-effective.ttf",
-    pingfang = ASSET .. "Fonts\\Pingfangpixel.ttf",
+    wenkai   = ASSET .. "Fonts\\LXGWWenKai-Regular.ttf",
+    -- 历史别名：15+ 调用点还写着 "pingfang"（键是历史名，文件已换文楷），语义与 pixel 相同。
+    pingfang = ASSET .. "Fonts\\LXGWWenKai-Regular.ttf",
 }
 
 -- 默认渲染标志：OUTLINE = 1px 描边，MONOCHROME = 关掉抗锯齿。
