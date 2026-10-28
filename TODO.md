@@ -25,8 +25,8 @@
    `SkinAdoptedButton`/`STYLE_ADOPTED_BARS`/`ResolveContainer`/`bars`/`adopted`/`PET_DEF`，同名别名接走
    所以搬走的函数体一行没改）；输出 = `M.petbar.BuildPetBar/SyncPetGlow/SyncPetGlowNow/TeardownPetGlow`。
    机械核对：删的 245 行只有 5 行不是原样（5 处调用点改名）。闸门全绿。**已部署待实机验**。
-   ⏳ 顺手发现：`RefreshPetContent` 全仓**零调用点**（自绘宠物条拆掉后的遗留），按 move-only 原样搬进
-   新文件了 —— 下次单独一个 commit 删掉它，别混进重构。
+   ✅ 顺手账已清（2026-10-28，`e4e50cd`）：`RefreshPetContent` 全仓零调用点（自绘宠物条
+   拆掉后的遗留），单独 commit 删除 58 行，实机 0 报错。
 6. ✅ `ActionBars/Blizzard.lua`（暴雪条压制/收养/归还的"压制/归还"这一半，`61b5842`）：
    284 行 move-only，主文件 2519 → 2264；接口 `M.blizzard.Park/ParkBag/Restore`，
    `M:ParkBlizzard` / `M:RestoreBlizzard` 搬到新文件（仍是模块方法，调用点零改）。
