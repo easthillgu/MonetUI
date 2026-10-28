@@ -569,10 +569,21 @@ local function Rebuild(bagType)
     RestoreDragged()
 end
 
-local blizzardHidden = {}
+-- ---- 暴雪背包框：预停车（2026-10-28 定案）---------------------------------------
+-- 本客户端实机探针（2026-10-28）：按 B 开背包，BAG_OPEN / BAG_CLOSED **不发**，
+-- 连 BAG_UPDATE 都不发 —— "开背包"这件事在事件层是静默的，IsShown 边沿是唯一信号。
+-- 旧方案（守卫见到显示的就 Hide()）两个代价：Show → Hide 之间有可见闪帧；暴雪自己的
+-- 更新逻辑会再 Show 回来，跟守卫打拉锯（"两套同屏"的老病灶）。
+-- 新方案：模块开着就**常驻停车** —— alpha 0 + 全子树禁鼠标。暴雪的 Show 照样成功
+-- （IsShown 为真，我们拿它当边沿信号），但屏幕上永远看不见、鼠标事件穿过去；
+-- 没有 Hide 这一刀，拉锯战不存在。SetAlpha / EnableMouse 不是受保护调用（AGENTS.md
+-- 藏暴雪 HUD 的正路），战斗中也可用；不往框上写字段，记账用弱键旁表（ns:Mark 同款）。
+local parked = setmetatable({}, { __mode = "k" })
+local bagsVisualOpen = false    -- 上次扫描：暴雪框是否有任何一个在显示（边沿检测）
+local shown = false             -- 我们的分类窗口开没开（守卫边沿要用，须先声明）
 
 --- 暴雪的背包框：零售 12.x 默认是**合并背包**（ContainerFrameCombinedBags），
---- 老客户端才是 ContainerFrame1..N。两个都得管。
+--- 老客户端才是 ContainerFrame1..N。两个都得管；BackpackTokenFrame 跟着背包一起出现。
 local function BlizzardBagFrames()
     local frames = {}
     for index = 1, 13 do
@@ -581,56 +592,96 @@ local function BlizzardBagFrames()
     end
     local combined = _G.ContainerFrameCombinedBags
     if combined then frames[#frames + 1] = combined end
+    local tokens = _G.BackpackTokenFrame
+    if tokens then frames[#frames + 1] = tokens end
     return frames
 end
 
---- 藏 / 还暴雪的背包框。
---- 还原时必须真的 Show 回来：只把记账抹掉的话，暴雪的框永远留在隐藏状态，
---- 玩家就一个背包都打不开了。
-local function HideBlizzardBags(enable)
+--- 收集 frame 及其全部 Frame 子代（ItemButton 等收鼠标事件的东西都在里面；
+--- alpha 0 的框其子框照样收 OnEnter，所以必须整棵树关）。
+local function CollectTree(frame, into)
+    into[#into + 1] = frame
+    local kids = { frame:GetChildren() }
+    for _, child in ipairs(kids) do
+        if child and child.GetChildren then CollectTree(child, into) end
+    end
+    return into
+end
+
+--- 停车 / 取回。取回按记账把鼠标还回去、alpha 拉回 1（模块关闭后玩家还要用原生背包）。
+local function ParkBlizzardBags(park)
     for _, frame in ipairs(BlizzardBagFrames()) do
-        if enable then
-            if frame:IsShown() then
-                blizzardHidden[frame] = true
-                frame:Hide()
+        if frame then
+            if park then
+                if not parked[frame] then
+                    local rec = { mouse = {}, mouseSet = {} }
+                    for _, f in ipairs(CollectTree(frame, {})) do
+                        if f.EnableMouse and f.IsMouseEnabled and f:IsMouseEnabled() then
+                            f:EnableMouse(false)
+                            rec.mouseSet[f] = true
+                            rec.mouse[#rec.mouse + 1] = f
+                        end
+                    end
+                    parked[frame] = rec
+                end
+                pcall(frame.SetAlpha, frame, 0)
+            elseif parked[frame] then
+                local rec = parked[frame]
+                parked[frame] = nil
+                for _, f in ipairs(rec.mouse) do pcall(f.EnableMouse, f, true) end
+                pcall(frame.SetAlpha, frame, 1)
             end
-        elseif blizzardHidden[frame] then
-            blizzardHidden[frame] = nil
-            pcall(frame.Show, frame)
         end
     end
 end
 
---- 暴雪的背包框每次被打开都要拦一道：把我们的分类窗口顶上来，暴雪那条继续藏着。
---- 玩家按 B（或点背包钮）时暴雪走的就是「Show 它的 ContainerFrame」。
----
---- **不再用 ShowWatch 的上升沿**（2026-10-26 实机 bug：连续按 B 会两套背包一起出来）。原因两条：
----   1. `ShowWatch` 是 0.2 秒轮询 —— 两次 B 压在一个间隔里，上升沿直接漏掉；
----   2. 更关键：我们藏掉之后，暴雪那边（合并框 + 5 个包是一串调用）**还会再 Show 回来**，
----      而老实现只在"切换我们自己的窗口"那一下藏过一次，之后没人管 → 我们的窗口开着、暴雪的框也留着。
----
---- 现在的规矩是**持续不变量**：只要模块开着，暴雪那十几个背包框一律不许出现在屏幕上；
---- 每 0.05 秒扫一次，见到就藏，并把"见到"当成玩家按了一次 B（= 切换我们自己的窗口）。
---- 连续调用（一次开背包会 Show 六次）会合并成同一个 tick 里的一次；`TOGGLE_DEBOUNCE` 再把
---- 我们刚藏完那一小段里暴雪的"回光返照"挡掉，免得自己把自己切来切去。
+--- 扫一遍暴雪背包框：把漂移的停车状态按回去（暴雪重设 alpha / 重开鼠标就补一刀），
+--- 返回"是否有框在显示"。只读 IsShown / GetAlpha，**不 Hide** —— 显示状态归暴雪管，我们只看。
 local blizzardDriver, guardAcc, lastToggle = nil, 0, 0
-local bankOpen = false          -- 银行窗口开着时，暴雪自己也会开背包框：只藏，不当成"玩家按了 B"
+local bankOpen = false          -- 银行开合也会 Show/Hide 背包框：那段时间的边沿让给银行路径
 local GUARD_INTERVAL = 0.05
 local TOGGLE_DEBOUNCE = 0.12
 
---- 扫一遍暴雪背包框：见到显示的就藏掉，返回"刚才是不是有东西在显示"。
+-- 停车扫查的复用工作台（避免每拍建表）。
+local sweepScratch = {}
+
 local function SweepBlizzardBags()
-    local opened = false
+    local anyShown = false
     for _, frame in ipairs(BlizzardBagFrames()) do
-        if frame and frame.IsShown and frame:IsShown() then
-            opened = true
-            blizzardHidden[frame] = true
-            pcall(frame.Hide, frame)
+        if frame and frame.IsShown then
+            local isShown = frame:IsShown()
+            if isShown then anyShown = true end
+            local rec = parked[frame]
+            if rec then
+                if frame.GetAlpha and frame:GetAlpha() ~= 0 then
+                    pcall(frame.SetAlpha, frame, 0)
+                end
+                -- 晚生/重开的子框（开背包时暴雪现建 ItemButton）鼠标默认是开的：
+                -- alpha 沿树继承所以看不见，但鼠标状态不继承 → tooltip 会冒出来。
+                -- 只在框显示着时才需要管（不显示收不到鼠标事件），整树补禁。
+                if isShown then
+                    for i = #sweepScratch, 1, -1 do sweepScratch[i] = nil end
+                    CollectTree(frame, sweepScratch)
+                    for _, f in ipairs(sweepScratch) do
+                        if f.EnableMouse and f.IsMouseEnabled and f:IsMouseEnabled() then
+                            f:EnableMouse(false)
+                            if not rec.mouseSet[f] then
+                                rec.mouseSet[f] = true
+                                rec.mouse[#rec.mouse + 1] = f
+                            end
+                        end
+                    end
+                end
+            end
         end
     end
-    return opened
+    return anyShown
 end
 
+--- 守卫 = 边沿检测器：暴雪框"从无到有" = 玩家按了 B（开我们的窗），"从有到无" =
+--- 玩家又按了 B（关我们的窗）。一次开背包暴雪会 Show 好几个框，边沿天然合并成一次；
+--- TOGGLE_DEBOUNCE 挡掉重载瞬间的抖动。**不再 toggle**：开/关都显式，免得"回光返照"
+--- 把我们自己切来切去（2026-10-26 实机 bug 的根）。
 local function StartBlizzardGuard()
     if blizzardDriver then return end
     blizzardDriver = CreateFrame("Frame")
@@ -640,18 +691,84 @@ local function StartBlizzardGuard()
         if guardAcc < GUARD_INTERVAL then return end
         guardAcc = 0
 
-        local opened = SweepBlizzardBags()
+        local anyShown = SweepBlizzardBags()
+        if anyShown == bagsVisualOpen then return end
+        bagsVisualOpen = anyShown
         local now = GetTime()
-        if opened and not bankOpen and (now - lastToggle) >= TOGGLE_DEBOUNCE then
-            lastToggle = now
-            M:Toggle()
+        if bankOpen or (now - lastToggle) < TOGGLE_DEBOUNCE then return end
+        lastToggle = now
+        if anyShown then
+            if not shown then M:Toggle(true) end
+        elseif shown then
+            M:Toggle(false)
         end
     end)
 end
 
-local shown = false
+-- ---- 更新触发（2026-10-28 补强）------------------------------------------------
+-- 玩家报"背包物品更新不及时"：本客户端 BAG_UPDATE 覆盖不全（邮件取件 / 商人购买后
+-- 窗口停在旧内容，要重开背包才更新）。三层保险：
+--   ① 事件（Initialize 里注册；EventBus 对本客户端不认识的事件名会静默跳过，零成本）；
+--   ② 公开刷新入口 M:Refresh()（其它模块 / /mui bags refresh 显式触发）；
+--   ③ 开窗期间的签名轮询：每 0.5s 对一次"槽位=itemID x 数量"指纹，变了才重建 ——
+--      "及时"最终不赌事件派发（本客户端事件缺口已经不止一次：PLAYER_REGEN_* 当拍
+--      标志是旧值、事件不补发，见 HANDOFF 3.26）。
+local POLL_INTERVAL = 0.5
 
---- 打开 / 关闭分类背包。force = true 时只开（给"暴雪背包被打开"那条路用）。
+--- 轻量指纹：一组背包槽位的 itemID+数量串。只读数量字段，不碰贴图/链接。
+local function BagSignature(indexes)
+    local parts = {}
+    for _, bag in ipairs(indexes) do
+        local num = C_Container.GetContainerNumSlots(bag)
+        if num and num > 0 then
+            for slot = 1, num do
+                local info = C_Container.GetContainerItemInfo(bag, slot)
+                if info and info.itemID then
+                    parts[#parts + 1] = bag .. ":" .. slot .. "="
+                        .. tostring(info.itemID) .. "x" .. tostring(info.stackCount)
+                end
+            end
+        end
+    end
+    return table.concat(parts, ",")
+end
+
+local pollDriver, pollAcc, bagSig, bankSig
+
+local function StartPolling()
+    bagSig, bankSig = nil, nil      -- 重开窗口先强制对一次
+    if not pollDriver then
+        pollDriver = CreateFrame("Frame")
+        pollDriver:SetScript("OnUpdate", function(self, elapsed)
+            if not shown then self:Hide() return end
+            pollAcc = (pollAcc or 0) + (elapsed or 0)
+            if pollAcc < POLL_INTERVAL then return end
+            pollAcc = 0
+            local indexes = Setting("showReagentBag")
+                and { 0, 1, 2, 3, 4, BAG_REAGENT } or BAGS_CARRIED
+            local sig = BagSignature(indexes)
+            if sig ~= bagSig then
+                bagSig = sig
+                Rebuild("bags")
+            end
+            if bankOpen then
+                local bSig = BagSignature(BANK_TABS)
+                if bSig ~= bankSig then
+                    bankSig = bSig
+                    Rebuild("bank")
+                end
+            end
+        end)
+    end
+    pollDriver:Show()
+end
+
+local function StopPolling()
+    if pollDriver then pollDriver:Hide() end
+    bagSig, bankSig = nil, nil
+end
+
+--- 打开 / 关闭分类背包。force = true / false 显式开关（给守卫边沿那条路用，不 toggle）。
 function M:Toggle(force)
     if force == nil then
         shown = not shown
@@ -662,29 +779,36 @@ function M:Toggle(force)
     end
 
     if shown then
-        HideBlizzardBags(true)
+        -- 暴雪框已在 Initialize 停车（alpha 0 + 禁鼠标），这里不用再藏；
+        -- 就算它此刻被 Show 着（边沿路径来的），停车状态让它在屏幕上不可见。
         Rebuild("bags")
+        StartPolling()
     else
+        StopPolling()
         for _, win in pairs(windows) do win:Hide() end
-        -- **不要把暴雪的背包框还回来**：那一步会把它 Show 出来，而守卫（0.05s 扫一次）下一拍
-        -- 又会把它当成"玩家按了 B"再切一次我们的窗口 —— 自己把自己弹来弹去。
-        -- 还框只在模块被关掉时做（SetEnabled(false)）。
+        -- 暴雪框的显隐归暴雪管（停车不碰它），关我们的窗就够了。
     end
 end
 
 function M:Initialize()
     if not ns:DB().bags then ns:DB().bags = {} end
 
-    -- 只要模块开着，暴雪的背包框一律不许出现（每 0.05s 扫一次，见 StartBlizzardGuard 的注释）。
+    -- 只要模块开着，暴雪的背包框一律常驻停车（alpha 0 + 全子树禁鼠标，见上文的模型注释）。
+    ParkBlizzardBags(true)
     StartBlizzardGuard()
 
     -- BAG_UPDATE fires often and for every bag: the handler only marks a rebuild, coalesced to one frame by the flag.
-    local pending = false
+    -- 资源口径（2026-10-28 探针实测）：帧级合并比 0.1s timer 更紧（突发一帧只重建一次，
+    -- 空闲时驱动器自 Hide 零开销）；CURSOR_CHANGED 本客户端 ×298 高频刷，挂上它等于
+    -- 窗口开着时每次光标变化都全量重建 —— 不注册，兜底交给签名轮询。
+    local pending, pendingBank = false, false
     local driver = CreateFrame("Frame")
     driver:SetScript("OnUpdate", function(self)
-        if not pending then self:Hide() return end
-        pending = false
-        if shown then Rebuild("bags") end
+        if not pending and not pendingBank then self:Hide() return end
+        local doBags, doBank = pending, pendingBank
+        pending, pendingBank = false, false
+        if doBags and shown then Rebuild("bags") end
+        if doBank and shown and bankOpen then Rebuild("bank") end
     end)
 
     local function Mark()
@@ -693,23 +817,43 @@ function M:Initialize()
         driver:Show()
     end
 
+    local function MarkBank()
+        if not shown or not bankOpen then return end
+        pendingBank = true
+        driver:Show()
+    end
+
+    -- ① 事件层：BAG_UPDATE 是主路径，再补几条本客户端可能单独发的（EventBus 对
+    --    不认识的事件名静默跳过，注册多余事件零成本）。
     EventBus:Register("BAG_UPDATE", Mark)
     EventBus:Register("BAG_UPDATE_DELAYED", Mark)
     EventBus:Register("ITEM_LOCK_CHANGED", Mark)
+    EventBus:Register("ITEM_COUNT_CHANGED", Mark)   -- 部分客户端堆叠变化只发这条（去重事件，精准）
+    EventBus:Register("LOOT_READY", Mark)           -- 拾取结算（一次拾取发多条，帧级合并吸收）
+    EventBus:RegisterUnit("UNIT_INVENTORY_CHANGED", "player", Mark)
+    EventBus:Register("PLAYERBANKSLOTS_CHANGED", MarkBank)  -- 银行格子变化（快照有，载荷 slot）
+    -- 读图回来缓存可能失效：开着窗就强制重扫（事件不补发，InfoBar 同款教训）。
+    EventBus:Register("PLAYER_ENTERING_WORLD", function()
+        if shown then
+            bagSig, bankSig = nil, nil
+            Rebuild("bags")
+            if bankOpen then Rebuild("bank") end
+        end
+    end)
 
     -- Bank: only while the bank is open.
     EventBus:Register("BANKFRAME_OPENED", function()
         bankOpen = true
         if Setting("showBank") then
             shown = true
-            HideBlizzardBags(true)
             Rebuild("bank")
+            StartPolling()
         end
     end)
     EventBus:Register("BANKFRAME_CLOSED", function()
         bankOpen = false
         -- 银行关了就把背包那几扇窗放回去（原来这里一关就再也不回来了）。
-        -- **不再 HideBlizzardBags(false)**：守卫会把它们立刻又藏起来，而"还框"只属于模块关闭。
+        -- 暴雪框的显隐归暴雪管（停车不碰它），这里只管我们自己的窗口。
         if shown then
             Rebuild("bags")
         else
@@ -721,21 +865,38 @@ end
 function M:HandleCommand(rest)
     if rest == "bank" then
         shown = true
-        HideBlizzardBags(true)
         Rebuild("bank")
+        StartPolling()
+        return true
+    end
+    if rest == "refresh" then
+        -- 显式刷新：事件缺口时的手动兜底（也供其它模块调用 M:Refresh()）。
+        self:Refresh()
         return true
     end
     self:Toggle()
     return true
 end
 
+--- 公开刷新入口：显式触发重扫（② 层）。窗口没开时是 no-op。
+function M:Refresh()
+    if not shown then return end
+    bagSig, bankSig = nil, nil
+    Rebuild("bags")
+    if bankOpen then Rebuild("bank") end
+end
+
 function M:SetEnabled(enabled)
     if not enabled then
+        StopPolling()
         for _, win in pairs(windows) do win:Hide() end
         shown = false
-        -- 模块关掉：把当初藏起来的暴雪背包框还回去（守卫这时会因为 IsModuleEnabled 为假而停手）
-        HideBlizzardBags(false)
+        bagsVisualOpen = false
+        -- 模块关掉：取回停车（alpha 1 + 鼠标还回去），玩家继续用原生背包。
+        -- 守卫这时会因为 IsModuleEnabled 为假而停手。
+        ParkBlizzardBags(false)
     else
+        ParkBlizzardBags(true)
         StartBlizzardGuard()
     end
 end
