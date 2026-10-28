@@ -19,12 +19,18 @@ node_modules/
 .opencode/
 
 # ---- 开发记录与过程文档 ----
-# 例外只有三个：项目介绍（README.md）、第三方库许可（Libs/NOTICE.md）、字体许可（Assets/Fonts/NOTICE.md）。
+# Markdown 默认不进库；例外：项目介绍、第三方库许可、字体许可、docs/ 下的四份交接文档（见下方）。
 *.md
 !README.md
 !Libs/NOTICE.md
 !Assets/Fonts/NOTICE.md
-docs/
+# 例外：交接类文档进库（其余 docs/ 内容——api 快照、texture-preview 产物、评审表——只留本地）。
+# 注意：不能写成整目录 `docs/`——那会让下面的 ! 全部失效（git 不会进入被排除的目录）。
+docs/*
+!docs/CHECKS.md
+!docs/CODEX-SETUP.md
+!docs/HANDOFF.md
+!docs/PLAN-refactor.md
 
 # ---- 过程产物 / 中间文件 ----
 *.tmp
