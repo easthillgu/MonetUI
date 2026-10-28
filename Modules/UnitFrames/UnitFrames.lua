@@ -454,7 +454,7 @@ local function UpdateName(frame)
     -- "允许污染代码传机密"；探针 unitName_secret=true，名牌同窗口 plate_name_secret=true
     -- ——名牌能显示名字，是因为它把机密串原样 SetText 进显示控件：认为机密值可展示、
     -- 不可读）。策略分三档：
-    --   明文 → 截断（AbbrName/Shorten）+ 职业色；
+    --   明文 → 职业色显示，超宽走 FitText 缩字号（2026-10-27 起截断停用）；
     --   机密串 → 原样 SetText 进显示（不可截断、不派生、不比较），底色退主题 neutral；
     --   读不到（nil / 抛错）→ frame.label。
     local okName, name = pcall(UnitName, unit)
@@ -466,12 +466,21 @@ local function UpdateName(frame)
         if okClass and type(class) == "string" and not Secrets.IsSecret(class) then
             classFile = class
         end
-        -- Leading words become initials, then the whole thing is capped. The text row is
-        -- shared with the level, so an untruncated NPC name would run past the bar's edge.
-        -- 字符串截取只许在明文值上做 —— 机密串跳过这段，走下面的原样显示。
-        rawName = Math:Shorten(Math:AbbrName(rawName), frame.nameCap or NAME_CAP, true)
     end
-    nameText:SetText(rawName or frame.label)
+    -- 规则（2026-10-27 玩家定）：名字最多占框宽 70%，超了**缩字号**（Widget:FitText，
+    -- 绝不截断）；frame.nameCap 仍由布局登记但不再读（原截断规则暂不使用）。
+    -- 机密串走 FitText 的"不测不缩"分支：原样按基础字号显示。
+    -- 名字与 level / 血量文字同占框顶那行左右分列：实测这两段占的宽不够留 30% 时再收。
+    do
+        local W = frame:GetWidth() or 160
+        local maxW = W * 0.70
+        local levelW  = frame.level      and frame.level:GetStringWidth()      or 0
+        local healthW = frame.healthText and frame.healthText:GetStringWidth() or 0
+        if levelW + healthW > 0 then
+            maxW = math.min(maxW, W - levelW - healthW - 6)
+        end
+        Widget:FitText(nameText, rawName or frame.label, maxW, NAME_SIZE, nil, 6)
+    end
 
     local r, g, b = Color:ClassColor(classFile)
     if not r then

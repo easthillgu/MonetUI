@@ -572,18 +572,7 @@ end
 local function UpdateText(plate)
     local unit = plate.unit
 
-    local name = Query(UnitName, unit)
-    if type(name) == "string" then
-        -- Truncating needs a length, which a secret refuses -- a hidden name is drawn whole.
-        if not Secrets.IsSecret(name) and Setting("truncate") ~= false then
-            local limit = Setting("nameLength") or 16
-            if #name > limit then name = name:sub(1, limit) .. "..." end
-        end
-        plate.name:SetText(name)
-    else
-        plate.name:SetText("")
-    end
-
+    -- 名字与 "Lv???" 共享一行左右分列：先定 level 段，名字的可用宽要避开它。
     local parts = {}
     if Setting("showLevel") ~= false then
         local level = Secrets.Number(Query(UnitLevel, unit))
@@ -600,6 +589,24 @@ local function UpdateText(plate)
         end
     end
     plate.level:SetText(table.concat(parts, " "))
+
+    -- 规则（2026-10-27 玩家定）：名字最多占牌子总宽 70%，超了**缩字号**、绝不截断 ——
+    -- 统一走 Widget:FitText（机密名走它内部的"不测不缩"分支，原样显示）。
+    -- Setting("truncate"/"nameLength") 保留在设置里但不再读（原截断规则暂不使用）。
+    -- level 段比剩余 30% 还宽时再收一档，免得两段挤在一起。
+    local name = Query(UnitName, unit)
+    local nameSize = ns.Media:SnapSize(Setting("nameSize"))
+    if type(name) == "string" then
+        local W = PlateWidth()
+        local maxWidth = W * 0.70
+        local levelW = plate.level:GetStringWidth()
+        if levelW > 0 then
+            maxWidth = math.min(maxWidth, W - levelW - 4)
+        end
+        Widget:FitText(plate.name, name, maxWidth, nameSize, nil, 6)
+    else
+        Widget:FitText(plate.name, "", PlateWidth() * 0.70, nameSize, nil, 6)
+    end
 end
 
 --- The border says what the unit is doing to you: threat first, then "this is my target".
@@ -891,6 +898,8 @@ end
 
 function M:Initialize()
     self.active = true
+    -- 诊断口：`/mui` 探针要读当前名牌表（plates 是文件局部，改这里不导入其它引用）。
+    self.plates = plates
     self:RegisterEvents()
     self:HookDriver()
     self:ApplyCVars()

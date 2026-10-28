@@ -65,8 +65,13 @@ end
 -- 按钮外观
 -- ============================================================================
 
--- 名字截断走 Math:Shorten(单一来源,review 2026-10-24 #4):以前这里的本地 Truncate 按字节切,
--- 会切进汉字中间画出坏字形 —— Shorten 按字符边界走,还统一了省略号(UF 同源)。
+-- 名字显示放宽（2026-10-27 玩家定 70% 规则）：
+-- 旧的整段走 Math:Shorten(单一来源,review 2026-10-24 #4)截断，会把名字裁掉 —— 现在
+-- 截断规则**暂不使用**，改走 Widget:FitText（超过框宽 70% 就缩字号、绝不裁字）；
+-- 布局时仍登记 nameCap（保留设置，暂不读）。
+
+--- 按钮名字的基础字号（FitText 的 baseSize 用；small 框 9 / 普通 10）。
+local function NameBaseSize(small) return small and 9 or 10 end
 
 --- 名字最多几个字：中文一个字顶两个拉丁字宽，团队框只放得下三四个。
 local function NameCap(cfg)
@@ -234,7 +239,7 @@ end
 --- 名字 + 血量文字（原 241-269 行）。
 local function StyleTexts(button, cfg, small, inner)
     if not button.name then
-        button.name = Widget:Font(button.overlay, small and 9 or 10, "pixel", { r = 1, g = 1, b = 1 }, "LEFT")
+        button.name = Widget:Font(button.overlay, NameBaseSize(small), "pixel", { r = 1, g = 1, b = 1 }, "LEFT")
         -- 名字压在血条上：小框放不下一行独立的名字，加硬阴影保证亮色血条上也读得清
         if button.name.SetShadowColor then
             button.name:SetShadowColor(0, 0, 0, 1)
@@ -242,10 +247,14 @@ local function StyleTexts(button, cfg, small, inner)
         end
         button.name:SetWordWrap(false)
     end
-    Widget:SetFont(button.name, small and 9 or 10, "pixel")
+    Widget:SetFont(button.name, NameBaseSize(small), "pixel")
+    -- 基础字号留在按钮上：名字缩字（FitText）要"从这一档往下缩"，绝不能拿缩过的当 base。
+    button.nameSize = NameBaseSize(small)
     -- 血量文字开着时名字给右侧让位（百分比 4 字符 / 当前值带千分位，32 够放）
     local textReserve = ((cfg.healthText or "none") ~= "none") and 32 or 0
-    button.name:SetSize(inner - 6 - (small and 10 or 12) - textReserve, small and 11 or 13)
+    local nameBoxW = inner - 6 - (small and 10 or 12) - textReserve
+    button.nameBoxW = nameBoxW   -- FitText 的 boxWidth：自动宽度字串不能用 GetWidth 猜（见 Widget:FitText 注）
+    button.name:SetSize(nameBoxW, small and 11 or 13)
     button.name:ClearAllPoints()
     button.name:SetPoint("LEFT", button, "LEFT", BORDER + 3, 0)
 
@@ -339,7 +348,17 @@ local function DisplayName(button)
     local raw = button.unitName or ""
     local dash = string.find(raw, "-", 1, true)
     if dash then raw = string.sub(raw, 1, dash - 1) end
-    return Math:Shorten(raw, button.nameCap or 7, true)
+    -- 截断停用（70% 缩字规则，见文件头）：只剥服务名后缀，长度交给 FitText 收。
+    return raw
+end
+
+--- 名字缩字：占按钮宽最多 70%，超了缩字号、绝不裁字（Widget:FitText 单一入口）。
+-- FitText 内部会把 maxWidth 钳到名字框自己的宽度（StyleTexts 里 SetSize 时已给
+-- 血量文字留位），所以这里只传 70% 限额。
+local function FitName(button, text)
+    if not button.name then return end
+    Widget:FitText(button.name, text or "", (button:GetWidth() or 72) * 0.70,
+        button.nameSize or 9, nil, 6, button.nameBoxW)
 end
 
 local function UpdateHealth(button)
@@ -376,7 +395,7 @@ local function UpdateName(button)
     if ok and type(name) == "string" and not Secrets.IsSecret(name) then
         button.unitName = name
     end
-    button.name:SetText(DisplayName(button))
+    FitName(button, DisplayName(button))
 end
 
 local function UpdateRole(button)
@@ -417,11 +436,11 @@ local function UpdateState(button)
     end
 
     if offline then
-        button.name:SetText("离线")
+        FitName(button, "离线")
     elseif dead then
-        button.name:SetText("死亡")
+        FitName(button, "死亡")
     else
-        button.name:SetText(DisplayName(button))
+        FitName(button, DisplayName(button))
     end
 
     if dead or offline then

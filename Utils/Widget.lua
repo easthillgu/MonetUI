@@ -372,7 +372,7 @@ end
 -- 不测不缩，原样按 baseSize 显示（宁可溢出也不瞎猜，见 AGENTS 秘密值规矩）。
 -- @param fs FontString；text 要显示的文本；maxWidth 允许的最大宽度（UI 单位）
 -- @return 最终字号（像素字符串，未吸附网格 —— 缩字需要连续档）
-function Widget:FitText(fs, text, maxWidth, baseSize, flags, minSize)
+function Widget:FitText(fs, text, maxWidth, baseSize, flags, minSize, boxWidth)
     if not (fs and fs.SetText) then return baseSize end
     baseSize = tonumber(baseSize) or 12
     minSize  = tonumber(minSize) or 6
@@ -390,12 +390,13 @@ function Widget:FitText(fs, text, maxWidth, baseSize, flags, minSize)
     if Secrets and Secrets.IsSecret(text) then return baseSize end
     if not (maxWidth and maxWidth > 0) then return baseSize end
 
-    -- 文本框本身比限额还窄时以文本框为准（否则缩了字也仍会被裁）
-    if fs.GetWidth then
-        local bw = fs:GetWidth()
-        if type(bw) == "number" and not (Secrets and Secrets.IsSecret(bw)) and bw > 0 and bw < maxWidth then
-            maxWidth = bw
-        end
+    -- 名字框固定 SetSize 的调用方（Groups）显式传 boxWidth：盒子比限额窄就以盒子为准。
+    -- **不要用 fs:GetWidth() 去猜** —— 自动宽度的 FontString（只锚一个点）GetWidth 跟着
+    -- 文本走，等于把限额压到"文本自身宽度"，然后 `width > maxWidth` 是同源浮点
+    -- 比大小，毛刺一翻就白白缩一档（2026-10-28 实机判例：玩家名 10 号被压成 9）。
+    local box = tonumber(boxWidth)
+    if box and box > 0 and box < maxWidth then
+        maxWidth = box
     end
 
     local width = fs.GetStringWidth and fs:GetStringWidth() or 0
