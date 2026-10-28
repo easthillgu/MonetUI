@@ -2,11 +2,13 @@
     <!-- MonetUI · Modules/ActionBars — 动作条（自绘安全按钮）
          1–8 号自绘条 + 收养的宠物条 / 姿态条，外加暴雪条的压制与拖放接住器。
          顺序：ActionBars.lua 建条并导出共享件（ButtonSize / PositionBar / SkinAdoptedButton /
-         bars / adopted …），其余三件都从它取，必须排在后面：
+         bars / adopted …），其余四件都从它取，必须排在后面：
+           Secure.lua   —— 安全片段的生成与注入（状态驱动 / 子片段，M.secure.*）；
            Blizzard.lua —— 压制 / 归还暴雪自己的条；
            PetBar.lua   —— 收养 PetActionButton1..10 + 自动施法像素环；
            DragDrop.lua —— 每条一只透明接住器（PlaceAction）。 -->
     <Script file="ActionBars.lua"/>
+    <Script file="Secure.lua"/>
     <Script file="Blizzard.lua"/>
     <Script file="PetBar.lua"/>
     <Script file="DragDrop.lua"/>

@@ -18,7 +18,7 @@ local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
 local Marked = function(o, k) return ns:Marked(o, k) end
 
 -- 8 条动作条：暴雪那几条只做 alpha 0（见 Park），点击板盖住它们看不见的裸按钮；
--- 显示与施法全部由我们自己的按钮承担（槽位由安全片段写，见 PAGE_CHILD 那段）。
+-- 显示与施法全部由我们自己的按钮承担（槽位由安全片段写，见 Secure.lua 的 PAGE_CHILD 段）。
 local ACTION_BAR_FRAMES = {
     "MainMenuBar", "MainActionBar",
     "MultiBarBottomLeft", "MultiBarBottomRight",
