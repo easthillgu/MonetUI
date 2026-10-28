@@ -950,6 +950,27 @@ active = "true" / setting = "true:true" / refresh = "true"（手动调用不报�
 - 附带发现：任务/对话窗口开着时按 B 会被吞（零事件零反应）——不是插件问题，测背包
   前先关 NPC 对话框。
 
+### 3.28 姓名板：暴雪牌压制补全（2026-10-28，`7d012f4`）
+
+玩家报"暴雪姓名板没藏掉、和自绘的同屏，右侧减益列还在"。探针实锤**两层根因**：
+
+1. **base 级 sibling 容器漏网**：压制只盖 `base.UnitFrame`（alpha 0），但 base 上还有
+   同级容器（StatusBar+Frame 一族，alpha 1.00，随 base 的距离衰减 alpha 0.60 可见），
+   有减益时暴雪还**动态再建**容器（BuffListFrame 一族）。alpha 沿树继承救不了它们。
+   修：`HideBlizzardPlate` 压暗 base **全部子框**（除自绘牌）；`KeepBlizzardHidden`
+   每拍整树回压；`RestoreBlizzardPlate` 全部放回。`SetAlpha` 非 `Hide`，C++ 点击区
+   （锚在血条/名字上）不受影响。
+2. **目标高亮回压缺口**：牌子成为**当前目标**时暴雪把 UnitFrame alpha 重设回 1
+   （base 同到 1.0），我们的回压只在事件驱动的 `UpdatePlate` 里 —— 暴雪抢先后无人再压
+   （探针：假人牌 `blizzardHidden=true` 但 `ufAlpha=1.00`）。修：`PLAYER_TARGET_CHANGED`
+   即时回压 + **0.25s 低频守卫**扫全部已接管牌整树回压。
+
+- 误判记录：base 上的 StatusBar+Frame 匿名子框一度被当成"暴雪施法条"，实为**我们的
+  自绘牌**（血条 StatusBar + 施法框结构吻合）——探针时先数结构再下结论。
+- 实机：压住了（目标牌不再亮、减益列消失）。`BuffListFrame` 已知问题随之闭环。
+- 排查手法沉淀：`_G.MonetUI = ns`（Core.lua:977）——探针可以直接 `ns:GetModule("Nameplates")`
+  读模块内部状态（`Marked(base,"plate")` / `M:ShouldShow` / 设置表），比纯 `_G` 猜快得多。
+
 ---
 
 
