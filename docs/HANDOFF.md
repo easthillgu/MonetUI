@@ -1128,6 +1128,59 @@ end
 
 ---
 
+## 8.5 2026-10-28 素材线 + 圆角（本轮收档）
+
+**这一轮只动了素材与视图层，没碰任何 game API 调用。**
+
+### 素材目录变了（重要）
+
+```
+Assets-src/Textures/*.tga   源：进 git、**不发行**（audit-pixels / regen / svg-to-tga 的输入）
+Assets/Textures/*.blp       交付：进游戏（由源同步生成）
+```
+
+- 游戏目录里**只有 BLP**，消除"引擎读哪个格式"的歧义。`tools/deploy-retail.ps1` 不用改（只拷 `Assets`）。
+- `node tools/regen-textures.js standard` 与 `node tools/svg-to-tga.js` 都会**自动同步 BLP**；
+  单张手转：`node tools/tga-to-blp.js <tga>`（源目录里的 TGA 默认输出到 `Assets/Textures`）。
+- BLP 三条硬要求（`tools/tga-to-blp.js` 内置）：完整 **mip 链**、mip 逐级**白衬底修正**、
+  剔除 raw3 用不到的 1024B 调色板块。滤波用 `triangle`（唯一不过冲的）。
+- 清理：删了 6 张死素材（canvas_weave / diagonal_weave / minus / plus / search / win_restore）
+  与 3 个 `*_blp` 别名键、`Widget.lua` 的 `blpKey` 死字段。
+
+### 素材画法重做（照参考插件 Andromeda）
+
+- **斜纹**（`monet_stripe_weave`）：4px 周期、剖面 `255→129→0→129`、覆盖率 50%（原来是单像素点阵 17.5%）。
+- **图标字形**：笔画 = 画布 × 0.115、字形占 88%（原来固定 2px / 55%）；`check`/`chevron`/`arrow`/
+  `radio`/`win_*` 全部重画；role 三张改成**实心剪影 + 径向渐变 + 内沿压暗**（heal 改十字、dps 改并排双匕首）；
+  关闭钮三态与小地图三徽章（SVG）加粗简化。
+- **审计口径同步修**：45° 粗笔画交汇处的零星半透明像素不再判"软边未对齐"（改为中段多数发虚才算），
+  并用一张人为错位的测试图确认真实错位仍会被抓住。
+
+### 圆角（新功能，实机未验）
+
+- `edgeFile` 在本引擎不可用，圆角是**自绘 9-slice**：4 角（原尺寸）+ 4 边（拉伸）+ 4 块
+  `monet_round_fill` 填充压在下层补方底。实现：`Widget:RoundBorder`（Utils/Widget.lua），
+  染色并入 `Widget:Refresh`。
+- 圆角纹理 32×32、外弧 8、角部**曲率线性渐变**（欧拉螺线，G2 连续）。曲率剖面：圆弧 0→0.50 阶跃、
+  超椭圆 0.01→0.36、螺线 0.01→0.24。切片 `slice = 8`，`Widget.lua` 的 `ROUND_EDGES` 与
+  `tools/regen-textures.js` 必须同步。
+- 接入：小地图面板、任务追踪、配置面板、微型菜单（`round = true`）。
+
+### 待实机验收（下次开工先做这三条）
+
+1. **圆角**：1× / 1.25× UI 缩放下四角是否仍对齐（1 纹素 = 1 UI 单元的映射）、
+   小地图面板圆角与矩形遮罩之间那圈缝、Config 面板 2px 环的观感。
+2. **BLP 与 TGA 显示一致**：9-slice 边框、`IconTexture` 图标、小地图遮罩 1:1。
+3. **图标可读性**：`/mui` 里 check/radio/箭头/role 在实机尺寸下的辨识度（离线对照见
+   `docs/texture-preview/glyphs-before-after.png`、`svg-glyphs-before-after.png`）。
+
+### 本轮 commit
+
+`d5c242d` 素材迁移+重出+重画 · `7d207e3` 注册键清理 · `5ca1f54` 规范文档 ·
+`7f42c5b` 圆角功能+资产 · `14b0d83` 圆角文档
+
+---
+
 ## 9. 建议的下一步（按价值排序）
 
 1. **实机回归这一轮的 P4 拆分**（动作条 + 单位框的创建路径全都动过）：
