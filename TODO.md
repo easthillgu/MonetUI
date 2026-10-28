@@ -11,7 +11,13 @@
    接口 `M.classpower.*`，资源色表经 `M.POWER_COLOR` 共享。
 2. ✅ `UnitFrames/Blizzard.lua`（89 行 move-only，`4fd510d`）：主文件 1044 → 958；
    仍是 `M:SuppressBlizzard` / `M:HideBlizzardCastBars` 两个方法，调用点零改动。
-3. ⏳ `ActionBars/Secure.lua`（安全片段生成与注入 —— 全仓最敏感的一段）
+3. ✅ `ActionBars/Secure.lua`（安全片段生成与注入 —— 全仓最敏感的一段，`f98ccf3`）：
+   146 行 move-only，主文件 1780 → 1677；接口 `M.secure.*`（ON_STATE_PAGE / VISIBILITY_MAIN /
+   VISIBILITY_OTHER / FULL_PAGE / EXIT_SNIPPET / InstallPageChild / InstallSecureInit /
+   PushSecureInit / PushPageToChildren / SetUseOnKeyDown）。状态驱动条件串随片段一起搬
+   （它们是 RegisterStateDriver 注入的半边）；`SlotFor`/`SlotOf`（槽位算术）留在主文件。
+   机械核对：删的 100 行 = 77 原样 + 10 调用点改名 + 1 注释指向 + 12 空行，零意外改动。
+   实机回归通过（2026-10-28）：施法 / 翻页 / 拖放 / 宠物条自动施法环。
 4. ✅ `ActionBars/DragDrop.lua`（122 行 move-only，`528b388`）：主文件 2416 → 2297；
    接口 `M.dragdrop.EnsureDropCatcher`，`SlotOf` 经 `M.SlotOf` 共享。**已部署待实机验**（拖放）。
 5. ✅ `ActionBars/PetBar.lua`（宠物条收养 + 自动施法环，`3e3bd40`）：290 行 move-only，
