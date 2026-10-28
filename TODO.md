@@ -94,6 +94,24 @@
 - ⏳ 暴雪队伍/团队框重复：A 共存 / B 关自绘 Groups / C 自动藏（C 有污染风险）。
 - ⏳ SpellFlyout 弹出托盘：鼠标点击只能看，选项必须走快捷键（客户端限制，已实测）。
 
+**D. 素材交付（2026-10-28）**
+
+- ✅ 31 张纹理全部出 BLP2（raw3）+ **完整 mip 链**（此前 `mipmaps:false` 是交付缺陷）、逐级白衬底修正、
+  滤波 triangle、剔除 raw3 用不到的 1024B 调色板块；TGA 源迁到 `Assets-src/Textures`（进 git、不发行），
+  `Assets/Textures` 只剩 BLP（进游戏）。对照页：`node tools/make-blp-compare.js`
+  → `docs/texture-preview/blp-compare.html`。
+- ✅ 清理死素材 6 张（`monet_canvas_weave` / `diagonal_weave` / `minus` / `plus` / `search` /
+  `win_restore`）：文件 + Media 注册键 + regen 生成器 + audit 判定名单一并移除；3 个 `*_blp` 别名键与
+  `Widget.lua` 的 `blpKey` 死字段也删了。
+- ✅ 照 Andromeda 的画法重画一轮（2026-10-28）：斜纹（渐变剖面）、图标字形几何（笔画 12.5% / 字形 88%）、
+  role 三张（实心剪影 + 渐变 + 内压暗）、关闭钮三态（SVG 加粗）、小地图三徽章（加粗简化）。
+  前后对照：`docs/texture-preview/glyphs-before-after.png`、`svg-glyphs-before-after.png`。
+  审计侧同步修了一处误报：45° 粗笔画交汇处的零星半透明像素不再判"软边未对齐"（改为中段多数发虚才算）。
+- ⏳ **待实机验收**：BLP 与 TGA 在本客户端是否显示一致（尤其 9-slice 边框、`IconTexture` 图标、
+  小地图矩形遮罩 1:1 映射）——现在游戏里只有 BLP，这条验完才算收口。
+- ⏳ **待拍板**：是否给低风险贴图单独换 DXT5 省体积（TGA 1159KB / BLP 1548KB → DXT5 423KB，但
+  21/31 张 mip0 最大色差 >16，发丝线/笔触会明显受损）。
+
 ## ✅ 2026-10-26 P4 长函数拆分收尾（纯重构，离线验收，待实机回归）
 
 > 来龙去脉写在 `docs/HANDOFF.md` 3.6 节与 `docs/PLAN-refactor.md` P4 节；一个函数一个 commit。

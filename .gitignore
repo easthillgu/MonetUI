@@ -5,6 +5,11 @@
 #
 # 发行集 = MonetUI.toc + Core/Config/Modules/Utils + Assets（材质与字体）
 #        + Libs（第三方代码与许可声明）+ README.md + LICENSE + .gitignore
+#
+# 材质分两处（2026-10-28 起）：
+#   Assets-src/Textures/*.tga  —— TGA **源**：进 git（可复现 + 可审计），**不发行**。
+#   Assets/Textures/*.blp      —— BLP **交付**：进游戏，由 TGA 同步生成（tools/tga-to-blp.js）。
+# 游戏里只该出现 BLP —— 两种格式并存的话"引擎读哪个"没有验证过。
 # ============================================================
 
 # ---- 开发工具与工具链 ----
@@ -29,6 +34,7 @@ luac.out
 Assets/Textures.bak/
 
 # ---- 编辑器 / 系统 ----
+.codegraph/
 .vscode/
 .idea/
 *.swp

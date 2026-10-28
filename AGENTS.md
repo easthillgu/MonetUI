@@ -190,21 +190,56 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
 ## 材质制作规范
 
 - 尺寸必须为 2 的幂次方（32/64/128/256），非正方形需补白到最近幂次。
-- 优先输出 TGA 格式（32bit RGBA），BLP 作为备选。
+- **交付格式：BLP2 优先（2026-10-28 拍板）**。目录分工：
+  `Assets-src/Textures/*.tga` = **源**（进 git、不进游戏，`audit-pixels.js` 审这个）；
+  `Assets/Textures/*.blp` = **交付**（进游戏，由源同步生成：`node tools/tga-to-blp.js <tga> <blp>`）。
+  `node tools/regen-textures.js standard` 会自己把新出的 TGA 转成 BLP，不用手工补。
+  **规矩**：任何一条路线（脚本/SVG/GIMP）改完 TGA 必须重出 BLP，且两边的像素必须一致。
+  Media 键一律**不带扩展名**（引擎自行解析）；唯一显式引用是 `MonetUI.toc` 的 `IconTexture: ...monet_addon_icon.blp`。
+  注意：`SetBackdrop` 的 `edgeFile` 不可用这些贴图（本引擎连 RAW3 BLP 也渲染成碎线），edgeFile 的唯一客户
+  照旧走 `blank`/直角（见 `Utils/Media.lua` 头部注释与 `Widget:ApplyBackdrop`）。
+- **BLP 必须带完整 mip 链**（`tga-to-blp.js` 默认就生成）。`mipmaps:false` 属交付缺陷：贴图被缩小显示时，
+  没有 mip 就只能实时缩采样，1px 线条会丢、会闪。四条细则：
+  ① 滤波用 `triangle` —— 唯一不过冲的选项，`catmullRom`/`lanczos3` 会在发丝线与 alpha 硬边两侧振铃出 halo；
+  ② mip 生成后必须做**逐级白衬底修正**（编码器会把 alpha 舍入到 0 却留下彩色 RGB，每级几十个像素，
+  渲染时变成彩色毛边；`tga-to-blp.js` 内置该修正并打印修正量）；
+  ③ raw3 用不到调色板，编码器却固定预留 1024 字节 —— `tga-to-blp.js` 会剔掉这段并前移 mip 偏移
+  （每张省 1KB，16×16 的图体积直接降四成）；
+  ④ 尺寸=1 的贴图（`monet_hairline` 256×1）拿不到 mip 链——它按横向拉伸使用，不缩小，可接受。
+- **格式与分辨率的口径（2026-10-28 实测，`node tools/make-blp-compare.js` 出对照页）**：本套 37 张全部 RAW3。
+  DXT5 虽然能瘦到 1/3.7，但 24/37 张 mip0 最大色差 >16（发丝线 75% 像素被毁、笔触 38%），
+  9-slice 边纹和 alpha 遮罩经不起 4×4 块量化。「32×32」同样不适用：9-slice 按 1 texel = 1 UI 单位映射，
+  砍一半分辨率等于把边框线宽算错。逐张证据见 `docs/texture-preview/blp-compare.html`。
 - 图标类材质建议 64x64，边框/背景建议 256x256。
 - 命名规范：小写下划线，如 `icon_shield_gold.tga`。
 - 透明靠 Alpha=0，且 **Alpha=0 的像素 RGB 必须是纯白 (255,255,255) 衬底，永不用纯黑**。客户端建 mip / 滤波时会把边缘颜色拖进可见区，黑衬底会让每个图标镶一圈黑边；白衬底乘任何染色正好等于那个染色。
 - **染色模具必须无色相**：凡是被 `SetVertexColor` / `SetBackdropBorderColor` 上色的贴图，只能用纯白或纯灰。引擎是 贴图 × 顶点色**相乘**，`#fffcf6` 染完是 `borderColor × (1, .988, .965)` —— 蓝少 3.5%，边框这种几百像素长的色带一眼看得出来；烘了金色的按下态碰上蓝色主题会变成浑浊的蓝褐。
 - 刻意保留美术色、不许顺手拉平的只有四张：`monet_close_hover`（`Skin:CloseButton` 刻意不染色，金色即 hover 信号）、`monet_win_maximize`（金色标题栏 = "这是个窗口"）、`monet_brush_stroke` 与 `monet_corner`（只调 alpha，奶油/赭石双色是核心）。
+- **45° 斜纹必须带半像素过渡**（2026-10-28 照 Andromeda `statusbar-stripes-thin` 重画）：4px 周期，
+  每条线的剖面是 **255 → 129 → 0 → 129**（1px 满 alpha 核心 + 两侧各半像素），覆盖率 50%。
+  只画"硬边单像素"（旧版 `monet_stripe_weave`：一个 0.70 alpha 点 / 4px，覆盖率 17.5%）在 1:1 下
+  会读成若有若无的点阵——45° 的锯齿边缘没有任何过渡，越小越糊。这条对任何斜纹/斜线材质都成立。
+- **图标字形按画布比例，不按固定像素**（2026-10-28 照 Andromeda `ui-checkbox-tick` / `ui-close` /
+  `ui-arrow-up` 重画）：那批参考在 32px 画布上是**笔画 ≈ 4px（12.5%）、字形撑到 ≈ 88%、边缘全抗锯齿**。
+  我们原来是固定 2px 笔画 + 55% 字形（3% / 55%），缩到实显 16–22px 时细到几乎看不见，而且没法加粗。
+  现役：`GLYPH_STROKE(size) = size × 0.115`、`GLYPH_SPAN = 0.88`（`tools/regen-textures.js`）。
+  例外是**构成网格的直线段**（窗口控件、加减号、光标杆）：那些仍用 `pxRect/pxHLine` 吸附到像素边界，
+  抗锯齿对它们是错的。
+- **role 图标是"实心剪影 + 径向渐变 + 内沿压暗 + 极淡外发光"**，不是细线描边
+  （参考 `role-tank/healer/damager` 有 68–83% 半覆盖、上百个灰度层次）。三条纪律不变：
+  全图只允许 R==G==B（染色模具色相必须为 0）、alpha=0 处纯白、`SetVertexColor` 决定最终颜色。
 - 上面两条由 `tools/audit-pixels.js` 强制（`STENCIL` 名单 28 张 + 全局白衬底检查），改生成器后必须重跑；`Assets/Textures.bak` 是现成的反例库，拿它跑一遍能验证规则没失效。
-- **要"手绘感"的材质交给 GIMP**（`C:\Users\EastHillGu\Documents\GreenAPPS\GIMPPortable`，GIMP 3.2 自带 Oils / Bristles / Acrylic / Charcoal 等真实颜料笔刷）。脚本逐像素画不出鬃毛痕与颜料洇边。现役：`monet_brush_stroke` = `tools/gimp-brush-stroke.py`（画布 256×16，五个 Monet 色做五遍颜料，笔触点自己盖章）。流程：GIMP 出 PNG → `node tools/tga-post.js <png> <tga>`（转成项目格式的未压缩 32bit TGA + 补纯白衬底；GIMP 的 TGA 导出默认是 RLE，格式对不上）→ `node tools/audit-pixels.js` 验收。注意 GIMP 3 的 API：`Gimp.*` 命名空间（没有旧版 `gimpfu.pdb`）；颜色分量必须 **0..1 浮点**（传 0..255 会被夹成纯白），**而且是线性分量**（画笔上下文吃线性的，喂 sRGB 会整体提亮：`#214447` → `rgb(100,139,142)`；浅色几乎不变、越暗越明显，所以 `monet_brush_stroke` 曾经把"干笔暗边"整个洗没了，要先 `srgb_to_linear()`）；画笔"硬度"是 0..1、"间距/不透明度"是 0..100；`edit_stroke_item()` 在这个版本只画路径首尾两点，所以要自己逐点盖章。
-- **要"能自己画/能自己改"的材质走 SVG**（Inkscape 1.4.3，`C:\Users\EastHillGu\Documents\GreenAPPS\Inkscape\bin\inkscape.com`）。源码放在 `tools/svg/*.svg`（**手写矢量**，可以在 Inkscape 里直接打开改），导出走 `node tools/svg-to-tga.js`（Inkscape 出 PNG → 项目格式 TGA + 补白衬底 + 校验画布是 2 的幂）。现役 9 张：`minimap_rect_mask`、`monet_close_{normal,hover,push}`、`monet_map_{tracking,compartment,difficulty}`、`monet_spark_{up,down}`（施法条火花 / 经验线三角，**尖端画在贴图边缘**，位置靠锚点精确控制）。**规矩：有 SVG 的以 SVG 为准** —— 生成器（`tools/regen-textures.js`）里不再画同名纹理，否则两套源码会互相覆盖。像素质量与脚本版等价（对照表 `%TEMP%\opencode\svg-compare.png`），SVG 的优势是**源码可读可改**。
+- **要"手绘感"的材质交给 GIMP**。dev 机（Windows）：`C:\Users\EastHillGu\Documents\GreenAPPS\GIMPPortable`，GIMP 3.2；
+  本机（Linux/Debian 13）：apt 的 `gimp` 3.0.4（同样是 `Gimp.*` 新 API），但 `tools/gimp-render.ps1` 盯文件壳不可用，
+  要改用 `gimp -i -b '<scheme>' -b '(gimp-quit 0)'` 批处理。GIMP 3 自带 Oils / Bristles / Acrylic / Charcoal 等真实颜料笔刷。脚本逐像素画不出鬃毛痕与颜料洇边。现役：`monet_brush_stroke` = `tools/gimp-brush-stroke.py`（画布 256×16，五个 Monet 色做五遍颜料，笔触点自己盖章）。流程：GIMP 出 PNG → `node tools/tga-post.js <png> <tga>`（转成项目格式的未压缩 32bit TGA + 补纯白衬底；GIMP 的 TGA 导出默认是 RLE，格式对不上）→ `node tools/audit-pixels.js` 验收。注意 GIMP 3 的 API：`Gimp.*` 命名空间（没有旧版 `gimpfu.pdb`）；颜色分量必须 **0..1 浮点**（传 0..255 会被夹成纯白），**而且是线性分量**（画笔上下文吃线性的，喂 sRGB 会整体提亮：`#214447` → `rgb(100,139,142)`；浅色几乎不变、越暗越明显，所以 `monet_brush_stroke` 曾经把"干笔暗边"整个洗没了，要先 `srgb_to_linear()`）；画笔"硬度"是 0..1、"间距/不透明度"是 0..100；`edit_stroke_item()` 在这个版本只画路径首尾两点，所以要自己逐点盖章。
+- **要"能自己画/能自己改"的材质走 SVG**（dev 机：Inkscape 1.4.3，`C:\Users\EastHillGu\Documents\GreenAPPS\Inkscape\bin\inkscape.com`；
+  本机：apt 的 `inkscape` 1.4，`tools/svg-to-tga.js` 会读 `INKSCAPE` 环境变量覆盖默认路径 —— 本机这样跑：`INKSCAPE=$(command -v inkscape) node tools/svg-to-tga.js ...`）。源码放在 `tools/svg/*.svg`（**手写矢量**，可以在 Inkscape 里直接打开改），导出走 `node tools/svg-to-tga.js`（Inkscape 出 PNG → 项目格式 TGA + 补白衬底 + 校验画布是 2 的幂）。现役 9 张：`minimap_rect_mask`、`monet_close_{normal,hover,push}`、`monet_map_{tracking,compartment,difficulty}`、`monet_spark_{up,down}`（施法条火花 / 经验线三角，**尖端画在贴图边缘**，位置靠锚点精确控制）。**规矩：有 SVG 的以 SVG 为准** —— 生成器（`tools/regen-textures.js`）里不再画同名纹理，否则两套源码会互相覆盖。像素质量与脚本版等价（对照表 `%TEMP%\opencode\svg-compare.png`），SVG 的优势是**源码可读可改**。
 - 三条路线按材质分工：**结构性的**（9-slice 边纹、遮罩、发丝线）必须像素级精确 → 脚本；**要软、要洇的**（笔触）→ GIMP；**要自己画/改的**（图标）→ SVG。GIMP 画小图标会更差：笔刷的抗锯齿在 11–24px 的显示尺寸下会糊（对照表 `%TEMP%\opencode\icon-compare.png`）。
 
 ### 插件列表图标（`Assets\Textures\monet_addon_icon.tga`）
 
 - **机制**：`.toc` 的 `## IconTexture:` → 客户端 `Blizzard_AddOnList/AddonList.lua:390` 用 `C_AddOns.GetAddOnMetadata(addonIndex, "IconTexture")` 取到，再以内联 `CreateSimpleTextureMarkup(iconTexture, 20, 20)` 画在插件名前面 —— **实际只显示 20×20**，所以构图必须"一眼认得出"（本图：深绿池水上一朵粉白睡莲）。128×128 足够（参考 Ellesmere 64×64、Platynator 128×128）。
-- **流水线**（三个本地工具，缺一不可）：
+- **流水线**（三个本地工具，缺一不可；Windows/dev 机路径，第 1 步依赖 PowerShell——Linux 本机无 PowerShell，见上文 GIMP 条的批处理替代）：
   1. `powershell -File tools/gimp-render.ps1 -Script tools/gimp-addon-icon.py -Out $env:TEMP\monet_addon_icon_bg.png` —— 跑 GIMP 的 Python-Fu，产出**背景**（水+天空+叶，不透明）与**前景**（只有花，带 alpha）两张 PNG。该壳负责"盯着输出文件出现就收摊"，因为 GIMP 3.2 的批处理跑完不会自己退出。
   2. `node tools/icon-post.js --bg <bg.png> --fg <fg.png> --out <out.png> --size=128` —— 背景重柔化（2.4px）、花轻柔化（0.9px），叠画布颗粒与织纹，再缩到 128。
   3. `node tools/tga-post.js <out.png> Assets\Textures\monet_addon_icon.tga` —— 转项目格式的未压缩 32bit TGA（type 2）。
