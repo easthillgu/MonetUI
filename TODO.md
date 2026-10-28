@@ -281,9 +281,8 @@
 - ◑ **待复核**：名牌 8 号 + 宽 85 超限 1px 的瞬态（`银月大使帕拉·晨歌`，链接断前的最后
   一块反例，理论应停在 9 号）。重开游戏读 `MonetUI:GetModule("Nameplates"):plates` 确认；
   若复现，往 FitText 的 while 循环加"结果仍超限就继续缩"兜底。
-- 📝 `MonetUI.md` §9 与现状不符，待订正：写着"明暗不烘进纹理""不产 SVG 材质""26/26 通过"，
-  实际剑/盾已烘灰阶明暗、SVG 源 9 张、`audit-pixels` **37/37 PASS**；§4.3.2 白名单的
-  火花一行还写着旧名（SPARK_CORE/GLOW），要改成 SPARK_FILL/SPARK_EDGE。
-
+- ~~📝 `MonetUI.md` §9 与现状不符，待订正~~ **已订正**（2026-10-28，`95aa983`）：§9 明暗行
+  （插画件例外）、26/26 → 37/37、SVG 现役 9 张、§4.3.2 火花白名单改 SPARK_FILL/SPARK_EDGE、
+  名字 70% 规则成条、姓名板 nameSize 默认 11→10 与 truncate 行"已停用"。
 - 注释清理前基线备份：`%TEMP%\opencode\comment-cleanup-backup`（29 文件，可逐文件回滚）。
 - 仓库约定：游戏正式上线且初步测试通过前，不向远端推送。
