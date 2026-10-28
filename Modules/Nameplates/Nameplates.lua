@@ -392,6 +392,33 @@ end
 
 --- Take the plate over: fade Blizzard's box out (kept and still shown, see below) and borrow its aura list;
 --- only faded, so a later Restore gives back exactly what the game drew.
+--
+-- **压暗范围是 base 上的全部子框（除我们自绘牌）**（2026-10-28 实机判例）：只压
+-- `base.UnitFrame` 不够 —— base 上还有**同级容器**（实机探针：每块牌子各 1 个
+-- StatusBar+Frame 的匿名容器，alpha 1.00，随 base 的距离衰减 alpha 0.60 可见），
+-- 有减益时暴雪还会**动态再建**容器（BuffListFrame 一族）。这些 sibling 全都不在
+-- UnitFrame 里，alpha 沿树继承救不了它们 → "暴雪牌子没藏掉、和自绘的同屏"。
+-- 一并压 0（SetAlpha 非 Hide：C++ 点击区锚在血条/名字上，见下，alpha 不影响命中）。
+local siblingFaded = setmetatable({}, { __mode = "k" })   -- 还原时要知道哪些被我们压过
+
+local function FadeBlizzardSiblings(base, keep)
+    for _, c in ipairs({ base:GetChildren() }) do
+        if c ~= keep and c.SetAlpha then
+            siblingFaded[c] = true
+            pcall(c.SetAlpha, c, 0)
+        end
+    end
+end
+
+local function RestoreBlizzardSiblings(base)
+    for _, c in ipairs({ base:GetChildren() }) do
+        if siblingFaded[c] then
+            siblingFaded[c] = nil
+            pcall(c.SetAlpha, c, 1)
+        end
+    end
+end
+
 local function HideBlizzardPlate(base, plate)
     local uf = BlizzardUnitFrame(base)
     if not uf then return false end
@@ -403,6 +430,7 @@ local function HideBlizzardPlate(base, plate)
     -- 视觉上一样看不见，但 hit test 仍然有效。
     if uf.SetAlpha then pcall(uf.SetAlpha, uf, 0) end
     if uf.IsShown and not uf:IsShown() then pcall(uf.Show, uf) end
+    FadeBlizzardSiblings(base, plate)
 
     plate.blizzardUF = uf
     plate.blizzardHidden = true
@@ -427,6 +455,7 @@ local function RestoreBlizzardPlate(base, plate)
         if uf.SetAlpha then pcall(uf.SetAlpha, uf, 1) end
         pcall(uf.Show, uf)
     end
+    RestoreBlizzardSiblings(base)
     if plate then
         plate.blizzardHidden = nil
         plate.blizzardUF = nil
@@ -654,11 +683,39 @@ end
 
 --- Blizzard can show its own UnitFrame again on any update; keep it faded (never hidden — the
 --- C++ nameplate hit test is anchored to its bars, see HideBlizzardPlate).
+--- sibling 容器一并回压：暴雪更新会重设它们的 alpha，**有减益时还会动态新 建 sibling 容器**
+--- （alpha 沿树继承救不了它们，和背包"晚生子框"同一课）—— 每拍整树补压。
 local function KeepBlizzardHidden(plate)
     local uf = plate.blizzardUF
     if not uf then return end
     if uf.IsShown and not uf:IsShown() then pcall(uf.Show, uf) end
     if uf.SetAlpha then pcall(uf.SetAlpha, uf, 0) end
+    FadeBlizzardSiblings(plate.base, plate)
+end
+
+-- ---- 目标高亮回压守卫（2026-10-28 实机判例）--------------------------------------
+-- 牌子成为**当前目标**时，暴雪自己的更新把 UnitFrame 的 alpha 重设回 1（目标高亮，
+-- base alpha 同时到 1.0）。我们的回压只挂在 UpdatePlate（事件驱动）里，目标切换那一刻
+-- 暴雪抢先、之后就没人再压 —— 表现是"当前目标的暴雪牌整块亮着，和自绘牌同屏"，
+-- 它右侧的减益列也跟着回来（探针实锤：假人牌 blizzardHidden=true 但 ufAlpha=1.00）。
+-- 低频守卫对全部 blizzardHidden 的牌子整树回压；PLAYER_TARGET_CHANGED 再补一记即时的。
+local guardDriver, guardAcc = nil, 0
+local GUARD_INTERVAL = 0.25
+
+local function StartGuard()
+    if guardDriver then return end
+    guardDriver = CreateFrame("Frame")
+    guardDriver:SetScript("OnUpdate", function(_, elapsed)
+        if not M.active then return end
+        guardAcc = guardAcc + (elapsed or 0)
+        if guardAcc < GUARD_INTERVAL then return end
+        guardAcc = 0
+        for _, plate in pairs(plates) do
+            if plate.blizzardHidden and plate.base then
+                KeepBlizzardHidden(plate)
+            end
+        end
+    end)
 end
 
 local function UpdatePlate(plate)
@@ -832,10 +889,14 @@ function M:RegisterEvents()
         Removed(unit)
     end)
 
-    -- A new target re-tints every plate's border.
+    -- A new target re-tints every plate's border; 换目标同时会把新目标的暴雪牌点亮
+    -- （目标高亮重设 UnitFrame alpha，见上面的守卫注释）—— 这里即时回压一记。
     EventBus:Register("PLAYER_TARGET_CHANGED", function()
         if not M.active then return end
-        for _, plate in pairs(plates) do UpdateBorder(plate) end
+        for _, plate in pairs(plates) do
+            if plate.blizzardHidden and plate.base then KeepBlizzardHidden(plate) end
+            UpdateBorder(plate)
+        end
     end)
 
     EventBus:Register("PLAYER_ENTERING_WORLD", function()
@@ -920,6 +981,7 @@ function M:SetEnabled(enabled)
         self:ApplyPlateSize()
         self:AbsorbExisting()
         self:UpdateAll()
+        StartGuard()
         return
     end
 
