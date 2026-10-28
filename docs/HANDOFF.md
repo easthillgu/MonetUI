@@ -912,6 +912,44 @@ active = "true" / setting = "true:true" / refresh = "true"（手动调用不报�
   （7=6 是字体分辨率地板）。 FitText 按规则正确工作；如果嫌"长名 8→7 跳档太狠"，
   候选微调：限宽允差 ±1px / 0.5px 步进（玩家没抱怨前不动）。
 
+#### 3.27 背包两轮：更新触发补强 + 暴雪框预停车（2026-10-28，`51e07b2`）
+
+**更新不及时**（玩家报"邮件/商人后窗口停在旧内容"）：
+
+- 三层触发：① 事件补强（`ITEM_COUNT_CHANGED` / `LOOT_READY` /
+  `UNIT_INVENTORY_CHANGED(player)` / `PLAYERBANKSLOTS_CHANGED`→银行直达、
+  `PLAYER_ENTERING_WORLD` 强制重扫）；② 公开 `M:Refresh()` + `/mui bags refresh`；
+  ③ 开窗期 **0.5s 签名轮询**（每槽 `itemID×数量` 指纹，变了才重建）——"及时"最终不赌
+  事件派发。
+- **资源口径（探针实测）**：`CURSOR_CHANGED` 本客户端 **×298 高频刷**，挂进 Mark 等于
+  窗口开着时每次光标变化全量重建 → **已移除**；`BAG_UPDATE_COOLDOWN` ×184（只管冷却，
+  不注册是对的）。驱动器帧级合并（比 qianwen 参考代码的 0.1s `C_Timer.NewTimer` 紧），
+  `pending`/`pendingBank` 双通道。
+- qianwen 参考代码的死代码：`PLAYERREAGENTBANKSLOTS_CHANGED`、`NUM_BAG_SLOTS`
+  本客户端**都不存在**（照抄会 nil 报错）。
+
+**两套同屏根治（预停车 + 边沿检测）**：
+
+- **实机探针定案**：按 B 开背包，`BAG_OPEN`/`BAG_CLOSED`/`BAG_UPDATE` **全部不发**
+  （事件在快照里存在但这条路径不派发）——"开背包"在事件层是静默的，`IsShown` 边沿是
+  唯一信号，事件驱动方案作废。
+- 旧方案（守卫见到显示的就 `Hide()`）两代价：Show→Hide 之间有可见闪帧；暴雪更新逻辑
+  再 Show 回来跟守卫打拉锯。
+- **新方案**：Initialize 即**常驻停车**——alpha 0 + 全子树禁鼠标（`parked` 弱键旁表记账，
+  含 `mouseSet` 防重复）。暴雪 Show 照样成功但不可见不收鼠标；**没有 Hide 这一刀，拉锯
+  不存在**。`SetAlpha`/`EnableMouse` 非受保护调用，战斗中可用，不写字段。
+- 守卫改**边沿检测**：上升沿 = 开我们的窗（`Toggle(true)`）、下降沿 = 关（`Toggle(false)`），
+  **不再 toggle**（回光返照反复切的根）；`bankOpen` 期间边沿让给银行路径；漂移回压
+  （alpha/鼠标被暴雪重设就补一刀）。
+- **晚生子框判例**：开背包时暴雪**现建** ItemButton（树从几框涨到 187 子框、85 个鼠标
+  开着）→ tooltip 冒出来。**alpha 沿树继承但鼠标状态不继承** → 扫描器对显示着的框每拍
+  整树补禁（不显示收不到鼠标事件，不用管）。实测 mouseOn=0。
+- `BlizzardBagFrames` 补了 `BackpackTokenFrame`。
+- 实机验证：按 B 只出我们的窗（零闪帧）、再按 B 关、悬停无 tooltip、点击穿透、
+  全程 **0 BLOCKED**。
+- 附带发现：任务/对话窗口开着时按 B 会被吞（零事件零反应）——不是插件问题，测背包
+  前先关 NPC 对话框。
+
 ---
 
 
