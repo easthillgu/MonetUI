@@ -808,25 +808,107 @@ local function Unpark(frame)
     pcall(frame.Show, frame)
 end
 
-local BLIZZARD_GROUPS = {
-    "CompactRaidFrameContainer",
-    "CompactRaidFrameManager",
-    "CompactPartyFrame",
-    "PartyFrame",
+--- 暴雪的小队/团队框分两组（小队 `PartyFrame` 是新式分离框，团队两组是容器 + 管理器）。
+local BLIZZARD_GROUP_FRAMES = {
+    party = { "CompactPartyFrame", "PartyFrame" },
+    raid  = { "CompactRaidFrameContainer", "CompactRaidFrameManager" },
 }
 
---- 暴雪的团队/小队框：**我们完全不动**。
+--- 饿事件：框体不再收到 GROUP_ROSTER_UPDATE / UNIT_*，因此不会被再次拉起或刷新。
+--- 这是 NDui 的做法，也是三家里唯一不动受保护几何/层级就能"关掉"的路径。
+--- **不可逆**：Blizzard 自己注册的事件在插件侧补不回来，还原只能靠 /reload。
+local starved = setmetatable({}, { __mode = "k" })
+local warnedReload = false
+
+local function Starve(frame)
+    if not frame or starved[frame] then return end
+    starved[frame] = true
+    pcall(frame.UnregisterAllEvents, frame)
+end
+
+local function Unstarve(frame)
+    if not frame or not starved[frame] then return end
+    starved[frame] = nil
+    if not warnedReload then
+        warnedReload = true
+        if type(ns.Print) == "function" then
+            ns:Print("暴雪团队/小队框的事件需要在 /reload 之后才会重新注册。")
+        end
+    end
+end
+
+--- alpha 0 的成员框仍然占着鼠标:点空地会被当成点单位(选目标/施法)。
+--- `EnableMouse` 不受保护、也不写字段,所以只关鼠标是最便宜的修法。
+--- 成员框是 LoD 加载后动态建的,所以每次 Repark 都补一遍(一层的开销,可忽略)。
+local function MuteChildren(frame, enable)
+    if type(frame.GetChildren) ~= "function" then return end
+    local ok, kids = pcall(frame.GetChildren, frame)
+    if not ok or type(kids) ~= "table" then return end
+    for i = 1, #kids do
+        local kid = kids[i]
+        if kid and type(kid.EnableMouse) == "function" then
+            pcall(kid.EnableMouse, kid, enable)
+        end
+    end
+end
+
+local function ParkGroup(frame)
+    Park(frame)            -- alpha 0 + 关鼠标（与 MainActionBar 同一套，不写字段、不 Hide）
+    Starve(frame)          -- 饿事件：不再被暴雪自己拉起
+    MuteChildren(frame, false)
+end
+
+local function UnparkGroup(frame)
+    if not frame then return end
+    Unstarve(frame)
+    Unpark(frame)
+    MuteChildren(frame, true)
+end
+
+--- 藏掉暴雪的团队/小队框（`groupFrames.hideBlizzard`）。
 ---
---- 实测：只要碰这个容器（写字段、HookScript、Hide()、甚至 SetAlpha），它和它的成员框
---- 就会被记成"被 MonetUI 动过"，之后 `EditModeManagerFrame:ResetPartyFrames →
---- CompactPartyFrame:RefreshMembers → CompactUnitFrame_UpdateHealthColor` 比较机密颜色
---- 分量就抛 "attempt to compare local 'oldR' (a secret number value, while execution tainted
---- by 'MonetUI')"（退出编辑模式必现）。
---- 所以这里彻底放手：玩家要藏暴雪的小队/团队框，用 `Esc → 编辑模式 → 小队/团队框 → 可见性 隐藏`，
---- 那是玩家操作，不产生任何污染。我们自己的小队/团队框照常工作（两者同时存在时会有重复，
---- 由玩家那一项设置决定）。
+--- **不 Hide()、不 SetParent、不挂 OnShow、不写字段**：
+---   * Hide()/SetParent 会被算成"插件动过这个受保护框"，退出编辑模式时
+---     `CompactUnitFrame_UpdateHealthColor` 比较机密颜色分量就会抛
+---     "attempt to compare local 'oldR' (a secret number value, while execution tainted by 'MonetUI')"；
+---   * 所以只做 **饿事件 + alpha 0 + 关鼠标**：框体仍算"显示"，它自己的更新逻辑照常跑，
+---     不写任何属性、不换父，语义上最接近"玩家把它调成透明"。
+---
+--- 本仓 2026-10 的旧记录里，对 `CompactPartyFrame` 直接 SetAlpha 也复现过上面那条 oldR。
+--- 这一版按新方案重试（先饿事件、只有 alpha/鼠标两项）；若退出编辑模式再报，
+--- 把 `groupFrames.hideBlizzard` 关掉即可退回到"完全放手"，不需要改代码。
 local function SetBlizzardHidden(cfg, partyActive, raidActive)
-    return
+    local hide = not (cfg and cfg.hideBlizzard == false)
+    local groups = BLIZZARD_GROUP_FRAMES
+
+    if not hide then
+        for _, name in ipairs(groups.party) do UnparkGroup(_G[name]) end
+        for _, name in ipairs(groups.raid)  do UnparkGroup(_G[name]) end
+        return
+    end
+
+    for _, name in ipairs(groups.party) do
+        if partyActive then ParkGroup(_G[name]) else UnparkGroup(_G[name]) end
+    end
+    for _, name in ipairs(groups.raid) do
+        if raidActive then ParkGroup(_G[name]) else UnparkGroup(_G[name]) end
+    end
+end
+
+--- LoD 补做：`Blizzard_CompactRaidFrames` 可能在登录之后才加载，而且加载时会把框换成新对象
+--- （"藏一次 + 盯 OnShow"永远漏），所以三个时机各补一次。
+--- Park/Starve 都是幂等的（弱键旁表守卫），重复调用只是两次查表。
+local function ReparkBlizzardGroups()
+    local cfg = Config()
+    if not cfg then return end
+    local partyCfg, raidCfg = cfg.party, cfg.raid
+    if not partyCfg or not raidCfg then return end
+    if type(ns.IsModuleEnabled) == "function" and ns:IsModuleEnabled("GroupFrames") == false then
+        return
+    end
+    SetBlizzardHidden(cfg,
+        party ~= nil and partyCfg.enabled ~= false,
+        raid ~= nil and raidCfg.enabled ~= false)
 end
 
 -- ============================================================================
@@ -1065,7 +1147,15 @@ function M:RegisterEvents()
     end
 
     EventBus:Register("GROUP_ROSTER_UPDATE", function() M:RefreshAll() end)
-    EventBus:Register("PLAYER_ENTERING_WORLD", function() M:RefreshAll() end)
+    -- 暴雪的框是 LoD + 会被换成新对象：进世界 / 换区 / 该包加载时都补一次压制。
+    EventBus:Register("PLAYER_ENTERING_WORLD", function()
+        M:RefreshAll()
+        ReparkBlizzardGroups()
+    end)
+    EventBus:Register("ZONE_CHANGED_NEW_AREA", function() ReparkBlizzardGroups() end)
+    EventBus:Register("ADDON_LOADED", function(_, name)
+        if name == "Blizzard_CompactRaidFrames" then ReparkBlizzardGroups() end
+    end)
 
     -- 选中目标边框：切目标只改四条边的 alpha，战斗里也能立刻跟上
     EventBus:Register("PLAYER_TARGET_CHANGED", function() SyncSelection() end)
