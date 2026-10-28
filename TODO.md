@@ -271,16 +271,19 @@
 
 ### 2026-10-27 下午遗留（下一次接手先看）
 
-- ◑ **名字"最多占 70%、超了缩字号"只做了一半**：`Widget:FitText()` 已写好
-  （`Utils/Widget.lua`，含机密宽度防护、按 1px 逐档缩、绝不裁字），但**还没接线**：
-  `Nameplates`（`UpdateText`）、`UnitFrames`（`UpdateName`）、`Groups`（`DisplayName` + 状态字）
-  三处仍在按字数截断（`Shorten` / `AbbrName` / `nameLength`）。接法：把 SetText 换成
-  `Widget:FitText(fs, text, 框宽 * 0.7, 基础字号, Media.fontFlags, 6)`，
-  并把旧的截断分支停用（`combatText` 那条 `truncate` 设置先留着但不再读）。
-- ⏳ **实机未验（改完游戏就关了）**：施法火花 3px 双层观感、小地图区域名 24px+THICKOUTLINE、
-  背包物品数量白字、InfoBar 战斗脉冲覆盖层。
+- ✅ **名字"最多占 70%、超了缩字号"已接线**（2026-10-28）：`Widget:FitText` 接到
+  `Nameplates.UpdateText` / `UnitFrames.UpdateName` / `Groups`（FitName，按钮存
+  `nameSize`/`nameBoxW`），旧截断（`Shorten`/`AbbrName`/`nameLength`）全部停用。
+  接线时抓到 FitText 真 bug：自动宽度字串被 `fs:GetWidth()` 误钳 → 永缩一档
+  （玩家名 10 显示成 9）；已改为显式传 `boxWidth`（详见 HANDOFF 3.26.6）。
+- ✅ **四项实机已验**（2026-10-28）：施法火花 3px 双层、小地图区域名 24px、
+  背包数量白字（全窗都在显示）、InfoBar 战斗脉冲（红线呼吸 0.93↔0.99）。
+- ◑ **待复核**：名牌 8 号 + 宽 85 超限 1px 的瞬态（`银月大使帕拉·晨歌`，链接断前的最后
+  一块反例，理论应停在 9 号）。重开游戏读 `MonetUI:GetModule("Nameplates"):plates` 确认；
+  若复现，往 FitText 的 while 循环加"结果仍超限就继续缩"兜底。
 - 📝 `MonetUI.md` §9 与现状不符，待订正：写着"明暗不烘进纹理""不产 SVG 材质""26/26 通过"，
-  实际剑/盾已烘灰阶明暗、SVG 源 9 张、`audit-pixels` **37/37 PASS**。
+  实际剑/盾已烘灰阶明暗、SVG 源 9 张、`audit-pixels` **37/37 PASS**；§4.3.2 白名单的
+  火花一行还写着旧名（SPARK_CORE/GLOW），要改成 SPARK_FILL/SPARK_EDGE。
 
 - 注释清理前基线备份：`%TEMP%\opencode\comment-cleanup-backup`（29 文件，可逐文件回滚）。
 - 仓库约定：游戏正式上线且初步测试通过前，不向远端推送。
