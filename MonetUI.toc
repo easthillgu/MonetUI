@@ -4,7 +4,7 @@
 ## Author: EastHillGu
 ## Version: 0.12.0
 ## Category: Interface
-## IconTexture: Interface\AddOns\MonetUI\Assets\Textures\monet_addon_icon.tga
+## IconTexture: Interface\AddOns\MonetUI\Assets\Textures\monet_addon_icon.blp
 ## X-Website: https://github.com/EastHillGu/MonetUI
 ## SavedVariables: MonetUIDB
 

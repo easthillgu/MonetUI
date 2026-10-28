@@ -478,14 +478,15 @@ end
 -- The rounded-border art, in three ring widths.  Each entry is fixed by the texture, not by taste:
 --   ring   = the ring's width in texels, which 9-slice maps 1:1 into UI units  -> also the background inset
 --   slice  = the outer arc radius in texels, which is also the smallest edgeSize that shows the whole arc
--- The generated files are Assets/Textures/monet_round_edge{,_thin,_thick}.tga (+ .blp via tga-to-blp.js);
--- the three numbers have to stay in step with tools/regen-textures.js (ROUND_EDGES) or the border drifts or
--- gets clipped.  Each entry carries the matching .blp key for SetBackdrop's edgeFile (retail/Forever
--- SetBackdrop cannot ingest TGA/PNG as an edge file -- it renders them as a row of dashes).
+-- Source TGA lives in Assets-src/Textures (tracked, not shipped); the shipped copy is
+-- Assets/Textures/monet_round_edge{,_thin,_thick}.blp.  The three numbers have to stay in step with
+-- tools/regen-textures.js (ROUND_EDGES) or the border drifts or gets clipped.
+-- (SetBackdrop's edgeFile cannot ingest these at all in this client -- see Widget:ApplyBackdrop -- so the
+-- rings are only ever drawn as plain textures; the old *_blp alias keys were removed 2026-10-28.)
 local ROUND_EDGES = {
-    { key = "monet_round_edge_thin",   blpKey = "monet_round_edge_thin_blp",   ring = 1, slice = 2 },
-    { key = "monet_round_edge",        blpKey = "monet_round_edge_blp",        ring = 2, slice = 3 },
-    { key = "monet_round_edge_thick",  blpKey = "monet_round_edge_thick_blp", ring = 3, slice = 4 },
+    { key = "monet_round_edge_thin",   ring = 1, slice = 2 },
+    { key = "monet_round_edge",        ring = 2, slice = 3 },
+    { key = "monet_round_edge_thick",  ring = 3, slice = 4 },
 }
 
 --- Pick the ring whose width is nearest the physical thickness asked for.
