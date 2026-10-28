@@ -244,8 +244,8 @@ Buff 边框）即时生效。
 |------|------|------|------|
 | 背包任务物品琥珀 | `QUEST_COLOR = (0.80, 0.80, 0.00)` | `Modules/Bags/Bags.lua` | 任务品边框，玩家靠"琥珀边"一眼认任务（Andromeda 同款语义） |
 | 背包任务标记 `!` | `(1.00, 0.82, 0.00)` | `Modules/Bags/Bags.lua` | 同上，金色是任务信号的载体 |
-| 施法火花内芯 | `SPARK_CORE = (1.00, 0.96, 0.86)` | `Modules/UnitFrames/CastBar.lua` | 白热芯：在任何条色（职业色 / resource / 中性）上都要跳出来 |
-| 施法火花外晕 | `SPARK_GLOW = (1.00, 0.18, 0.10)` | `Modules/UnitFrames/CastBar.lua` | 危险红晕 + 呼吸，提示"这条可以断/正在施法" |
+| 施法火花内芯（红） | `SPARK_FILL = (1.00, 0.18, 0.10)` | `Modules/UnitFrames/CastBar.lua` | 危险红：施法条已无填充条，红色三角是"正在施法/可断"的唯一信号 |
+| 施法火花描边 | `SPARK_EDGE = (0.10, 0.03, 0.03)` | `Modules/UnitFrames/CastBar.lua` | 近黑暖灰描边：3px 总高的东西没有描边就糊进条底；不可断施法两层一起转中性灰 |
 | 进出战斗提示 · 剑 | 金 `(0.92, 0.70, 0.28)` / 青蓝 `(0.45, 0.78, 0.90)` | `Modules/CombatText.lua` | 插画件；主题签名槽是边框用的低饱和色，染大块剑刃会发灰（实机验过） |
 | 进出战斗提示 · 盾 | 与大字同语义：danger / health / 暖金 | `Modules/CombatText.lua` | 盾 = 状态主角，红（危险）/ 绿（安全）/ 金（进入战斗） |
 
@@ -446,10 +446,14 @@ Secrets.SetBar(frame.health, UnitHealth(unit), UnitHealthMax(unit))  -- 内部 p
 | focus | — | — | 名字 |
 | pet | — | — | —（无文字，同 Andromeda） |
 
-- **名字截断**（取 Andromeda 的 name tag 数值）：先 `Math:AbbrName` 把多词名的前几个词压成首字母
-  （`Lady Sylvanas Windrunner` → `L. S. Windrunner`；中文名没有空格，这一步不动它），再 `Math:Shorten`
-  按**字符数**截断并补 `...` —— 玩家/目标 8（拉丁名 10），目标的目标/焦点 5（拉丁名 8）。按字符而不是
-  字节：按字节切会把一个汉字拦腰截断，字体画出乱码。名字读不出来（保密）时整段跳过，与 Nameplates 的约定一致。
+- **名字显示（2026-10-27 玩家定的 70% 规则，现行）**：名字最多占名牌/框宽 **70%**，超了就
+  **逐档缩小字号**（1px 一档），**绝不截断** —— 统一入口 `Widget:FitText`
+  （`Utils/Widget.lua`；机密名/机密宽度走它的"不测不缩"分支，原样按基础字号显示）。
+  三个调用点：`Nameplates.UpdateText`（限额还要扣 level 段实测宽防挤）、
+  `UnitFrames.UpdateName`（再扣 level/血量文字）、`Groups` 的 `FitName`（固定盒子
+  `nameBoxW` 兜底）。旧的按字数截断（`Math:AbbrName` + `Math:Shorten`，2026-10-18 立的
+  "玩家/目标 8 拉丁 10"那套）**停用**：设置（`nameCap`/`nameLength`/`truncate`）保留
+  但不再读，改字号粒度能保住完整名字。
 
 #### 小地图矩形化
 
@@ -826,9 +830,9 @@ MonetUI 只写"怎么用"和"长什么样"：
 | `hideCritters` / `hideDead` | `true` / `false` | 过滤小动物 / 死亡单位 |
 | `viewDistance` | `60` | `nameplateMaxDistance` |
 | `width` / `height` | `120` / `12` | 血条框尺寸 |
-| `nameSize` | `11` | 名字/等级字号（百分比与施法文字小 1px） |
+| `nameSize` | `10` | 名字/等级字号（2026-10-27 从 12 降到 10，暴雪名牌名是 9.6 号；百分比与施法文字小 1px） |
 | `showName` / `showLevel` / `showPercent` | `true` | 名称 / 等级+精英标记 / 血量百分比 |
-| `truncate` / `nameLength` | `true` / `16` | 名称截断与长度 |
+| `truncate` / `nameLength` | `true` / `16` | **已停用**（2026-10-28 起）：新规则走 `Widget:FitText` 的 70% 缩字（见 §四「单位框架 · 文字位置」名字显示条），设置保留只为收纳旧档 |
 | `showCast` / `castHeight` | `true` / `13` | 施法条与高度（带图标） |
 | `showThreat` / `highlightTarget` | `true` | 仇恨描边（红/橙）/ 当前目标描边高亮 |
 | `showDebuffs` / `auraGap` | `true` / `4` | 借用暴雪减益列表与间距 |
@@ -1253,9 +1257,9 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | 透明 | 只靠 **Alpha=0**，不做颜色键；透明像素的 RGB 填成**纯白哑光 (255,255,255)**，不留黑也不填平均色 —— 客户端生成 mip / 双线性过滤时会把边缘像素的颜色拖进可见区，纯黑会在每个图标周围描一圈灰边；我们的材质全是 `SetVertexColor` 可染色的近白，染色是乘法，纯白哑光乘任何色调都精确得到该色调本身 |
 | 纯黑 | 没有任何 alpha=255 的纯黑像素；且透明区 RGB 也不为纯黑（逐像素审计实测 0 个） |
 | 命名 | `monet_*` 小写 + **下划线**（如 `monet_round_edge.tga`），文件名、生成器 id、`Utils/Media.lua` 的贴图键三者同名；改名要同时改这三处 |
-| 明暗 | **不烘进纹理**：纹理只提供可染色的基色（`monet_barfill` 是平色），体积由运行期 `Widget:BarGradient`（沿条轴）/ `Widget:TopLight`（横截面）算出。理由见决策记录：把渐变烘进固定尺寸的纹理等于把明暗绑死在一个条高上 |
-| 像素对齐 | 轴对齐几何一律走 `pxRect` / `pxHLine` / `pxVLine` / `pxStrokeRect`，**边吸附到整数像素边界**，抗锯齿只留给曲线。验收用 `tools/audit-pixels.js`：`STRICT` 表（7 张纯矩形纹理）半覆盖像素必须为 0、`NO_SOFT_EDGE` 表（含直边的纹理）软边直边必须为 0、所有纹理孤立像素（描边断点）必须为 0。当前实测 **26/26 通过** |
-| SVG | 不产 SVG 材质（`@napi-rs/canvas` / Cairo 直接绘制）；设计稿里的 `<svg>` 只是 CSS 遮罩滤镜，不是贴图，所以 viewBox 规则不适用 |
+| 明暗 | 条/面的明暗**不烘进纹理**：`monet_barfill` 等仍是平色基材，体积由运行期 `Widget:BarGradient`（沿条轴）/ `Widget:TopLight`（横截面）算出 —— 把渐变烘进固定尺寸纹理等于绑死一个条高（理由见 2026-10-19 决策）。**例外（2026-10-27 起）：插画件例外** —— 进出战斗的剑/盾按"灰阶明暗 = 形体感的载体"烘进贴图（斜面渐变、 fuller/铆钉/盾钉的高光），它们是唯一形体、没有"其它条高"要服务；染色的只是语义层（进/出的金与青蓝）。详见 HANDOFF 3.25/3.26 |
+| 像素对齐 | 轴对齐几何一律走 `pxRect` / `pxHLine` / `pxVLine` / `pxStrokeRect`，**边吸附到整数像素边界**，抗锯齿只留给曲线。验收用 `tools/audit-pixels.js`：`STRICT` 表（纯矩形纹理）半覆盖像素必须为 0、`NO_SOFT_EDGE` 表（含直边的纹理）软边直边必须为 0、所有纹理孤立像素（描边断点）必须为 0；另有 `STENCIL` 染色模具名单 + 全局白衬底检查。当前实测 **37/37 通过**（含剑/盾等烘了灰阶明暗的插画件） |
+| SVG | **产** SVG 材质（2026-10-20 起三条路线并存）：结构性的走脚本、要软要洇的走 GIMP、**要自己画/自己改的走 SVG**（Inkscape 手写矢量 → `tools/svg-to-tga.js` 导出）。现役 9 张：`minimap_rect_mask` / `monet_close_{normal,hover,push}` / `monet_map_{tracking,compartment,difficulty}` / `monet_spark_{up,down}`，源码在 `tools/svg/`。**规矩：有 SVG 的以 SVG 为准** —— 生成器（`tools/regen-textures.js`）里不再画同名纹理，否则两套源码互相覆盖 |
 | 线宽 | 由**变体**决定（`tools/regen-textures.js` 的 `VARIANTS[*].lineWidth`），当前采用 **`crisp` 锐利**：`icon = 3px`（勾/X/箭头/V 形/窗口控件/搜索）、`plusMinus = 5px`、`hairline = 1px`。**不是**变体的：`round_edge` 的 2px 环 / 外弧 3（被 `Widget.lua` 的 `ROUND_INSET=2`、`ROUND_SLICE=3` 钉死）、`corner` 的 1px 线。原因见决策记录：对比表带 18px 实显格，3px 在实际显示尺寸下明显比 2px 实，而 2px 在 16–22px 区间偏虚 |
 | 自校验 | 生成后由 `tools/compare-textures.js` 做像素对比，`tools/gen-compare-html.js` 出并排预览页；另查尺寸幂次、BPP、descriptor、文件大小、纯黑透明像素 |
 
