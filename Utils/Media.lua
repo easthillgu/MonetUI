@@ -287,9 +287,12 @@ Media.texture = {
     -- is nearest to thickness * Media:Mult(), keeping the error under half a physical pixel.
     -- Each one's outer arc radius is also its required 9-slice slice, and the ring width is also the
     -- background inset -- see ROUND_EDGES in Utils/Widget.lua, which must stay in step with the generator.
-    ["monet_round_edge"]        = ASSET .. "Textures\\monet_round_edge",          -- 环宽 2，外弧 3
-    ["monet_round_edge_thin"]   = ASSET .. "Textures\\monet_round_edge_thin",     -- 环宽 1，外弧 2
-    ["monet_round_edge_thick"]  = ASSET .. "Textures\\monet_round_edge_thick",    -- 环宽 3，外弧 4
+    -- 32x32 圆角填充：形状与环的外沿完全重合，压在环下面补住 SetBackdrop 方底的四个角
+    -- （方底的角点落在弧外，不补的话圆角处会戳出一小块底色）。
+    ["monet_round_fill"]        = ASSET .. "Textures\\monet_round_fill",
+    ["monet_round_edge"]        = ASSET .. "Textures\\monet_round_edge",          -- 环宽 2，外弧 8
+    ["monet_round_edge_thin"]   = ASSET .. "Textures\\monet_round_edge_thin",     -- 环宽 1，外弧 8
+    ["monet_round_edge_thick"]  = ASSET .. "Textures\\monet_round_edge_thick",    -- 环宽 3，外弧 8
     -- 注：曾有三个 `*_blp` 别名键专供 SetBackdrop 的 edgeFile 走 BLP 圆角 9-slice，
     -- 实测本引擎对 edgeFile 连 RAW3 BLP 都渲染成碎线（见 Widget:ApplyBackdrop 的注释），
     -- 该方案已废弃、别名无人读取，2026-10-28 删除。现在三个键的路径不带扩展名，

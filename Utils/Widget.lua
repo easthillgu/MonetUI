@@ -483,10 +483,13 @@ end
 -- tools/regen-textures.js (ROUND_EDGES) or the border drifts or gets clipped.
 -- (SetBackdrop's edgeFile cannot ingest these at all in this client -- see Widget:ApplyBackdrop -- so the
 -- rings are only ever drawn as plain textures; the old *_blp alias keys were removed 2026-10-28.)
+-- 2026-10-28：外弧从 3 提到 8（纹理 32×32），三档只差环宽，slice 统一 8。
+-- 角部用**曲率渐变**（欧拉螺线）而不是圆弧：曲率从 0 线性升到峰值再降回 0（G2 连续），
+-- 直边与角部的接口没有"折一下"的观感；同外弧下曲率峰值比圆弧/超椭圆低三成。
 local ROUND_EDGES = {
-    { key = "monet_round_edge_thin",   ring = 1, slice = 2 },
-    { key = "monet_round_edge",        ring = 2, slice = 3 },
-    { key = "monet_round_edge_thick",  ring = 3, slice = 4 },
+    { key = "monet_round_edge_thin",   ring = 1, slice = 8 },
+    { key = "monet_round_edge",        ring = 2, slice = 8 },
+    { key = "monet_round_edge_thick",  ring = 3, slice = 8 },
 }
 
 --- Pick the ring whose width is nearest the physical thickness asked for.
@@ -505,6 +508,117 @@ local function PickRoundEdge(thickness)
     return best
 end
 
+-- ---------------------------------------------------------------------------
+-- 自绘 9-slice 圆角边框
+-- ---------------------------------------------------------------------------
+-- SetBackdrop 的 edgeFile 在本引擎上不可用（连 RAW3 BLP 都渲染成碎线），所以四角与四边由我们
+-- 自己摆贴图：4 块角（原尺寸，1 纹素 = 1 UI 单位，弧线因此精确）+ 4 条边（沿轴向拉伸），
+-- 外加 4 块**圆角填充**压在下面，补住 SetBackdrop 方底在圆角处戳出来的那一小块。
+--
+-- 贴图共用一张：靠 SetTexCoord 取九宫格里的不同块。全部挂在框体自己的 BORDER 层（边框）与
+-- BACKGROUND 层（填充），不碰任何暴雪对象，也不往框体上写字段（状态走 ns:Mark 的旁表）。
+local ROUND_TEX = 32          -- 圆角贴图的边长（纹素），与 regen-textures.js 一致
+local ROUND_SLICE = 8         -- 外弧半径（纹素 = UI 单位），与 ROUND_EDGES 的 slice 一致
+
+local function LayoutRoundBorder(st)
+    local frame, s, w = st.frame, ROUND_SLICE, st.ring
+    local u0, u1 = 0, s / ROUND_TEX                       -- 角部横向纹理区间
+    local v0, v1 = 0, s / ROUND_TEX
+    local ru = w / ROUND_TEX                              -- 边带宽度的纹理区间
+
+    local function place(tex, point, relPoint, x, y, w2, h2)
+        tex:ClearAllPoints()
+        tex:SetPoint(point, frame, relPoint, x, y)
+        if w2 then tex:SetSize(w2, h2) end
+    end
+
+    -- 四角
+    place(st.corner.tl, "TOPLEFT", "TOPLEFT", 0, 0, s, s)
+    place(st.corner.tr, "TOPRIGHT", "TOPRIGHT", 0, 0, s, s)
+    place(st.corner.bl, "BOTTOMLEFT", "BOTTOMLEFT", 0, 0, s, s)
+    place(st.corner.br, "BOTTOMRIGHT", "BOTTOMRIGHT", 0, 0, s, s)
+
+    -- 四边：只在两个角之间铺，厚度 = 环宽
+    local function span(tex, p1, r1, x1, y1, p2, r2, x2, y2, thickness, vertical)
+        tex:ClearAllPoints()
+        tex:SetPoint(p1, frame, r1, x1, y1)
+        tex:SetPoint(p2, frame, r2, x2, y2)
+        if vertical then tex:SetWidth(thickness) else tex:SetHeight(thickness) end
+    end
+    span(st.edge.top, "TOPLEFT", "TOPLEFT", s, 0, "TOPRIGHT", "TOPRIGHT", -s, 0, w, false)
+    span(st.edge.bottom, "BOTTOMLEFT", "BOTTOMLEFT", s, 0, "BOTTOMRIGHT", "BOTTOMRIGHT", -s, 0, w, false)
+    span(st.edge.left, "TOPLEFT", "TOPLEFT", 0, -s, "BOTTOMLEFT", "BOTTOMLEFT", 0, s, w, true)
+    span(st.edge.right, "TOPRIGHT", "TOPRIGHT", 0, -s, "BOTTOMRIGHT", "BOTTOMRIGHT", 0, s, w, true)
+
+    -- 纹理区间：角 = 九宫格的四个角；边 = 两角之间的那条带
+    st.corner.tl:SetTexCoord(0, u1, 0, v1)
+    st.corner.tr:SetTexCoord(1 - u1, 1, 0, v1)
+    st.corner.bl:SetTexCoord(0, u1, 1 - v1, 1)
+    st.corner.br:SetTexCoord(1 - u1, 1, 1 - v1, 1)
+    st.edge.top:SetTexCoord(u1, 1 - u1, 0, ru)
+    st.edge.bottom:SetTexCoord(u1, 1 - u1, 1 - ru, 1)
+    st.edge.left:SetTexCoord(0, ru, v1, 1 - v1)
+    st.edge.right:SetTexCoord(1 - ru, 1, v1, 1 - v1)
+
+    -- 圆角填充的角：与环同形（同一个外沿），只负责补住方底
+    for _, key in ipairs({ "tl", "tr", "bl", "br" }) do
+        st.fill[key]:ClearAllPoints()
+        st.fill[key]:SetPoint(({ tl = "TOPLEFT", tr = "TOPRIGHT", bl = "BOTTOMLEFT", br = "BOTTOMRIGHT" })[key], frame,
+            ({ tl = "TOPLEFT", tr = "TOPRIGHT", bl = "BOTTOMLEFT", br = "BOTTOMRIGHT" })[key], 0, 0)
+        st.fill[key]:SetSize(s, s)
+        st.fill[key]:SetTexCoord(st.corner[key]:GetTexCoord())
+    end
+
+end
+
+--- 开启（或更新）一个框体的圆角边框。opts.thickness 与方角边框同义。
+function Widget:RoundBorder(frame, opts)
+    if not frame or not frame.CreateTexture then return nil end
+    opts = opts or {}
+    local edge = PickRoundEdge(opts.thickness or 1)
+
+    local st = Marked(frame, "roundBorder")
+    if not st then
+        st = { frame = frame, ringKey = edge.key, corner = {}, edge = {}, fill = {} }
+        Mark(frame, "roundBorder", st)
+        local ringTex = Media.texture[edge.key]
+        local fillTex = Media.texture.monet_round_fill
+        for _, key in ipairs({ "tl", "tr", "bl", "br" }) do
+            local tex = frame:CreateTexture(nil, "BORDER", nil, 1)
+            tex:SetTexture(ringTex)
+            st.corner[key] = tex
+
+            local fill = frame:CreateTexture(nil, "BACKGROUND", nil, 1)
+            fill:SetTexture(fillTex)
+            st.fill[key] = fill
+        end
+        for _, key in ipairs({ "top", "bottom", "left", "right" }) do
+            local tex = frame:CreateTexture(nil, "BORDER", nil, 1)
+            tex:SetTexture(ringTex)
+            st.edge[key] = tex
+        end
+        -- 尺寸变化时重排。只挂**我们自己的**框（名字前缀 MonetUI）——挂到暴雪框上等于插进它的
+        -- 事件链，一样会污染；没名字的框靠 Refresh 里的尺寸比对兜底（见下）。
+        local fname = frame.GetName and frame:GetName()
+        if frame.HookScript and fname and fname:find("^MonetUI") then
+            frame:HookScript("OnSizeChanged", function(self) -- TAINT-OK: name 门控，只挂自建框
+                local state = Marked(self, "roundBorder")
+                if state then LayoutRoundBorder(state) end
+            end)
+        end
+    elseif st.ringKey ~= edge.key then
+        -- 换了环宽：贴图换成新的一档
+        local ringTex = Media.texture[edge.key]
+        st.ringKey = edge.key
+        for _, key in ipairs({ "tl", "tr", "bl", "br" }) do st.corner[key]:SetTexture(ringTex) end
+        for _, key in ipairs({ "top", "bottom", "left", "right" }) do st.edge[key]:SetTexture(ringTex) end
+    end
+
+    st.ring = edge.ring
+    LayoutRoundBorder(st)
+    return st
+end
+
 --- (Re)build the backdrop table and push it to the frame.  Split out of Theme so it can be re-run on
 --- its own: every value here is derived from Media:Mult(), i.e. from the uiScale CVar, so a UI scale
 --- change invalidates all of them.  Without this the borders built before the player moved the slider
@@ -519,13 +633,16 @@ function Widget:ApplyBackdrop(frame, opts)
     end
     bd.bgFile = Media.texture.blank
     if opts.round then
-        -- 尝试过用 monet_round_edge*.blp 走 SetBackdrop 的 edgeFile 做 9-slice 圆角，
-        -- 正式服 12.1.5 / Forever 16001 上效果都很差（edgeFile 在这个引擎里只能喂 BLP，
-        -- 即使 RAW3 无压缩也渲染破碎）。直接回退到直角——theme borderColor + WHITE8X8 足够。
-        local edge = (opts.thickness or 1) * Media:Mult()
-        bd.edgeFile = Media.texture.blank
-        bd.edgeSize = edge
-        bd.insets = { left = edge, right = edge, top = edge, bottom = edge }
+        -- 圆角：SetBackdrop 的 edgeFile 在本引擎上不可用（连 RAW3 BLP 都渲染成碎线，见
+        -- Widget:RoundBorder 的注释），所以边框完全自绘 9-slice；这里只留下背景，并把背景
+        -- 内缩到环的内沿，别让方底盖住我们的边框。
+        local ring = PickRoundEdge(opts.thickness or 1)
+        bd.edgeFile = nil
+        bd.edgeSize = 0
+        bd.insets = { left = ring.ring, right = ring.ring, top = ring.ring, bottom = ring.ring }
+        frame:SetBackdrop(bd)
+        Widget:RoundBorder(frame, opts)
+        return
     else
         -- Square corners: a continuous line of WHITE8X8.  edgeSize / insets are physical pixels
         -- (thickness * Media:Mult()), so the line stays crisp at any UI scale instead of softening
@@ -577,13 +694,34 @@ function Widget:Refresh(frame, opts)
         frame:SetBackdropColor(ar * 0.35, ag * 0.35, ab * 0.35, opts.bgAlpha or 0.85)
 
         local state = opts.borderState
+        local kr, kg, kb, ka
         if state then
             -- A live state (threat glow ...) outranks the themed colour and lives in this opts table, so a theme-refresh broadcast re-applies *it* instead of stomping it.
             frame:SetBackdropBorderColor(state.r, state.g, state.b, state.a or 1)
+            kr, kg, kb, ka = state.r, state.g, state.b, state.a or 1
         else
-            local kr, kg, kb = BorderColor(opts)
-            local _, _, _, ka = Color:GetEdge()
-            frame:SetBackdropBorderColor(kr, kg, kb, opts.borderAlpha or ka or 1)
+            kr, kg, kb = BorderColor(opts)
+            local _, _, _, ea = Color:GetEdge()
+            ka = opts.borderAlpha or ea or 1
+            frame:SetBackdropBorderColor(kr, kg, kb, ka)
+        end
+        -- 自绘圆角边框自己上色：环吃边框色，填充块吃背景色（与 SetBackdropColor 同源）
+        local st = Marked(frame, "roundBorder")
+        if st then
+            -- 尺寸兜底：没名字的框挂不了 OnSizeChanged，这里比对一下再重排（12 个 SetPoint，很轻）
+            local fw, fh = frame:GetWidth(), frame:GetHeight()
+            if fw ~= st.lastW or fh ~= st.lastH then
+                st.lastW, st.lastH = fw, fh
+                LayoutRoundBorder(st)
+            end
+            local a = opts.bgAlpha or 0.85
+            for _, key in ipairs({ "tl", "tr", "bl", "br" }) do
+                st.corner[key]:SetVertexColor(kr, kg, kb, ka)
+                st.fill[key]:SetVertexColor(ar * 0.35, ag * 0.35, ab * 0.35, a)
+            end
+            for _, key in ipairs({ "top", "bottom", "left", "right" }) do
+                st.edge[key]:SetVertexColor(kr, kg, kb, ka)
+            end
         end
     end
 end

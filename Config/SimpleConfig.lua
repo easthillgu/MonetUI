@@ -277,7 +277,7 @@ function SimpleConfig:Build()
     if panel then return panel end
 
     panel = Widget:CreateFrame("MonetUIConfigFrame", UIParent, 400, 800)
-    Widget:Theme(panel, { thickness = 2, bgAlpha = 0.96, borderAlpha = 1 })
+    Widget:Theme(panel, { thickness = 2, bgAlpha = 0.96, borderAlpha = 1, round = true })
     panel:SetPoint("CENTER")
     panel:SetFrameStrata("DIALOG")
     panel:SetMovable(true)
