@@ -198,6 +198,12 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   Media 键一律**不带扩展名**（引擎自行解析）；唯一显式引用是 `MonetUI.toc` 的 `IconTexture: ...monet_addon_icon.blp`。
   注意：`SetBackdrop` 的 `edgeFile` 不可用这些贴图（本引擎连 RAW3 BLP 也渲染成碎线），edgeFile 的唯一客户
   照旧走 `blank`/直角（见 `Utils/Media.lua` 头部注释与 `Widget:ApplyBackdrop`）。
+- **圆角边框是自绘 9-slice，不是 `edgeFile`**（2026-10-28 实装）：本引擎把 `edgeFile` 渲染成碎线，
+  所以四角/四边由 `Widget:RoundBorder` 自己摆贴图 —— 4 块角（原尺寸，1 纹素 = 1 UI 单位）+ 4 条边（拉伸）
+  + 4 块 `monet_round_fill` 圆角填充压在下层（补住 `SetBackdrop` 方底戳出圆角的那一小块）。
+  贴图 32×32、外弧 8、**曲率线性渐变**（欧拉螺线，G2 连续）而不是圆弧 —— 圆弧在切点处曲率从 0 突跳到 1/r，
+  那就是肉眼看到的"折一下"；同外弧下螺线的曲率峰值低三成。`slice = 8`（与 `Widget.lua` 的 `ROUND_EDGES` 同源）。
+  现役使用点：小地图面板、任务追踪、配置面板、微型菜单。
 - **BLP 必须带完整 mip 链**（`tga-to-blp.js` 默认就生成）。`mipmaps:false` 属交付缺陷：贴图被缩小显示时，
   没有 mip 就只能实时缩采样，1px 线条会丢、会闪。四条细则：
   ① 滤波用 `triangle` —— 唯一不过冲的选项，`catmullRom`/`lanczos3` 会在发丝线与 alpha 硬边两侧振铃出 halo；
