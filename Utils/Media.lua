@@ -251,8 +251,8 @@ Media.texture = {
     -- 走这条路径时**不要再叠 Widget:BarGradient**（两层相乘会双倍压暗），见 Widget:Bar。
     ["monet_barfill_gradient"] = ASSET .. "Textures\\monet_barfill_gradient",
 
-    -- 细条剖面（64x64，竖轴）：**中间亮、上下暗**，对称。4–6px 的条上整条渐变只剩 4 个台阶，
-    -- 看不出体积；对称剖面压到 4 行仍然是"暗/亮/亮/暗"，读起来是一根有厚度的细条。
+    -- 细条剖面（64x64，竖轴）：**上亮下暗的单向**。4–6px 的条上整条渐变只剩 4 个台阶，
+    -- 看不出体积；单向剖面压到 4 行仍然是一条"顶亮、底暗"的带子。
     -- Widget:Bar 按高度自动选它（<= THIN_BAR_MAX），姓名板就是这条路径。
     ["monet_barfill_thin"] = ASSET .. "Textures\\monet_barfill_thin",
 

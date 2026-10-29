@@ -345,8 +345,8 @@ function Widget:CreateFrame(name, parent, width, height, template, kind)
     return frame
 end
 
---- 细条阈值：条高 <= 这个值就改用对称剖面（monet_barfill_thin：中间亮、上下暗）。
---- 4–6px 上 64 行单向渐变只剩 4 个台阶，对称剖面才读得出"厚度"。
+--- 细条阈值：条高 <= 这个值就改用细条剖面（monet_barfill_thin：上亮下暗的单向）。
+--- 4–6px 上 64 行渐变只剩 4 个台阶，单向剖面在细条上读起来最像"被上方打光"。
 local THIN_BAR_MAX = 6
 
 --- 某条高的条该用哪张剖面填充贴图（姓名板重排时也要按这个规则重设）。
@@ -356,9 +356,9 @@ function Widget:BarFillTexture(height)
 end
 
 --- 建一条状态条。
---- textureKey 不传时按条高自动选：细条用对称剖面（monet_barfill_thin），其余用单向剖面
---- （monet_barfill_gradient）。两张剖面都已烤进贴图，所以**不叠 Widget:BarGradient** ——
---- 运行时渐变会和贴图相乘，等于双倍压暗。
+--- textureKey 不传时按条高自动选：细条用上亮下暗的单向细条剖面（monet_barfill_thin），
+--- 其余用整条单向剖面（monet_barfill_gradient）。两张剖面都已烤进贴图，所以**不叠
+--- Widget:BarGradient** —— 运行时渐变会和贴图相乘，等于双倍压暗。
 --- 传 textureKey="monet_barfill"（或任何扁平材质）时仍按老路子走运行时渐变。
 function Widget:Bar(parent, width, height, textureKey)
     local key = textureKey or Widget:BarFillTexture(height)
