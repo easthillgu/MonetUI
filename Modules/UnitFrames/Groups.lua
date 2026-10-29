@@ -796,9 +796,17 @@ local parked = setmetatable({}, { __mode = "k" })
 local function Park(frame)
     if not frame or parked[frame] then return end
     parked[frame] = true
+    -- 1. alpha 0（保持"仍在显示"的语义，不与自身 Show 拉锯）
     pcall(frame.SetAlpha, frame, 0)
+    -- 2. 关鼠标（EnableMouse 不受保护）
     pcall(frame.EnableMouse, frame, false)
     if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, false) end
+    -- 3. 移出屏幕 —— 暴雪可能画 backdrop/border/selection highlight 且
+    --    SetIgnoreParentAlpha，alpha 0 挡不住；SetPoint 不受保护。
+    if type(frame.ClearAllPoints) == "function" then pcall(frame.ClearAllPoints, frame) end
+    if type(frame.SetPoint) == "function" then
+        pcall(frame.SetPoint, frame, "TOPLEFT", "UIParent", "BOTTOMRIGHT", 1, -1)
+    end
 end
 
 local function Unpark(frame)
@@ -839,30 +847,78 @@ end
 
 --- alpha 0 的成员框仍然占着鼠标:点空地会被当成点单位(选目标/施法)。
 --- `EnableMouse` 不受保护、也不写字段,所以只关鼠标是最便宜的修法。
---- 成员框是 LoD 加载后动态建的,所以每次 Repark 都补一遍(一层的开销,可忽略)。
-local function MuteChildren(frame, enable)
-    if type(frame.GetChildren) ~= "function" then return end
+---
+--- 层级比看上去深:团队是 容器 → `CompactRaidGroupN` → `CompactRaidGroupNMemberM`,
+--- 小队还另有独立全局 `PartyMemberFrameN` / `CompactPartyFrameMemberN`(不一定是容器的子框)。
+--- 所以这里**递归**关(深度 4 足够覆盖上述三代),外加显式名单兜底;
+--- 成员框是 LoD/进组后才建的,所以 Repark 每次都会重扫(幂等,几十个框的 pcall,可忽略)。
+local EXTRA_PARTY_MEMBERS = {}
+for i = 1, 5 do
+    EXTRA_PARTY_MEMBERS[#EXTRA_PARTY_MEMBERS + 1] = "PartyMemberFrame" .. i
+    EXTRA_PARTY_MEMBERS[#EXTRA_PARTY_MEMBERS + 1] = "CompactPartyFrameMember" .. i
+end
+
+local function MuteOne(frame, enable)
+    if not frame then return end
+    if type(frame.EnableMouse) == "function" then pcall(frame.EnableMouse, frame, enable) end
+    if type(frame.EnableMouseMotion) == "function" then pcall(frame.EnableMouseMotion, frame, enable) end
+end
+
+--- 暴雪的紧凑框对很多子件设了 `SetIgnoreParentAlpha(true)`，
+--- 所以根框 `SetAlpha(0)` 挡不住它们露出来（空心描边）。
+--- 必须逐件归零；归还时统一拉回 1（简单、安全、幂等）。
+local function AlphaTree(frame, alpha, depth)
+    if not frame then return end
+    depth = depth or 0
+    if type(frame.SetAlpha) == "function" then pcall(frame.SetAlpha, frame, alpha) end
+    if depth >= 4 or type(frame.GetChildren) ~= "function" then return end
     local ok, kids = pcall(frame.GetChildren, frame)
     if not ok or type(kids) ~= "table" then return end
-    for i = 1, #kids do
-        local kid = kids[i]
-        if kid and type(kid.EnableMouse) == "function" then
-            pcall(kid.EnableMouse, kid, enable)
-        end
-    end
+    for i = 1, #kids do AlphaTree(kids[i], alpha, depth + 1) end
+end
+
+local function MuteTree(frame, enable, depth)
+    if not frame then return end
+    depth = depth or 0
+    MuteOne(frame, enable)
+    if depth >= 4 or type(frame.GetChildren) ~= "function" then return end
+    local ok, kids = pcall(frame.GetChildren, frame)
+    if not ok or type(kids) ~= "table" then return end
+    for i = 1, #kids do MuteTree(kids[i], enable, depth + 1) end
+end
+
+local function MuteChildren(frame, enable)
+    MuteTree(frame, enable, 0)
+    if not enable then return end
+    -- 归还时把独立全局成员框一起放开
+    for _, name in ipairs(EXTRA_PARTY_MEMBERS) do MuteOne(_G[name], true) end
 end
 
 local function ParkGroup(frame)
     Park(frame)            -- alpha 0 + 关鼠标（与 MainActionBar 同一套，不写字段、不 Hide）
     Starve(frame)          -- 饿事件：不再被暴雪自己拉起
-    MuteChildren(frame, false)
+    AlphaTree(frame, 0)    -- 递归归零 alpha（绕过 IgnoreParentAlpha 漏网）
+    MuteTree(frame, false) -- 整棵子树关鼠标（成员按钮在第三层）
+    if frame == _G.CompactPartyFrame or frame == _G.PartyFrame then
+        -- 小队的独立成员框不一定是容器的子框
+        for _, name in ipairs(EXTRA_PARTY_MEMBERS) do
+            MuteOne(_G[name], false)
+            AlphaTree(_G[name], 0)
+        end
+    end
 end
 
 local function UnparkGroup(frame)
     if not frame then return end
     Unstarve(frame)
-    Unpark(frame)
+    AlphaTree(frame, 1)    -- 归还：全树拉回 alpha 1
     MuteChildren(frame, true)
+    Unpark(frame)
+    -- 独立成员框也恢复
+    for _, name in ipairs(EXTRA_PARTY_MEMBERS) do
+        MuteOne(_G[name], true)
+        AlphaTree(_G[name], 1)
+    end
 end
 
 --- 藏掉暴雪的团队/小队框（`groupFrames.hideBlizzard`）。
@@ -912,8 +968,33 @@ local function ReparkBlizzardGroups()
 end
 
 -- ============================================================================
--- 建 / 重贴
+-- 子框鼠标循环静音（补 LoD 漏网）
 -- ============================================================================
+--- 子框（StatusIcon、Pet 等）是 LoD 后建的，`MuteTree` 跑一次抓不全。
+--- 用一个轻量 ticker 每 1 秒重扫 parked 框的整棵子树，pcall 关鼠标 —— 只有几十个
+--- EnableMouse 调用，开销可忽略；幂等，对已关的框重复调用无副作用。
+local muteTicker
+
+local function StopMuteTicker()
+    if muteTicker then muteTicker:Cancel(); muteTicker = nil end
+end
+
+local MUTE_ROOTS = { "CompactPartyFrame", "PartyFrame",
+                     "CompactRaidFrameContainer", "CompactRaidFrameManager" }
+
+local function StartMuteTicker()
+    StopMuteTicker()
+    if type(C_Timer) ~= "table" or type(C_Timer.NewTicker) ~= "function" then return end
+    muteTicker = C_Timer.NewTicker(1, function()
+        for _, name in ipairs(MUTE_ROOTS) do
+            local f = _G[name]
+            if f and parked[f] then
+                AlphaTree(f, 0)
+                MuteTree(f, false)
+            end
+        end
+    end)
+end
 
 local function StylePartyHeader(header, cfg)
     header:SetAttribute("showParty", true)
@@ -1124,6 +1205,7 @@ function M:Apply()
 
     self:RefreshAll()
     StartTicker()
+    StartMuteTicker()   -- 循环静音暴雪子框鼠标（LoD 补网）
 end
 
 function M:RegisterEvents()
@@ -1146,7 +1228,11 @@ function M:RegisterEvents()
         end)
     end
 
-    EventBus:Register("GROUP_ROSTER_UPDATE", function() M:RefreshAll() end)
+    -- 进组/退组时暴雪会新建（或复活）成员框，鼠标要重新关一遍
+    EventBus:Register("GROUP_ROSTER_UPDATE", function()
+        M:RefreshAll()
+        ReparkBlizzardGroups()
+    end)
     -- 暴雪的框是 LoD + 会被换成新对象：进世界 / 换区 / 该包加载时都补一次压制。
     EventBus:Register("PLAYER_ENTERING_WORLD", function()
         M:RefreshAll()
@@ -1181,9 +1267,11 @@ function M:SetEnabled(enabled)
 
     if enabled then
         self:Apply()
+        StartMuteTicker()   -- 循环静音暴雪子框鼠标（LoD 补网）
         return
     end
 
+    StopMuteTicker()        -- 模块停用：不再关子框鼠标
     StopTicker()
     if party then
         SetDriver(party.header, nil, false)
