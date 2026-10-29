@@ -123,14 +123,17 @@ function Widget:ShowWatch(frame, fn)
     EnsureShowDriver()
 end
 
---- 通用轮询：每 0.2 秒对登记的框体调一次 fn(frame)。
+--- 通用轮询：默认每 0.2 秒对登记的框体调一次 fn(frame)；第三个参数可给每个回调
+--- **自己的间隔**（秒）—— 以前这里是全局 0.2 秒，调用处写的 "2 秒" 其实没生效。
 --- 用在"暴雪改了状态但没有任何 Lua 钩子"的场合（按钮 enabled、皮肤需要复检的东西…）。
-local pollWatch, pollDriver, pollAcc = {}, nil, 0
+local pollWatch, pollDriver = {}, nil
+local POLL_INTERVAL = 0.2
 
 --- 一个框体可以挂**多个**回调：早先这里是 `pollWatch[frame] = fn`（一个框只能一个回调），
 --- 而四个模块都拿 UIParent 当锚点（Skins/System、Nameplates、Cooldown、QuestTracker）——
 --- 后注册的会把先注册的**静默顶掉**，那些轮询就等于没装（"藏不掉、对不齐"的怪现象就出在这）。
-function Widget:PollWatch(frame, fn)
+--- 返回一个句柄，交给 Widget:Unwatch 注销（一次性的补扫必须注销，否则会一直空转）。
+function Widget:PollWatch(frame, fn, interval)
     if not frame or type(fn) ~= "function" then return end
     local list = pollWatch[frame]
     if not list then
@@ -138,21 +141,49 @@ function Widget:PollWatch(frame, fn)
         pollWatch[frame] = list
     end
     for i = 1, #list do
-        if list[i] == fn then return end
+        if list[i].fn == fn then
+            -- 同一回调重复登记只更新间隔，不重复执行。
+            list[i].interval = tonumber(interval) or POLL_INTERVAL
+            return list[i]
+        end
     end
-    list[#list + 1] = fn
-    if pollDriver then return end
+    local entry = { fn = fn, interval = tonumber(interval) or POLL_INTERVAL, acc = 0 }
+    list[#list + 1] = entry
+    if pollDriver then return entry end
     pollDriver = CreateFrame("Frame")
     pollDriver:SetScript("OnUpdate", function(_, elapsed)
-        pollAcc = pollAcc + (elapsed or 0)
-        if pollAcc < 0.2 then return end
-        pollAcc = 0
+        elapsed = elapsed or 0
         for f, cbs in pairs(pollWatch) do
+            -- 隐藏的框不累加时间：等它显示时再从 0 开始算，不会"一显示就补执行一堆"。
             if type(f) == "table" and f.IsVisible and f:IsVisible() then
-                for i = 1, #cbs do pcall(cbs[i], f) end
+                for i = 1, #cbs do
+                    local cb = cbs[i]
+                    cb.acc = cb.acc + elapsed
+                    if cb.acc >= cb.interval then
+                        cb.acc = 0
+                        pcall(cb.fn, f)
+                    end
+                end
             end
         end
     end)
+    return entry
+end
+
+--- 注销轮询回调。省略 fn 时注销该框的全部回调；框体没有回调了就整条移除（驱动帧自己留着，
+--- 开销只是一次空循环）。ShowWatch / PollWatch 的注销句柄都从这里走。
+function Widget:Unwatch(frame, fn)
+    if not frame then return end
+    local list = pollWatch[frame]
+    if not list then return end
+    if not fn then
+        pollWatch[frame] = nil
+        return
+    end
+    for i = #list, 1, -1 do
+        if list[i].fn == fn then table.remove(list, i) end
+    end
+    if #list == 0 then pollWatch[frame] = nil end
 end
 
 ns.Widget = Widget
