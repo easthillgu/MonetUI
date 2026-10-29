@@ -32,7 +32,8 @@ local Widget = {}
 Widget.BORDER   = 1   -- 1px Monet 发丝边（框 / 条 / 牌 / 按钮的内嵌边）
 Widget.TEXT_GAP = 3   -- 文字行与条顶边之间的空隙
 
-local hoverWatch, hoverDriver, hoverAcc = {}, nil, 0
+-- 弱键：自建框体被丢弃后条目跟着回收（以前是强引用，永不释放）。
+local hoverWatch, hoverDriver, hoverAcc = setmetatable({}, { __mode = "k" }), nil, 0
 
 local function MouseOver(frame)
     -- 本客户端没有 MouseIsOver / GetMouseFocus（实测都是 nil），但有 frame:IsMouseOver()。
@@ -62,22 +63,48 @@ local function EnsureHoverDriver()
         hoverAcc = 0
         local down = _G.IsMouseButtonDown and _G.IsMouseButtonDown("LeftButton")
         for frame, st in pairs(hoverWatch) do
+            local list = st.list
             local inside = frame:IsVisible() and MouseOver(frame)
-            if inside and not st.inside then
-                st.inside = true
-                if st.enter then pcall(st.enter, frame) end
-            elseif not inside and st.inside then
-                st.inside = false
-                if st.pressed then st.pressed = false; if st.up then pcall(st.up, frame) end end
-                if st.leave then pcall(st.leave, frame) end
+            if inside ~= st.inside then
+                st.inside = inside
+                if inside then
+                    for i = 1, #list do
+                        local e = list[i]
+                        if e.enter then pcall(e.enter, frame) end
+                    end
+                else
+                    if st.pressed then
+                        st.pressed = false
+                        for i = 1, #list do
+                            local e = list[i]
+                            if e.up then pcall(e.up, frame) end
+                        end
+                    end
+                    for i = 1, #list do
+                        local e = list[i]
+                        if e.leave then pcall(e.leave, frame) end
+                    end
+                end
             end
-            if inside and st.down then
-                if down and not st.pressed then
-                    st.pressed = true
-                    if st.down then pcall(st.down, frame) end
-                elseif not down and st.pressed then
-                    st.pressed = false
-                    if st.up then pcall(st.up, frame) end
+            if inside then
+                local wantsDown = false
+                for i = 1, #list do
+                    if list[i].down then wantsDown = true break end
+                end
+                if wantsDown then
+                    if down and not st.pressed then
+                        st.pressed = true
+                        for i = 1, #list do
+                            local e = list[i]
+                            if e.down then pcall(e.down, frame) end
+                        end
+                    elseif not down and st.pressed then
+                        st.pressed = false
+                        for i = 1, #list do
+                            local e = list[i]
+                            if e.up then pcall(e.up, frame) end
+                        end
+                    end
                 end
             end
         end
@@ -85,20 +112,32 @@ local function EnsureHoverDriver()
 end
 
 --- 轮询式 hover。onEnter/onLeave/onDown/onUp 都只收到 frame。
---- 同一帧只登记一次（后来的回调覆盖旧的）。
+---
+--- **一个框体可以挂多个监听**：以前这里是"后来的覆盖前面的"（`st.enter = onEnter`），
+--- 而 Skin:Button 先挂 HoverHighlight 再挂 ControlState —— 前者的 enter/leave 被静默顶掉，
+--- 按钮的高亮就再也不亮（review 2026-10-29 4.1）。现在同一个框的各监听各存一份。
 function Widget:HoverWatch(frame, onEnter, onLeave, onDown, onUp)
     if not frame then return end
     local st = hoverWatch[frame]
-    if st then
-        st.enter, st.leave, st.down, st.up = onEnter, onLeave, onDown, onUp
-        return
+    if not st then
+        st = { list = {}, inside = false, pressed = false }
+        hoverWatch[frame] = st
+        EnsureHoverDriver()
     end
-    hoverWatch[frame] = { enter = onEnter, leave = onLeave, down = onDown, up = onUp, inside = false }
-    EnsureHoverDriver()
+    for i = 1, #st.list do
+        local e = st.list[i]
+        if e.enter == onEnter and e.leave == onLeave and e.down == onDown and e.up == onUp then
+            return e
+        end
+    end
+    local entry = { enter = onEnter, leave = onLeave, down = onDown, up = onUp }
+    st.list[#st.list + 1] = entry
+    return entry
 end
 
 --- 同样的轮询思路，观察"从隐藏变成显示"这一个瞬间（替掉 HookScript("OnShow")）。
-local showWatch, showDriver, showAcc = {}, nil, 0
+--- 同样支持一个框多个监听（以前后来的覆盖前面的）。
+local showWatch, showDriver, showAcc = setmetatable({}, { __mode = "k" }), nil, 0
 
 local function EnsureShowDriver()
     if showDriver then return end
@@ -109,7 +148,9 @@ local function EnsureShowDriver()
         showAcc = 0
         for frame, st in pairs(showWatch) do
             local shown = frame:IsVisible()
-            if shown and not st.shown then pcall(st.fn, frame) end
+            if shown and not st.shown then
+                for i = 1, #st.list do pcall(st.list[i], frame) end
+            end
             st.shown = shown
         end
     end)
@@ -118,9 +159,16 @@ end
 function Widget:ShowWatch(frame, fn)
     if not frame or type(fn) ~= "function" then return end
     local st = showWatch[frame]
-    if st then st.fn = fn; return end
-    showWatch[frame] = { fn = fn, shown = frame:IsVisible() }
-    EnsureShowDriver()
+    if not st then
+        st = { list = {}, shown = frame:IsVisible() }
+        showWatch[frame] = st
+        EnsureShowDriver()
+    end
+    for i = 1, #st.list do
+        if st.list[i] == fn then return fn end
+    end
+    st.list[#st.list + 1] = fn
+    return fn
 end
 
 --- 通用轮询：默认每 0.2 秒对登记的框体调一次 fn(frame)；第三个参数可给每个回调
@@ -170,20 +218,51 @@ function Widget:PollWatch(frame, fn, interval)
     return entry
 end
 
---- 注销轮询回调。省略 fn 时注销该框的全部回调；框体没有回调了就整条移除（驱动帧自己留着，
---- 开销只是一次空循环）。ShowWatch / PollWatch 的注销句柄都从这里走。
+--- 注销回调。三种 Watch（PollWatch / ShowWatch / HoverWatch）都从这里走：
+---   * 省略 fn 时注销该框的全部回调；
+---   * 给了 fn：HoverWatch 的监听按"任一回调等于 fn"匹配整条摘掉，ShowWatch / PollWatch 按值匹配。
+--- 框体没有回调了就整条移除（驱动帧自己留着，开销只是一次空循环）。
 function Widget:Unwatch(frame, fn)
     if not frame then return end
+
     local list = pollWatch[frame]
-    if not list then return end
-    if not fn then
-        pollWatch[frame] = nil
-        return
+    if list then
+        if not fn then
+            pollWatch[frame] = nil
+        else
+            for i = #list, 1, -1 do
+                if list[i].fn == fn then table.remove(list, i) end
+            end
+            if #list == 0 then pollWatch[frame] = nil end
+        end
     end
-    for i = #list, 1, -1 do
-        if list[i].fn == fn then table.remove(list, i) end
+
+    local show = showWatch[frame]
+    if show then
+        if not fn then
+            showWatch[frame] = nil
+        else
+            for i = #show.list, 1, -1 do
+                if show.list[i] == fn then table.remove(show.list, i) end
+            end
+            if #show.list == 0 then showWatch[frame] = nil end
+        end
     end
-    if #list == 0 then pollWatch[frame] = nil end
+
+    local hover = hoverWatch[frame]
+    if hover then
+        if not fn then
+            hoverWatch[frame] = nil
+        else
+            for i = #hover.list, 1, -1 do
+                local e = hover.list[i]
+                if e.enter == fn or e.leave == fn or e.down == fn or e.up == fn then
+                    table.remove(hover.list, i)
+                end
+            end
+            if #hover.list == 0 then hoverWatch[frame] = nil end
+        end
+    end
 end
 
 ns.Widget = Widget
