@@ -8,7 +8,7 @@
 -- 只进日志、不弹窗、功能正常。
 --
 -- move-only：逻辑原样搬自 ActionBars.lua；接口面：
---   * 输入：M.ButtonSize / Spacing / PositionBar / SkinAdoptedButton / STYLE_ADOPTED_BARS /
+--   * 输入：M.ButtonSize / Spacing / PositionBar / SkinAdoptedButton /
 --           ResolveContainer / bars / adopted / PET_DEF（主文件在文件尾导出，同名别名接走）；
 --   * 输出：M.petbar.BuildPetBar(bar, frame, def)（CreateBar 里宠物条那一支）、
 --           M.petbar.SyncPetGlow(def, entry) / SyncPetGlowNow() / TeardownPetGlow()。
@@ -26,7 +26,6 @@ local ButtonSize        = M.ButtonSize
 local Spacing           = M.Spacing
 local PositionBar       = M.PositionBar
 local SkinAdoptedButton = M.SkinAdoptedButton
-local STYLE_ADOPTED_BARS = M.STYLE_ADOPTED_BARS
 local ResolveContainer  = M.ResolveContainer
 local bars              = M.bars
 local adopted           = M.adopted
@@ -189,9 +188,6 @@ end
 
 --- 宠物条的像素环跟一遍当前状态。自绘动作条关着时这条条没被接管，得自己去拿容器。
 local function SyncPetGlowNow()
-    -- 不排版（STYLE_ADOPTED_BARS=false）时不画像素环：环是画在**暴雪的**宠物按钮上的，
-    -- 现阶段一碰它们就有把受保护按钮弄脏的风险（见文件开头两个开关的注释）。
-    if not STYLE_ADOPTED_BARS then return end
     local def = PET_DEF
     if not def then return end
 

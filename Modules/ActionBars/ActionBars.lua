@@ -38,13 +38,6 @@ local Skin     = ns.Skin
 local M = { name = "ActionBars" }
 
 
---- 收养之后要不要再排版（SetScale / SetPoint 到我们的位置）。
---- **保持 false**：排版写的每一个 SetScale/SetPoint 都会把这些受保护框标脏。
---- 只关外壳鼠标（那个壳 1303×1193，会把屏幕中间的点击全吃掉）—— 那是必须的。
---- 想让它长得跟自绘条一致、还落在我们的位置：得像 Bar1..8 那样建自己的安全按钮
---- （宠物 type="pet"），见 AGENTS 待办。
-local STYLE_ADOPTED_BARS = false
-
 local ActionBar        = _G.C_ActionBar
 local RegisterStateDriver   = _G.RegisterStateDriver
 local UnregisterStateDriver = _G.UnregisterStateDriver
@@ -1614,7 +1607,6 @@ M.ButtonSize         = ButtonSize
 M.Spacing            = Spacing
 M.PositionBar        = PositionBar
 M.SkinAdoptedButton  = SkinAdoptedButton
-M.STYLE_ADOPTED_BARS = STYLE_ADOPTED_BARS
 M.ResolveContainer   = ResolveContainer
 M.bars               = bars
 M.adopted            = adopted
