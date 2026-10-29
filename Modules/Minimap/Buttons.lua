@@ -240,9 +240,19 @@ local function SetupTracking()
 
     -- 按钮搬走之后，暴雪那个容器框（零售 12.x 会在集群角上留一个旋涡按钮）就空了：把它收起来，
     -- 免得地图上方挂着一个点不动的旧按钮。老客户端上这个框默认就是隐藏的，收起来没有影响。
+    --
+    -- **只能 alpha 0 + 关鼠标，不能 Hide**（AGENTS「收暴雪的 HUD 帧」）：Hide 会让它自己的
+    -- 显隐逻辑和我们对着干，而且还原时没人记得它原本是显示还是隐藏。原 alpha 记进旁表，
+    -- RestoreOne 时还回去。
     local oldParent = savedParents[btn] and savedParents[btn].parent
     if oldParent and oldParent ~= container and oldParent ~= UIParent then
-        pcall(oldParent.Hide, oldParent)
+        if not Marked(oldParent, "parked") then
+            Mark(oldParent, "parked", true)
+            Mark(oldParent, "parkAlpha", oldParent.GetAlpha and oldParent:GetAlpha() or 1)
+            if type(oldParent.EnableMouse) == "function" then
+                pcall(oldParent.EnableMouse, oldParent, false)
+            end
+        end
         pcall(oldParent.SetAlpha, oldParent, 0)
     end
 
@@ -380,7 +390,22 @@ local function RestoreOne(path)
     for _, info in ipairs(saved.art) do
         pcall(info.region.SetAlpha, info.region, info.alpha)
     end
-    if frame.monetBadge then pcall(frame.monetBadge.Hide, frame.monetBadge) end
+    -- 徽章存在旁表里（`Mark(btn, "badge", ...)`）：以前读的是 `frame.monetBadge` 这个
+    -- 从来不存在的字段，所以还原时徽章一直挂在屏幕上（review 2026-10-29）。
+    local badge = Marked(frame, "badge")
+    if badge then pcall(badge.Hide, badge) end
+    -- 追踪按钮的原父框（Tracking）是被我们 alpha 0 压掉的，一并还回去。
+    local oldParent = saved.parent
+    if oldParent and oldParent ~= container and oldParent ~= UIParent
+        and Marked(oldParent, "parked") then
+        local alpha = Marked(oldParent, "parkAlpha")
+        Mark(oldParent, "parked", nil)
+        Mark(oldParent, "parkAlpha", nil)
+        pcall(oldParent.SetAlpha, oldParent, type(alpha) == "number" and alpha or 1)
+        if type(oldParent.EnableMouse) == "function" then
+            pcall(oldParent.EnableMouse, oldParent, true)
+        end
+    end
 end
 
 --- 把三个按钮摆到覆盖层上（overlay 是小地图可见区那块透明层）。
