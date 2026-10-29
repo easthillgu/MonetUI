@@ -587,6 +587,9 @@ local function UpdateButtonContent(button, slot)
 
     -- 冷却自己画（不读机密数字，见 PaintCooldown）
     PaintCooldown(button, slot)
+
+    -- 这一格现在画的是哪个槽：距离检测靠它（**不读**安全属性 action，那个可能机密）。
+    Mark(button, "slot", slot)
 end
 
 -- CreateFrame 的第 5 个参数（id）只有直接调用才能给，所以按钮不走 NewFrame。
@@ -804,6 +807,119 @@ local function RefreshBar(bar)
         UpdateButtonContent(button, SlotOf(button, bar, index))
     end
 end
+
+-- ---------------------------------------------------------------------------
+-- 目标距离检测：超出施法距离的按钮变暗（2026-10-30 玩家要求）
+--
+-- 判定用 C_ActionBar.IsActionInRange(slot)。它在受限环境会返回**机密布尔**，
+-- 所以每次先过 Secrets.IsSecret：机密就保留上一次的判定（AGENTS 的规矩，不猜）。
+-- nil = 这个动作本来就不检查距离（buff / 无目标技能）→ 按"在范围内"处理。
+-- 槽位来自我们自己画的 slot（`Marked(button,"slot")`），**不读**安全属性 action。
+-- 收养来的宠物/姿态按钮不参与：暴雪自己的按钮本来就会做距离着色。
+-- ---------------------------------------------------------------------------
+local RANGE_DIM = 0.45        -- 超出距离时图标的顶点色（灰色压暗，不上色相）
+
+local rangeCheckEnabled = {}
+
+--- 让客户端把这一格的进出距离推给我们（ACTION_RANGE_CHECK_UPDATE）。
+--- 每个槽只在第一次用到时调一次（最多 96 次），之后不再打扰客户端。
+local function EnsureRangeCheck(slot)
+    if rangeCheckEnabled[slot] then return end
+    rangeCheckEnabled[slot] = true
+    local api = _G.C_ActionBar
+    if api and type(api.EnableActionRangeCheck) == "function" then
+        pcall(api.EnableActionRangeCheck, slot, true)
+    end
+end
+
+--- 把某个按钮的变暗状态写成 outOfRange。只在状态真的变了时才动顶点色。
+local function ApplyRangeTint(button, outOfRange)
+    local icon = button and button.icon
+    if not icon or not icon.SetVertexColor then return end
+    if Marked(button, "rangeDim") == outOfRange then return end
+    Mark(button, "rangeDim", outOfRange)
+    if outOfRange then
+        pcall(icon.SetVertexColor, icon, RANGE_DIM, RANGE_DIM, RANGE_DIM)
+    else
+        pcall(icon.SetVertexColor, icon, 1, 1, 1)
+    end
+end
+
+--- 读一次距离：true = 超出距离；nil = 读不到（机密 / 没有 API），调用方保留上次。
+local function IsOutOfRange(slot)
+    local api = _G.C_ActionBar
+    if not api or type(api.IsActionInRange) ~= "function" then return nil end
+    local ok, raw = pcall(api.IsActionInRange, slot)
+    if not ok then return nil end
+    if raw == nil then return false end                 -- 不检查距离
+    if Secrets.IsSecret(raw) then return nil end        -- 机密：保留上次
+    if raw == false or raw == 0 then return true end
+    return false
+end
+
+--- 只重算一个槽（同槽位可能出现在多条条上：各条页号不同）。
+local function RefreshRangeFor(slot)
+    if type(slot) ~= "number" then return end
+    EnsureRangeCheck(slot)
+    for _, bar in pairs(bars) do
+        if not IsAdopted(bar) then
+            for _, button in ipairs(bar.buttons) do
+                if Marked(button, "slot") == slot then
+                    local out = IsOutOfRange(slot)
+                    if out ~= nil then ApplyRangeTint(button, out) end
+                end
+            end
+        end
+    end
+end
+
+--- 全量重算：目标变化 / 可用性变化 / 换区域时用（事件驱动，不是每帧）。
+local function RefreshRanges()
+    local api = _G.C_ActionBar
+    if not api or type(api.IsActionInRange) ~= "function" then return end
+
+    -- 没有目标时不动：这时敌对技能普遍报"不在范围"，一律变暗会把整条压灰
+    -- （暴雪自己的表现也不是这样）。
+    local okExists, exists = pcall(_G.UnitExists, "target")
+    local hasTarget = okExists and Secrets.Bool(exists, true) or false
+
+    for _, bar in pairs(bars) do
+        if not IsAdopted(bar) then
+            for _, button in ipairs(bar.buttons) do
+                local slot = Marked(button, "slot")
+                if slot then
+                    EnsureRangeCheck(slot)
+                    if not hasTarget then
+                        ApplyRangeTint(button, false)
+                    else
+                        local out = IsOutOfRange(slot)
+                        if out ~= nil then ApplyRangeTint(button, out) end
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- 距离事件会成串到达（一次切换目标能触发几十条），0.1 秒合并一次。
+local rangeQueued = false
+local function QueueRanges()
+    if rangeQueued then return end
+    rangeQueued = true
+    if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+        C_Timer.After(0.1, function()
+            rangeQueued = false
+            RefreshRanges()
+        end)
+    else
+        rangeQueued = false
+        RefreshRanges()
+    end
+end
+
+M.RefreshRanges = RefreshRanges
+M.RefreshRangeFor = RefreshRangeFor
+M.QueueRanges = QueueRanges
 
 -- 页号是**客户端**写的：状态驱动每 0.2 秒才结算一次，然后 _onstate-page 片段把
 -- 新页号写进条自己的 "actionpage" 属性。我们的事件（翻页 / 槽位变化）发生在
@@ -1368,6 +1484,22 @@ function M:RegisterEvents()
         EventBus:Register(event, function() M:UpdateCooldowns() end)
     end
 
+    -- 目标距离：客户端只推"这一格刚进出距离"（ACTION_RANGE_CHECK_UPDATE，槽位在参数里）；
+    -- 目标/可用性变化则整条重算一次。都走 0.1 秒合并，不逐帧。
+    EventBus:Register("ACTION_RANGE_CHECK_UPDATE", function(_, slot)
+        if type(slot) == "number" then
+            RefreshRangeFor(slot)
+        else
+            QueueRanges()
+        end
+    end)
+    for _, event in ipairs({
+        "ACTIONBAR_UPDATE_USABLE", "SPELL_UPDATE_USABLE", "UPDATE_BONUS_ACTIONBAR",
+        "PLAYER_TARGET_CHANGED", "PLAYER_ENTERING_WORLD",
+    }) do
+        EventBus:Register(event, QueueRanges)
+    end
+
     EventBus:Register("MONETUI_THEME_CHANGED", function() M:UpdateAll() end)
     EventBus:Register("MONETUI_RESTRICTION_CHANGED", function() M:UpdateAll() end)
 end
@@ -1590,6 +1722,7 @@ function M:Apply()
     ReassignBindings()
     self:UpdateAll()
     self:UpdateHotkeys()
+    M.QueueRanges()   -- 建成/改过之后按当前目标重算一次距离变暗
 
     -- 宠物条的自动施法提示：自绘条开着是动画环，关着是静态环（这条路径不依赖 AdoptAll）。
     M.petbar.SyncPetGlowNow()
