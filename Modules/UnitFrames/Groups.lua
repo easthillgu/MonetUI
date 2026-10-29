@@ -337,7 +337,10 @@ end
 
 local function UnitClassColor(unit)
     local ok, class = pcall(UnitClassBase, unit)
-    if ok and class then
+    -- UnitClassBase 被标了 SecretWhenUnitIdentityRestricted：受限时返回机密串，
+    -- 而机密串的 type() 照样是 "string"，直接喂给 ClassColor 会在里面的比较/索引上炸。
+    -- 先判 issecretvalue 再用（UnitFrames.lua:466 是同一套写法）。
+    if ok and type(class) == "string" and not Secrets.IsSecret(class) then
         local r, g, b = Color:ClassColor(class)
         if r then return r, g, b end
     end
