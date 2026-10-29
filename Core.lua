@@ -862,8 +862,18 @@ local function HandleSlash(message)
         ns:Print("已禁用，执行 /reload 后生效。")
 
     elseif command == "reset" then
-        _G.MonetUIDB = nil
-        ns:Print("设置已重置，执行 /reload 后生效。")
+        -- 重置必须**就地清空再补默认值**：以前直接 `_G.MonetUIDB = nil`，之后 ns:DB() 建出来的
+        -- 是一张空表、里面没有 modules，面板一开就 `IsModuleEnabled` 抛 index nil
+        -- （review 2026-10-29 H7）。而且这是不可撤销的破坏性操作，要二次确认。
+        if rest ~= "confirm" then
+            ns:Print("这会清空所有 MonetUI 设置。确定请执行：/mui reset confirm")
+            return
+        end
+        local db = ns:DB()
+        for key in pairs(db) do db[key] = nil end
+        MergeDefaults(db, DEFAULTS)
+        db.schema = SCHEMA
+        ns:Print("设置已重置为默认值，执行 /reload 后生效。")
 
     elseif command == "scale" then
         PrintScale()
@@ -917,6 +927,8 @@ SLASH_MONETUI2 = "/mui"
 SlashCmdList["MONETUI"] = HandleSlash
 
 -- Boot: EventBus owns the only frame; every listener below is registered on it.
+local loginThemeReported = false
+
 ns.EventBus:Register("ADDON_LOADED", function(_, addonName)
     if addonName ~= ADDON_NAME then return end
     LoadDatabase()
@@ -924,7 +936,13 @@ end)
 
 ns.EventBus:Register("PLAYER_LOGIN", function()
     LoadDatabase()
-    RefreshTheme("login")
+    -- 主题刷新失败不能让模块永远不启动：以前这里裸调 RefreshTheme，
+    -- 抛一次错就停在 StartModules 之前（模块一个都没加载，玩家看到的是"插件没生效"）。
+    local okTheme, themeErr = pcall(RefreshTheme, "login")
+    if not okTheme and not loginThemeReported then
+        loginThemeReported = true
+        ns:Print("主题刷新失败（已继续启动模块）：" .. tostring(themeErr))
+    end
     -- Before the modules: every size they build is computed from the scale.
     ApplyAutoScale()
     ns:StartModules()
