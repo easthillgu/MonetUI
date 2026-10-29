@@ -223,10 +223,10 @@ local function StyleOverlay(button)
     end
 end
 
---- 能量条（原 231-239 行）。
+--- 能量条（原 231-239 行）。**纯高亮平涂，不用渐变**（玩家 2026-10-30 定）。
 local function StylePowerBar(button, inner, powerHeight)
     if powerHeight > 0 then
-        if not button.power then button.power = Widget:Bar(button, inner, powerHeight) end
+        if not button.power then button.power = Widget:Bar(button, inner, powerHeight, "monet_barfill") end
         button.power:SetSize(inner, powerHeight)
         button.power:ClearAllPoints()
         button.power:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT", BORDER, BORDER)

@@ -87,7 +87,8 @@ local function LayoutClassPower(holder, count)
         local pip = holder.pips[i]
         if not pip then
             -- Widget:Bar already brings the dim "empty" background along.
-            pip = Widget:Bar(holder)
+            -- 资源点：纯高亮平涂（显式材质 = 不叠渐变、也不按高度换剖面）。
+            pip = Widget:Bar(holder, nil, nil, "monet_barfill")
             pip:SetHeight(holder:GetHeight())
             holder.pips[i] = pip
         end

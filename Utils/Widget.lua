@@ -290,6 +290,7 @@ local function EnsureGradients()
 end
 
 --- Re-derive a StatusBar's fill gradient from the bar's own orientation.
+-- 只在**显式要求**老视觉时用：Widget:Bar 的两条默认路径（烤进贴图的剖面）都不叠它。
 -- MUST be called again after SetStatusBarTexture: that call builds a brand new texture object, and the
 -- old one carried the gradient (the same trap that catches their fill rotation after a texture swap).
 function Widget:BarGradient(bar)
@@ -326,7 +327,10 @@ end
 function Widget:Size(frame, width, height)
     if not frame then return frame end
     local w = Media:SnapUnit(width)
-    frame:SetSize(w, height and Media:SnapUnit(height) or w)
+    local h = height and Media:SnapUnit(height) or w
+    frame:SetSize(w, h)
+    -- 条：定了尺寸就按最终高度重选剖面（粗条 / 细条两张贴图）。
+    if Widget.SyncBarFill then Widget:SyncBarFill(frame) end
     return frame
 end
 
@@ -349,17 +353,37 @@ end
 --- 4–6px 上 64 行渐变只剩 4 个台阶，单向剖面在细条上读起来最像"被上方打光"。
 local THIN_BAR_MAX = 6
 
---- 某条高的条该用哪张剖面填充贴图（姓名板重排时也要按这个规则重设）。
+--- 某条高的条该用哪张剖面填充贴图。
 function Widget:BarFillTexture(height)
     if height and height <= THIN_BAR_MAX then return "monet_barfill_thin" end
     return "monet_barfill_gradient"
 end
 
+-- 由 Widget:Bar 建出来的条：true = 剖面自动跟着高度走；字符串 = 调用方显式指定的材质。
+-- 弱键，免得丢弃的条一直占着表。
+local barFill = setmetatable({}, { __mode = "k" })
+
+--- 按条**当前**高度重选剖面。只对 Widget:Bar 建出来的、且没显式指定材质的条生效。
+--- 之所以需要这一步：有的条是 `Widget:Bar(frame)` 先建、再 `SetHeight(...)` 定高，
+--- 建的时候还拿不到最终高度；只按创建时的高度选，1px 的条会拿到"粗条"那张剖面
+--- （1px 只采样到最顶一行，整条看着和预期不一致）。
+--- 能量条不走这条路径：它显式指定了扁平材质（纯高亮平涂）。
+function Widget:SyncBarFill(bar)
+    if not bar then return end
+    if barFill[bar] ~= true then return end
+    local h = bar.GetHeight and bar:GetHeight()
+    local key = Widget:BarFillTexture(h)
+    if Marked(bar, "fillKey") == key then return end
+    Mark(bar, "fillKey", key)
+    bar:SetStatusBarTexture(Media:Texture(key))
+end
+
 --- 建一条状态条。
---- textureKey 不传时按条高自动选：细条用上亮下暗的单向细条剖面（monet_barfill_thin），
---- 其余用整条单向剖面（monet_barfill_gradient）。两张剖面都已烤进贴图，所以**不叠
---- Widget:BarGradient** —— 运行时渐变会和贴图相乘，等于双倍压暗。
---- 传 textureKey="monet_barfill"（或任何扁平材质）时仍按老路子走运行时渐变。
+--- textureKey **不传**时按条高自动选剖面：细条用上亮下暗的单向细条剖面
+--- （monet_barfill_thin），其余用整条单向剖面（monet_barfill_gradient）。两张都已烤进贴图，
+--- 所以都不叠 Widget:BarGradient（运行时渐变会和贴图相乘，等于双倍压暗）。
+--- textureKey **传了**就按字面用，**不叠任何渐变**：调用方要的是那块材质本身
+--- （能量条就是这条路径 —— 纯高亮平涂，只要顶点色）。
 function Widget:Bar(parent, width, height, textureKey)
     local key = textureKey or Widget:BarFillTexture(height)
     local bar = CreateFrame("StatusBar", nil, parent)
@@ -367,9 +391,8 @@ function Widget:Bar(parent, width, height, textureKey)
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(1)
     if width then Widget:Size(bar, width, height or 18) end
-    if key ~= "monet_barfill_gradient" and key ~= "monet_barfill_thin" then
-        Widget:BarGradient(bar)
-    end
+    barFill[bar] = textureKey or true
+    Mark(bar, "fillKey", key)
 
     bar.bg = bar:CreateTexture(nil, "BACKGROUND")
     bar.bg:SetAllPoints()

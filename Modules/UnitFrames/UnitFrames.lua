@@ -716,7 +716,9 @@ local function BuildUnitBars(frame, border, width, healthHeight, powerHeight, sh
         local sr, sg, sb = Color:GetBorder()
         separator:SetColorTexture(sr, sg, sb, 0.55)
 
-        power = Widget:Bar(frame)
+        -- 能量条：**纯高亮平涂**，不用渐变（玩家 2026-10-30 定）。传显式材质后
+        -- Widget:Bar 不会再叠运行时渐变，也不会按高度换剖面 —— 顶点色就是资源色。
+        power = Widget:Bar(frame, nil, nil, "monet_barfill")
         power:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", border, border)
         power:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -border, border)
         power:SetHeight(powerHeight)

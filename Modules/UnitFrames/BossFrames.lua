@@ -208,7 +208,8 @@ local function StyleButton(button, cfg)
     local powerH = cfg.power or 0
     if powerH > 0 and widget then
         if not button.power then
-            button.power = widget:Bar(button, inner, powerH)
+            -- 能量条：纯高亮平涂，不用渐变（和玩家/小队框同一口径）。
+            button.power = widget:Bar(button, inner, powerH, "monet_barfill")
         end
         button.power:SetPoint("BOTTOMLEFT", button, "BOTTOMLEFT", BORDER, BORDER)
         button.power:Show()
