@@ -112,6 +112,11 @@ local function Config()
     return ns:DB().actionBars or {}
 end
 
+--- 面板上的显示开关（默认开：DEFAULTS 里同为 true，读到 false 才关）。
+local function Toggle(key)
+    return Config()[key] ~= false
+end
+
 local function ButtonSize()
     local size = tonumber(Config().buttonSize)
     return size and size >= 12 and size or DEFAULT_SIZE
@@ -435,10 +440,10 @@ local function ShortenKey(text)
     return short
 end
 
---- 把热键写在按钮角上（没有绑定就藏起来）。
+--- 把热键写在按钮角上（没有绑定、或面板里关了就藏起来）。
 local function SetHotkey(button)
     if not button or not button.hotkey then return end
-    local key = BindingFor(button.bindName)
+    local key = Toggle("showHotkey") and BindingFor(button.bindName) or nil
     if key then
         pcall(button.hotkey.SetText, button.hotkey, ShortenKey(key))
         pcall(button.hotkey.Show, button.hotkey)
@@ -567,7 +572,8 @@ local function UpdateButtonContent(button, slot)
     -- 受限环境下它整体是机密值，而机密串的 type() 照样是 "string"：判完类型必须再过
     -- issecretvalue，否则 SetText / 比较会抛 invalid value (secret)。
     local count
-    if ActionBar and ActionBar.GetActionDisplayCount and not Secrets.CooldownsSecret() then
+    if Toggle("showCount") and ActionBar and ActionBar.GetActionDisplayCount
+        and not Secrets.CooldownsSecret() then
         count = ActionBar.GetActionDisplayCount(slot)
     end
     if type(count) == "string" and not Secrets.IsSecret(count) and count ~= "" and count ~= "1" then
@@ -580,7 +586,7 @@ local function UpdateButtonContent(button, slot)
 
     -- 宏名
     local macroText
-    if ActionBar and ActionBar.GetActionText then
+    if Toggle("showMacro") and ActionBar and ActionBar.GetActionText then
         macroText = ActionBar.GetActionText(slot)
     end
     if type(macroText) == "string" and macroText ~= "" then
@@ -1868,6 +1874,7 @@ function M:Apply()
 
     ReassignBindings()
     self:UpdateAll()
+    self:UpdateHotkeys()
 
     -- 宠物条的自动施法提示：自绘条开着是动画环，关着是静态环（这条路径不依赖 AdoptAll）。
     M.petbar.SyncPetGlowNow()
