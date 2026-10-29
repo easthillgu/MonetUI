@@ -618,16 +618,14 @@ end
 -- 托盘提示只打印一次（每个会话），不刷屏。
 local hintedFlyout
 
---- 拖出 / 拖入。动作条走 PickupAction/PlaceAction；宠物条走 PickupPetAction（拖不进去）。
+--- 拖出 / 拖入。动作条走 PickupAction/PlaceAction。
 --- 这些全是受保护全局，战斗中会被客户端拒，所以一律先看 InCombatLockdown。
-local function InstallDrag(bar, button, index, isPet)
+--- （宠物条不在这里：它收养的是暴雪 PetActionButton，拖放由暴雪自己处理，
+---  原来的 isPet 分支在 def.pet 提前 return 之后就已经走不到了。）
+local function InstallDrag(bar, button, index)
     pcall(button.RegisterForDrag, button, "LeftButton", "RightButton")
     button:SetScript("OnDragStart", function(self)
         if InCombatLockdown() then return end
-        if isPet then
-            if _G.PickupPetAction then pcall(_G.PickupPetAction, index) end
-            return
-        end
         local slot = SlotOf(self, bar, index)
         if slot and not IsModifiedClick("PICKUPACTION") then
             local locked = true
@@ -640,7 +638,7 @@ local function InstallDrag(bar, button, index, isPet)
         if slot and PickupAction then pcall(PickupAction, slot) end
     end)
     button:SetScript("OnReceiveDrag", function(self)
-        if InCombatLockdown() or isPet then return end
+        if InCombatLockdown() then return end
         local slot = SlotOf(self, bar, index)
         if slot and PlaceAction then pcall(PlaceAction, slot) end
     end)
@@ -724,12 +722,9 @@ local function BuildButton(bar, index)
     local def  = bar.def
     local name = "MonetUI" .. def.key .. "Button" .. index
 
-    -- 宠物条的按钮要能吃 _onclick 片段（SecureHandlerClickTemplate）；
-    -- 带不上就退回原来的安全按钮模板（那时点击不会生效，但不会崩）。
-    local templates = def.pet
-        and { "", "CheckButton" }   -- 宠物条：普通 CheckButton，点击走 WrapScript 的安全片段
-        or nil
-    local button = CreateSecureButton(name, bar.frame, index, templates)
+    -- 只有自绘条会走到这里（宠物条 / 姿态条在 CreateBar 里提前 return 去收养暴雪按钮），
+    -- 所以模板固定用安全动作按钮那一套。
+    local button = CreateSecureButton(name, bar.frame, index)
     if not button then return nil end
 
     -- 安全按钮契约（和 Ellesmere 在 12.x 上验证过的写法一致）：
@@ -743,22 +738,6 @@ local function BuildButton(bar, index)
     --     "MonetUI 已被禁用，因为该功能只对暴雪的 UI 开放"；片段写 → 正常施法（已实机验证）。
     pcall(button.SetID, button, 0)
     pcall(button.RegisterForClicks, button, "AnyDown", "AnyUp")
-
-    if def.pet then
-        -- 宠物条：**不在我们自己身上施法**（本客户端没有通用安全按钮的 type="pet"）。
-        -- 改成"点击片段去点暴雪自己的 PetActionButton"：
-        --   条（SecureHandlerStateTemplate）用 SetFrameRef 指向 PetActionButtonN，
-        --   按钮的 OnClick 用 WrapScript 包成安全片段，片段里 owner:GetFrameRef(...):Click()。
-        -- 施法 / 冷却 / 自动施法提示全部由暴雪负责，我们只管外观和位置。
-        pcall(button.RegisterForClicks, button, "AnyUp")
-        M.secure.InstallPageChild(button, index)
-        button.bindName = def.bind .. index
-        button.bar      = bar.frame
-        SkinButton(button)
-        SetHotkey(button)
-        InstallDrag(bar, button, index, true)
-        return button
-    end
 
     EnsureFlyoutMixin(button)
 
