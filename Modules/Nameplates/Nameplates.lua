@@ -660,10 +660,20 @@ local function UpdateBorder(plate)
         plate:SetScale(scale)
     end
 
-    local status = nil
+    -- 仇恨状态：UnitThreatSituation 受限时返回机密值。**机密就保留上一次的判定**
+    -- （AGENTS：受限时保留上次状态）—— 以前走 Secrets.Number，机密时拿到 nil、status 变 nil，
+    -- 边框落回默认色，战斗中就是"红边一直闪灭"（review 2026-10-29 H16）。
+    -- 脱战后它返回**普通 nil**（表示没有该信息），那不是机密，按 0 处理，红边才会正常消失。
+    local status
     if Setting("showThreat") ~= false then
-        status = Secrets.Number(Query(UnitThreatSituation, "player", unit))
+        local raw = Query(UnitThreatSituation, "player", unit)
+        if Secrets.IsSecret(raw) then
+            status = plate.threatStatus   -- 保留上次
+        else
+            status = Secrets.Number(raw) or 0
+        end
     end
+    plate.threatStatus = status
 
     if status == 3 then
         r, g, b = 0.90, 0.20, 0.20
@@ -843,9 +853,10 @@ local function Added(unit)
     plate:ClearAllPoints()
     plate:SetPoint("CENTER", base, "CENTER", 0, 0)
     plate:SetFrameLevel(base:GetFrameLevel() + 1)
-    -- 同一个 base 会被池子换给另一个单位：目标判定/缩放从头来，别继承上一只的。
+    -- 同一个 base 会被池子换给另一个单位：目标判定/缩放/仇恨色从头来，别继承上一只的。
     plate.isTarget = nil
     plate.targetScale = nil
+    plate.threatStatus = nil
 
     for _, event in ipairs(UNIT_EVENTS) do
         plate:RegisterUnitEvent(event, unit)
