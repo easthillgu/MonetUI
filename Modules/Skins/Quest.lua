@@ -61,6 +61,35 @@ local function SkinQuestFrame()
             ns.Skin:Strip(panel)
             ns.Skin:Panel(panel)
         end)
+
+        -- Quest content FontStrings (body text, reward text) were designed for the original light parchment.
+        -- After Strip + Panel the background is dark, so the text needs brightening.
+        -- Content FontStrings are recreated lazily on every quest, so we recolor on every Show.
+        M:HookShow(quest, function()
+            local panels = {
+                _G.QuestFrameGreetingPanel, _G.QuestFrameProgressPanel,
+                _G.QuestFrameRewardPanel, _G.QuestFrameDetailPanel,
+            }
+            for _, panel in ipairs(panels) do
+                if panel then
+                    -- Recurse into all FontStrings; skip buttons and headers (they keep their own style).
+                    local function brighten(f)
+                        if f.GetObjectType and f:GetObjectType() == "FontString" then
+                            -- Only touch FontStrings that are still using Blizzard's dim color.
+                            local ok, r, g, b = pcall(f.GetTextColor, f)
+                            if ok and r and r < 0.6 and g < 0.6 and b < 0.6 then
+                                -- Dim Blizzard grey → bright Monet light: 0.88 / 0.86 / 0.82
+                                pcall(f.SetTextColor, f, 0.88, 0.86, 0.82, 1)
+                            end
+                        end
+                        if f.GetChildren then
+                            for _, c in ipairs({ f:GetChildren() }) do brighten(c) end
+                        end
+                    end
+                    brighten(panel)
+                end
+            end
+        end)
     end
 
     local gossip = _G.GossipFrame

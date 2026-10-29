@@ -35,7 +35,7 @@ local GREEN   = { r = 0.35, g = 0.80, b = 0.40 }
 local RED     = { r = 0.85, g = 0.35, b = 0.30 }
 local ORANGE  = { r = 0.90, g = 0.55, b = 0.25 }
 local YELLOW  = { r = 0.85, g = 0.75, b = 0.35 }
-local GREY    = { r = 0.55, g = 0.55, b = 0.55 }
+local GREY    = { r = 0.72, g = 0.70, b = 0.66 }  -- 提亮：原 0.55 在深底上对比度不够
 
 local enabled = true       -- Core only calls SetEnabled on runtime toggles
 local tracker, scrollFrame, content, scrollBar
@@ -245,8 +245,8 @@ Render = function(settle)
             if texts[j].done or complete then
                 fs:SetTextColor(GREEN.r, GREEN.g, GREEN.b, 1)
             else
-                local r, g, b = Color:GetNeutral()
-                fs:SetTextColor(r, g, b, 1)
+                -- 对比度增强：中灰在中深色背景上看不清，改用亮灰（不受主题 neutral 约束）
+                fs:SetTextColor(0.82, 0.80, 0.76, 1)
             end
             entry.objs[#entry.objs + 1] = fs
         end
