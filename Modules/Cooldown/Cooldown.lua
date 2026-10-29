@@ -435,54 +435,9 @@ local function StyleButton(button)
     end
 end
 
-local TINT = {
-    normal   = { 1.00, 1.00, 1.00 },
-    lacking  = { 0.35, 0.35, 0.95 },  -- not enough resource
-    outRange = { 0.55, 0.25, 0.25 },  -- out of range
-}
-
-local function IsUsable(slot)
-    local api = _G.C_ActionBar
-    if api and api.IsUsableAction then
-        return api.IsUsableAction(slot)
-    end
-    return nil
-end
-
-local function InRange(slot)
-    local api = _G.C_ActionBar
-    if api and api.IsActionInRange then
-        return api.IsActionInRange(slot)
-    end
-    return nil
-end
-
-local function UpdateState(button)
-    local slot = button.action
-    local icon = button.icon
-    if not slot or not icon then return end
-
-    local usable, lacking = IsUsable(slot)
-    local inRange = InRange(slot)
-
-    usable  = Secrets.Bool(usable, true)
-    lacking = Secrets.Bool(lacking, false)
-    inRange = Secrets.Bool(inRange, true)
-
-    local tint = TINT.normal
-    if not inRange then
-        tint = TINT.outRange
-    elseif not usable and lacking then
-        tint = TINT.lacking
-    end
-
-    icon:SetVertexColor(tint[1], tint[2], tint[3])
-end
-
 local function RefreshAll()
     for i = 1, #buttons do
         StyleButton(buttons[i])
-        UpdateState(buttons[i])
     end
 end
 
@@ -573,12 +528,9 @@ function M:SetEnabled(enabled)
         RefreshAll()
     else
         RestoreBlizzardViewer()
-        -- restore the icons
-        local normal = TINT.normal
-        for i = 1, #buttons do
-            local icon = buttons[i].icon
-            if icon then icon:SetVertexColor(normal[1], normal[2], normal[3]) end
-        end
+        -- 图标染色（TINT）已随空转的 UpdateState 一并删除：自建按钮没有 `.action` 字段，
+        -- 那条路径从来没生效过，也就没有"还原染色"这回事。
+        buttons = {}
     end
 
     -- Hand every countdown back to Blizzard (or wake our text up) at once instead of waiting for the next tick.
