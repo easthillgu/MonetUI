@@ -161,28 +161,38 @@ function EventBus:Unregister(event, callback)
         end
         if changed then ResyncUnitFilter(event) end
     end
+
+    -- 最后一个回调走了就把引擎注册也退掉：以前非单位事件在这里只清表、不 UnregisterEvent，
+    -- 于是那个事件一直往我们身上派发（review 2026-10-29 4.4）。
+    ResyncUnitFilter(event)
 end
 
 function EventBus:UnregisterAll(event)
     callbacks[event] = nil
     unitListeners[event] = nil
     unitSets[event] = nil
+    ResyncUnitFilter(event)
 end
 
 function EventBus:Dispatch(event, ...)
+    -- **先快照再派发**：回调里调 Unregister 会改列表，直接遍历会跳过后面几个回调。
     local list = callbacks[event]
-    if list then
-        for i = 1, #list do
-            local ok, err = pcall(list[i], event, ...)
+    if list and #list > 0 then
+        local snapshot = {}
+        for i = 1, #list do snapshot[i] = list[i] end
+        for i = 1, #snapshot do
+            local ok, err = pcall(snapshot[i], event, ...)
             if not ok then Report(event, err) end
         end
     end
 
     local listeners = unitListeners[event]
-    if listeners then
+    if listeners and #listeners > 0 then
+        local snapshot = {}
+        for i = 1, #listeners do snapshot[i] = listeners[i] end
         local unit = ...
-        for i = 1, #listeners do
-            local entry = listeners[i]
+        for i = 1, #snapshot do
+            local entry = snapshot[i]
             if entry.unit == unit then
                 local ok, err = pcall(entry.cb, event, ...)
                 if not ok then Report(event, err) end
