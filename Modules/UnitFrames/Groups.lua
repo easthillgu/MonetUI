@@ -638,8 +638,9 @@ local function SyncSelection()
     local target
 
     -- 只看显示着的按钮：团队里小队的那些按钮还在 byUnit 里（unit 已被安全头清空，这里再兜一层）
+    -- IsShown 在受限环境下也可能返回机密值，统一过 Secrets.Bool（读不出来按"没显示"）。
     for unit, button in pairs(byUnit) do
-        if button:IsShown() then
+        if Secrets.Bool(button:IsShown(), false) then
             -- UnitIsUnit 在受限时返回**机密布尔**（秘密标注 SecretWhenUnitComparisonRestricted，
             -- AGENTS 实机判例）：先值级判，机密就当作"不是"跳过（= Bool 被拦后的 nil 回退分支）。
             local ok, same = pcall(UnitIsUnit, unit, "target")
@@ -664,7 +665,7 @@ function M:RefreshAll()
         -- 退路边框的颜色跟着主题走（走 Widget:Theme 的按钮没有 monetEdges，这里是空转）
         SizePlainBorder(button)
         SizeSelectBorder(button)
-        if button:IsShown() then RefreshButton(button) end
+        if Secrets.Bool(button:IsShown(), false) then RefreshButton(button) end
     end
 
     -- 名册一动，目标可能换到别的按钮上；主题一换，选中色也要重上
@@ -673,7 +674,7 @@ end
 
 function M:UpdateUnit(unit, kind)
     local button = unit and byUnit[unit]
-    if not button or not button:IsShown() then return end
+    if not button or not Secrets.Bool(button:IsShown(), false) then return end
 
     if kind == "health" then
         -- 血条填充的右缘动了，预估 / 吸收盾的锚点与上限都要跟着重算
@@ -1121,7 +1122,7 @@ local function StartTicker()
     if type(C_Timer) ~= "table" or type(C_Timer.NewTicker) ~= "function" then return end
     ticker = C_Timer.NewTicker(RANGE_INTERVAL, function()
         for _, button in pairs(byUnit) do
-            if button:IsShown() then UpdateRange(button) end
+            if Secrets.Bool(button:IsShown(), false) then UpdateRange(button) end
         end
     end)
 end

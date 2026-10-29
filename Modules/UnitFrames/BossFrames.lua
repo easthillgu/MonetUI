@@ -297,9 +297,11 @@ local function BuildBoss(cfg)
 
     -- 距离 ticker
     local function Tick()
+        local secrets = Secrets()
+        if not secrets then return end
         for i = 1, MAX_BOSS do
             local btn = bossButtons[i]
-            if btn and btn:IsShown() and btn.unit and UnitExists(btn.unit) then
+            if btn and secrets.Bool(btn:IsShown(), false) and btn.unit and UnitExists(btn.unit) then
                 UpdateState(btn)
             end
         end
@@ -443,7 +445,7 @@ function M:RegisterEvents()
     eb:Register("UNIT_TARGET", function()
         for i = 1, MAX_BOSS do
             local btn = bossButtons[i]
-            if btn and btn:IsShown() then UpdateState(btn) end
+            if btn and Secrets().Bool(btn:IsShown(), false) then UpdateState(btn) end
         end
     end)
     eb:Register("MONETUI_THEME_CHANGED", function()

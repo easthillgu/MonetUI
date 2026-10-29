@@ -429,7 +429,8 @@ local function HideBlizzardPlate(base, plate)
     -- "点不中玩家 / 宠物，只有没被我们接管的 NPC 才点得中"。只把 alpha 压到 0：
     -- 视觉上一样看不见，但 hit test 仍然有效。
     if uf.SetAlpha then pcall(uf.SetAlpha, uf, 0) end
-    if uf.IsShown and not uf:IsShown() then pcall(uf.Show, uf) end
+    -- IsShown 也可能返回机密值：一律过 Secrets.Bool（读不出来就当"没显示"，再 Show 一次）。
+    if uf.IsShown and not Secrets.Bool(uf:IsShown(), false) then pcall(uf.Show, uf) end
     FadeBlizzardSiblings(base, plate)
 
     plate.blizzardUF = uf
@@ -698,7 +699,7 @@ end
 local function KeepBlizzardHidden(plate)
     local uf = plate.blizzardUF
     if not uf then return end
-    if uf.IsShown and not uf:IsShown() then pcall(uf.Show, uf) end
+    if uf.IsShown and not Secrets.Bool(uf:IsShown(), false) then pcall(uf.Show, uf) end
     if uf.SetAlpha then pcall(uf.SetAlpha, uf, 0) end
     FadeBlizzardSiblings(plate.base, plate)
 end
