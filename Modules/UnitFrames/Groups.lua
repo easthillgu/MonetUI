@@ -860,6 +860,10 @@ end
 
 local function MuteOne(frame, enable)
     if not frame then return end
+    -- 战斗中**不能**对受保护的成员框 EnableMouse / EnableMouseMotion —— 会被客户端拦成
+    -- ADDON_ACTION_BLOCKED（实机 ×984，每秒一条，来自压制 ticker）。战斗中只靠 AlphaTree 的
+    -- alpha 0 + 移出屏幕挡视觉；鼠标在脱战后由 1s ticker 补关（那时不受保护）。
+    if type(InCombatLockdown) == "function" and InCombatLockdown() then return end
     if type(frame.EnableMouse) == "function" then pcall(frame.EnableMouse, frame, enable) end
     if type(frame.EnableMouseMotion) == "function" then pcall(frame.EnableMouseMotion, frame, enable) end
 end

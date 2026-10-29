@@ -10,5 +10,6 @@
     <Script file="CastBar.lua"/>
     <Script file="ClassPower.lua"/>
     <Script file="Blizzard.lua"/>
+    <Script file="BossFrames.lua"/>
     <Script file="Groups.lua"/>
 </Ui>

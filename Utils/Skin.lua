@@ -537,27 +537,141 @@ function Skin:ScrollBar(scrollbar)
 
     local thumb = scrollbar.Thumb
     if thumb then
-        self:Strip(thumb, { regions = true })
-        if not Marked(thumb, "thumbFill") then
-            -- The handle gets the same barfill material as the action-bar buttons: a gradient in the theme hue, brightening under the cursor so the grip feels alive instead of a flat swatch.
-            local fill = thumb:CreateTexture(nil, "ARTWORK")
-            fill:SetAllPoints(thumb)
-            fill:SetTexture(Media.texture["monet_barfill"])
-            Widget:TopLight(fill)
-            Mark(thumb, "thumbFill", fill)
-            self:Track(fill)
-
-            local function tint(k)
-                local r, g, b = Color:GetBorder()
-                fill:SetVertexColor(r * k, g * k, b * k, 0.95)
-            end
-            tint(1)
-            self:OnTheme(function() tint(1) end)
-            -- 轮询代替 HookScript（滑块手柄是暴雪的贴图，写脚本槽会污染）。
-            Widget:HoverWatch(thumb, function() tint(1.35) end, function() tint(1) end)
-        end
+        self:ScrollThumb(thumb)
     end
     return scrollbar
+end
+
+--- 滚动条把手（thumb）统一换肤：barfill 材质 + 主题色 + 悬停提亮。
+--- 本体铺一块窄一点的"细把手"（居中留边），读起来是细条而不是整块亮条 —— 2026-10-29 细线风。
+--- 经典 Slider（Skin:ScrollBar）和 ScrollBox 的无名滚动条共用这一套。
+function Skin:ScrollThumb(thumb)
+    if not thumb then return end
+    self:Strip(thumb, { regions = true })
+    if Marked(thumb, "thumbFill") then return end
+
+    local fill = thumb:CreateTexture(nil, "ARTWORK")
+    fill:SetTexture(Media.texture["monet_barfill"])
+    Widget:TopLight(fill)
+    -- 细条：比 thumb 本体窄（居中留边），别做成铺满整格的实心亮块。
+    local w = thumb:GetWidth() or 8
+    local bar = math.max(3, math.floor(w * 0.55))
+    local inset = math.max(0, math.floor((w - bar) / 2))
+    fill:SetPoint("TOPLEFT", thumb, "TOPLEFT", inset, 0)
+    fill:SetPoint("BOTTOMRIGHT", thumb, "BOTTOMRIGHT", -inset, 0)
+    Mark(thumb, "thumbFill", fill)
+    self:Track(fill)
+
+    local function tint(k)
+        local r, g, b = Color:GetBorder()
+        fill:SetVertexColor(r * k, g * k, b * k, 0.95)
+    end
+    tint(1)
+    self:OnTheme(function() tint(1) end)
+    -- 轮询代替 HookScript（滑块手柄是暴雪的贴图，写脚本槽会污染）。
+    Widget:HoverWatch(thumb, function() tint(1.35) end, function() tint(1) end)
+end
+
+--- ScrollBox 的上下箭头按钮：无名 17×11 Button，贴图是 region 上的
+--- atlas `minimal-scrollbar-arrow-top` / `-bottom`（没有 NormalTexture、没有 ScrollUpButton 字段）。
+--- **暴雪每次滚动会把这张 atlas 重设回去**，所以不能直接改它的贴图（会被覆盖）。做法：
+---   ① 把暴雪那张 atlas region `SetAlpha(0)` 藏掉；
+---   ② 另建一张我们自己的箭头贴图（独立纹理，Blizzard 改 atlas 也盖不掉）；
+---   ③ 轮询驱动兜底：暴雪偶尔会把 alpha 顶回 1（滚动/禁用态），驱动每 0.3s 重新压回 0。
+local SCROLL_ARROW_ATLAS = {
+    ["minimal-scrollbar-arrow-top"]    = "monet_chevron_up",
+    ["minimal-scrollbar-arrow-bottom"] = "monet_chevron_down",
+}
+local arrowRegions = setmetatable({}, { __mode = "k" })  -- [blizzardRegion] = true
+local arrowDriver, arrowAcc
+
+local function EnsureArrowDriver()
+    if arrowDriver then return end
+    arrowDriver = CreateFrame("Frame")
+    arrowDriver:SetScript("OnUpdate", function(_, elapsed)
+        arrowAcc = (arrowAcc or 0) + (elapsed or 0)
+        if arrowAcc < 0.3 then return end
+        arrowAcc = 0
+        for reg in pairs(arrowRegions) do
+            if type(reg.GetAlpha) == "function" and type(reg.SetAlpha) == "function" then
+                local ok, a = pcall(reg.GetAlpha, reg)
+                if ok and type(a) == "number" and a > 0 then pcall(reg.SetAlpha, reg, 0) end
+            end
+        end
+    end)
+end
+
+function Skin:ScrollArrowButton(button)
+    if not button or Marked(button, "scrollArrow") then return false end
+    if type(button.GetRegions) ~= "function" then return false end
+    -- GetRegions 返回**多返回值**，必须用 { } 包成 table（直接 pcall 只会拿到第一个 region）。
+    local okRegions, regions = pcall(function() return { button:GetRegions() } end)
+    if not okRegions or type(regions) ~= "table" then return false end
+    for _, reg in ipairs(regions) do
+        if type(reg.GetAtlas) == "function" then
+            local ok, atlas = pcall(reg.GetAtlas, reg)
+            local key = ok and atlas and SCROLL_ARROW_ATLAS[atlas]
+            if key then
+                Mark(button, "scrollArrow", true)
+                -- ① 藏掉暴雪 atlas（它每次滚动会重设贴图，但 alpha 由驱动持续压回 0）
+                pcall(reg.SetAlpha, reg, 0)
+                arrowRegions[reg] = true
+                EnsureArrowDriver()
+                -- ② 我们自己的箭头：独立纹理，压在上层
+                local w = button:GetWidth() or 16
+                local h = button:GetHeight() or 16
+                local our = button:CreateTexture(nil, "ARTWORK", nil, 2)
+                our:SetAllPoints(button)
+                our:SetTexture(Media:Texture(key))
+                local r, g, b = Color:GetBorder()
+                our:SetVertexColor(r, g, b)
+                return true
+            end
+        end
+    end
+    return false
+end
+
+--- 全局兜底：扫一遍所有帧，把 ScrollBox 的细把手 + 上下箭头都换上。
+--- ScrollBox 的滚动条是匿名 Frame + .Thumb + 无名 atlas 箭头，而且标签页懒创建 ——
+--- 逐帧换肤（SkinScrollsIn）常常赶不上。登录后延迟扫几遍兜底（EnumerateFrames 一遍几十毫秒）。
+function Skin:ScanScrollArrows()
+    if type(EnumerateFrames) ~= "function" then return end
+    local frame = EnumerateFrames()
+    local guard = 0
+    while frame and guard < 200000 do
+        guard = guard + 1
+        pcall(function()
+            if frame.Thumb then
+                self:ScrollThumb(frame.Thumb)
+            end
+            local kind = frame.GetObjectType and frame:GetObjectType()
+            if kind == "Button" then
+                self:ScrollArrowButton(frame)
+            end
+        end)
+        frame = EnumerateFrames(frame)
+    end
+end
+
+--- 翻页按钮的左右箭头（商人 / 邮件 / 拾取 / 任务文本）：换 Normal/Pushed 贴图 + 主题色。
+function Skin:PageArrow(button, dir)
+    if not button then return button end
+    local key = (dir == "left") and "monet_arrow_left" or "monet_arrow_right"
+    local normal = self:SwapArt(button.GetNormalTexture and button:GetNormalTexture(), key)
+    self:SwapArt(button.GetPushedTexture and button:GetPushedTexture(), key)
+    if normal and normal.SetVertexColor then
+        local r, g, b = Color:GetBorder()
+        normal:SetVertexColor(r, g, b)
+        if not Marked(button, "pageArrowTint") then
+            Mark(button, "pageArrowTint", true)
+            self:OnTheme(function()
+                local nr, ng, nb = Color:GetBorder()
+                if normal.SetVertexColor then normal:SetVertexColor(nr, ng, nb) end
+            end)
+        end
+    end
+    return button
 end
 
 --- Walk a scroll frame's scroll bar (Blizzard names differ across builds).

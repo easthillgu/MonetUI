@@ -313,16 +313,19 @@ Render = function(settle)
         scrollFrame:Hide()
     else
         trackH = math.min(contentH, maxH)
+        -- 正文在 scrollFrame 里：**永远显示 scrollFrame**，只在需要滚动时才显示滚动条。
+        -- （旧版在"内容装得下、不需要滚动"时 Hide 了 scrollFrame —— 等于把整块正文藏掉，
+        --   标题和按钮是 tracker 的直接子件所以还在，正文却整片看不见。）
+        scrollFrame:Show()
         if contentH > trackH then
-            scrollFrame:Show()
             local range = math.max(0, contentH - trackH)
             scrollBar:SetMinMaxValues(0, range)
             scrollBar:SetValueStep(LINE_H)
             scrollBar:Show()
-            scrollBar.ScrollUpButton:Show()
-            scrollBar.ScrollDownButton:Show()
-        else
-            scrollFrame:Hide()
+            if scrollBar.ScrollUpButton then scrollBar.ScrollUpButton:Show() end
+            if scrollBar.ScrollDownButton then scrollBar.ScrollDownButton:Show() end
+        elseif scrollBar then
+            scrollBar:Hide()
         end
     end
     tracker:SetHeight(trackH)
@@ -544,9 +547,18 @@ function M:Initialize()
     EventBus:Register("QUEST_LOG_UPDATE", QueueRender)
     EventBus:Register("QUEST_WATCH_UPDATE", QueueRender)
     EventBus:Register("QUEST_ACCEPTED", QueueRender)
+    -- 旧版只挂了上面三个事件：目标打勾（CRITERIA）、任务数据变化、完成/移除、watch 列表变动
+    -- 都等不到下一次 QUEST_LOG_UPDATE，所以看起来"更新不及时"。补齐这些：
+    EventBus:Register("QUEST_LOG_CRITERIA_UPDATE", QueueRender)   -- 单个目标进度变化（打勾/计数）
+    EventBus:Register("QUEST_WATCH_LIST_CHANGED", QueueRender)    -- 追踪列表增删
+    EventBus:Register("QUEST_REMOVED", QueueRender)               -- 任务移除（放弃/删除）
+    EventBus:Register("QUEST_FINISHED", QueueRender)              -- 任务完成（可交）
+    EventBus:Register("QUEST_TURNED_IN", QueueRender)             -- 任务已交
+    EventBus:Register("SCENARIO_UPDATE", QueueRender)             -- 场景目标变化
+    EventBus:RegisterUnit("UNIT_QUEST_LOG_CHANGED", "player", QueueRender)
 
     -- 暴雪的追踪框会晚到、还会被换成新对象（见 SuppressBlizzard 的注释），这几个时机都补一次。
-    EventBus:Register("PLAYER_ENTERING_WORLD", function() SuppressBlizzard() end)
+    EventBus:Register("PLAYER_ENTERING_WORLD", function() SuppressBlizzard(); QueueRender() end)
     EventBus:Register("ZONE_CHANGED_NEW_AREA", function() SuppressBlizzard() end)
     EventBus:Register("ADDON_LOADED", function(_, name)
         if name == "Blizzard_ObjectiveTracker" then SuppressBlizzard() end

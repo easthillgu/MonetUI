@@ -275,6 +275,11 @@ Media.texture = {
     -- SetHeight(1); stretched taller it becomes a separator band.  See Widget:Hairline.
     ["monet_hairline"]      = ASSET .. "Textures\\monet_hairline",
 
+    -- 滚动条（2026-10-29 细线风）：轨道 = 8x64 的 1px 竖线；把手 = 8x64 的 3px 竖条。
+    -- 都按覆盖率光栅化（和 weave / round_edge 同一套），1px 线干净不虚。
+    ["monet_scrollbar_track"] = ASSET .. "Textures\\monet_scrollbar_track",
+    ["monet_scrollbar_thumb"] = ASSET .. "Textures\\monet_scrollbar_thumb",
+
     -- 16x16 rounded 9-slice border rings for Widget:Theme's round panels, in three ring widths.
     -- The ring is painted PURE WHITE, like WHITE8X8, and that is not an accident: Widget:Refresh tints it
     -- with SetBackdropBorderColor, the same call that tints every flat border, and the engine multiplies

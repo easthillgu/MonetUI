@@ -893,6 +893,63 @@ function SimpleConfig:Build()
 
     sec.bodyHeight = -row.y + 4
 
+    sec = BeginSection("首领框架", false)
+    content = sec.body
+    row = LayoutCursor(0)
+
+    local function BossGetter(key, fallback)
+        return function()
+            local cfg = ns:DB().bossFrames
+            local value = cfg and cfg[key]
+            if value == nil then return fallback end
+            return value
+        end
+    end
+
+    local function BossSetter(key)
+        return function(value)
+            local cfg = ns:DB().bossFrames
+            if cfg then cfg[key] = value end
+            local mod = ns:GetModule("BossFrames")
+            if mod and type(mod.Apply) == "function" then mod:Apply() end
+        end
+    end
+
+    MakeCheckbox(content, "启用首领框架", row(26),
+        BossGetter("enabled", true), BossSetter("enabled"))
+
+    MakeCheckbox(content, "隐藏暴雪自带首领框", row(26),
+        BossGetter("hideBlizzard", true),
+        function(value)
+            local cfg = ns:DB().bossFrames
+            if cfg then cfg.hideBlizzard = value end
+            local mod = ns:GetModule("BossFrames")
+            if mod and type(mod.Apply) == "function" then mod:Apply() end
+        end)
+
+    local BOSS_WIDTHS = {
+        { value = 140, text = "140 px" },
+        { value = 160, text = "160 px" },
+        { value = 180, text = "180 px" },
+        { value = 200, text = "200 px" },
+    }
+    MakeDropdown(content, row(28), "首领框宽度", BOSS_WIDTHS,
+        BossGetter("width", 180), BossSetter("width"))
+
+    local BOSS_HEALTH = {
+        { value = 14, text = "14 px" },
+        { value = 16, text = "16 px" },
+        { value = 20, text = "20 px" },
+        { value = 24, text = "24 px" },
+    }
+    MakeDropdown(content, row(28), "首领血条高度", BOSS_HEALTH,
+        BossGetter("health", 20), BossSetter("health"))
+
+    MakeDropdown(content, row(28), "首领血量文字", HEALTH_TEXT_MODES,
+        BossGetter("healthText", "none"), BossSetter("healthText"))
+
+    sec.bodyHeight = -row.y + 4
+
     sec = BeginSection("动作条", false)
     content = sec.body
     row = LayoutCursor(0)

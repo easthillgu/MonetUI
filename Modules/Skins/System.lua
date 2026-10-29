@@ -20,6 +20,8 @@ local function SkinLoot()
         M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
         -- The close button is handled by SkinWindow; only the pager arrows go through the text-button skin.
         M:Buttons({ "LootFramePrevPageButton", "LootFrameNextPageButton" })
+        Skin:PageArrow(_G.LootFramePrevPageButton, "left")
+        Skin:PageArrow(_G.LootFrameNextPageButton, "right")
         Skin:ScrollFrame(frame.LootFrameScrollFrame)
     end
 

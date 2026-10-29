@@ -30,6 +30,8 @@ local function SkinCharacter()
         Skin:Panel(panel, { bgAlpha = 0.96 })
         M:SkinButtonsIn(panel)
         M:SkinScrollsIn(panel)
+        -- 标签页内容是懒加载的（滚动条 / 上下箭头在显示时才建），显示时再扫一次。
+        M:HookShow(panel, function() M:SkinScrollsIn(panel) end)
     end)
 end
 
@@ -45,6 +47,7 @@ local function SkinInspect()
         Skin:Panel(panel, { bgAlpha = 0.96 })
         M:SkinButtonsIn(panel)
         M:SkinScrollsIn(panel)
+        M:HookShow(panel, function() M:SkinScrollsIn(panel) end)
     end)
 end
 

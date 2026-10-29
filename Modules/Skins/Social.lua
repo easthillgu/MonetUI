@@ -26,6 +26,19 @@ local function SkinFriends()
     end)
 
     M:Scrolls({ "FriendsFrameListScrollFrame" })
+
+    -- 各标签页（好友 / 声望 / 团队 / 公会…）的列表用 ScrollBox，滚动条是无名 Frame + Thumb；
+    -- 递归扫一遍把它们也换上我们的细把手。标签内容懒加载，面板显示时再补一次。
+    M:SkinScrollsIn(frame)
+    M:HookShow(frame, function() M:SkinScrollsIn(frame) end)
+    if type(frame.GetChildren) == "function" then
+        for _, child in ipairs({ frame:GetChildren() }) do
+            local okKind, kind = pcall(child.GetObjectType, child)
+            if okKind and kind == "Frame" then
+                pcall(M.HookShow, M, child, function() M:SkinScrollsIn(child) end)
+            end
+        end
+    end
 end
 
 local function SkinWho()
@@ -69,47 +82,48 @@ end
 -- Strip already fades Blizzard's blue; the plate replaces it.
 local CHAT_FRAMES = { "ChatFrame1", "ChatFrame2", "ChatFrame3", "ChatFrame4" }
 
---- 聊天框底边对齐到全局基线（和第一动作条同一条线，见 Utils/Layout.lua）。
---- 聊天窗口的位置是暴雪记在账号级布局里的，我们从没设过它（之前底边是 50，动作条 24），
---- 所以这里只"校底边"：左边的 X 保持用户自己的值，停靠的子窗口跟着主窗口走。
-local function AlignChatBottom()
-    local chat = _G.ChatFrame1
-    if not chat or type(chat.GetRect) ~= "function" then return end
-    local ok, left, bottom = pcall(chat.GetRect, chat)
-    if not ok or type(left) ~= "number" or type(bottom) ~= "number" then return end
+--- 聊天框"贴底"已移除（2026-10-29）。
+--- **原因：ChatFrame1 是暴雪 EditMode 的系统帧（system=8），从插件里对它做
+--- ClearAllPoints / SetPoint / SetClampRectInsets 会把这个帧永久标脏**（AGENTS.md 的
+--- "anchor family connection"）。它一脏，编辑模式 `InvokeOnAnyEditModeSystemAnchorChanged`
+--- 用 `secureexecuterange` 遍历 52 个系统帧时整段执行被带脏 —— 实机后果：
+--- `GetAuraDataByIndex(): Auras cannot be accessed when secret while tainted by 'MonetUI'`
+--- （编辑模式 + 目标追踪两条栈同时炸，09:52:03）。暴雪/玩家自己记的聊天位置，
+--- 我们不抢；需要贴底请在编辑模式里拖（那是暴雪自己的安全路径）。
+--- 聊天框的**外观**美化（Strip + Panel + 滚动条 + 按钮 + 输入框）保留在下面。
 
-    local target = ns.Layout and ns.Layout.bottom
-    if type(target) ~= "number" then return end
-
-    -- 暴雪给聊天框加了屏幕内缩（实测左/下都留 32），SetPoint 到底边会被**夹回 32**，
-    -- 所以 y=24 根本落不下来。先把下边内缩放宽到 target，其余三边保持暴雪原值。
-    local okIns, insLeft, insRight, insTop, insBottom = pcall(chat.GetClampRectInsets, chat)
-    if okIns and type(insLeft) == "number" and type(insRight) == "number"
-        and type(insTop) == "number" and type(insBottom) == "number" then
-        if -insBottom > target then
-            pcall(chat.SetClampRectInsets, chat, insLeft, insRight, insTop, -target)
+--- 聊天框高度对齐小地图（2026-10-29）。
+--- **改尺寸安全、改位置污染**：实测对 ChatFrame1（EditMode 系统帧）调 SetHeight 不会
+--- 扩散污染（脏字段数不变、taint.log 空），而 SetPoint / SetClampRectInsets 会把帧标脏
+--- （见下方"贴底已移除"的说明）。所以只对齐**高度**，位置和宽度完全交给暴雪/玩家。
+local function MatchChatHeight()
+    local mm = _G.Minimap
+    if not mm or type(mm.GetHeight) ~= "function" then return end
+    local ok, h = pcall(mm.GetHeight, mm)
+    if not ok or type(h) ~= "number" or h <= 0 then return end
+    for _, name in ipairs(CHAT_FRAMES) do
+        local f = _G[name]
+        if f and type(f.SetHeight) == "function" then
+            local gok, cur = pcall(f.GetHeight, f)
+            if not gok or math.abs((cur or 0) - h) > 0.5 then
+                pcall(f.SetHeight, f, h)
+            end
         end
     end
-
-    if math.abs(bottom - target) < 0.01 then return end
-
-    pcall(chat.ClearAllPoints, chat)
-    pcall(chat.SetPoint, chat, "BOTTOMLEFT", UIParent, "BOTTOMLEFT", left, target)
 end
 
--- 暴雪的布局（编辑模式 / 登录恢复）可能在套用皮肤之后把聊天框放回去，所以每个
--- PLAYER_ENTERING_WORLD 再校一次；套用皮肤时也校一次（改设置立刻可见）。
+-- 编辑模式 / 登录恢复可能在套皮后重排，进世界再校一次（SetHeight 幂等、无污染）。
 if ns.EventBus then
-    ns.EventBus:Register("PLAYER_ENTERING_WORLD", AlignChatBottom)
+    ns.EventBus:Register("PLAYER_ENTERING_WORLD", MatchChatHeight)
 end
 
 local function SkinChat()
-    AlignChatBottom()
-
     M:Controls(CHAT_FRAMES, function(chat)
         ns.Skin:Strip(chat)
         ns.Skin:Panel(chat, { thickness = 1, bgAlpha = 0.35 })
     end)
+
+    MatchChatHeight()
 
     M:Controls({
         "ChatFrame1ScrollFrame", "ChatFrame2ScrollFrame",

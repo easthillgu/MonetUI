@@ -248,16 +248,29 @@ function M:SkinButtonsIn(frame, opts)
     end
 end
 
---- Restyle every direct child ScrollFrame of a frame.
-function M:SkinScrollsIn(frame)
+--- Restyle every child ScrollFrame / ScrollBox scrollbar of a frame (recurses a little,
+--- because ScrollBox scrollbars are anonymous Frames nested inside the list).
+function M:SkinScrollsIn(frame, depth)
     if not frame or type(frame.GetChildren) ~= "function" then return end
+    depth = depth or 0
     local children = { frame:GetChildren() }
     for i = 1, #children do
         local child = children[i]
         -- forbidden object 上连 GetObjectType 都会抛（见 SkinButtonsIn 的注释），一律 pcall。
         local okKind, kind = pcall(child.GetObjectType, child)
-        if okKind and kind == "ScrollFrame" then
-            pcall(Skin.ScrollFrame, Skin, child)
+        if okKind then
+            if kind == "ScrollFrame" then
+                pcall(Skin.ScrollFrame, Skin, child)
+            elseif kind == "Button" then
+                -- ScrollBox 的上下箭头（atlas minimal-scrollbar-arrow-*）。
+                pcall(Skin.ScrollArrowButton, Skin, child)
+            elseif child.Thumb then
+                -- ScrollBox 的滚动条：无名 Frame + .Thumb Button（没有具名的 ScrollUpButton）。
+                pcall(Skin.ScrollThumb, Skin, child.Thumb)
+            end
+        end
+        if depth < 3 then
+            pcall(M.SkinScrollsIn, M, child, depth + 1)
         end
     end
 end
@@ -395,6 +408,14 @@ local function InstallHooks()
         end
         C_Timer.After(1, pass)
         C_Timer.After(4, pass)
+        -- 滚动条细把手 / 上下箭头：ScrollBox 懒创建，多扫几遍兜底（只扫存在的帧）。
+        local function scanScrolls()
+            if M.active and Skin.ScanScrollArrows then Skin:ScanScrollArrows() end
+        end
+        C_Timer.After(1, scanScrolls)
+        C_Timer.After(3, scanScrolls)
+        C_Timer.After(6, scanScrolls)
+        C_Timer.After(10, scanScrolls)
     end)
 
     EventBus:Register("UI_SCALE_CHANGED", M:Debounce(function()

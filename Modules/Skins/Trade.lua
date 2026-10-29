@@ -60,6 +60,9 @@ local function SkinMail()
         -- 收件箱多了"一键收取"按钮 OpenAllMail（全局名，Ellesmere 同客户端实机名单佐证）。
         "OpenAllMail",
     })
+    -- 翻页按钮换成细线左右箭头。
+    Skin:PageArrow(_G.InboxPrevPageButton, "left")
+    Skin:PageArrow(_G.InboxNextPageButton, "right")
 end
 
 local function SkinMerchant()
@@ -72,6 +75,10 @@ local function SkinMerchant()
         "MerchantNextPageButton", "MerchantPrevPageButton", "MerchantRepairButton",
         "MerchantRepairAllButton", "MerchantSellButton", "MerchantBuyBackButton",
     })
+
+    -- 翻页按钮换成细线左右箭头（monet_arrow_left/right）。
+    Skin:PageArrow(_G.MerchantPrevPageButton, "left")
+    Skin:PageArrow(_G.MerchantNextPageButton, "right")
 
     M:Scrolls({ "MerchantFrameScrollFrame" })
 end

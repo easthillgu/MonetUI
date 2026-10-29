@@ -122,6 +122,18 @@ local DEFAULTS = {
             point = "CENTER", relativeTo = "UIParent", relativePoint = "CENTER", x = 300, y = 0,
         },
     },
+    -- 首领框架（Modules/UnitFrames/BossFrames.lua）：安全按钮 + visibility 驱动，
+    -- 风格与团队框同源；hideBlizzard 压制暴雪的 BossTargetFrameContainer。
+    bossFrames = {
+        enabled    = true,
+        hideBlizzard = true,
+        width      = 180,
+        health     = 20,
+        power      = 4,
+        spacing    = 2,
+        healthText = "none",
+        point = "RIGHT", relativeTo = "UIParent", relativePoint = "RIGHT", x = -200, y = -100,
+    },
     -- Blizzard's bottom chrome is re-parented off screen, not destroyed, so the buttons keep working for keybinds.
     -- ownBars: MonetUI draws its own 1..8 bars on LibActionButton-1.0 (Modules/ActionBars) and parks Blizzard's bars; with it off only hideBlizzard can still hide them.  First-run layout lives in BAR_DEFS, positions holds a per-bar override.
     actionBars = {

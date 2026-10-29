@@ -5,6 +5,114 @@
 local ADDON_NAME, ns = ...
 
 local M = ns.Skins
+local Media = ns.Media
+local Widget = ns.Widget
+local Skin = ns.Skin
+
+-- 任务对话框斜纹底板：暗色半透明衬底 + monet_stripe_weave + 亮色文字。
+-- 替代原来的 Strip + Panel（纯深色底），解决暴雪 FontString 在深底上看不清的问题。
+local WEAVE_SIZE = 64
+local Mark = function(o, k, v) return ns:Mark(o, k, v) end
+local Marked = function(o, k) return ns:Marked(o, k) end
+
+-- 按当前尺寸重算斜纹 texcoord（两轴同一密度 → 45° 不变形）
+local function UpdateWeave(panel)
+    local weave = Marked(panel, "questWeave")
+    if not weave then return end
+    local tex = Media.texture["monet_stripe_weave"]
+    if not tex then return end
+    weave:SetTexture(tex, "REPEAT", "REPEAT")
+    local mult = Media:Mult()
+    local w = panel:GetWidth() or 0
+    local h = panel:GetHeight() or 0
+    if w > 0 and h > 0 and mult > 0 then
+        local cols = w / (mult * WEAVE_SIZE)
+        local v0 = 1 / WEAVE_SIZE
+        local v1 = v0 + h / (mult * WEAVE_SIZE)
+        weave:SetTexCoord(0, cols, v0, v1)
+    end
+end
+
+-- 递归提亮暗色 FontString（暴雪正文 0,0,0 / 深棕，深底上看不清）
+local function BrightenTree(f)
+    if not f or not f.GetObjectType then return end
+    if f:GetObjectType() == "FontString" then
+        local ok, r, g, b = pcall(f.GetTextColor, f)
+        if ok and r and r < 0.55 and g < 0.55 and b < 0.55 then
+            pcall(f.SetTextColor, f, 0.88, 0.86, 0.82, 1)
+        end
+    end
+    if f.GetChildren then
+        for _, c in ipairs({ f:GetChildren() }) do BrightenTree(c) end
+    end
+end
+
+local function WeavePanel(panel, opts)
+    if not panel then return end
+    opts = opts or {}
+    local baseAlpha = opts.baseAlpha or 0.70
+    local weaveAlpha = opts.weaveAlpha or 0.30
+    local weaveColor = opts.weaveColor or { 0.55, 0.53, 0.50 }
+
+    -- 去掉暴雪原始贴图和边框
+    ns.Skin:Strip(panel)
+
+    -- 衬底层：半透明深色，控制底板的整体明度
+    local bg = Marked(panel, "questBg")
+    if not bg then
+        bg = panel:CreateTexture(nil, "BACKGROUND", nil, -2)
+        bg:SetAllPoints(panel)
+        Mark(panel, "questBg", bg)
+    end
+    bg:SetColorTexture(0.12, 0.12, 0.14, baseAlpha)
+
+    -- 斜纹层：monet_stripe_weave 铺满，ADD 混合做柔光
+    local weave = Marked(panel, "questWeave")
+    if not weave then
+        weave = panel:CreateTexture(nil, "BACKGROUND", nil, -1)
+        weave:SetAllPoints(panel)
+        weave:SetBlendMode("ADD")
+        Mark(panel, "questWeave", weave)
+    end
+    weave:SetVertexColor(weaveColor[1], weaveColor[2], weaveColor[3], weaveAlpha)
+    UpdateWeave(panel)
+
+    BrightenTree(panel)
+end
+
+-- 面板显示时再亮一次（暴雪 quest 数据是 Show 后才塞进去的）
+local function HookQuestBrighten(frame)
+    M:HookShow(frame, function()
+        local panels = {
+            _G.QuestFrameGreetingPanel, _G.QuestFrameProgressPanel,
+            _G.QuestFrameRewardPanel, _G.QuestFrameDetailPanel,
+        }
+        for _, panel in ipairs(panels) do
+            if panel then
+                UpdateWeave(panel)
+                BrightenTree(panel)
+            end
+        end
+
+        -- 全局 FontString 也一起提亮
+        local questFonts = {
+            "QuestProgressText", "QuestGreetingText", "QuestDetailText",
+            "QuestRewardText", "QuestProgressRequiredItemsText",
+            "QuestProgressRequiredMoneyText", "QuestProgressCompleteText",
+            "QuestProgressShowItemsText", "QuestRewardChoiceRequiredText",
+            "QuestRewardTextRequiredText",
+        }
+        for _, name in ipairs(questFonts) do
+            local f = _G[name]
+            if f and f.SetTextColor then
+                local ok, r, g, b = pcall(f.GetTextColor, f)
+                if ok and r and r < 0.55 and g < 0.55 and b < 0.55 then
+                    pcall(f.SetTextColor, f, 0.88, 0.86, 0.82, 1)
+                end
+            end
+        end
+    end)
+end
 
 local QUESTLOG_BUTTONS = {
     "QuestLogFrameAbandonButton", "QuestLogFrameTrackButton", "QuestLogFrameShareButton",
@@ -53,43 +161,16 @@ local function SkinQuestFrame()
         M:Buttons(QUESTFRAME_BUTTONS)
         M:Scrolls(QUESTFRAME_SCROLLS)
 
-        -- The greeting / progress / reward / detail sub-panels each carry their own backdrop art; plate them so the dialog reads as one surface.
+        -- 斜纹底板：暗色衬底 + monet_stripe_weave，解决暴雪正文在深底上看不清的问题
         M:Controls({
             "QuestFrameGreetingPanel", "QuestFrameProgressPanel",
             "QuestFrameRewardPanel", "QuestFrameDetailPanel",
         }, function(panel)
-            ns.Skin:Strip(panel)
-            ns.Skin:Panel(panel)
+            WeavePanel(panel, { baseAlpha = 0.70, weaveAlpha = 0.30 })
         end)
 
-        -- Quest content FontStrings (body text, reward text) were designed for the original light parchment.
-        -- After Strip + Panel the background is dark, so the text needs brightening.
-        -- Content FontStrings are recreated lazily on every quest, so we recolor on every Show.
-        M:HookShow(quest, function()
-            local panels = {
-                _G.QuestFrameGreetingPanel, _G.QuestFrameProgressPanel,
-                _G.QuestFrameRewardPanel, _G.QuestFrameDetailPanel,
-            }
-            for _, panel in ipairs(panels) do
-                if panel then
-                    -- Recurse into all FontStrings; skip buttons and headers (they keep their own style).
-                    local function brighten(f)
-                        if f.GetObjectType and f:GetObjectType() == "FontString" then
-                            -- Only touch FontStrings that are still using Blizzard's dim color.
-                            local ok, r, g, b = pcall(f.GetTextColor, f)
-                            if ok and r and r < 0.6 and g < 0.6 and b < 0.6 then
-                                -- Dim Blizzard grey → bright Monet light: 0.88 / 0.86 / 0.82
-                                pcall(f.SetTextColor, f, 0.88, 0.86, 0.82, 1)
-                            end
-                        end
-                        if f.GetChildren then
-                            for _, c in ipairs({ f:GetChildren() }) do brighten(c) end
-                        end
-                    end
-                    brighten(panel)
-                end
-            end
-        end)
+        -- Show 后再亮一次（暴雪 quest 数据是 Show 后才塞的）
+        HookQuestBrighten(quest)
     end
 
     local gossip = _G.GossipFrame
@@ -192,6 +273,8 @@ local function SkinItemText()
 
     M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
     M:Buttons({ "ItemTextCloseButton", "ItemTextNextPageButton", "ItemTextPrevPageButton" })
+    Skin:PageArrow(_G.ItemTextPrevPageButton, "left")
+    Skin:PageArrow(_G.ItemTextNextPageButton, "right")
     M:Scrolls({ "ItemTextScrollFrame" })
 end
 
