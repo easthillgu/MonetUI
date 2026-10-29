@@ -561,12 +561,16 @@ local function UpdateButtonContent(button, slot)
         pcall(button.icon.Hide, button.icon)
     end
 
-    -- 堆叠数量：受限环境下可能是秘密值，拿不到就不显示。
+    -- 堆叠数量：本客户端的 C_ActionBar.GetActionDisplayCount 返回的是**字符串**
+    -- （use count 或充能数，超出上限时是 "*"，见 docs/api/FUNCTIONS.md），不是数字 ——
+    -- 以前判 type(count)=="number"，所以数字从来没显示出来过。
+    -- 受限环境下它整体是机密值，而机密串的 type() 照样是 "string"：判完类型必须再过
+    -- issecretvalue，否则 SetText / 比较会抛 invalid value (secret)。
     local count
     if ActionBar and ActionBar.GetActionDisplayCount and not Secrets.CooldownsSecret() then
         count = ActionBar.GetActionDisplayCount(slot)
     end
-    if type(count) == "number" and count > 1 then
+    if type(count) == "string" and not Secrets.IsSecret(count) and count ~= "" and count ~= "1" then
         pcall(button.count.SetText, button.count, count)
         pcall(button.count.Show, button.count)
     else
