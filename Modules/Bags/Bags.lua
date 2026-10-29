@@ -477,6 +477,21 @@ local function FillWindow(win, items)
     win:SetShown(#items > 0)
 end
 
+--- Place windows the user has dragged back where they left them.
+--- 定义在 LayoutWindows **之前**：LayoutWindows 的降级补扫闭包要调用它，
+--- 而闭包在文本里早于原来的定义位置 —— 那样会解析成全局 nil，
+--- 报错还会被 PollWatch 的 pcall 吞掉（review 2026-10-29 H5）。
+local function RestoreDragged()
+    for key, win in pairs(windows) do
+        local pos = WindowPosition(key)
+        if pos and win:IsShown() then
+            win:ClearAllPoints()
+            win:SetPoint(pos.point or "TOPLEFT", UIParent, pos.relativePoint or "TOPLEFT",
+                pos.x or 0, pos.y or 0)
+        end
+    end
+end
+
 --- Tile the visible, not-yet-dragged windows in category order from the anchor.
 --- 首选布局：side="right" —— 分类背包的 RIGHT 对齐 QuestTracker 的 LEFT，
 --- 间隔 anchor.x（负数 = QuestTracker 左边），垂直从 anchor.y 起一列堆下来。
@@ -523,28 +538,20 @@ local function LayoutWindows()
     end
 
     -- 降级布局：说明 QuestTracker 帧还没出生。PollWatch 低频轮询，帧一出来
-    -- （锚框是 UIParent，所以每 2s 跑一次）就重新 LayoutWindows 贴回正确位置。
+    -- 就把窗口贴回正确位置，然后**自我注销** —— 一次性补扫，不该永久空转。
     if not _G.MonetUIQuestTracker then
         if not Marked(_G.UIParent, "bagsRetry") then
             Mark(_G.UIParent, "bagsRetry", true)
-            Widget:PollWatch(_G.UIParent, function()
+            local retry
+            retry = function()
                 if _G.MonetUIQuestTracker and shown then
+                    Widget:Unwatch(_G.UIParent, retry)
+                    Mark(_G.UIParent, "bagsRetry", nil)
                     LayoutWindows()
                     RestoreDragged()
                 end
-            end, 2)
-        end
-    end
-end
-
---- Place windows the user has dragged back where they left them.
-local function RestoreDragged()
-    for key, win in pairs(windows) do
-        local pos = WindowPosition(key)
-        if pos and win:IsShown() then
-            win:ClearAllPoints()
-            win:SetPoint(pos.point or "TOPLEFT", UIParent, pos.relativePoint or "TOPLEFT",
-                pos.x or 0, pos.y or 0)
+            end
+            Widget:PollWatch(_G.UIParent, retry, 2)
         end
     end
 end
