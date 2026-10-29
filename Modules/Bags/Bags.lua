@@ -589,6 +589,15 @@ local parked = setmetatable({}, { __mode = "k" })
 local bagsVisualOpen = false    -- 上次扫描：暴雪框是否有任何一个在显示（边沿检测）
 local shown = false             -- 我们的分类窗口开没开（守卫边沿要用，须先声明）
 
+--- 战斗中为真。暴雪背包框里有受保护子按钮，战斗里对它们 EnableMouse 会被拦
+--- （QuestTracker 2026-10-26 实机记录过同类 ×29）；鼠标这一半要跳战斗、脱战补做。
+local function InCombat()
+    local fn = _G.InCombatLockdown
+    if type(fn) ~= "function" then return false end
+    local ok, value = pcall(fn)
+    return ok and value and true or false
+end
+
 --- 暴雪的背包框：零售 12.x 默认是**合并背包**（ContainerFrameCombinedBags），
 --- 老客户端才是 ContainerFrame1..N。两个都得管；BackpackTokenFrame 跟着背包一起出现。
 local function BlizzardBagFrames()
@@ -617,6 +626,12 @@ end
 
 --- 停车 / 取回。取回按记账把鼠标还回去、alpha 拉回 1（模块关闭后玩家还要用原生背包）。
 local function ParkBlizzardBags(park)
+    -- 停车要整树关鼠标（受保护子按钮）—— 战斗中这一半做不了，排队到脱战再补。
+    -- alpha 0 本身不受保护，但一起跳过更简单，且停车只在装载 / 脱战时发生。
+    if park and InCombat() then
+        ns:AfterCombat("bags-park", function() ParkBlizzardBags(true) end)
+        return
+    end
     for _, frame in ipairs(BlizzardBagFrames()) do
         if frame then
             if park then
@@ -624,7 +639,7 @@ local function ParkBlizzardBags(park)
                     local rec = { mouse = {}, mouseSet = {} }
                     for _, f in ipairs(CollectTree(frame, {})) do
                         if f.EnableMouse and f.IsMouseEnabled and f:IsMouseEnabled() then
-                            f:EnableMouse(false)
+                            pcall(f.EnableMouse, f, false)
                             rec.mouseSet[f] = true
                             rec.mouse[#rec.mouse + 1] = f
                         end
@@ -646,13 +661,13 @@ end
 --- 返回"是否有框在显示"。只读 IsShown / GetAlpha，**不 Hide** —— 显示状态归暴雪管，我们只看。
 local blizzardDriver, guardAcc, lastToggle = nil, 0, 0
 local bankOpen = false          -- 银行开合也会 Show/Hide 背包框：那段时间的边沿让给银行路径
-local GUARD_INTERVAL = 0.05
+local GUARD_INTERVAL = 0.2
 local TOGGLE_DEBOUNCE = 0.12
 
 -- 停车扫查的复用工作台（避免每拍建表）。
 local sweepScratch = {}
 
-local function SweepBlizzardBags()
+local function SweepBlizzardBags(allowMouse)
     local anyShown = false
     for _, frame in ipairs(BlizzardBagFrames()) do
         if frame and frame.IsShown then
@@ -666,12 +681,12 @@ local function SweepBlizzardBags()
                 -- 晚生/重开的子框（开背包时暴雪现建 ItemButton）鼠标默认是开的：
                 -- alpha 沿树继承所以看不见，但鼠标状态不继承 → tooltip 会冒出来。
                 -- 只在框显示着时才需要管（不显示收不到鼠标事件），整树补禁。
-                if isShown then
+                if isShown and allowMouse then
                     for i = #sweepScratch, 1, -1 do sweepScratch[i] = nil end
                     CollectTree(frame, sweepScratch)
                     for _, f in ipairs(sweepScratch) do
                         if f.EnableMouse and f.IsMouseEnabled and f:IsMouseEnabled() then
-                            f:EnableMouse(false)
+                            pcall(f.EnableMouse, f, false)
                             if not rec.mouseSet[f] then
                                 rec.mouseSet[f] = true
                                 rec.mouse[#rec.mouse + 1] = f
@@ -698,7 +713,7 @@ local function StartBlizzardGuard()
         if guardAcc < GUARD_INTERVAL then return end
         guardAcc = 0
 
-        local anyShown = SweepBlizzardBags()
+        local anyShown = SweepBlizzardBags(not InCombat())
         if anyShown == bagsVisualOpen then return end
         bagsVisualOpen = anyShown
         local now = GetTime()
@@ -709,6 +724,11 @@ local function StartBlizzardGuard()
         elseif shown then
             M:Toggle(false)
         end
+    end)
+    -- 脱战后补一刀：战斗中跳过的鼠标屏蔽在这里补做（受保护子按钮在战斗里动不得）。
+    EventBus:Register("PLAYER_REGEN_ENABLED", function()
+        if not ns:IsModuleEnabled("Bags") then return end
+        SweepBlizzardBags(true)
     end)
 end
 
