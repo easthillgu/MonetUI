@@ -245,6 +245,12 @@ Media.texture = {
     -- orientation (the reference skin does the same: texture = material, SetGradient = shading).
     ["monet_barfill"]      = ASSET .. "Textures\\monet_barfill",
 
+    -- 剖面渐变填充（64x64，竖轴：顶暗 → 中下亮 → 底缘一条压暗的收边），纯灰模具、无 alpha。
+    -- 与 monet_barfill 的区别正是"把剖面烤进贴图"：竖向 v 轴被 StatusBar 映射到条高上，
+    -- 于是任何高度的条都得到同一条剖面，宽度方向不受影响。
+    -- 走这条路径时**不要再叠 Widget:BarGradient**（两层相乘会双倍压暗），见 Widget:Bar。
+    ["monet_barfill_gradient"] = ASSET .. "Textures\\monet_barfill_gradient",
+
     -- bar ground (Widget:BarWeave): 64x64, one-direction 45° hairlines on a 4px period.
     -- Fine enough to read as cloth at a 4px health bar; tiled 1 texel = 1 physical pixel
     -- so the angle never stretches with the bar width.

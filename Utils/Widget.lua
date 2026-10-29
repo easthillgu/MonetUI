@@ -345,20 +345,28 @@ function Widget:CreateFrame(name, parent, width, height, template, kind)
     return frame
 end
 
+--- 建一条状态条。
+--- textureKey 默认 **monet_barfill_gradient**：剖面（顶暗→中下亮→底缘收边）已经烤进 64x64 贴图，
+--- 由 StatusBar 把 v 轴映射到条高，所以任何高度的条都是同一条剖面，宽度方向不受影响。
+--- 走这条路径时**不叠 Widget:BarGradient**：运行时渐变会与贴图相乘，等于双倍压暗。
+--- 传 textureKey="monet_barfill"（或任何扁平材质）时仍按老路子走运行时渐变。
 function Widget:Bar(parent, width, height, textureKey)
+    local key = textureKey or "monet_barfill_gradient"
     local bar = CreateFrame("StatusBar", nil, parent)
-    bar:SetStatusBarTexture(Media:Texture(textureKey or "barfill"))
+    bar:SetStatusBarTexture(Media:Texture(key))
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(1)
     if width then Widget:Size(bar, width, height or 18) end
-    Widget:BarGradient(bar)
+    if key ~= "monet_barfill_gradient" then
+        Widget:BarGradient(bar)
+    end
 
     bar.bg = bar:CreateTexture(nil, "BACKGROUND")
     bar.bg:SetAllPoints()
     local r, g, b = Color:GetNeutral()
     bar.bg:SetColorTexture(r, g, b, 0.25)
 
-    themed[bar] = { kind = "bar", bgAlpha = 0.25, texture = textureKey }
+    themed[bar] = { kind = "bar", bgAlpha = 0.25, texture = key }
     return bar
 end
 

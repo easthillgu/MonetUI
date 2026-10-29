@@ -360,10 +360,9 @@ local function Layout(plate)
     plate:SetSize(width, height)
     plate.health:SetPoint("TOPLEFT", plate, "TOPLEFT", BORDER, -BORDER)
     plate.health:SetPoint("BOTTOMRIGHT", plate, "BOTTOMRIGHT", -BORDER, BORDER)
-    plate.health:SetStatusBarTexture(ns.Media:Texture("barfill"))
-    -- SetStatusBarTexture builds a NEW texture object, so the fill gradient has to be re-derived here or
-    -- the bar comes back unshaded after every relayout.
-    Widget:BarGradient(plate.health)
+    -- 剖面渐变烤在贴图里（monet_barfill_gradient），不再叠运行时 BarGradient：
+    -- SetStatusBarTexture 每次重建纹理对象，烤进贴图的那种不用重推渐变，重排也不会掉色。
+    plate.health:SetStatusBarTexture(ns.Media:Texture("monet_barfill_gradient"))
 
     plate.name:SetShown(Setting("showName") ~= false)
     plate.level:SetShown(Setting("showLevel") ~= false)
@@ -373,8 +372,7 @@ local function Layout(plate)
     plate.percent:SetShown(Setting("showPercent") ~= false)
 
     plate.cast:SetSize(width, castHeight)
-    plate.cast.fill:SetStatusBarTexture(ns.Media:Texture("barfill"))
-    Widget:BarGradient(plate.cast.fill)
+    plate.cast.fill:SetStatusBarTexture(ns.Media:Texture("monet_barfill_gradient"))
     plate.cast.icon:SetSize(castHeight - BORDER * 2, castHeight - BORDER * 2)
     plate.cast:Hide()
 
