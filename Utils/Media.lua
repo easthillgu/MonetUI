@@ -98,7 +98,9 @@ end
 --
 -- There is deliberately NO "if m == 1 then return n" shortcut in SnapUnit: at uiScale 1 the grid is
 -- whole UI units, and a length of 19.37 still has to snap down to 19 or it never lands on the grid.
-function Media:Mult()
+--- 真实计算（只在缓存失效后跑一次）。公式与注释见上面的长说明。
+local multCache
+local function ComputeMult(media)
     local raw
     local CVar = _G.C_CVar and _G.C_CVar.GetCVar
     if CVar then
@@ -116,11 +118,26 @@ function Media:Mult()
     -- Sanity band: a nonsense reading falls back to 1 (= uiScale 1.0), which is the common case.
     if scale < 0.1 or scale > 6 then return 1 end
 
-    local physH = self:ScreenHeight()
+    local physH = media:ScreenHeight()
     -- No resolution: keep at least the scale part rather than returning a wrong pixel size.
     if not physH then return 1 / scale end
 
     return (768 / physH) / scale
+end
+
+--- 缓存：Mult() 被每一根边框、每一个吸附尺寸调用，每次都要 3 次 pcall + tonumber + 一次
+--- GetPhysicalScreenSize。它只在 UI 缩放 / 分辨率变化时才会变，所以按这两个事件失效
+--- （注册在文件尾部，见 Media 初始化）。
+function Media:Mult()
+    if multCache == nil then
+        multCache = ComputeMult(self)
+    end
+    return multCache
+end
+
+--- 缩放 / 分辨率变了就把缓存丢掉（下一次 Mult 重新读）。
+function Media:InvalidateMult()
+    multCache = nil
 end
 
 --- Snap a length onto the pixel grid: the nearest multiple of Media:Mult().
@@ -345,4 +362,14 @@ end
 --- Resolve a texture key to a path (unknown keys fall back to the blank texture).
 function Media:Texture(key)
     return self.texture[key] or self.texture.blank
+end
+
+-- Mult() 的缓存只在缩放 / 分辨率变化时失效。用 EventBus（懒注册，事件名不被本客户端认时静默跳过）。
+do
+    local EventBus = ns.EventBus
+    if EventBus then
+        for _, event in ipairs({ "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED" }) do
+            EventBus:Register(event, function() Media:InvalidateMult() end)
+        end
+    end
 end
