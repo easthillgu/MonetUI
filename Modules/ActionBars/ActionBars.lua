@@ -470,20 +470,22 @@ local function BuildButtonIcon(button)
 end
 
 -- 热键 / 堆叠数 / 宏名三个文本。抽自 SkinButton（P4 拆分，逐条保留语义）。
+-- 字体与颜色（2026-10-30 玩家定）：三个都用 Super Effective + **主题色**（edge 槽）。
+-- 以前热键与堆叠数是白色，理由是"主题色在技能图标上看不清"；玩家明确要求统一成主题色，
+-- 对比度由 OUTLINE 描边兜底（12px 走 fontFlags）。
 local function BuildButtonFonts(button)
     -- 热键
-    -- 颜色必须是白的（原来用主题的 edge 色，在技能图标上根本看不清）。
-    local hotkey = Widget:Font(button, HOTKEY_SIZE, "pixel", { r = 1, g = 1, b = 1 }, "LEFT")
+    local hotkey = Widget:Font(button, HOTKEY_SIZE, "supereff", "edge", "LEFT")
     hotkey:SetPoint("TOPLEFT", button, "TOPLEFT", 2, -1)
     button.hotkey = hotkey
 
     -- 堆叠数量
-    local count = Widget:Font(button, COUNT_SIZE, "pixel", { r = 1, g = 1, b = 1 }, "RIGHT")
+    local count = Widget:Font(button, COUNT_SIZE, "supereff", "edge", "RIGHT")
     count:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -2, 1)
     button.count = count
 
     -- 宏名
-    local macro = Widget:Font(button, MACRO_SIZE, "pixel", "edge", "CENTER")
+    local macro = Widget:Font(button, MACRO_SIZE, "supereff", "edge", "CENTER")
     macro:SetPoint("BOTTOM", button, "BOTTOM", 0, 1)
     button.macro = macro
 end
@@ -881,8 +883,17 @@ local function SkinAdoptedButton(btn)
         pcall(Skin.CropIcon, Skin, icon, CROP, 1 - CROP, CROP, 1 - CROP)
     end
 
-    if btn.HotKey then pcall(Widget.SetFont, Widget, btn.HotKey, HOTKEY_SIZE, "pixel") end
-    if btn.Count then pcall(Widget.SetFont, Widget, btn.Count, COUNT_SIZE, "pixel") end
+    -- 收养按钮（宠物/姿态）的热键与堆叠数：和自绘按钮同一套 —— Super Effective + 主题色
+    -- （2026-10-30 玩家要求）。暴雪自己的 FontString，只调字体与颜色，不写字段。
+    local er, eg, eb = Color:GetEdge()
+    if btn.HotKey then
+        pcall(Widget.SetFont, Widget, btn.HotKey, HOTKEY_SIZE, "supereff")
+        if btn.HotKey.SetTextColor then pcall(btn.HotKey.SetTextColor, btn.HotKey, er, eg, eb) end
+    end
+    if btn.Count then
+        pcall(Widget.SetFont, Widget, btn.Count, COUNT_SIZE, "supereff")
+        if btn.Count.SetTextColor then pcall(btn.Count.SetTextColor, btn.Count, er, eg, eb) end
+    end
 
     -- 冷却**交给暴雪自己**：我们那套渲染会给它的冷却框 SetHideCountdownNumbers(true) 再自己画字，
     -- 而暴雪冷却框在本客户端受限（SetCooldown 参数可能是机密值、调用被拒），
@@ -1417,6 +1428,18 @@ function M:UpdateHotkeys()
         if not IsAdopted(bar) then
             for _, button in ipairs(bar.buttons) do
                 SetHotkey(button)
+            end
+        else
+            -- 收养按钮的字体/颜色是我们在 SkinAdoptedButton 里直接写的（不在 themed 表里），
+            -- 换主题不会自动重染，这里补一刀。
+            local er, eg, eb = Color:GetEdge()
+            for _, btn in ipairs(bar.buttons) do
+                if btn.HotKey and btn.HotKey.SetTextColor then
+                    pcall(btn.HotKey.SetTextColor, btn.HotKey, er, eg, eb)
+                end
+                if btn.Count and btn.Count.SetTextColor then
+                    pcall(btn.Count.SetTextColor, btn.Count, er, eg, eb)
+                end
             end
         end
     end

@@ -22,10 +22,12 @@ Media.texturesDir  = ASSET .. "Textures\\"
 --           发虚（2026-10-28 判例：12 以下整体糊），点阵苹方就是为小尺寸设计的。
 --           **无授权声明**，只许私有包携带（NOTICE.md 记档），转公开前必须处理。
 --   cooldown 键例外：Super Effective 只给倒计时数字，任何字号都用它自己。
+--   supereff 键同样任何字号都用 Super Effective（动作条的热键/堆叠数/宏名，2026-10-30 定）。
 -- 键名保留 `pixel` / `pingfang`（15+ 调用点引用的是键不是文件；未知键回落到 pixel）。
 Media.font = {
     pixel    = ASSET .. "Fonts\\LXGWWenKai-Regular.ttf",
     cooldown = ASSET .. "Fonts\\super-effective.ttf",
+    supereff = ASSET .. "Fonts\\super-effective.ttf",
     wenkai   = ASSET .. "Fonts\\LXGWWenKai-Regular.ttf",
     -- 历史别名：15+ 调用点还写着 "pingfang"（键是历史名，文件已换文楷），语义与 pixel 相同。
     pingfang = ASSET .. "Fonts\\LXGWWenKai-Regular.ttf",
@@ -345,11 +347,12 @@ function Media:Font(key)
 end
 
 --- 双轨漏斗①：按字号解析字体路径（≥12px 走 Media.font 的键，<12px 一律点阵苹方；
---- cooldown 键例外，任何字号都是 Super Effective）。所有 SetFont 调用点都该走这个，
+--- cooldown / supereff 两个键例外，任何字号都是 Super Effective）。所有 SetFont 调用点都该走这个，
 --- 不要直接 Media:Font —— 字号与字体必须同源，否则楷体会被塞进小字号发虚。
 function Media:FontFor(key, size)
     size = tonumber(size) or 12
     if key == "cooldown" then return self.font.cooldown end
+    if key == "supereff" then return self.font.supereff end
     if size < self.smallSizeCutoff then return self.smallFont end
     return self:Font(key)
 end
