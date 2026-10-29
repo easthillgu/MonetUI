@@ -1292,4 +1292,12 @@ function M:SetEnabled(enabled)
     SetBlizzardHidden(Config() or {}, false, false)
 end
 
+--- 首领框架（Modules/UnitFrames/BossFrames.lua）复用这里的样式件。
+--- 它们原本是文件局部函数，BossFrames 的 StyleReady() 因此永远为假、一直走降级皮肤
+--- （review 2026-10-29 H18）。导出后由 BossFrames 显式取用。
+M.StyleButton = StyleButton
+M.NameCap = NameCap
+M.UpdateHealthText = UpdateHealthText
+M.FrameHeight = FrameHeight
+
 ns:Register("GroupFrames", M)

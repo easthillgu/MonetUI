@@ -169,7 +169,7 @@ local function StyleButton(button, cfg)
     if StyleReady() then
         local gf = GetGroupFrames()
         if gf and type(gf.StyleButton) == "function" then
-            gf.StyleButton(button, cfg, cfg.width < 100)
+            gf.StyleButton(button, cfg, (cfg.width or 180) < 100)
             if type(gf.NameCap) == "function" then
                 button.nameCap = gf.NameCap(cfg)
             end
@@ -232,22 +232,28 @@ end
 local function CreateButton(index, cfg)
     local unit = "boss" .. index
 
-    -- 用普通 Button（不依赖 SecureUnitButtonTemplate，避免加载失败）
-    local ok, button = pcall(CreateFrame, "Button", "MonetBossButton" .. index, nil)
-    if not ok or not button then return nil end
+    -- **必须是 SecureUnitButtonTemplate**：点击由客户端在受限环境里执行
+    -- （*type1 = target / *type2 = togglemenu，和 Groups 的 SecureInit 同一套）。
+    -- 普通 Button 上直接调 TargetUnit / ToggleDropDownMenu 是受保护调用，
+    -- 战斗中必被拦成 ADDON_ACTION_FORBIDDEN（wuxian check 报的就是这一条）。
+    -- 模板建不出来时退回普通 Button —— 那时只显示不点击，绝不挂受保护的 OnClick。
+    local ok, button = pcall(CreateFrame, "Button", "MonetBossButton" .. index, nil,
+        "SecureUnitButtonTemplate")
+    local secure = ok and button
+    if not secure then
+        ok, button = pcall(CreateFrame, "Button", "MonetBossButton" .. index, nil)
+        if not ok or not button then return nil end
+    end
 
     button:SetID(0)
     button.unit = unit
+    button:RegisterForClicks("AnyDown", "AnyUp")
 
-    -- 点击 → target
-    button:RegisterForClicks("AnyDown")
-    button:SetScript("OnClick", function(self, btn)
-        if btn == "LeftButton" and self.unit and UnitExists(self.unit) then
-            TargetUnit(self.unit)
-        elseif btn == "RightButton" and self.unit and UnitExists(self.unit) then
-            ToggleDropDownMenu(1, nil, _G.UnitPopupMenus["UNIT"], "UnitPopupDropDown", self.unit)
-        end
-    end)
+    if secure then
+        pcall(button.SetAttribute, button, "unit", unit)
+        pcall(button.SetAttribute, button, "*type1", "target")
+        pcall(button.SetAttribute, button, "*type2", "togglemenu")
+    end
 
     StyleButton(button, cfg)
 
