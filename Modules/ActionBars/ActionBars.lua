@@ -37,14 +37,6 @@ local Skin     = ns.Skin
 
 local M = { name = "ActionBars" }
 
---- 收养暴雪宠物/姿态条的开关。**保持 false，而且现在连"收起"都不做** ——
---- 这两个受保护的条我们**一个字段都不写、一个方法都不调**，完全交给暴雪：
---- 它就按自己的默认位置/大小显示，玩家能用。
---- 为什么连 EnableMouse(false) 都不能留：实测这一下也会让 PetActionBar 的
---- flyoutDirection 变脏，之后暴雪自己的 PetActionButton*:SetShown /
---- PetActionBar:ClearAllPoints 战斗中被拒（taint.log: "tainted from MonetUI"）。
---- 想要"挪到我们的位置 + 自绘外观"，只能像 Bar1..8 那样建自己的安全按钮（宠物 type="pet"）。
-local ADOPT_BLIZZARD_BARS = false
 
 --- 收养之后要不要再排版（SetScale / SetPoint 到我们的位置）。
 --- **保持 false**：排版写的每一个 SetScale/SetPoint 都会把这些受保护框标脏。
@@ -1236,276 +1228,18 @@ end
 --- 注意每个容器**只装一个按钮**（1..10 号各一个），而且都锚在外层壳的 BOTTOMLEFT 上、按 32
 --- 递增排开。所以不能只搬 1 号容器 —— 2..10 号还挂在壳的老位置上，表现就是"宠物条 /
 --- 姿态条只显示一个按钮"。这里把整串容器都取出来，由调用方按 1 号的位置重新排。
-local function ButtonContainers(bar)
-    if not bar or type(bar.GetName) ~= "function" then return nil end
-    local ok, base = pcall(bar.GetName, bar)
-    if not ok or not base then return nil end
-    local list
-    for i = 1, 12 do
-        local c = _G[base .. "ButtonContainer" .. i]
-        if c then
-            list = list or {}
-            list[#list + 1] = c
-        end
-    end
-    return list
-end
 
 --- 把 1 号之外的容器串到 1 号旁边：宠物条右对齐、往左长，姿态条往右长。
 ---
 --- 间距要换算成**壳的虚拟坐标系**里的单位：外面看着 30（自绘按钮 28 + 间隙 2），而这一串容器
 --- 带着 0.9333 的缩放，真实落点 = 虚拟 × scale，所以虚拟步距 = 30 / scale ≈ 32.14。
 --- 写死 32（暴雪自己的值）会让 10 个按钮累计右偏 1.2 个单位 —— 肉眼能看出来。
-local function ChainContainers(containers, point, scale)
-    local first = containers[1]
-    if #containers < 2 or not first then return end
-
-    local growLeft = point:find("RIGHT", 1, true) ~= nil
-    local pitch = ButtonSize() + Spacing()
-    if not scale or scale <= 0 then scale = 1 end
-    local step = pitch / scale
-
-    for i = 2, #containers do
-        local c = containers[i]
-        pcall(c.ClearAllPoints, c)
-        local offset = step * (i - 1)
-        pcall(c.SetPoint, c, "BOTTOMLEFT", first, "BOTTOMLEFT", growLeft and -offset or offset, 0)
-    end
-end
 
 --- 受保护写入的"签名"：只有这些值变了，才值得去碰暴雪的受保护框体。
-local function AdoptSignature(point, scale, stored, count)
-    return table.concat({
-        tostring(point), tostring(scale),
-        tostring(stored.relativeTo), tostring(stored.relativePoint),
-        tostring(stored.x), tostring(stored.y),
-        tostring(count),
-    }, "|")
-end
 
 --- 已经就位了吗：签名一致 + 实测锚点/步距/缩放都没被暴雪动过。
 --- 这里只读不写（GetPoint / GetScale），所以每来一个宠物事件都问一遍也不产生任何 BLOCKED。
-local function AdoptInPlace(entry, bar, containers, point, scale, stored, def)
-    local count = #(containers or {})
-    if not entry.signature or entry.signature ~= AdoptSignature(point, scale, stored, count) then
-        return false
-    end
-    local okScale, barScale = pcall(bar.GetScale, bar)
-    if okScale and math.abs((barScale or 1) - scale) > 0.001 then return false end
 
-    local first = containers and containers[1]
-    if not first then return true end
-
-    local p1, _, rp1, x1, y1 = first:GetPoint(1)
-    if p1 ~= point then return false end
-    if rp1 ~= (stored.relativePoint or def.relativePoint or point) then return false end
-    if math.abs((x1 or 0) - (stored.x or def.x or 0)) > 0.01 then return false end
-    if math.abs((y1 or 0) - (stored.y or def.y or 0)) > 0.01 then return false end
-
-    if count > 1 then
-        local p2, _, _, x2 = containers[2]:GetPoint(1)
-        if p2 ~= "BOTTOMLEFT" then return false end
-        local step = (ButtonSize() + Spacing()) / (scale > 0 and scale or 1)
-        local growLeft = point:find("RIGHT", 1, true) ~= nil
-        local want = growLeft and -step or step
-        if math.abs((x2 or 0) - want) > 0.5 then return false end
-    end
-    return true
-end
-
---- 这一串容器带着壳的 0.9333 缩放，**`GetRect` / `GetPoint` 对它们报的是"虚拟"坐标**：
---- 容器说自己 L=1215.67，拿一个不缩放的探针框锚到里面的按钮上量，真实落点是 1134.6 ——
---- 正好差 1/0.9333。所以别拿 GetRect 的数字去换算屏幕坐标，那是把已经除过缩放的数字再除一遍。
---- 搬它们照常按壳自己的锚点走：锚点和偏移会一起被缩放，落点反而是准的。
-
---- 收养条的"空格子"美术。
---- 暴雪只让**有技能的槽位**显示按钮：空格子的按钮本身是 hidden 的，一整排就缺一个口
---- （宠物条最常见：4 号格没有宠物技能，那一格就空着，看着像少画了一块）。
---- 这里把描边 + 中性底 + 织纹/顶光画在**按钮的容器**上：容器的贴图永远画在自己的子按钮
---- 之下，所以按钮在的时候被完全盖住、按钮藏起来时正好露出来 —— 和自绘动作条的空槽是
---- 同一套材质，纯美术，不 Show/Hide 受保护的按钮、也不动层级，没有污染风险。
-local function BuildEmptySlot(button)
-    local slot = Marked(button, "emptySlot")
-    if slot then return slot end
-
-    local holder = button.GetParent and button:GetParent()
-    if not holder then return nil end
-
-    local ring = holder:CreateTexture(nil, "BACKGROUND", nil, 0)
-    ring:SetAllPoints(button)
-    local well = holder:CreateTexture(nil, "BACKGROUND", nil, 1)
-    well:SetPoint("TOPLEFT", button, "TOPLEFT", BORDER, -BORDER)
-    well:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -BORDER, BORDER)
-
-    local r, g, b = Color:GetBorder()
-    ring:SetColorTexture(r, g, b, 0.9)
-    well:SetColorTexture(0, 0, 0, 0.25)
-
-    local material = Widget:ButtonMaterial(holder, { alpha = 0, weaveAlpha = 0.25, layer = "BACKGROUND", sublevel = 3 })
-
-    slot = {
-        ring  = ring,
-        well  = well,
-        weave = material and material.weave,
-        sheen = material and material.sheen,
-    }
-    Mark(button, "emptySlot", slot)
-    return slot
-end
-
---- 这一格空着（暴雪把按钮藏了）时空槽顶上，有按钮时让开。
-local function SyncEmptySlot(button)
-    local slot = button and Marked(button, "emptySlot")
-    if not slot then return end
-    local empty = not button:IsShown()
-    if slot.ring  then slot.ring:SetShown(empty)  end
-    if slot.well  then slot.well:SetShown(empty)  end
-    if slot.weave then slot.weave:SetShown(empty) end
-    if slot.sheen then slot.sheen:SetShown(empty) end
-end
-
--- 收养条的记忆化记录：换过容器（比如暴雪这次才把外层建出来）就把缩放的基准丢掉重算。
--- 抽自 AdoptBar（P4 拆分，逐条保留语义）。
-local function EnsureAdoptedEntry(def, bar, name)
-    local entry = adopted[def.key]
-    if not entry then
-        entry = {}
-        adopted[def.key] = entry
-    end
-
-    if entry.frame ~= bar then
-        if entry.frame then pcall(entry.frame.SetScale, entry.frame, 1) end
-        entry.base = nil
-    end
-    entry.def   = def
-    entry.frame = bar
-    entry.name  = name
-    return entry
-end
-
--- 缩放到自绘按钮的尺寸，暴雪条内部的排布原样不动；基准宽度只量一次（量时缩放还是 1），
--- 免得每次乘一遍自己设的缩放。抽自 AdoptBar（P4 拆分，逐条保留语义）。
-local function AdoptScaleBase(entry, def)
-    local firstButton = _G[def.pattern:format(1)]
-    if not entry.base and firstButton then
-        local base = firstButton:GetWidth()
-        if base and base > 8 then entry.base = base end
-    end
-    local size = ButtonSize()
-    return (entry.base and (size / entry.base)) or 1
-end
-
--- 真正的受保护写操作：换缩放 / 摆容器。只在"真的要变"或"暴雪把位置改回去了"时调用
--- （判断在 AdoptInPlace）。抽自 AdoptBar（P4 拆分，逐条保留语义）。
-local function WriteAdoptLayout(entry, bar, def, containers, point, scale, stored)
-    entry.signature = AdoptSignature(point, scale, stored, #(containers or {}))
-    pcall(bar.SetScale, bar, scale)
-    entry.scale = scale
-
-    local first = containers and containers[1]
-
-    -- 外层壳（PetActionBar / StanceBar）我们不动它，只搬里面的按钮容器。但它是**开鼠标**的：
-    -- 宠物条那个实测 1303×1193、贴 UIParent，正好盖住屏幕中间一大块 —— 表现就是
-    -- 世界里点不中、按住左/右键都转不了视角，而外圈的 UI（动作条、小地图）照常能点。
-    -- 壳自己没有美术也没有按钮（按钮在 ButtonContainer 里各自收鼠标），所以把它的鼠标关掉。
-    if first and first ~= bar then
-        pcall(bar.EnableMouse, bar, false)
-        pcall(bar.EnableMouseMotion, bar, false)
-
-        -- 一个容器只装一个按钮：整串跟着 1 号排开，否则只有 1 号搬过去、其余留在壳的老位置。
-        Anchor(first, stored, def)
-        ChainContainers(containers, point, scale)
-    else
-        Anchor(first or bar, stored, def)
-    end
-end
-
-local function AdoptBar(def)
-    local bar, name = ResolveContainer(def)
-    if not bar then return nil end
-
-    local entry = EnsureAdoptedEntry(def, bar, name)
-
-    -- 只让它"能用"，不排版：原位置、原大小，仅关掉外壳的鼠标（那壳 1303×1193，
-    -- 会把屏幕中间整块的点击吃掉）。排版相关的 SetScale / SetPoint 一律不做 ——
-    -- 见 STYLE_ADOPTED_BARS 的注释。
-    if not STYLE_ADOPTED_BARS then
-        pcall(bar.EnableMouse, bar, false)
-        pcall(bar.EnableMouseMotion, bar, false)
-        return entry
-    end
-
-    -- 暴雪的条本来就在 UIParent 下面。以前我们把它们塞进隐藏框（SetParent），零售 12.x 上这会把
-    -- 受保护的框体弄成"强污染"，暴雪的编辑模式再想给它们挪一下就被拒（ADDON_ACTION_BLOCKED
-    -- 刷屏）。现在只是隐藏，不再搬动它们。
-
-    -- 缩放到自绘按钮的尺寸（基准只量一次，见 AdoptScaleBase）。
-    local scale = AdoptScaleBase(entry, def)
-
-    local containers = ButtonContainers(bar)
-    local stored = StoredPosition(def, def.key)
-    local point = stored.point or def.point or "CENTER"
-
-    -- 记忆化（选项 A）：签名一致、实测锚点也没被暴雪动过，就**跳过所有受保护写操作**。
-    -- 宠物事件（PET_BAR_UPDATE / UNIT_PET / 目标变化…）会频繁走到这里；以前每来一次都对
-    -- StanceBar / PetActionBar 写一遍 SetScale / SetPoint / EnableMouse，日志里攒出
-    -- "StanceBar:SetPointBase()" / "PetActionBar:SetShownBase()" 这类 BLOCKED（只进日志、不弹窗）。
-    -- 现在只在"真的要变"或"暴雪把位置改回去了"时才写。
-    if not AdoptInPlace(entry, bar, containers, point, scale, stored, def) then
-        WriteAdoptLayout(entry, bar, def, containers, point, scale, stored)
-    end
-
-    -- **不再碰暴雪的按钮**（这里原本会给它们套 ControlBg / 渐隐边框 / ButtonMaterial /
-    -- 像素字体，还会替它们 Show）。
-    --
-    -- taint.log 实测：这些写入会把**受保护的**动作按钮/按钮容器弄脏。脏了之后：
-    --   * 暴雪自己的 UpdateShownButtons → SetShown 在战斗中被拒
-    --     （"An action was blocked in combat because of taint from MonetUI - PetActionButton9:SetShown()"）； -- TAINT-OK: 同上，注释非代码
-    --   * 按钮卡在错误状态，暴雪只能反复重试 → 每次进战斗刷一屏，并连带把
-    --     PetActionBar / MainActionBar 的整体重排也拒掉（ClearAllPointsBase / SetPointBase）；
-    --   * 连带 UpdateShownButtons 的后钩也失去意义。
-    -- 所以这里只保留"容器摆位置"（容器不是受保护按钮），外观交回暴雪自己。
-    -- 代价：宠物/姿态条是暴雪原生外观。要自绘就得像 Bar1..8 那样建自己的安全按钮
-    -- （宠物用 type="pet"），那是另一件事，记进 AGENTS 待办。
-
-    if def.glow == "autoCast" then
-        M.petbar.SyncPetGlow(def, entry)
-    end
-
-    -- **不要给外壳写 ignoreFramePositionManager**（以前这里调 LeaveManagedFrameSystem）。
-    -- 那个字段一写，这个受保护的条就变成"被 MonetUI 写过的框"：它的 OnEvent 脚本随之以
-    -- 我们的名义执行，于是它内部调用的暴雪安全函数全被拒 —— 实机链条：
-    --   PetActionBar:OnEvent → Update → Hide → UpdateVisibility
-    --     → SetShownBase (BLOCKED)
-    --     → EditModeManagerFrame:UpdateActionBarLayout → UpdateBottomActionBarPositions
-    --       → MainActionBar:ClearAllPointsBase / SetPointBase (BLOCKED，明明 MainActionBar 自己是干净的)
-    -- 也就是"一进战斗就弹：插件导致界面行为失效"。去掉之后外壳保持干净，链路恢复安全。
-
-    return entry
-end
-
---- 暴雪的宠物/姿态条现在**完全交给玩家自己的编辑模式设置**：想藏就在
---- 编辑模式里把「宠物栏 / 姿态栏」的可见性设成隐藏（那是玩家操作，不算插件污染）。
---- 我们不再碰它：实测连 SetAlpha(0) 都会让它变脏，之后暴雪自己的
---- PetActionBar:ClearAllPoints / PetActionButton:SetShown 全被拒（就是那串拦截）。
-local function AdoptAll()
-    if not M.own then return end
-    if not ADOPT_BLIZZARD_BARS then
-        -- 宠物条 / 姿态条都是"收养暴雪按钮"做的（见 CreateBar / BuildPetBar / BuildStanceBar），
-        -- 外壳在各自的 Build 里处理（宠物条 alpha 0，姿态条看形态数）。这里什么都不做：
-        -- 以前这里对 StanceBar 调过 GhostBar，把玩家唯一能点姿态的地方整条收掉了
-        -- （实机 2026-10-26：德鲁伊 21 级、NumShapeshiftForms=3、按钮全在、只有外壳 alpha 0）。
-        return
-    end
-    if Locked() then
-        -- 战斗中动不了暴雪的条：排队到脱战（ns:AfterCombat）。
-        ns:AfterCombat("actionbars-adopt", AdoptAll)
-        return
-    end
-    for _, def in ipairs(ADOPTED_DEFS) do
-        AdoptBar(def)
-    end
-end
 
 --- 放开接管：交还给暴雪原来的大小。位置留给下一次暴雪的排版去纠正，因为插件不能替暴雪写它自己的布局。
 -- 缩放归 1：交还后的宠物条不再是自绘按钮的大小，像素环的点距要按未缩放重算（见 SyncPetGlow）。
@@ -1573,16 +1307,7 @@ local function ClearBindings()
     end
 end
 
--- 这些事件之后暴雪可能重排 / 换过宠物条和姿态条，我们再把位置和缩放放回去；战斗中不能动受保护的框体，留到 PLAYER_REGEN_ENABLED。
-local ADOPT_EVENTS = {
-    "UNIT_PET", "UNIT_FLAGS", "PET_UI_UPDATE", "PET_BAR_UPDATE",
-    "PET_BAR_UPDATE_USABLE", "PET_BAR_UPDATE_COOLDOWN",
-    "UPDATE_SHAPESHIFT_FORM", "UPDATE_SHAPESHIFT_FORMS",
-    "PLAYER_CONTROL_GAINED", "PLAYER_CONTROL_LOST", "PLAYER_TARGET_CHANGED",
-    "UPDATE_VEHICLE_ACTIONBAR", "PLAYER_MOUNT_DISPLAY_CHANGED",
-}
-
--- 宠物条"自动施法"的状态事件：跟 ADOPT_EVENTS 分开登记，因为像素环不受战斗锁影响
+-- 宠物条"自动施法"的状态事件：像素环不受战斗锁影响
 -- （往按钮上加几个方块不用搬受保护的框体），开关自动施法在战斗中也得立刻跟上。
 local PET_GLOW_EVENTS = {
     "PET_BAR_UPDATE", "PET_BAR_UPDATE_USABLE", "PET_UI_UPDATE", "UNIT_PET",
@@ -1625,10 +1350,6 @@ function M:RegisterEvents()
             M:UpdateAll()
         end
     end)
-
-    for _, event in ipairs(ADOPT_EVENTS) do
-        EventBus:Register(event, function() AdoptAll() end)
-    end
 
     for _, event in ipairs(PET_GLOW_EVENTS) do
         EventBus:Register(event, function() M.petbar.SyncPetGlowNow() end)
@@ -1727,7 +1448,6 @@ function M:RefreshLayout()
         end
         PositionBar(bar)
     end
-    AdoptAll()
     self:UpdateAll()
 end
 
@@ -1817,7 +1537,6 @@ function M:Apply()
     WatchPages(own)
 
     if own then
-        AdoptAll()
         if not leaveVehicle then leaveVehicle = CreateLeaveVehicle() end
     else
         for _, entry in pairs(adopted) do
