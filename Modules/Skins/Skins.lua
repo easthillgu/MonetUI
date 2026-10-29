@@ -1,6 +1,6 @@
 -- Modules/Skins/Skins.lua
 -- Blizzard panel beautification (界面美化) engine: panel files (Modules/Skins/*.lua) register windows through Skins:Panel(key, { apply = fn, ... }); the engine applies them at login / ADDON_LOADED / loading screen, records every mutation for rollback, and exposes the list to the config panel.
--- Skins only fade Blizzard art and add our own child frames: no SetScript / SetParent / SetShown / Hide on a Blizzard frame; hover feedback uses HookScript.
+-- Skins only fade Blizzard art and add our own child frames: no SetScript / SetParent / SetShown / Hide on a Blizzard frame; hover feedback is polled (Widget:HoverWatch) -- never HookScript.
 
 local ADDON_NAME, ns = ...
 

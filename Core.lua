@@ -8,7 +8,7 @@ local LibStub = _G.LibStub
 local LMC = LibStub and LibStub("LibMonetColor-1.0", true)
 
 ns.name = ADDON_NAME
-ns.version = "0.11.0"
+ns.version = "0.12.0"
 
 local DEFAULTS = {
     enabled = true,
@@ -815,7 +815,7 @@ local function PrintScale()
         if lw == pw and lh == ph then
             ns:Print("分辨率            : 原生（栅格 = 物理像素）")
         else
-            ns:Print(string.format("分辨率            : 非原生！%dx%d -> %dxxd，栅格比物理像素粗",
+            ns:Print(string.format("分辨率            : 非原生！%dx%d -> %dx%d，栅格比物理像素粗",
                                     lw, lh, pw, ph))
         end
     end

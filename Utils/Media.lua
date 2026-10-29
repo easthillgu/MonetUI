@@ -58,6 +58,15 @@ function Media:SnapSize(size)
     return math.max(12, math.floor((size + 6) / 12) * 12)
 end
 
+--- The physical screen height, or nil when the client cannot report it.
+-- One source of truth for the screen size: Mult() and the pinned scale table both need it.
+function Media:ScreenHeight()
+    if not _G.GetPhysicalScreenSize then return nil end
+    local ok, _, height = pcall(_G.GetPhysicalScreenSize)
+    if not ok or type(height) ~= "number" or height <= 0 then return nil end
+    return height
+end
+
 --- The size of ONE physical screen pixel expressed in UI units ("mult").
 -- Anything sized N * Media:Mult() stays exactly N physical pixels at any resolution and UI scale.
 --
@@ -89,15 +98,6 @@ end
 --
 -- There is deliberately NO "if m == 1 then return n" shortcut in SnapUnit: at uiScale 1 the grid is
 -- whole UI units, and a length of 19.37 still has to snap down to 19 or it never lands on the grid.
---- The physical screen height, or nil when the client cannot report it.
--- One source of truth for the screen size: Mult() and the pinned scale table both need it.
-function Media:ScreenHeight()
-    if not _G.GetPhysicalScreenSize then return nil end
-    local ok, _, height = pcall(_G.GetPhysicalScreenSize)
-    if not ok or type(height) ~= "number" or height <= 0 then return nil end
-    return height
-end
-
 function Media:Mult()
     local raw
     local CVar = _G.C_CVar and _G.C_CVar.GetCVar

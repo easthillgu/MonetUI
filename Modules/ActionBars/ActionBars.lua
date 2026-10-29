@@ -5,12 +5,13 @@
 -- 按钮全部自建，但**施法由客户端完成**，所以战斗中不会失效：
 --
 --   * 按钮 = CreateFrame("CheckButton", name, bar, "SecureActionButtonTemplate", index)
---     第 5 个参数是 id，客户端靠它算槽位：slot = id + (page - 1) * 12。
---   * 条 = SecureHandlerStateTemplate。_onstate-page 片段把状态页写进条自己的
---     "actionpage" 属性；按钮设 useparent-actionpage，客户端每次点击都重新算槽位，
---     于是翻页 / 载具 / 覆盖条 / 变形条全部由客户端决定，我们不碰任何安全逻辑。
+--     **SetID(0)**，槽位只来自安全片段写的 action 属性（不是 id + actionpage）。
+--   * 条 = SecureHandlerStateTemplate。_onstate-page 片段读状态页，再 ChildUpdate 给每个
+--     按钮的 _childupdate-mui-page 片段，由它写 action —— 翻页 / 载具 / 覆盖条 / 变形条
+--     全部由客户端决定，我们不碰任何安全逻辑（Lua 写 action 会被判越权）。
 --   * 图标 / 数量 / 宏名 / 热键 由我们自己读 C_ActionBar 的数据画；
---     冷却交给客户端（RegisterActionUIButton），所以永远不会和真实状态脱节。
+--     冷却由我们自己 GetActionCooldown + SetCooldownFromDurationObject 驱动
+--     （**不用** C_ActionBar.RegisterActionUIButton：客户端回写时参数是机密值，受限环境必报）。
 --
 -- 暴雪自己的条只是**藏起来**（Park），不搬动：零售 12.x 上搬动受保护的框体会变成
 -- 强污染，暴雪的编辑模式再想挪一下就被拒（ADDON_ACTION_BLOCKED 一片刷屏）。
