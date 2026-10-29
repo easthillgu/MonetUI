@@ -1230,12 +1230,64 @@ BLP 都是 `enc=3 alphaDepth=8 **alphaType=8**`；我们 32 张全是 `alphaType
 
 ---
 
+## 8.6 2026-10-30：条填充材质（剖面烤进贴图）+ 按 review 计划收掉 P0/P1
+
+### 8.6.1 条填充：两张剖面贴图，按条高自动选
+
+**结论先说**：状态条的填充不再是"扁平材质 + 运行期 `SetGradient`"，改成**剖面烤进贴图**；
+细条另有对称之外的"上亮下暗"版本。开关只有一个：`Utils/Widget.lua` 的 `THIN_BAR_MAX`。
+
+| 贴图 | 剖面 | 用在哪 |
+|---|---|---|
+| `monet_barfill_gradient` | 单向：顶 124 → 中下 205 → 底缘收边 141 | 条高 > 6px（玩家/目标/焦点血条、姓名板施法条…） |
+| `monet_barfill_thin` | 单向：顶 240 → 底 112，指数 0.40（亮区占大头，暗只压底缘） | 条高 ≤ 6px（姓名板血条、能量条、职业资源） |
+
+- 两张都是 **64×64、纯灰、无 alpha**，竖轴（v）由 StatusBar 映射到条高，所以任何高度都是同一条剖面。
+- `Widget:BarFillTexture(height)` 是唯一的选择点；姓名板每次重排按当前高度重设，面板改高度立即生效。
+- **走这两条路径时不要再叠 `Widget:BarGradient`**：运行时渐变会和贴图相乘，等于双倍压暗。
+  传 `textureKey = "monet_barfill"` 才回到老路子（扁平材质 + 运行期渐变）。
+- 两张图都在 `tools/regen-textures.js` 里（gradient 的 64 行剖面按实测值固化成常量，
+  重出素材不会漂）：改完跑 `node tools/regen-textures.js standard monet_barfill_thin`。
+- `audit-pixels.js` 两张都 PASS（色相 0 / 衬底 0 / 孤立 0）。
+- **回退**：`THIN_BAR_MAX = 0` 全部回到单向剖面；再把 `Widget:BarFillTexture` 改成返回
+  `"monet_barfill"` 就回到"扁平 + 运行期渐变"的老视觉。
+
+### 8.6.2 P0/P1 收档（29 + 5 个提交，每项可单独 revert）
+
+按 `docs/REVIEW-2026-10-29.md` / `docs/PLAN-refactor-2026-10-29.md` 执行，逐项清单在 `TODO.md`。
+闸门全程：`api-audit` 0 HARD、`audit-taint` 0/0/0、`wuxian check(live:false)` **0 error**
+（原基线那 1 条 `BossFrames.lua:246 TargetUnit` 已清）。
+
+值得记住的几条：
+
+1. **`C_ActionBar.GetActionDisplayCount` 返回 string**，以前判 `number` 所以动作条堆叠数从来没显示过；
+   机密串的 `type()` 照样是 `"string"`，判完类型必须再过 `issecretvalue`。
+2. **`showHotkey` / `showCount` / `showMacro` 三个配置键全仓没有读取点**（面板勾了不生效），已接线。
+3. **暴雪经验条 / 追踪按钮父框**都从 `Hide()` 改成 `alpha 0 + EnableMouse(false)`（AGENTS 的 HUD 规则），
+   并补了 `InfoBar` 装饰的 `remove` 钩子，关模块时还原。
+4. **不再覆写暴雪 `Minimap` 的 `OnMouseUp`**：覆盖层本来就独占左右键。
+5. **BossFrames 必须用 `SecureUnitButtonTemplate`**（`*type1=target` / `*type2=togglemenu`）；
+   它原本依赖的 `Groups.StyleButton` 是文件局部函数，从没导出 → `StyleReady()` 永远为假。两处都已修。
+6. **姓名板仇恨状态**：机密时保留上次判定，普通 nil 按 0 —— 否则战斗中红边一直闪灭。
+7. **宠物条自动施法像素环**曾被 `STYLE_ADOPTED_BARS=false` 静默关掉（那开关出自 10-24 的旧判决），已恢复。
+8. **`/mui reset` 现在要 `/mui reset confirm`**，并且就地清空 + 补默认值（以前重置后开面板报 `index nil`）。
+
+### 8.6.3 还没做 / 仍需实机
+
+- P2.1 统一 OnUpdate 调度器、P2.3 `ns.Mark` 下沉、P2.5 `FitText`/`SetBorderColor` 常量、
+  P2.6 `Skin.tinters` 注销句柄；P3（配置面板拆分）、P4（ActionBars 拆分）、P5、P6、P7。
+- **P0.20 待取证**：`Modules/UnitFrames/Blizzard.lua` 对 `PlayerFrame/TargetFrame/…` 的
+  `SetScript("OnShow", Hide)` + `Hide()` 压制方式，是否仍是 10-25 消除 `UNKNOWN()` 的必要手段
+  （要开 `taintLog=2` 跑一次战斗进出对比）。
+- 实机清单见 `TODO.md` 的"必须实机复核"一节（9 条）。
+
+---
+
 ## 9. 建议的下一步（按价值排序）
 
-1. **实机回归这一轮的 P4 拆分**（动作条 + 单位框的创建路径全都动过）：
-   动作条 1–8 施法/翻页/拖放、宠物条（收养十按钮 + 自动施法像素环 + 冷却转圈）、
-   **姿态条（收养 `StanceButton1..3`：点形态能不能变、位置是否贴在 3 号条左边、`/reload` 后不变）**、
-   单位框（玩家/目标/目标的目标/焦点）血条与文本位置、进出编辑模式、`/reload` 后无新增 BLOCKED。
+1. **实机回归 P0/P1 的改动面**（`docs/HANDOFF.md` 8.6.2 + `TODO.md` 的 9 条清单）：
+   动作条堆叠数/三个开关、宠物条像素环、小地图三种鼠标操作、经验条不闪、背包位置、
+   姓名板红边与细条剖面、首领框点击、按钮悬停三态、`/mui reset confirm`。
 2. **回归一遍编辑模式**（改动最密集的地方），确认 `oldR` 与 BLOCKED 都不再出现。
 3. **P5 剩余文件拆分**：Auras/CastBar 试水已通过，按同一模式拆
    `UnitFrames` 的 Blizzard/ClassPower、`ActionBars` 的 Secure/DragDrop/PetBar/暴雪条处置
