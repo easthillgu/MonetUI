@@ -15,6 +15,7 @@ local ADDON_NAME, ns = ...
 
 local Media = ns.Media
 local Math = ns.Math
+local Secrets = ns.Secrets
 
 local Mover = {}
 ns.Mover = Mover
@@ -48,8 +49,14 @@ local function Rect(frame)
     if not frame or type(frame.GetRect) ~= "function" then return nil end
     local left, bottom, width, height = frame:GetRect()
     if not left or not width then return nil end
-    local scale = (frame.GetEffectiveScale and frame:GetEffectiveScale() or 1)
-                  / (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale() or 1)
+    -- GetEffectiveScale 在受限环境下可能返回机密值（Media.lua 头部记过同一件事）：
+    -- 机密时不做除法与比较，直接把这一帧当作"读不到"，调用方用上一次的位置。
+    local rawScale = frame.GetEffectiveScale and frame:GetEffectiveScale() or 1
+    local rawParent = UIParent.GetEffectiveScale and UIParent:GetEffectiveScale() or 1
+    local frameScale = Secrets.Number(rawScale)
+    local parentScale = Secrets.Number(rawParent)
+    if frameScale == nil or parentScale == nil then return nil end
+    local scale = frameScale / parentScale
     if scale > 0 and scale ~= 1 then
         left, bottom, width, height = left / scale, bottom / scale, width / scale, height / scale
     end
@@ -202,6 +209,16 @@ end
 local function ApplyOne(entry)
     local frame = entry.frame
     if not frame then return end
+
+    -- 挪受保护框（安全单位框 / 动作条）只能在脱战做：战斗中 SetPoint 会被拒，
+    -- 而且这记失败会算在 MonetUI 名下（AGENTS「secure 元素战斗中禁改」）。
+    local isProtected = frame.IsProtected and frame:IsProtected()
+    if isProtected and type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown() then
+        if ns.AfterCombat then
+            ns:AfterCombat("mover:" .. tostring(entry.key), function() ApplyOne(entry) end)
+        end
+        return
+    end
 
     local stored = Stored(entry) or {}
     local default = entry.default or {}
