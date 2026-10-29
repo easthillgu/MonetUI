@@ -128,6 +128,19 @@ function EventBus:RegisterUnit(event, unit, callback)
     sets[unit] = (sets[unit] or 0) + 1
 
     -- Re-register with the full set of units so the engine filters for us.
+    --
+    -- **但同一事件上已经有普通 Register 回调时不能设单位过滤**：RegisterUnitEvent 会顶掉
+    -- RegisterEvent 的整事件投递，普通回调从此只在那几个单位上触发（review 2026-10-29 4.4）。
+    -- 这种情况下退成普通注册，单位过滤交给 Dispatch 自己做（它本来就按 entry.unit 比）。
+    local plain = callbacks[event]
+    if plain and #plain > 0 then
+        if not registered[event] then
+            registered[event] = true
+            pcall(frame.RegisterEvent, frame, event)
+        end
+        return callback
+    end
+
     local units = {}
     for u in pairs(sets) do
         units[#units + 1] = u
