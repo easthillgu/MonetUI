@@ -174,7 +174,7 @@ local function HandBack(cd, state)
         state.text:SetText("")
         state.text:Hide()
     end
-    SetNumbers(cd, state.externalHide)
+    SetNumbers(cd, false)
 end
 
 local function ApplyLook(cd, state, tight)
@@ -309,68 +309,6 @@ local function Tick(cd, elapsed)
     state.next = nextUpdate
 end
 
-local function OnCooldownStart(cd, start, duration, modRate)
-    local state = cd and attached[cd]
-    if not state then return end
-
-    local plainStart = Secrets.Number(start)
-    local plainDuration = Secrets.Number(duration)
-    local plainModRate = Secrets.Number(modRate) or 1
-    if plainModRate <= 0 then plainModRate = 1 end
-
-    if plainStart and plainDuration and plainDuration > 0 then
-        -- modRate > 1 recovers faster, so the wall-clock duration is duration / modRate
-        -- (Andromeda's TimerOnUpdate uses the same division).
-        state.expiry = plainStart + plainDuration / plainModRate
-    else
-        -- A secret or empty start: Blizzard's own numbers show until we can read one again.
-        state.expiry = nil
-        HandBack(cd, state)
-    end
-    state.next = 0
-
-    -- Charge-based abilities: when the main cooldown starts, stop a separate
-    -- charge timer on the same button so two numbers never run at once
-    -- (Andromeda's parent.chargeCooldown reconciliation).  If that frame is
-    -- ours, hand it back to Blizzard, which keeps its own numbers hidden.
-    local parent = cd.GetParent and cd:GetParent()
-    local charge = parent and parent.chargeCooldown
-    if charge and charge ~= cd then
-        local chargeState = attached[charge]
-        if chargeState then
-            chargeState.expiry = nil
-            chargeState.shownText = nil
-            chargeState.next = 0
-            HandBack(charge, chargeState)
-        end
-    end
-end
-
-local function OnSetHideCountdownNumbers(cd, hidden)
-    if selfWrite then return end
-    local state = cd and attached[cd]
-    if not state then return end
-
-    state.externalHide = hidden and true or false
-    if state.own then state.next = 0 end  -- re-assert on the next pass
-end
-
-local hooksDone = false
-local function EnsureHooks()
-    if hooksDone then return end
-    hooksDone = true
-
-    -- **不挂全局方法钩子。** 以前这里做的是
-    --   hooksecurefunc(methods, "SetCooldown", OnCooldownStart)
-    --   hooksecurefunc(methods, "SetHideCountdownNumbers", ...)
-    -- 而 Cooldown 的方法表是全客户端共享的 —— 于是**暴雪每次设置冷却**都会在我们的
-    -- 代码里跑一段。本客户端把整条执行链记为 "tainted by MonetUI"，链后续的安全调用
-    -- 就全被拒：实机日志里宠物条的
-    --   PetActionButton*:SetShown / PetActionBar:ClearAllPointsBase
-    -- 全是 ActionButton_UpdateCooldown → SetCooldown → 我们的钩子 之后发生的。
-    -- 计时改由 Tick 里的 GetCooldownTimes 轮询接管（本来就有的回退路径，0.5 秒一次），
-    -- 精度差半个轮询周期，但不再污染任何暴雪调用链。
-end
 
 --- 所有冷却文字共用一个**我们自己的**驱动帧。
 --- 绝不 `cd:SetScript("OnUpdate", Tick)`：那等于改写暴雪冷却框的脚本 —— 写字段本身就是污染，
@@ -432,7 +370,6 @@ function M:Attach(cd, size, compact, font)
         compact      = compact,
         font         = font,
         flags        = (font == "pingfang") and Media.outlineFlags or Media.fontFlags,
-        externalHide = false,         -- what outside code last asked for
         own          = false,
         next         = 0,
         accum        = 0,
@@ -444,7 +381,7 @@ function M:Attach(cd, size, compact, font)
     Widget:StyleCooldownText(cd, Media:SnapSize(size), "cooldown")
 
     -- Follow a live resize of the action bar (buttonSize setting). 只挂**我们自己的**冷却框：
-    -- 挂到暴雪的冷却框上等于插进它的事件链，一样会污染（见 EnsureHooks 的注释）。
+    -- 挂到暴雪的冷却框上等于插进它的事件链，一样会污染（见文件头"绝不全局钩脚本槽"的说明）。
     local name = cd.GetName and cd:GetName()
     if cd.HookScript and name and name:find("^MonetUI") then
         cd:HookScript("OnSizeChanged", function(self) -- TAINT-OK: 有 name:find("^MonetUI") 门控，只挂自建冷却框
@@ -456,7 +393,6 @@ function M:Attach(cd, size, compact, font)
         end)
     end
 
-    EnsureHooks()
     EnsureDriver()
     return state
 end
@@ -465,7 +401,6 @@ end
 function M:StyleCooldown(cd, size, compact, font)
     local state = self:Attach(cd, size, compact, font)
     if state and not state.own then
-        state.externalHide = false
         SetNumbers(cd, false)
     end
     return state
