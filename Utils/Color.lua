@@ -7,6 +7,7 @@ local ADDON_NAME, ns = ...
 
 local LibStub = _G.LibStub
 local LMC = LibStub and LibStub("LibMonetColor-1.0", true)
+local Secrets = ns.Secrets      -- Secrets.lua 在本文件之前加载（见 Utils.xml）
 
 local Color = {}
 ns.Color = Color
@@ -183,7 +184,9 @@ function Color:RoleTint(unit)
             local api = _G[ROLE_MARKS[i]]
             if type(api) == "function" then
                 local ok, v = pcall(api, unit)
-                if ok and v then marked = true break end
+                -- 真值测试前必须过 Secrets.Bool：受限环境下这几个 API 返回机密布尔，
+                -- 直接 `if v then` 会被客户端拦成 ADDON_ACTION_BLOCKED（AGENTS 的"值级前置"）。
+                if ok and Secrets.Bool(v, false) then marked = true break end
             end
         end
     end
