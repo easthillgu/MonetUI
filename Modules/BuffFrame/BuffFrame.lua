@@ -444,24 +444,10 @@ local function EngineCombatReady()
     return combatBuffs ~= nil and combatDebuffs ~= nil
 end
 
---- 换主题：引擎按钮在 initializeFrame 之后就锁死（不能再改颜色），只能连容器一起重建；
---- 战斗中重建被拦，排队到脱战（ns:AfterCombat）。
-local function RebuildCombatAuras()
-    if type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown() then
-        ns:AfterCombat("buffframe-auras-rebuild", RebuildCombatAuras)
-        return
-    end
-    for _, container in ipairs({ combatBuffs, combatDebuffs }) do
-        if container then
-            pcall(container.ClearAllPoints, container)
-            pcall(container.Hide, container)
-        end
-    end
-    combatBuffs, combatDebuffs = nil, nil
-    -- 立刻按新主题重建（脱战才会走到这里）。否则容器要等到进战斗才补建 —— 那时创建
-    -- 会被引擎拒（得到空容器）并可能产生 ADDON_ACTION_BLOCKED（实机 2026-10-25 17:16 一次）。
-    EnsureCombatAuras()
-end
+--- 换主题：**绝不重建引擎容器**（2026-10-25 判例）。旧的 RebuildCombatAuras 已删除 ——
+--- 它没有任何调用点，而它做的事（ClearAllPoints + Hide + 置空后重建）恰恰是那条判例禁止的：
+--- 重建会留下一世代仍 SetEnabled(true) 的旧容器，战斗里引擎每次写它的按钮都被记成 MonetUI。
+--- 现在的口径：边框颜色保持创建时那一套，换主题后 /reload 跟新主题。
 
 --- 战斗显示开关：只切 alpha（容器常显，引擎才会持续更新；见 CreateCombatAura 的注释）。
 local function SetCombatContainersAlpha(alpha)
