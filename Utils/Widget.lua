@@ -951,8 +951,25 @@ function Widget:ButtonMaterial(frame, opts)
     FitWeave()
     -- Action buttons are created at Blizzard's template size and resized to the user's
     -- buttonSize later; re-fit so the hatch stays 1:1 at the final size.
-    if type(frame.HookScript) == "function" then
-        pcall(frame.HookScript, frame, "OnSizeChanged", FitWeave)
+    --
+    -- **只有我们自己的框才挂 OnSizeChanged**：ButtonMaterial 也会套到**暴雪的受保护按钮**上
+    -- （收养的宠物条 / 姿态条），给它们写脚本槽等于把它们标脏，之后暴雪自己的
+    -- SetShown / 冷却刷新都会被判成"以 MonetUI 的名义执行"（AGENTS 的污染模型）。
+    -- 暴雪那一侧改用轮询比对尺寸：变了再 re-fit，同样保持 1:1。
+    local fname = frame.GetName and frame:GetName()
+    if type(frame.HookScript) == "function" and fname and fname:find("^MonetUI") then
+        frame:HookScript("OnSizeChanged", FitWeave) -- TAINT-OK: 名字门控，只挂我们自己的框
+    else
+        local lastW, lastH
+        Widget:PollWatch(frame, function()
+            -- 用闭包里的 frame（不用 self:）：test-skin-lua 会把 Widget.lua 里的 self:X
+            -- 当成 Widget 自己的方法去校验，而 GetWidth 是框体方法。
+            local w, h = frame:GetWidth(), frame:GetHeight()
+            if w ~= lastW or h ~= lastH then
+                lastW, lastH = w, h
+                FitWeave()
+            end
+        end, 0.5)
     end
     weave:SetVertexColor(opts.r or 1, opts.g or 1, opts.b or 1, opts.weaveAlpha or 0.25)
 
