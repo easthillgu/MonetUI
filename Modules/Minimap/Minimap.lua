@@ -98,8 +98,6 @@ end
 local shapeOverridden = false
 local originalShape   = nil
 local shapeHadOriginal = false   -- 接管前这个全局本来存不存在（决定还原时是放回还是删掉）
-local pingSuppressed  = false   -- 右键要弹我们的菜单，暴雪那条"右键打标记"要堵掉
-local pingOriginal    = nil
 
 -- 前置声明：覆盖层要用它做悬停显隐，而实现在下面的"区域名"一节
 local SetZoneTextVisible
@@ -626,24 +624,11 @@ function OpenTrackingMenu()
     return false
 end
 
---- 把暴雪自己的"点击 = 打标记"堵掉。
---- 左键由覆盖层接管（方形的四角也要能打标记），右键留给微型菜单，两边都不要再走
---- 暴雪那条只认圆内的路，否则会打两次标记 / 在地图上留下标记。
---- 只换 OnMouseUp 这一个脚本，原脚本留着（还原时放回去）。
-local function SuppressClientPing(minimap)
-    if pingSuppressed then return end
-    if not minimap.GetScript or not minimap.SetScript then return end
-    -- 我们自己打不了标记时不要接管（宁可让暴雪那条路照旧），免得点了没反应
-    if not _G.GetCursorPosition or not minimap.PingLocation then return end
-    local original = minimap:GetScript("OnMouseUp")
-    if type(original) ~= "function" then return end
-    minimap:SetScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" or button == "RightButton" then return end
-        return original(self, button)
-    end)
-    pingOriginal = original
-    pingSuppressed = true
-end
+--- 左键打标记 / 右键菜单都由覆盖层（blocker）独占。
+---
+--- 这里**不再替换暴雪 Minimap 的 OnMouseUp 脚本**：给暴雪的框写脚本槽等于把它标脏
+--- （AGENTS 的污染模型，和 HookScript 同一类）。覆盖层本来就铺在可见区之上、
+--- 自己 EnableMouse(true)，鼠标事件到不了下面的 Minimap —— 那一刀是多余的。
 
 -- ------------------------------------------------------------------ 客户端重设遮罩
 
@@ -1005,13 +990,6 @@ function Restore()
     -- HybridMinimap 的矩形遮罩换回它自己的圆形遮罩
     RestoreHybrid()
 
-    -- 右键打标记那条路放回去
-    if pingSuppressed and minimap then
-        pcall(minimap.SetScript, minimap, "OnMouseUp", pingOriginal)
-        pingSuppressed = false
-        pingOriginal = nil
-    end
-
     -- 暴雪按钮搬回原来的父级，我们画的底板藏起来
     if M.buttons then M.buttons:Restore() end
     -- 被我们压掉的第三方 pin（遮罩档的带子裁剪）放回去
@@ -1044,7 +1022,6 @@ function Skin()
     ApplyButtons()
     EnsurePanel(minimap)
     EnsureBlocker(minimap)
-    SuppressClientPing(minimap)
     if M.buttons then M.buttons:Apply(blocker) end
     if M.pins then M.pins:Apply() end
     ApplyHybrid()
