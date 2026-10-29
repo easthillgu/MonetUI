@@ -391,6 +391,21 @@ function M:ApplyDecorations()
     end
 end
 
+function M:RemoveDecorations()
+    if not bar then return end
+    for i = 1, #decorations do
+        local spec = decorations[i]
+        if type(spec.remove) == "function" then
+            -- 同一个"各自兜底"的规矩：一个装饰还原失败不能连累其它装饰。
+            local ok, err = pcall(spec.remove, bar)
+            if not ok and not spec.removeReported then
+                spec.removeReported = true
+                ns:Print("信息栏装饰 [" .. tostring(spec.key) .. "] 还原失败：" .. tostring(err))
+            end
+        end
+    end
+end
+
 local function BuildBlockFrame(block)
     if block.frame or not bar then return end
 
@@ -632,6 +647,8 @@ function M:SetEnabled(enabled)
         -- Hiding the bar suppresses its OnLeave, so reset the hover count or the strip would come back faded-in-but-not-hovered.
         hoverDepth = 0
         SetFadeTargets(false)
+        -- 装饰替我们接管的暴雪框（目前是经验条）要还回去，否则它们会一直停在 alpha 0。
+        self:RemoveDecorations()
     end
 
     bar:SetShown(self.active and not hiddenForPetBattle)

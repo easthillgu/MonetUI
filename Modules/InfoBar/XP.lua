@@ -69,6 +69,66 @@ local function Format(number)
 end
 
 -- ============================================================================
+-- 暴雪经验条 / 状态追踪条：alpha 0 接管，关模块时还原
+-- ============================================================================
+--
+-- 零售 12.x 把经验条挪到了屏幕最下方的"状态追踪条"（MainStatusTrackingBarContainer，
+-- 里面还有那行"经验值: x/y"）。我们的经验线就是进度本身，所以原来那条要收起来。
+--
+-- **只能 alpha 0 + 关鼠标，不能 Hide**（AGENTS「收暴雪的 HUD 帧」）：暴雪会自己把它 Show 回来，
+-- Hide 与它的 Show 互相顶 —— 屏幕上就是"一闪一闪、时而可见"。alpha 0 的框客户端仍算
+-- "显示着"，不触发它的 Show 逻辑，拉锯就没了。原 alpha / 鼠标状态记在旁表，关模块时还原。
+
+local BLIZZARD_XP = {
+    "MainStatusTrackingBarContainer", "PlayerXPBar", "ExperienceBar", "MainStatusBar",
+}
+
+local function HideBlizzardXP()
+    for _, name in ipairs(BLIZZARD_XP) do
+        local f = _G[name]
+        if f and type(f.SetAlpha) == "function" then
+            if not Marked(f, "xpHidden") then
+                Mark(f, "xpHidden", true)
+                Mark(f, "xpAlpha", f.GetAlpha and f:GetAlpha() or 1)
+                if type(f.EnableMouse) == "function" and type(f.IsMouseEnabled) == "function" then
+                    Mark(f, "xpMouse", f:IsMouseEnabled())
+                    pcall(f.EnableMouse, f, false)
+                end
+            end
+            pcall(f.SetAlpha, f, 0)
+        end
+    end
+    -- 包加载 / 换区域后暴雪可能把这条换成新对象，用低频轮询补一次（不写它的脚本槽）。
+    local container = _G.MainStatusTrackingBarContainer
+    if container and not Marked(container, "xpWatch") and ns.Widget then
+        Mark(container, "xpWatch", true)
+        ns.Widget:ShowWatch(container, function(self)
+            if Marked(self, "xpHidden") then pcall(self.SetAlpha, self, 0) end
+        end)
+    end
+end
+
+--- 把暴雪经验条还回去（InfoBar 关掉时）。alpha / 鼠标还原成我们接手前的样子。
+local function ShowBlizzardXP()
+    for _, name in ipairs(BLIZZARD_XP) do
+        local f = _G[name]
+        if f and Marked(f, "xpHidden") then
+            local alpha = Marked(f, "xpAlpha")
+            local mouse = Marked(f, "xpMouse")
+            Mark(f, "xpHidden", nil)
+            Mark(f, "xpAlpha", nil)
+            Mark(f, "xpMouse", nil)
+            if type(f.SetAlpha) == "function" then
+                pcall(f.SetAlpha, f, type(alpha) == "number" and alpha or 1)
+            end
+            if mouse and type(f.EnableMouse) == "function" then
+                pcall(f.EnableMouse, f, true)
+            end
+        end
+    end
+end
+
+-- ============================================================================
 -- 读数：经验优先，满级后交给声望
 -- ============================================================================
 
@@ -478,21 +538,7 @@ local function Build(parentBar)
         M:HideTooltip()
     end)
 
-    -- 暴雪自己的经验条：零售 12.x 把它挪到了屏幕最下方的"状态追踪条"
-    -- （MainStatusTrackingBarContainer，里面还有那行"经验值: x/y"）。我们的经验线就是进度本身，
-    -- 所以原来那条收起来 —— 客户端会自己把它 Show 回来，钩一次按回去。
-    local function HideBlizzardXP()
-        for _, name in ipairs({ "MainStatusTrackingBarContainer", "PlayerXPBar", "ExperienceBar", "MainStatusBar" }) do
-            local f = _G[name]
-            if f and type(f.Hide) == "function" then pcall(f.Hide, f) end
-        end
-        local container = _G.MainStatusTrackingBarContainer
-        if container and not Marked(container, "xpHidden") and ns.Widget then
-            Mark(container, "xpHidden", true)
-            -- 轮询代替 hooksecurefunc(Show)：写方法槽会把框体标脏（见 AGENTS）。
-            ns.Widget:ShowWatch(container, function(self) pcall(self.Hide, self) end)
-        end
-    end
+    -- 暴雪经验条：alpha 0 接管（见文件头 HideBlizzardXP 的注释），关模块时由 ShowBlizzardXP 还原。
     HideBlizzardXP()
 
     local function Refresh()
@@ -517,4 +563,6 @@ M:AddDecoration({
     key   = "xp",
     build = Build,
     apply = function() if root then Apply() end end,
+    -- InfoBar 关掉时把暴雪经验条还回去（我们是 alpha 0 接管的，不还原它会一直透明）。
+    remove = ShowBlizzardXP,
 })
