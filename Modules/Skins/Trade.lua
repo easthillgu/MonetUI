@@ -1,12 +1,4 @@
 -- Modules/Skins/Trade.lua
--- Mail, merchant, trainer, auction house, professions and the bank.  Item rows keep their icons: only chrome buttons, tabs and scroll bars are restyled.
-
-local ADDON_NAME, ns = ...
-
-local M    = ns.Skins
-local Skin = ns.Skin
-
--- Modules/Skins/Trade.lua
 -- Mail, merchant, trainer, auction house, professions, the bank and the trade window.  Item rows keep
 -- their icons: only chrome buttons, tabs and scroll bars are restyled.
 

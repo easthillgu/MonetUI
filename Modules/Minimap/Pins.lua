@@ -96,10 +96,11 @@ local function Refresh(pin)
     ApplyAlpha(pin, y > top or y < bottom)
 end
 
---- 给一个 pin 登记（不挂任何钩子）：位置/显隐由 0.5 秒的驱动重算。
+--- 给一个 pin 登记进 seen（不挂任何钩子）：位置/显隐由 0.5 秒的驱动重算。
 --- 以前这里 hooksecurefunc(SetPoint/Show/SetAlpha)，写的是第三方库帧的方法槽，
 --- 同样属于"污染"（见 AGENTS 的皮肤原则），而且这些帧每次更新都会跑我们的代码。
-local function HookPin(pin)
+--- 名字从 HookPin 改成 TrackPin：它现在只做"去重 + 类型校验"，不挂任何东西。
+local function TrackPin(pin)
     if not pin or seen[pin] then return end
     seen[pin] = true
 
@@ -115,11 +116,11 @@ end
 local function Sweep()
     if not lib then return end
     if type(lib.minimapPins) == "table" then
-        for pin in pairs(lib.minimapPins) do HookPin(pin) end
+        for pin in pairs(lib.minimapPins) do TrackPin(pin) end
     end
     if type(lib.activeMinimapPins) == "table" then
         for pin in pairs(lib.activeMinimapPins) do
-            HookPin(pin)
+            TrackPin(pin)
             Refresh(pin)
         end
     end

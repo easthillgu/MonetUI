@@ -540,9 +540,9 @@ function M:Skin()
 end
 
 function M:Initialize()
-    if not self:Skin() then
-        EventBus:Register("PLAYER_ENTERING_WORLD", function() M:Skin() end)
-    end
+    -- 第一次 Skin 失败（追踪框还没出生 / C_QuestLog 没就绪）时，靠下面的 PLAYER_ENTERING_WORLD 补；
+    -- 以前这里另外注册了一条同事件的回调，等于同一事件挂两次（review 2026-10-29）。
+    self:Skin()
 
     EventBus:Register("QUEST_LOG_UPDATE", QueueRender)
     EventBus:Register("QUEST_WATCH_UPDATE", QueueRender)
@@ -558,7 +558,12 @@ function M:Initialize()
     EventBus:RegisterUnit("UNIT_QUEST_LOG_CHANGED", "player", QueueRender)
 
     -- 暴雪的追踪框会晚到、还会被换成新对象（见 SuppressBlizzard 的注释），这几个时机都补一次。
-    EventBus:Register("PLAYER_ENTERING_WORLD", function() SuppressBlizzard(); QueueRender() end)
+    -- 这里也负责"首次 Skin 没建出来"的补建（Skin 幂等：tracker 已存在就直接返回 true）。
+    EventBus:Register("PLAYER_ENTERING_WORLD", function()
+        M:Skin()
+        SuppressBlizzard()
+        QueueRender()
+    end)
     EventBus:Register("ZONE_CHANGED_NEW_AREA", function() SuppressBlizzard() end)
     EventBus:Register("ADDON_LOADED", function(_, name)
         if name == "Blizzard_ObjectiveTracker" then SuppressBlizzard() end

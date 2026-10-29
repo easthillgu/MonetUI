@@ -169,17 +169,6 @@ local function TintIcon(icon, key)
     pcall(icon.SetVertexColor, icon, r, g, b, 1)
 end
 
---- 悬停状态：把底板边框点亮，离开恢复主题色。
-local function SetHover(plate, hovered)
-    if not plate then return end
-    if hovered then
-        local r, g, b, a = ns.Color:Get("highlight")
-        Widget:SetBorderState(plate, r, g, b, a or 1)
-    else
-        Widget:SetBorderState(plate, nil)
-    end
-end
-
 --- 给一个框体加"4:3 徽章"。
 --- 徽章**就是材质本身**（描边 + 半透明底 + 符号都在贴图里），运行期用顶点色染色 ——
 --- 所以贴图是中性灰底 + 白色描边的"模具"（染色模具不许带色相，见 AGENTS.md）。
