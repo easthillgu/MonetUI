@@ -360,9 +360,9 @@ local function Layout(plate)
     plate:SetSize(width, height)
     plate.health:SetPoint("TOPLEFT", plate, "TOPLEFT", BORDER, -BORDER)
     plate.health:SetPoint("BOTTOMRIGHT", plate, "BOTTOMRIGHT", -BORDER, BORDER)
-    -- 剖面渐变烤在贴图里（monet_barfill_gradient），不再叠运行时 BarGradient：
-    -- SetStatusBarTexture 每次重建纹理对象，烤进贴图的那种不用重推渐变，重排也不会掉色。
-    plate.health:SetStatusBarTexture(ns.Media:Texture("monet_barfill_gradient"))
+    -- 剖面渐变烤在贴图里；按条高选版本（细条 = 中间亮上下暗的对称剖面）。
+    -- 重排改了条高，所以每次重排都按当前高度重设一次（同一张贴图时是空操作）。
+    plate.health:SetStatusBarTexture(ns.Media:Texture(Widget:BarFillTexture(height - BORDER * 2)))
 
     plate.name:SetShown(Setting("showName") ~= false)
     plate.level:SetShown(Setting("showLevel") ~= false)
@@ -372,7 +372,7 @@ local function Layout(plate)
     plate.percent:SetShown(Setting("showPercent") ~= false)
 
     plate.cast:SetSize(width, castHeight)
-    plate.cast.fill:SetStatusBarTexture(ns.Media:Texture("monet_barfill_gradient"))
+    plate.cast.fill:SetStatusBarTexture(ns.Media:Texture(Widget:BarFillTexture(castHeight - BORDER * 2)))
     plate.cast.icon:SetSize(castHeight - BORDER * 2, castHeight - BORDER * 2)
     plate.cast:Hide()
 

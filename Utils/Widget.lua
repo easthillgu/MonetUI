@@ -345,19 +345,29 @@ function Widget:CreateFrame(name, parent, width, height, template, kind)
     return frame
 end
 
+--- 细条阈值：条高 <= 这个值就改用对称剖面（monet_barfill_thin：中间亮、上下暗）。
+--- 4–6px 上 64 行单向渐变只剩 4 个台阶，对称剖面才读得出"厚度"。
+local THIN_BAR_MAX = 6
+
+--- 某条高的条该用哪张剖面填充贴图（姓名板重排时也要按这个规则重设）。
+function Widget:BarFillTexture(height)
+    if height and height <= THIN_BAR_MAX then return "monet_barfill_thin" end
+    return "monet_barfill_gradient"
+end
+
 --- 建一条状态条。
---- textureKey 默认 **monet_barfill_gradient**：剖面（顶暗→中下亮→底缘收边）已经烤进 64x64 贴图，
---- 由 StatusBar 把 v 轴映射到条高，所以任何高度的条都是同一条剖面，宽度方向不受影响。
---- 走这条路径时**不叠 Widget:BarGradient**：运行时渐变会与贴图相乘，等于双倍压暗。
+--- textureKey 不传时按条高自动选：细条用对称剖面（monet_barfill_thin），其余用单向剖面
+--- （monet_barfill_gradient）。两张剖面都已烤进贴图，所以**不叠 Widget:BarGradient** ——
+--- 运行时渐变会和贴图相乘，等于双倍压暗。
 --- 传 textureKey="monet_barfill"（或任何扁平材质）时仍按老路子走运行时渐变。
 function Widget:Bar(parent, width, height, textureKey)
-    local key = textureKey or "monet_barfill_gradient"
+    local key = textureKey or Widget:BarFillTexture(height)
     local bar = CreateFrame("StatusBar", nil, parent)
     bar:SetStatusBarTexture(Media:Texture(key))
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(1)
     if width then Widget:Size(bar, width, height or 18) end
-    if key ~= "monet_barfill_gradient" then
+    if key ~= "monet_barfill_gradient" and key ~= "monet_barfill_thin" then
         Widget:BarGradient(bar)
     end
 
