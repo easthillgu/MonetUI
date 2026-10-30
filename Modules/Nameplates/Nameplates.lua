@@ -137,7 +137,11 @@ function M:ApplyPlateSize()
 
     if not savedPlateSize and C_NamePlate and C_NamePlate.GetNamePlateSize then
         local ok, w, h = pcall(C_NamePlate.GetNamePlateSize)
-        if ok then savedPlateSize = { w, h } end
+        -- 原值只在 RestorePlateSize 里原样交回去：机密就别存（存了也只能原样传，
+        -- 反而让"保存的原样"变成一串读不出来的值）。
+        if ok and not Secrets.IsSecret(w) and not Secrets.IsSecret(h) then
+            savedPlateSize = { w, h }
+        end
     end
 
     if not C_NamePlate then return end
@@ -220,7 +224,11 @@ end
 
 --- Is this unit supposed to show a MonetUI plate at all?
 function M:ShouldShow(unit)
-    if not unit or not Secrets.Bool(Query(UnitExists, unit), false) then
+    -- 令牌先过两道：`type()` 判不出机密（机密串的 type 照样是 "string"），之后它还要进
+    -- Query / 当表键，所以守卫必须前置。
+    if type(unit) ~= "string" or Secrets.IsSecret(unit) then return false end
+
+    if not Secrets.Bool(Query(UnitExists, unit), false) then
         return false
     end
 
@@ -360,9 +368,10 @@ local function Layout(plate)
     plate:SetSize(width, height)
     plate.health:SetPoint("TOPLEFT", plate, "TOPLEFT", BORDER, -BORDER)
     plate.health:SetPoint("BOTTOMRIGHT", plate, "BOTTOMRIGHT", -BORDER, BORDER)
-    -- 剖面渐变烤在贴图里；按条高选版本（细条 = 中间亮上下暗的对称剖面）。
-    -- 重排改了条高，所以每次重排都按当前高度重设一次（同一张贴图时是空操作）。
-    plate.health:SetStatusBarTexture(ns.Media:Texture(Widget:BarFillTexture(height - BORDER * 2)))
+    -- 剖面渐变烤在贴图里；按条高选版本（细条 = 上亮下暗的单向剖面）。重排改了条高，
+    -- 所以每次重排都重设一次 —— 走 Widget:SyncBarFill（它会同步 fillKey 标记，
+    -- 标记和实际贴图对不上的话，Widget:Size 那侧的去重就会跳过真正该做的切换）。
+    Widget:SyncBarFill(plate.health, height - BORDER * 2)
 
     plate.name:SetShown(Setting("showName") ~= false)
     plate.level:SetShown(Setting("showLevel") ~= false)
@@ -372,7 +381,7 @@ local function Layout(plate)
     plate.percent:SetShown(Setting("showPercent") ~= false)
 
     plate.cast:SetSize(width, castHeight)
-    plate.cast.fill:SetStatusBarTexture(ns.Media:Texture(Widget:BarFillTexture(castHeight - BORDER * 2)))
+    Widget:SyncBarFill(plate.cast.fill, castHeight - BORDER * 2)
     plate.cast.icon:SetSize(castHeight - BORDER * 2, castHeight - BORDER * 2)
     plate.cast:Hide()
 
@@ -466,7 +475,7 @@ end
 -- client clamps against the secret start/end; the timer text needs math, only when end came plain.
 local function CastTick(plate)
     local cast = plate.cast
-    if not cast or not plate.castEndMS then return end
+    if not cast or not plate.castActive then return end
 
     pcall(cast.fill.SetValue, cast.fill, GetTime() * 1000)
 
@@ -486,7 +495,7 @@ end
 local function HideCast(plate)
     local cast = plate.cast
     if not cast then return end
-    plate.castEndMS = nil
+    plate.castActive = nil
     plate.castEndClock = nil
     plate:SetScript("OnUpdate", nil)
     cast:Hide()
@@ -535,8 +544,15 @@ local function UpdateCast(plate)
     end
 
     -- Bars take the raw times; no arithmetic of ours touches them.
-    pcall(plate.cast.fill.SetMinMaxValues, plate.cast.fill, startMS or 0, endMS or 1)
-    plate.castEndMS = endMS
+    -- `startMS or 0` 是机密数字上的一次真值测试（`or` 走 truth test，同族拦截），所以零值
+    -- 兜底只对**非机密**做；机密原样交给 widget（SetMinMaxValues 允许机密）。
+    local from, to = startMS, endMS
+    if not Secrets.IsSecret(from) then from = from or 0 end
+    if not Secrets.IsSecret(to) then to = to or 1 end
+    pcall(plate.cast.fill.SetMinMaxValues, plate.cast.fill, from, to)
+    -- 只存"有条在走"这个普通布尔：存原始 endMS 会让 CastTick 每帧对它做真值测试。
+    -- 机密/读不到 end 时沿用旧行为 —— 不跑每帧 SetValue，条保持静态（保留上次状态）。
+    plate.castActive = (not Secrets.IsSecret(endMS) and endMS ~= nil)
 
     -- Plain end => a real countdown; hidden end => bar moves, number blank (see 4.6 in MonetUI.md).
     local endClock = Secrets.Number(endMS)
@@ -558,8 +574,12 @@ local function UpdateHealth(plate)
     local unit = plate.unit
 
     -- A refused unit call skips the write entirely so the bar keeps its last state (Secrets contract).
+    -- **守卫必须在 `~= nil` 之前**：受限时 Query 拿到的是机密数字（pcall 成功、不是 nil），
+    -- `hp ~= nil` 本身就是一次被拦比较（2026-10-30 ×8 同一形态）。机密照样交给 SetBar
+    -- （引擎自己读，见 Utils/Secrets.lua 头部），只有"读不到"（普通 nil）才跳过。
     local hp, hpMax = Query(UnitHealth, unit), Query(UnitHealthMax, unit)
-    if hp ~= nil and hpMax ~= nil then
+    local opaque = Secrets.IsSecret(hp) or Secrets.IsSecret(hpMax)
+    if opaque or (hp ~= nil and hpMax ~= nil) then
         local interpolation = (Setting("smooth") ~= false) and Secrets.SMOOTH or nil
         Secrets.SetBar(plate.health, hp, hpMax, interpolation)
     end
@@ -570,7 +590,11 @@ local function UpdateHealth(plate)
     -- Dead / disconnected: the client greys the bar, and the "lost" overlay (no value of its
     -- own) is greyed by hand so a corpse reads as one (same rule as the unit frames).
     local connected = Query(UnitIsConnected, unit)
-    if connected == nil then connected = true end   -- refused query reads as connected
+    -- 机密布尔上做 `== nil` 同样被拦：先问 IsSecret，机密就直接往下交给 Secrets.Bool
+    -- 落回"算连接着"（= 以前被拦后的回退值）。
+    if not Secrets.IsSecret(connected) and connected == nil then
+        connected = true
+    end
     local gone = Secrets.Bool(Query(UnitIsDeadOrGhost, unit), false)
         or not Secrets.Bool(connected, true)
     plate.health:SetStatusBarDesaturated(gone)
@@ -628,7 +652,9 @@ local function UpdateText(plate)
         local W = PlateWidth()
         local maxWidth = W * 0.70
         local levelW = plate.level:GetStringWidth()
-        if levelW > 0 then
+        -- 宽度读回来也可能成机密（与 Widget:FitText 头部同一课：锚在机密几何上时
+        -- GetStringWidth 会变机密）—— 对机密宽度比大小就是被拦调用。
+        if type(levelW) == "number" and not Secrets.IsSecret(levelW) and levelW > 0 then
             maxWidth = math.min(maxWidth, W - levelW - 4)
         end
         Widget:FitText(plate.name, name, maxWidth, nameSize, nil, 6)
@@ -836,7 +862,12 @@ local function OnPlateEvent(plate, event)
 end
 
 --- Attach to the base frame Blizzard gave this unit.
+-- 令牌是**事件载荷**：它之后要当表键（plates[unit]）又要进 Unit* 查询，两样都会在机密值上
+-- 被拦。type() 判不出机密（机密串的 type 照样是 "string"），所以两道都要 —— 判不住就
+-- 少画一块牌子，别在索引时炸。
 local function Added(unit)
+    if type(unit) ~= "string" or Secrets.IsSecret(unit) then return nil end
+
     local base = C_NamePlate and C_NamePlate.GetNamePlateForUnit
         and Query(C_NamePlate.GetNamePlateForUnit, unit) or nil
     if not base then return nil end
@@ -869,6 +900,7 @@ end
 M.Added = Added
 
 local function Removed(unit)
+    if type(unit) ~= "string" or Secrets.IsSecret(unit) then return false end
     local plate = plates[unit]
     if not plate then return false end
 
@@ -876,7 +908,7 @@ local function Removed(unit)
     plate.unit = nil
     plate:UnregisterAllEvents()
     plate:SetScript("OnUpdate", nil)
-    plate.castEndMS = nil
+    plate.castActive = nil
     plate.castEndClock = nil
     plate:Hide()
     plate.cast:Hide()
@@ -1025,20 +1057,9 @@ function M:HandleCommand(rest)
     local sub = string.lower(rest or "")
     if sub ~= "diagnose" and sub ~= "diag" and sub ~= "probe" then return false end
 
-    ns:Print("姓名板对象自检（本客户端实测）：")
-    local missing = 0
-    for i = 1, #PROBED do
-        if ns.ResolvePath(PROBED[i]) then
-            ns:Print(("|cff88ff88✓|r %s"):format(PROBED[i]))
-        else
-            missing = missing + 1
-            ns:Print(("|cffff6b6b✗|r %s（缺失）"):format(PROBED[i]))
-        end
-    end
-
-    if missing == 0 then
-        ns:Print("全部存在。")
-    else
+    -- 同一本账：确认 + 打印交给 `Skin:Verify`，`/mui skins diagnose` 才会一起带上这些名字。
+    local _, missing = ns.Skin:Verify("nameplates", PROBED, "姓名板对象自检（本客户端实测）：")
+    if missing > 0 then
         ns:Print(string.format("%d 个缺失：全部已按特性探测跳过，不会报错；"
             .. "`NamePlateDriverFrame` 缺失时点击区仍会在设置/区域变化时重设。", missing))
     end

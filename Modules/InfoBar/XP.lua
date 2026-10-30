@@ -93,12 +93,14 @@ local function ReinforceBlizzardXP()
         local f = _G[name]
         if f and Marked(f, "xpHidden") then
             local ok, alpha = pcall(f.GetAlpha, f)
-            if not ok or not alpha or alpha > 0.01 then
-                pcall(f.SetAlpha, f, 0)
-            end
+            -- alpha 也可能是机密（被机密几何/状态驱动的框会让 GetAlpha 返回机密数）：
+            -- 真值测试与 `>` 都得排在 IsSecret 之后，顺序写反就是每秒一条被拦调用。
+            local keep = ok and not Secrets.IsSecret(alpha) and alpha ~= nil and alpha <= 0.01
+            if not keep then pcall(f.SetAlpha, f, 0) end
             if type(f.EnableMouse) == "function" and type(f.IsMouseEnabled) == "function" then
                 local okM, on = pcall(f.IsMouseEnabled, f)
-                if okM and on then pcall(f.EnableMouse, f, false) end
+                -- 帧的鼠标状态读回来也可能是机密布尔（同族）：机密按"已关"处理，别再写一次。
+                if okM and Secrets.Bool(on, false) then pcall(f.EnableMouse, f, false) end
             end
         end
     end

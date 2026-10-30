@@ -161,9 +161,14 @@ local function WatchedCurrencies()
     local list = {}
     for i = 1, size do
         local okInfo, info = pcall(api.GetCurrencyListInfo, i)
-        if okInfo and type(info) == "table" and not info.isHeader and info.isShowInBackpack then
+        -- 字段是机密布尔时 `not info.isHeader` / `info.isShowInBackpack` 一次真值测试就被拦
+        -- （ADDON_ACTION_BLOCKED UNKNOWN()）—— 走唯一的漏斗 Secrets.Bool。
+        if okInfo and type(info) == "table"
+            and not Secrets.Bool(info.isHeader, false)
+            and Secrets.Bool(info.isShowInBackpack, false) then
             local name = info.name
             local quantity = Secrets.Number(info.quantity)
+            -- name 之后要进 string.format / table.concat：type() 判不出机密串，必须再过 IsSecret。
             if type(name) == "string" and not Secrets.IsSecret(name) and quantity then
                 list[#list + 1] = {
                     name     = name,
