@@ -685,16 +685,58 @@ local function PrintStatus()
     end
 end
 
+--- 拦截归因账本（`/mui blocks`）。AGENTS 的结论：本客户端对 `ADDON_ACTION_BLOCKED`
+--- **不写 taint.log**，所以只能认我们自己记的栈 —— `Secrets.Bool()` 的失败路径会逐条存
+--- `debugstack`。这一族就是 docs/PLAN-refactor 里那批 `UNKNOWN()`（机密布尔被真值测试）。
+--- 只覆盖 `Secrets.Bool`：别的来源（引擎容器 / 半套压制）这里看不到，得走开关式二分。
+local function PrintBlockLedger(rest)
+    if type(ns.Secrets) ~= "table" or type(ns.Secrets.BoolBlocks) ~= "function" then
+        ns:Print("这个构建没有 BoolBlocks 账本。")
+        return
+    end
+    local blocks, total = ns.Secrets.BoolBlocks()
+    if total == 0 or #blocks == 0 then
+        ns:Print("|cff88ff88账本为空|r：本会话没有机密布尔被拦的记录。")
+        ns:Print("（只统计 `Secrets.Bool` 的失败路径；其它 `UNKNOWN()` 来源要靠关模块二分。）")
+        return
+    end
+    local order, groups = {}, {}
+    for _, entry in ipairs(blocks) do
+        local head = string.match(entry.stack or "?", "[^\r\n]+") or "?"
+        if not groups[head] then
+            groups[head] = { n = 0 }
+            order[#order + 1] = head
+        end
+        groups[head].n = groups[head].n + 1
+    end
+    ns:Print(("机密布尔被拦 |cffffa940%d|r 条 · 去重 %d 个调用点："):format(total, #order))
+    for i, head in ipairs(order) do
+        if i > 8 then
+            ns:Print(("  …另有 %d 个调用点（/mui blocks full 看完整栈）"):format(#order - 8))
+            break
+        end
+        ns:Print(("  |cffffd100×%d|r %s"):format(groups[head].n, head))
+    end
+    if rest == "full" then
+        local first = blocks[1]
+        ns:Print("最早一条的完整栈：")
+        for line in string.gmatch((first and first.stack or "?"), "[^\r\n]+") do
+            ns:Print("  " .. line)
+        end
+    end
+end
+
 local function PrintHelp()
     ns:Print("命令：")
     ns:Print("  |cffffd100/mui|r            打开配置面板")
     ns:Print("  |cffffd100/mui status|r     显示模块与主题状态")
     ns:Print("  |cffffd100/mui theme|r      重新采样环境色彩")
     ns:Print("  |cffffd100/mui scale|r      像素网格 / 缩放自检（改完 UI 缩放后再跑一次对比）")
+    ns:Print("  |cffffd100/mui blocks|r     机密布尔被拦的调用栈账本（`UNKNOWN()` 归因，加 full 看完整栈）")
     ns:Print("  |cffffd100/mui enable|r     启用本体")
     ns:Print("  |cffffd100/mui disable|r    禁用本体（需 /reload）")
     ns:Print("  |cffffd100/mui <模块> on|off|r  单独开关模块")
-    ns:Print("  |cffffd100/mui skins diagnose|r 探测本客户端缺少的对象名（skins / nameplates / infobar 同）")
+    ns:Print("  |cffffd100/mui skins diagnose|r 对象名可达性账本（全仓一本账：skins / nameplates / infobar / minimap）")
     ns:Print("  |cffffd100/mui reset|r      恢复默认设置（需 /reload）")
 end
 
@@ -882,6 +924,9 @@ local function HandleSlash(message)
 
     elseif command == "scale" then
         PrintScale()
+
+    elseif command == "blocks" then
+        PrintBlockLedger(rest)
 
     elseif command == "help" then
         PrintHelp()
