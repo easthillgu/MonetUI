@@ -1529,6 +1529,60 @@ v2 认三种：直接取用（`Skin:Need("A.B")`）、const 表被真实代码�
 银行 / 角色信息），再跑 `/mui skins diagnose` —— 那时还报缺失的才是名字写错。
 这条已经写进第 9 节第 1 项。
 
+## 8.10 2026-10-30 实机第一轮：三类报错各自的根（retail 12.1.5）
+
+首次把 8.8 的收口跑进 12.1.5，控制台给出三类新报错，逐条根因如下（都已修，闸门全绿）。
+
+### 8.10.1 「名字在但不是框体」→ CreateFrame Usage ×11 面板
+
+11 个面板（inspect/playerspells/collections/chat/guild/calendar/trainer/auction/professions/bank）
+整片 Apply 失败在 `Skin.lua:390 Usage: CreateFrame(...)`：`Skin:Need` 命中的对象**不是 ScriptObject
+**（命中的是全局函数/数字之类的同名东西），被当成 parent 传进 CreateFrame。一处抛错就把整个面板的
+Apply 打断 —— 这就是"一个控件炸了带走整面板"。
+
+- `Skin:IsScriptObject(obj)`（Utils/Skin.lua）：nil / table-or-userdata / `GetObjectType` 过 pcall；
+  `NewBackdropFrame`、`Skin:Panel`、`Skin:ControlBg` 都先问它，parent 不可用时**返回 nil**而不是抛。
+- `Skin:Need` 加第三种结果：命中但不是框体 → `led.shape = "notObject"`，`Skin:ReportScope` 单列一节
+  `⚠ N 个对象存在，其中 M 个不是框体` + 逐条路径。**名字写错从此是可查的账，不是静默跳过。**
+- `M:Dress` 逐步 pcall（`dressOne(frame, what, fn)`）：某个控件的某一步失败只记一行
+  `美化 <框名> 的「<步骤>」这步失败: <err>`，其余步骤和其余对象照做。
+
+### 8.10.2 forbidden 对象的 `GetRegions` → 交易框剥原美术被拒
+
+`trade` 面板失败在 `bad argument #1 to ? (Attempt to access forbidden object … self:GetRegions())`：
+`Skin:Strip` 里裸调 `frame:GetRegions()`。现在 `BACKDROP_PIECES` 的字段读和 regions 枚举都过 pcall ——
+**剥不掉就只剥不掉**，不再连累同一个面板的底衬和子控件。
+
+### 8.10.3 轮询读不到可见性 → 一个框刷 2087 条
+
+`Widget.lua:206: calling 'IsVisible' on bad self … Count 2087`：三个轮询驱动（hover 0.1s / show 0.2s /
+poll 0.2s）每拍对表里每个框读一次可见性，而本客户端有 **forbidden 对象**（被接管的安全框、战斗中临时
+受限的受保护框），对它们调 `IsVisible` 直接抛。2087 条 ≈ 同一个框被读了 7 分钟。
+
+- `Visible(frame)` 先 pcall，返回 `(shown, readable)`；读不出来时**只警告一次**并报名字
+  （`GetName` → 父框名 + "的子框" → 无名框；名字先过 `Secrets.IsSecret` 再 tostring）。
+- `VisibilityOf` 带暂停：读不出来就把这个框挂起 `PAUSE_RETRY = 5` 秒，期间一次都不碰，期满真读一次，
+  可读即自动恢复。**为什么不摘条目**：模块那边靠旁表标记去重（`deepSweep` / `showHook` /
+  `reassertHooked` / `adoptedWatch`…），条目没了标记还在，这个框之后就永远没人管了；而"读不到"
+  多半是战斗中临时受限，脱战本该继续被照看。
+- 暂停期间三个驱动都**不跑回调**（hover 用空监听表 `idleList` 推进状态）。理由：那些回调全是往这个
+  框写东西，跑了也只会被客户端拒 —— 等于把一条报错换成一条拦截。
+
+### 8.10.4 加载横幅带客户端身份
+
+`ns:ClientIdentity()`（Core.lua）打印 `版本 · build · Interface`，两个客户端（零售 12.1.5 /
+无限 1.60）交替验证时，日志里认不出是哪一版就没法定位 —— `GetBuildInfo` 返回值个数按版本不一样，
+逐位取、取不到给 `?`。
+
+### 8.10.5 闸门（本机，无游戏 MCP）
+
+`luac -p` 全仓通过（排除 `tools/api-audit-selftest/Broken.lua` 这个故意的反例）；
+`api-audit` **no hard finding**；`audit-taint` 53 个文件 0 BLOCKER / 0 HIGH / 0 SOFT；
+`audit-locals` 49 个文件全过；`check-frame-list` 167 个名字全部有取用路径（7 个 ALLOW_DYNAMIC）。
+
+**实机待办**：重部署后看横幅 `客户端：…`、`美化 … 这步失败`、`轮询读不到可见性：<框名>` 三类新行，
+并把 `/mui skins diagnose` 的"命中但不是框体"名单贴回来 —— 那批名字要按真名订正，不是靠加 ALLOW_DYNAMIC 过关。
+
 ## 9. 建议的下一步（按价值排序）
 
 1. **实机回归 P0/P1 的改动面**（`docs/HANDOFF.md` 8.6.2 + `TODO.md` 的 9 条清单）：

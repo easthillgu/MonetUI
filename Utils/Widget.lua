@@ -35,36 +35,62 @@ Widget.TEXT_GAP = 3   -- 文字行与条顶边之间的空隙
 -- 弱键：自建框体被丢弃后条目跟着回收（以前是强引用，永不释放）。
 local hoverWatch, hoverDriver, hoverAcc = setmetatable({}, { __mode = "k" }), nil, 0
 
---- 读一个框的可见性。本客户端里有**forbidden 对象**（被接管的安全框、战斗里的单位框等）：
+--- 驱动循环遇到暂停中的框时用它替下监听表：状态照常推进，但一个回调都不跑。
+local idleList = {}
+
+--- 读一个框的可见性。本客户端里有**forbidden 对象**（被接管的安全框、战斗里的受保护框等）：
 --- 对它们调 `IsVisible` 会抛 "Attempt to access forbidden object from code tainted by an AddOn"，
---- 而三个轮询驱动（hover 0.1s / show 0.2s / poll 0.2s）每拍都要读一次 —— 实机一个框就能刷
---- 2000+ 条。读不出来时按"显示着"继续（回调都是幂等的重涂，多跑一次无害），
---- 并**每个框只警告一次**，好让我们知道到底是谁。
+--- 而三个轮询驱动（hover 0.1s / show 0.2s / poll 0.2s）每拍都要读一次 —— 实机一个框就刷了 2087 条。
+--- 第二个返回值 `readable` 为 false 时调用方这一拍**什么都不要做**：那些回调全是对这个框的写入，
+--- 同样会被客户端拒，跑一次只是多一条拦截。每个框只警告一次，好让我们知道到底是谁。
 local forbidWarned
+local PAUSE_RETRY = 5
+local function FrameLabel(frame)
+    local name
+    local Secrets = ns.Secrets
+    local okName, n = pcall(function() return frame.GetName and frame:GetName() end)
+    if okName and type(n) == "string" and not (Secrets and Secrets.IsSecret(n)) then name = n end
+    if not name then
+        local okP, parent = pcall(function() return frame.GetParent and frame:GetParent() end)
+        if okP and parent and parent ~= frame then
+            local okN, pn = pcall(function() return parent.GetName and parent:GetName() end)
+            if okN and type(pn) == "string" and not (Secrets and Secrets.IsSecret(pn)) then
+                name = pn .. " 的子框"
+            end
+        end
+    end
+    return name
+end
+
 local function Visible(frame)
     local ok, value = pcall(frame.IsVisible, frame)
-    if ok then return value and true or false end
+    if ok then return value and true or false, true end
 
     forbidWarned = forbidWarned or setmetatable({}, { __mode = "k" })
     if not forbidWarned[frame] then
         forbidWarned[frame] = true
-        local name
-        local okName, n = pcall(function() return frame.GetName and frame:GetName() end)
-        local Secrets = ns.Secrets
-        if okName and type(n) == "string" and not (Secrets and Secrets.IsSecret(n)) then name = n end
-        if not name then
-            local okP, parent = pcall(function() return frame.GetParent and frame:GetParent() end)
-            if okP and parent and parent ~= frame then
-                local okN, pn = pcall(function() return parent.GetName and parent:GetName() end)
-                if okN and type(pn) == "string" and not (Secrets and Secrets.IsSecret(pn)) then
-                    name = pn .. " 的子框"
-                end
-            end
-        end
-        ns:Print(("|cffffa940轮询读不到可见性|r：%s（forbidden 对象），按显示着继续。")
-            :format(name or "无名框"))
+        ns:Print(("|cffffa940轮询读不到可见性|r：%s（forbidden 对象），暂停它的轮询，%d 秒复检一次。")
+            :format(FrameLabel(frame) or "无名框", PAUSE_RETRY))
     end
-    return true
+    return false, false
+end
+
+--- 带暂停的可见性读（三个驱动都走这里）。读不出来就先把这个框挂起 PAUSE_RETRY 秒：
+--- 期间一次都不碰（不抛错、不跑回调），期满再真读一次，读得出来就自动恢复。
+--- 为什么不直接把它从轮询表里摘掉：模块那边用旁表标记去重（`deepSweep` / `showHook` /
+--- `reassertHooked`…），条目没了标记还在，之后这个框就永远没人管了。而"读不到"多半是
+--- **战斗中临时受限**，框本身没错，脱战就该继续被照看 —— 所以只暂停，不除名。
+local pausedUntil = setmetatable({}, { __mode = "k" })
+local function VisibilityOf(frame)
+    local untilTime = pausedUntil[frame]
+    if untilTime then
+        if GetTime() < untilTime then return false, false end
+        pausedUntil[frame] = nil          -- 到复检点：这一拍真读一次
+    end
+    local shown, readable = Visible(frame)
+    if readable then return shown, true end
+    pausedUntil[frame] = GetTime() + PAUSE_RETRY
+    return false, false
 end
 
 local function MouseOver(frame)
@@ -95,8 +121,12 @@ local function EnsureHoverDriver()
         hoverAcc = 0
         local down = _G.IsMouseButtonDown and _G.IsMouseButtonDown("LeftButton")
         for frame, st in pairs(hoverWatch) do
-            local list = st.list
-            local inside = Visible(frame) and MouseOver(frame)
+            local shown, readable = VisibilityOf(frame)
+            -- 暂停中的框：shown=false → inside=false，状态照常推进但 list 是空的，
+            -- 一个回调都不跑（那些回调全是往这个框写东西，跑了也只是多一条拦截）。
+            -- 复检到可读时按真实悬停重来一次 enter。
+            local list = readable and st.list or idleList
+            local inside = shown and MouseOver(frame)
             if inside ~= st.inside then
                 st.inside = inside
                 if inside then
@@ -179,11 +209,13 @@ local function EnsureShowDriver()
         if showAcc < 0.2 then return end
         showAcc = 0
         for frame, st in pairs(showWatch) do
-            local shown = Visible(frame)
-            if shown and not st.shown then
-                for i = 1, #st.list do pcall(st.list[i], frame) end
+            local shown, readable = VisibilityOf(frame)
+            if readable then
+                if shown and not st.shown then
+                    for i = 1, #st.list do pcall(st.list[i], frame) end
+                end
+                st.shown = shown
             end
-            st.shown = shown
         end
     end)
 end
@@ -192,7 +224,7 @@ function Widget:ShowWatch(frame, fn)
     if not frame or type(fn) ~= "function" then return end
     local st = showWatch[frame]
     if not st then
-        st = { list = {}, shown = Visible(frame) }
+        st = { list = {}, shown = VisibilityOf(frame) }
         showWatch[frame] = st
         EnsureShowDriver()
     end
@@ -217,6 +249,7 @@ function Widget:PollWatch(frame, fn, interval)
     if not frame or type(fn) ~= "function" then return end
     local list = pollWatch[frame]
     if not list then
+        -- forbidden 对象不进轮询：每拍读可见性必抛，而回调对它的写入同样会被拒。
         list = {}
         pollWatch[frame] = list
     end
@@ -235,7 +268,9 @@ function Widget:PollWatch(frame, fn, interval)
         elapsed = elapsed or 0
         for f, cbs in pairs(pollWatch) do
             -- 隐藏的框不累加时间：等它显示时再从 0 开始算，不会"一显示就补执行一堆"。
-            if type(f) == "table" and f.IsVisible and Visible(f) then
+            local shown, readable
+            if type(f) == "table" and f.IsVisible then shown, readable = VisibilityOf(f) end
+            if shown and readable then
                 for i = 1, #cbs do
                     local cb = cbs[i]
                     cb.acc = cb.acc + elapsed

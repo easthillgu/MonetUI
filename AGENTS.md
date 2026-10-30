@@ -79,6 +79,10 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   高亮/显隐更新随之被拒（这就是那串 `PetActionButton*:SetShown` / `MainActionBar:ClearAllPoints`）。
   悬停/按下/面板重涂一律走轮询：`Widget:HoverWatch`、`Widget:ShowWatch`、`Widget:PollWatch`
   （本客户端**没有** `MouseIsOver` / `GetMouseFocus`，用 `frame:IsMouseOver()`）。
+  **本客户端还有 forbidden 对象**（被接管的安全框、战斗中临时受限的受保护框）：对它们调
+  `IsVisible` 会直接抛（实机一个框刷了 2087 条）。三个驱动统一走 `VisibilityOf`：读不出来就**暂停这个
+  框 5 秒、期间一个回调都不跑**，期满自动复检恢复。不要改成"从轮询表里摘掉"—— 模块用旁表标记去重
+  （`deepSweep` / `showHook` / `reassertHooked`），条目没了标记还在，那个框之后就永远没人管了。
 - **绝不覆写暴雪的方法去"骗"编辑模式**（这条栽得最狠）：编辑模式进入时在**同一条调用栈**里
   做完 `EditModeFrameSetup`（摆动作条 → 摆状态条 → … → `RefreshPartyFrames`），链上只要读过
   一个"被我们写过的值/方法"，**后面整段都算 MonetUI 的执行环境**。实机症状：进/退编辑模式必报
