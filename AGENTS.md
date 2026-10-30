@@ -87,6 +87,14 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   `IsVisible` 会直接抛（实机一个框刷了 2087 条）。三个驱动统一走 `VisibilityOf`：读不出来就**暂停这个
   框 5 秒、期间一个回调都不跑**，期满自动复检恢复。不要改成"从轮询表里摘掉"—— 模块用旁表标记去重
   （`deepSweep` / `showHook` / `reassertHooked`），条目没了标记还在，那个框之后就永远没人管了。
+  **但"根本读不出来"的框不要挂进去**：`EnumerateFrames` 这类全量扫描（`Skin:ScanScrollArrows`）和
+  `M:SweepDeep` 这种常驻登记，入口必须先过 `Widget:Readable(frame)` —— 从一开始就 forbidden 的框
+  挂上轮询等于永久空转，5 秒复检一次、永远检不回来（实机就是这条：一个 `ScrollFrame（无名）` 全程占着账本）。
+  **无名 ≠ forbidden**：暴雪大量控件本来就是匿名 `CreateFrame`，`GetName` 老实返回 nil、框体完全可读，
+  判 forbidden 只认 `IsVisible` 抛不抛。归因走**登记点账本**：三个 Watch 首次收框时各取一行
+  `debugstack`（`Origin`），`/mui restrict` 末尾的"轮询被暂停的框"清单读的就是它 ——
+  驱动循环每拍都是同一个 OnUpdate，栈里没有任何线索，而聊天框只留最后十几行、**多行栈一定会被顶掉**，
+  所以诊断一律"一行 + 一本随时能重看的账"，别印长栈。
 - **绝不覆写暴雪的方法去"骗"编辑模式**（这条栽得最狠）：编辑模式进入时在**同一条调用栈**里
   做完 `EditModeFrameSetup`（摆动作条 → 摆状态条 → … → `RefreshPartyFrames`），链上只要读过
   一个"被我们写过的值/方法"，**后面整段都算 MonetUI 的执行环境**。实机症状：进/退编辑模式必报

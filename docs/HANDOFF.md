@@ -1650,6 +1650,71 @@ C_RestrictedActions.InCombatLockdown` —— 全仓 29 处裸 `InCombatLockdown(
 3. `Secrets.CanRead` 换上后血量 / 能量 / 名字 / 施法条显示没有回退（若 `canaccessvalue` 对普通值误报
    false，症状会是「东西整体不更新」，那时把 `Bool` / `Number` 的门退回 `IsSecret` 单独提交）。
 
+## 8.12 2026-10-30 实机第二轮：retail 12.1.5 上把 8.11 三条验完（Computer Use 直接驱动客户端）
+
+这轮不需要作者贴输出：Computer Use 接管客户端，`/reload` → `/mui ...` → 截图 → 裁聊天区放大 3 倍读。
+**读聊天的规矩**：1365×768 的原图聊天字太小，一律 `tools` 外的 `%TEMP%\mui-crop.ps1 -In -Out -X -Y -W -H -Scale 3`
+裁出来再 `Read`；聊天框只留最后十几行，**多行栈一定会被顶掉**（见 8.12.2 的教训）。
+
+### 8.12.1 六类限制：实机确认（Core.lua）
+
+`/mui restrict` 在 12.1.5（build 120105）上：
+
+- `C_RestrictedActions.InCombatLockdown` / `IsAddOnRestrictionActive` / `GetAddOnRestrictionState` /
+  `CheckAllowProtectedFunctions` **四个都有**；`Enum.AddOnRestrictionType` 有，六个成员全解析得出。
+- `canaccessvalue` **有** → `Secrets.CanRead` 走的是正规前置，不是退回 `not issecretvalue`。
+- 空闲时六类全部 `账本 空 / 实时 空`；**打开世界地图**时 `当前受限：Map（战斗中 否 · IsRestricted 是）`
+  且 `Map: 账本 活 / 实时 活` —— 这条是本轮唯一想要的证据：**非战斗类限制是真的会活**，
+  以前全仓只盯 `InCombatLockdown()` 确实等于只看六分之一。两次观测（自动开 / 手动开）都一致。
+- 顺带：本客户端**没有** `C_WorldMap`（`attempt to index a nil value`），开地图只能走 `WorldMapFrame` 那条。
+- 换上 `CanRead` 后血量 / 能量 / 名字 / 施法条**没有回退**（HUD、动作条、45 个窗口照常），
+  8.11.4 担心的"整体不更新"没有出现 → 这道门保持现状。
+
+### 8.12.2 forbidden 对象：从"无名框"查到 `SweepDeep`（Utils/Widget.lua + Modules/Skins/Skins.lua）
+
+8.10.3 的暂停做到了"一个框只报一条"，但报的是**无名框**，查不下去。这轮把归因做完了，三步：
+
+1. **判据先纠正**：`GetName` 读不出来 ≠ forbidden。暴雪大量控件本来就是匿名 `CreateFrame`，
+   `GetName` 老老实实返回 nil、框体完全可读。第一版按"读不到名字"报 forbidden，指错了对象。
+   现在 `Forbidden()` 只认 `IsVisible` 抛不抛（那才是驱动每拍真正撞的刀），
+   `FrameLabel` 在没名字时退到 `父框 的子框` → `对象类型（无名）`，"无名框"三个字不再出现在账本里。
+2. **登记点记账**：`Origin(src, frame)` 在 `HoverWatch` / `ShowWatch` / `PollWatch` 各自第一次收这个框时
+   取一次 `debugstack(3, 1, 1)`（**只一行**），存进弱表；`Visible` 的告警和 `Widget:PrintStalled` 都带上它。
+   为什么必须在登记那一刻：驱动循环每拍都是同一个 OnUpdate，栈里没有任何线索；而框一旦变 forbidden
+   连名字都读不出来。`/mui restrict` 末尾新增"轮询被暂停的框"清单（`pausedUntil` 这本账一直在，
+   聊天被 NPC 对话顶掉也能重看）—— 就是它把凶手点出来的：
+   `1. ScrollFrame（无名） · 登记点 poll · Modules/Skins/Skins.lua:268: in function 'SweepDeep'`。
+3. **源头收口**：`M:SweepDeep` 现在先过 `Widget:Readable(frame)`，读不出来的框**不挂常驻轮询**、
+   只 `Skin:WarnOnce` 一条（保持暴雪原样，下次 Apply 能读了再补）。
+   `Skin:ScanScrollArrows` 同样：`EnumerateFrames` 会把这个客户端**所有**帧交给我们，
+   其中就有被引擎接管的安全框 —— 全量扫描的入口必须先问可读，不能指望下游的 pcall。
+
+结果：`/mui restrict` 的暂停清单是 `（没有）`，加载期不再出现"轮询读不到可见性"。
+
+### 8.12.3 `/mui skins diagnose bad`：命中但不是框体（Utils/Skin.lua）
+
+全量 diagnose 几百行，这一类恰恰会被顶出聊天框，所以新开一个只报它的入口
+（`M:Diagnose(onlyBad)` → `Skin:ReportBad`）。同时 `Skin:Need` 把第三种结果记成
+`notObject:<类型>`（`function` / `table` / `Mixin 表`），报告里跟着报名字 ——
+分不清"我们本来就在探一个函数"和"真名写错了"，这一类清单就没法看。
+
+12.1.5 实机三条：
+
+- `[micromenu] UpdateMicroButtons（函数）`、`[tooltip] SharedTooltip_SetBackdropStyle（函数）`
+  —— **不是缺陷**：这两处本来就是"这个客户端还有没有这个全局函数"的存在性探针
+  （`Forever.lua:144` / `System.lua:243`），标出类型后一眼可辨，不用改代码。
+- `[trade] TradePlayerInputMoneyFrame（Mixin 表）` —— **真名写错了**：它是个 Mixin 表，不是活框体，
+  所以 `M:Dress(TRADE_MONEY_FRAMES, ...)` 里这一半从来没被美化过。
+  实机另探：`TradePlayerMoneyFrame` = nil、`TradeRecipientMoneyFrame` = table（那个是对的）。
+  玩家侧金额框的真名**还没取到**（想列 `TradePlayer*` 全局的那条 `/run` 被客户端当未知命令拒了，
+  当时角色正跑任务线，就没继续往里敲键）。**留给下一件活**：开一次交易面板，
+  从 `TradeFrame` 的子控件里取真名（`/mui skins diagnose bad` 掉一条才算修完）。
+
+### 8.12.4 闸门
+
+`luac -p` 全过；`api-audit` **no hard finding**；`audit-taint` 0 / 0 / 0；`audit-locals` 49 文件过；
+`check-frame-list` 名单一致。部署走 `tools/deploy-retail.ps1`（119 文件，`## Interface: 120105`）。
+
 ## 9. 建议的下一步（按价值排序）
 
 1. **实机回归 P0/P1 的改动面**（`docs/HANDOFF.md` 8.6.2 + `TODO.md` 的 9 条清单）：
