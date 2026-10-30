@@ -22,6 +22,27 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
 - 客户端 API 以 `docs/api/` 里的本地快照为准（`node tools/api-lookup.js <名字>`；正文见 `docs/api/MANUAL.md`）。快照抓自 <https://wuxianwow.com/api/>，就是本客户端的 `Blizzard_APIDocumentationGenerated`：名字、参数、返回、机密/受保护标记都查它，效力**高于** `hated-wow` MCP（后者是正式服数据，只当补充；查暴雪插件 Lua 实现仍可用它）。快照没更新时 `node tools/api-fetch.js` 重新抓。
 - 改到 `C_*` 名字 / 事件名 / `Enum.X.Y` 值时另跑 `node tools/api-audit.js`：默认对撞 `docs/api` 的本地快照（HARD 项退出码 1；`--gethe` 才走旧的 `Gethe/wow-ui-source` 转储）。它同时给 CHECK（受保护全局，要在 `InCombatLockdown` 之外）、SOFT（实参个数、旧全局）、INFO（会返回机密值的 API 清单 + 文档外方法名 + TOC 指令校验）。`wuxian check` 对未知名字只给 `unresolved` note，判不死，所以这一层不能省。
 - 游戏在线时走 `/verify` 实机清单（小地图还原、威胁发光、新皮肤帧名）。
+- **换客户端第一趟跑 `/mui compat`（`bad` 只看与假设不符的）**，见 `Utils/Compat.lua`：
+  本仓的结论有一半是在 **retail 12.1.5** 上测的，而交付目标是 **《无限》1.60（camelot / Interface 16001）**，
+  同一句"本客户端没有 X"在两边可能相反（12.1.5 实测没有 `SecureHandlerClickTemplate`，1.60 的安全环境
+  整组都有）。**新写结论一律带客户端标签**（`12.1.5 实测` / `1.60 文档` / `1.60 实测`），
+  只有一句话证据的假设进 WATCH 表、不进本文件。
+  **三条从 12.1.5 基线趟里学来的口径**（`docs/HANDOFF.md` 8.13.6）：
+  ①结果**只认账本** —— 65 行一定被聊天框顶掉，读
+  `<客户端>/WTF/Account/<账号>/SavedVariables/MonetUI.lua` 里的 `compatReport`，
+  而且**落盘比 `/reload` 晚 1–2 分钟**，reload 完立刻读会读到上一趟；
+  ②模板探法默认**不跑**（`ActionBarButtonTemplate` 造出来会自己跑 OnLoad、报 6 条错），
+  要 `/mui compat tmpl` 才探，且 `CreateFrame` 没报错 ≠ 模板存在（客户端会静默忽略）——
+  只有"有把握的方法名"再验一次方法在不在才算硬证据；
+  ③暴雪框体对不上先 `/mui compat find <片段>` 扫真名（走 `EnumerateFrames` + `GetChildren`，
+  12.1.5 实测一次能走 15895 个框），别照抄参考插件里的名字。
+- **1.60 上"某个暴雪框读不到"的第一嫌疑人是 GameRule 把它关了**（`ObjectiveTrackerDisabled` /
+  `BagsUIDisabled` / `CompactRaidFrameManagerDisabled` / `PlayerCastBarDisabled` / `EditModeDisabled` …），
+  不是名字写错 —— 先 `/mui compat` 末段确认规则状态，再去改 `frames` 名单。
+  另外 1.60 有 `C_AddOns.GetScriptsDisallowedForBeta()` 与 `UserScriptsDisabled`：**/run 随时可能整条被禁**，
+  所有诊断必须是 `/mui <模块> ...` 子命令。Forever 部署：
+  `tools/deploy-retail.ps1 -Dest "...\WOWFOREVER\World of Warcraft\_cn_beta_" -Interface 16001`
+  （那台里已有 `!WuxianWorkshop` / `WoWBridge` / `163UI_Info`，只加 MonetUI 目录，别人的一个字节都不碰）。
 
 ## 安全边界
 

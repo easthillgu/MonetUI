@@ -1085,6 +1085,7 @@ end
 | `Utils/Skin.lua` | 窗口装饰引擎、`CropIcon`、页签 | 只装饰，不挂脚本 |
 | `Utils/EventBus.lua` | 事件总线（懒注册） | 回调第一个参数是事件名 |
 | `Utils/Mover.lua` | 位置/吸附/战斗锁 | 战斗里不要挪受保护帧 |
+| `Utils/Compat.lua` | 客户端能力自查（`/mui compat`）：跨客户端的假设清单 | 表里每条是**假设**不是结论；换客户端先跑它，别把 retail 的实测当 1.60 的 |
 | `Modules/ActionBars/ActionBars.lua` | 8 条自绘安全按钮 + 宠物条/姿态条收养 + 拖放接住器 | `action` 等点击属性只能由**安全片段**写；`PickupAction/PlaceAction` 必须脱战；收养来的条（`IsAdopted`）不进图标/冷却/绑定/布局那几套循环 |
 | `Modules/Cooldown/Cooldown.lua` | 冷却数字渲染 + 暴雪冷却管理器收掉 | 只处理我们自己的冷却框；`GetCooldownTimes` 是毫秒 |
 | `Modules/BuffFrame/BuffFrame.lua` | buff/proc/debuff 三行 + 战斗中引擎兜底 | 行位置按行高算，别锚空行 |
@@ -1715,6 +1716,157 @@ C_RestrictedActions.InCombatLockdown` —— 全仓 29 处裸 `InCombatLockdown(
 `luac -p` 全过；`api-audit` **no hard finding**；`audit-taint` 0 / 0 / 0；`audit-locals` 49 文件过；
 `check-frame-list` 名单一致。部署走 `tools/deploy-retail.ps1`（119 文件，`## Interface: 120105`）。
 
+## 8.13 2026-10-30 Forever 1.60 适配准备（离线：wuxianwow MCP 的 addon_api + docs/api 快照）
+
+### 8.13.1 快照刷新与版本差
+
+- `node tools/api-fetch.js`：本地快照从 **1.60.1.70450**（10-15 编译 / 10-26 抓）刷到
+  **1.60.1.70634**（10-26 编译）。站点数据已到 1.60.1.70707，但 API 手册页还在 70634
+  （`addon_api` 不传参数就返回概况与版本号，先核对它再决定要不要重抓）。
+- 70450 → 70634 的文档差集一共 6 条：`C_GameRules.SetForeverExperiencePreset` 拆成
+  `...PreLogin` / `...PostLogin`，另加 `C_PetInfo.*` 两条与一个 `SETTINGS_HEADER_TEXT_UPDATE` 事件。
+  **我们一条都没用到** → 过去两周没有名字在我们脚下改过。
+- 对着 70634 重跑闸门：`api-audit` **0 HARD**（全仓 `C_*` / 事件 / `Enum.*` 都在 Forever 文档里）、
+  `audit-taint` 0/0/0、`audit-locals` 50 文件过、`check-frame-list` 167 个名字与代码一致。
+- **口径**：这一层只证明"名字在无限客户端的 API 文档里"，**不证明"1.60 的暴雪框体叫这个名字"** ——
+  快照里没有框体名单（`TradeRecipientMoneyFrame` 这类只能实机取）。框体结论一律待实机。
+
+### 8.13.2 手册里会改变适配做法的几条（`addon_api` 的 topic 节，逐条摘）
+
+- **安全模板整组都在**：camelot 加载 `Blizzard_RestrictedAddOnEnvironment`，里面列了
+  `SecureActionButtonTemplate` / `SecureUnitButtonTemplate` / `SecureHandlerStateTemplate` /
+  `SecureHandlerClickTemplate` / `SecureAuraButtonTemplate` / `SecureFrameTemplate` 等 22 个。
+  而 AGENTS 写的是"本客户端**没有** `SecureHandlerClickTemplate`"—— 那是 **retail 12.1.5 的实测**。
+  换到 1.60 有可能能直接挂安全处理器（接住器、悬停钩子那几处"只能轮询"的写法就有得简化），
+  **但要先证再改**：`/mui compat` 的模板一节 + 一个真点得动的实验，不要看到文档就动手。
+- **GameRule 能整体关掉一块暴雪面板**（约 150 项，枚举编号不在文档里，登录后用
+  `C_GameRules.IsGameRuleActive` 读）：与界面直接相关的有 `EditModeDisabled`、
+  `ObjectiveTrackerDisabled`、`BagsUIDisabled`、`CompactRaidFrameManagerDisabled`、
+  `PersonalResourceDisplayDisabled`、`PlayerCastBarDisabled` / `TargetCastBarDisabled` /
+  `NameplateCastBarDisabled`、`WorldMapTrackingPinDisabled`、`MaximizeWorldMapDisabled`、
+  `CollectionsPanelDisabled`、`EncounterJournalDisabled`、`TalentsPanelDisabled`、`AeLootDisabled`。
+  → **在 1.60 上"某个暴雪框读不到"的第一嫌疑人是规则把它关了，不是我们名字写错**；
+  模块该交时就交还（那条框本来就不该出现），别照 diagnose 的 ✗ 去"修名字"。
+- **`/run` 可能整条被禁**：`C_AddOns.GetScriptsDisallowedForBeta()` 为真时 `/run`、`/script` 直接拒，
+  另有 GameRule `UserScriptsDisabled` 与 `UserAddonsDisabled`（后者能把第三方插件整体关掉）。
+  → 所有诊断**必须**是 `/mui <模块> ...` 子命令；贴 `/run` 长语句这条路在 Beta/正式版上随时会断
+  （作者定的"别发长 /run"原来还有这一层原因）。
+- **机密值语义**（站点按 1.60.1.70338 实测写明）：对机密值做运算、与同类型比较、取长度、当表键、
+  判布尔、交给 `math.*` / `string.upper` → **直接 Lua 报错**；而原样交给 `SetText`
+  （`SecretArguments = AllowedWhenTainted`）、拼接、`string.format`、存进表都是允许的。
+  六类限制（`Enum.AddOnRestrictionType` 的 Combat/Encounter/ChallengeMode/PvPMatch/Map/Chat）与事件
+  `ADDON_RESTRICTION_STATE_CHANGED` 就写在这一节里 → **8.11 那层不是 retail 专属**，1.60 同样要跑
+  （老构建没有 `C_RestrictedActions` 时我们退回 `InCombatLockdown`，行为不变）。
+  结论：`Secrets.Bool/Number/CanRead` 的口径不用改。
+- **配额与脚本节流**：`LimitedLuaResources` 机制在但当前 `Enabled = false`（每插件 10000 帧 /
+  40000 贴图 / 5000 FontString）；CVar `luaScriptBucketThrottleEnabled` 系列限制每秒脚本时间，
+  **受限状态下阈值更低**（`...MaxMsPerSecondRestricted` / `...BurstRestricted`）。
+  我们有三个轮询驱动（hover 0.1s / show 0.2s / poll 0.2s）+ 一堆低频兜底 ——
+  1.60 上若"轮询像没跑"，先看这几个 CVar，再怀疑逻辑。
+- **TOC**：exe 认 `## AllowLoadGameType`，无限对应的游戏类型标签是 **`camelot`**；
+  差异文件按规则可以叫 `MonetUI_Camelot.toc`（站点也没实测，**同时保留无后缀 TOC**）。
+  `## Interface: 16001` 本身是推算值（主×10000 + 次×100 + 修订），登录后用
+  `select(4, GetBuildInfo())` 落实；`checkAddonVersion` 不匹配只标"过期"，不阻止加载。
+  CVar `enableDeprecationAddons` 会挂上 18 个 `Blizzard_Deprecated*` 兼容层 ——
+  我们 `SOFT deprecated shim = 0`，别为了"兼容"顺手捡旧全局。
+- **无限专属**（万一以后要碰）：`C_GameRules.GetForeverExperiencePreset` / `IsSDHDToggleEnabled` /
+  `AccountHasSDEnabled`、GameMode `standard|wf|wfhc`、传承 `Constants.LegacyConsts.*`、
+  `PLAYER_CAMPING` 是**登出倒计时**不是篝火（本构建没有露营 Lua 接口）。
+
+### 8.13.3 新工具：`/mui compat`（Utils/Compat.lua，Core.lua 挂命令）
+
+64 项能力自查，一行一条；`/mui compat bad` 只留"与我们的假设不符"的那几条。分五组 + GameRule 一节：
+身份与脚本通道 / 机密值与受限窗口 / 鼠标与遍历 / 安全模板（真造一个才作数）/
+**"暴雪框体：名字只在 12.1.5 验过，Forever 必须复核"**。每条都写着"为什么在意"，
+所以这张表同时就是**待重验清单**：换一个客户端跑一次，哪几条结论跨不过去直接摊开。
+
+- **不套 `Skin:Need`**：那本账的语义是"取不到 = 名字写错"，而这里**"不存在"本身就是答案**
+  （`MouseIsOver`、`PetActionBar_UpdateCooldowns` 我们正因为没有才改了做法）。
+  解析仍走同一个漏斗 `ns.ResolveObject`，每一项都 pcall；条目支持三种探法：
+  点路径存在性 / `probe`（自己给结论，如"六类枚举齐不齐"）/ `tmpl`（`CreateFrame` 试继承）。
+- 模板那组的口径：客户端对不存在的模板要么报错、要么**静默忽略**，忽略会误报"有" →
+  模板结论只当线索，最终以"点得动 / 施得出法"为准。
+- 离线拿本机 `lua` 解释器 + 假 `_G` 跑过一遍（分支、格式、`bad` 过滤都对，64 项 / 2 项不符时输出 4 行）。
+- `Enum.GameRule` 不在快照里（站点写明编号未收录）→ `api-audit` 加了一张**带出处的豁免表**
+  `CLIENT_ENUMS_NO_DUMP`，把它降级成 INFO 一行。规矩同 `DEPRECATED_SHIMS`：**加条目必须给证据**，
+  不是给"过关口子"。
+
+**已完成**：2026-10-30 在 retail 12.1.5 上跑过基线，见 8.13.6。Forever 那一趟和它做差集。
+
+### 8.13.4 Forever 首趟流程（只记不改）
+
+1. 部署：`powershell -File tools/deploy-retail.ps1 -Dest "C:\Users\EastHillGu\Documents\Blizzards\WOWFOREVER\World of Warcraft\_cn_beta_" -Interface 16001`
+   → `node tools/sync-check.js --dest "...\_cn_beta_"` 必须报 in sync。
+   那台客户端的 `Interface\AddOns` 里已经有 `!WuxianWorkshop` / `WoWBridge` / `163UI_Info`
+   （`addon_strategy.txt` 是 `[]`，没有加载限制）—— **只加 MonetUI 目录，别人的一个字节都不碰**。
+2. 上线第一屏：加载横幅（`客户端：1.60.1.xxxx · build … · Interface 16001`，16001 是不是推算值就看这行）、
+   `/console scriptErrors 1`，然后四条诊断：`/mui compat tmpl`（全量 + 模板，65 项）→
+   `/mui compat bad`（只看与假设不符的）→ `/mui restrict`（六类 API + 被暂停的框）→ `/mui blocks`。
+   **compat 的结果不要指望聊天框**：65 行一定被顶掉，去读
+   `<客户端>/WTF/Account/<账号>/SavedVariables/MonetUI.lua` 里的 `compatReport`
+   （写入比 `/reload` 晚 1–2 分钟，见 8.13.6）。
+   暴雪框体那组对不上的，用 `/mui compat find <片段>` 扫真名（12.1.5 实测一次能走 15895 个框）。
+3. **先把没打开过的面板都开一次**（世界地图 / 交易 / 拾取 / 银行 / 角色 / 天赋 / 传承 / LFG / 微菜单），
+   再跑 `/mui skins diagnose` 与 `/mui skins diagnose bad` —— 顺序反了，缺的是"面板还没建"而不是"名字写错"。
+4. 红字看完开 taint：`/run C_CVar.SetCVar("taintLog","2")`（**如果 /run 被禁就用配置面板或
+   WTF 里手改**），读 `<客户端>/Logs/taint.log`，读完关回 0。
+5. 差集分三类处置：①**名字变了** → 改 `frames` 名单（过 `check-frame-list`）；
+   ②**GameRule 把面板关了** → 模块交还，这不算缺陷，别去"修"；
+   ③**客户端真没有这功能** → 按 8.13.2 的模板/接口清单换做法。
+   一趟只记账不重构，攒齐了再动（小步可回滚）。
+6. Forever 专属窗口（`LFGParentFrame` / `LegacySystemFrame` / `MicroMenu`）的名字来自
+   Ellesmere 的 Forever 皮肤文件，**在两个客户端上都还没验过** —— 首趟必看 `/mui compat bad`
+   与这三块的 diagnose。
+
+### 8.13.5 "本客户端"这个写法要退役
+
+AGENTS 与本文里大量"本客户端有/没有 X"混指两个客户端（retail 12.1.5 与《无限》1.60 / camelot）。
+本轮已确认至少一条是** retail 的结论**（`SecureHandlerClickTemplate` 不存在），而 1.60 的文档相反。
+今后新写的结论一律带客户端标签（`12.1.5 实测` / `1.60 文档` / `1.60 实测`），
+只有一句话证据的假设进 `Utils/Compat.lua` 的 WATCH 表，不进 AGENTS。
+
+### 8.13.6 retail 12.1.5 基线（2026-10-30 实测：`/mui compat tmpl` 65 项 / 5 项不符）
+
+客户端横幅：`12.1.5 · build 70575 · Interface 120105`。Forever 那一趟跑同一条命令，差集就是适配清单。
+（`when = 2026-10-30 19:56:06` 那一趟是**最终 shipped 构建**跑的，下面 5 条以它为准。）
+
+**读结果只认账本，别指望聊天框。** 65 行远超聊天框十几行的留存，所以 `Compat:Print` 把全量写进
+`MonetUIDB.compatReport`（`{client, when, total, odd, rows}`，每行 `{组, 名字, 结论, 不符?, 附注}`），
+落盘在 `_retail_/WTF/Account/039124100/SavedVariables/MonetUI.lua`。
+**坑：写入比 `/reload` 晚 1–2 分钟**（实测 19:48 重载 → 19:50 才落盘），reload 完立刻读会读到上一趟的。
+
+5 项与假设不符（Forever 上逐条看它们会不会反过来）：
+
+| 行 | 12.1.5 | 结论 |
+| --- | --- | --- |
+| `canaccessobject` | 无 | 文档里有、客户端没装。`Secrets.CanRead` 用的是 `canaccessvalue`，不受影响 |
+| `SecureHandlerClickTemplate` | 无（`SetBindingClick` 方法缺） | **AGENTS 那条"本客户端没有它"到此证完**：第一趟只用 `CreateFrame` 试，客户端静默忽略 → 误报"有"，差点把 AGENTS 改错。模板探法因此加了 `method` |
+| `SecureHandlerInputTemplate` | 造不出来 | `CreateFrame` 直接失败，是这组里最硬的一条"没有" |
+| `CompactUnitFrameTemplate` | 无（`SetupUnit` 方法缺） | 模板名或方法名有一个不对；我们并不用它，只当 Forever 的线索 |
+| `TempEnchantFrame` | 无 | **`Modules/BuffFrame/BuffFrame.lua:557` 的压制清单里是一条空枪**。`/mui compat find Enchant` 全 UI 只有 4 个交易附魔框（`TradePlayerEnchantInset` 等），12.1.5 没有独立的临时附魔框。名字留作 Forever 候选，注释已写明 |
+
+`SecureHandlerStateTemplate` 基线第一趟报的是"方法缺"，**那是我的方法名猜错**（`SetBindingHold`）：
+我们自绘条的 `_onstate-page` 一直在用这套片段，功能上它就是存在。已经去掉那个 method，
+现在这行是"有 · 名字被接受"。教训写进 `TemplateExists` 的注释：**只有有把握的方法名才配 `method`**。
+
+这一趟顺手改掉的东西（都是实机才暴露的）：
+
+- **模板探法有副作用**：`ActionBarButtonTemplate` 造出来会自己跑 OnLoad，12.1.5 实测报
+  6 条 `ActionButton.lua:540 RegisterActionUIButton` 参数错。所以模板一组**默认不探**，
+  只有 `/mui compat tmpl` 明确要时才探，`/mui compat` 末尾会提示"模板 N 项没探"。
+- **`EnumerateFrames` 的口径**：12.1.5 实测它把**所有**框（含子框）都吐出来（一次扫到 15895 个），
+  但只按它给的名字找会漏 → `find` 现在两条腿走：`EnumerateFrames` 取根 + 逐层 `GetChildren` 下钻，
+  用 `done` 表去重，上限 40000 个框 / 深度 12。
+- `C_RestrictedActions` 里**没有** `InCombatLockdown`（它是全局）：探针原来把它算进"4 项齐不齐"，
+  于是一年到头报"缺一个"。改成 3 项，全局那条单列。
+- `C_AddOns.GetScriptsDisallowedForBeta` 在 12.1.5 **存在**（我原来假设"没有"）→ 探"函数在不在"没意义，
+  改成探**值**：`/run 脚本通道 = 可用`。Forever 上这一行才是真问题（`UserScriptsDisabled`）。
+- 加载横幅 `客户端：` 那行的 Interface 号是空的：`GetBuildInfo` 的返回值位次按版本不一样
+  （12.1.5 第 4 个才是 120105，第 5 个是构建号，第 6 个是空串）。`ns:ClientIdentity` 改成
+  **认数不认位**：哪个返回值满足 `floor(v/100) == 主版本*100 + 次版本`，谁就是 Interface 号。
+- GameRule 一节：12.1.5 上 18 条里 17 条"没生效"、`AeLootDisabled` 这条枚举里根本没有 →
+  **这台服务器没关任何暴雪面板**，这一趟不用担心 GameRule；Forever 上这节才是重头。
+
 ## 9. 建议的下一步（按价值排序）
 
 1. **实机回归 P0/P1 的改动面**（`docs/HANDOFF.md` 8.6.2 + `TODO.md` 的 9 条清单）：
@@ -1731,4 +1883,7 @@ C_RestrictedActions.InCombatLockdown` —— 全仓 29 处裸 `InCombatLockdown(
    快捷键正常。要么接受"鼠标点不展开、只提示一次"，要么自绘托盘（工作量中等）。
 6. 未动模块的实机过一遍（Bags、InfoBar、Tooltip、Cursor、Toast、Durability、CombatText）。
 7. 想降噪的话：宠物条每次重载 10 条 `PetActionButton*:SetShown` BLOCKED（不改更稳，见 AGENTS）。
-8. 上线前：push 到 origin，README 里的 `status` 徽章改成正式版。
+8. **Forever 1.60 首趟（只记不改，见 8.13.4）**：先在 12.1.5 上跑 `/mui compat` 存基线，再部署到
+   `_cn_beta_`（`-Interface 16001`）跑第二次，两份差集 = 适配清单；三条 Forever 专属窗口（LFG / 传承 / 微菜单）
+   的名字在两个客户端上都还没验过。
+9. 上线前：push 到 origin，README 里的 `status` 徽章改成正式版。
