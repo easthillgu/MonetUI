@@ -558,7 +558,8 @@ function SuppressBlizzard()
         local blizzard = _G[name]
         if blizzard then
             found = found + 1
-            -- **不 Hide()、不 UnregisterAllEvents、不写脚本槽**：
+            -- **不 Hide()、不 UnregisterAllEvents、不写脚本槽**，也只用根框的 alpha + 鼠标
+            -- （depth 0：那些框的子节点是光环按钮，关鼠标会把暴雪自己的提示也一起关掉）：
             --   * Hide() 会被暴雪自己的 Show() 顶回来（一边补、一边顶 = 一闪一闪）；
             --   * 写脚本槽 / 注销事件都是"动过这个框"，之后它自己的代码全算成 MonetUI 的污染。
             -- alpha 0 的框一直算"显示着"，不触发它的 Show 逻辑，也就不打架（见 AGENTS.md）。
@@ -566,8 +567,11 @@ function SuppressBlizzard()
             -- 顶班；它不可用时才退回**暴雪原生 Buff 框**（alpha 1 + 可鼠标，客户端自己更新）。
             -- 脱战中一律 alpha 0 藏起来，用我们自绘那套。
             local useNative = combatMode and not EngineCombatReady()
-            pcall(blizzard.SetAlpha, blizzard, useNative and 1 or 0)
-            pcall(blizzard.EnableMouse, blizzard, useNative)
+            if useNative then
+                Widget:Unmute(blizzard, { depth = 0, combat = "write" })
+            else
+                Widget:Mute(blizzard, { depth = 0, combat = "write" })
+            end
         end
     end
     if found == 0 then

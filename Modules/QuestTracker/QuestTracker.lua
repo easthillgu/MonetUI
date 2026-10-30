@@ -5,11 +5,7 @@
 
 local ADDON_NAME, ns = ...
 
-
--- 旁表标记（见 Core.lua 的 ns:Mark）：不往暴雪的框体上写字段，
--- 否则那个框体之后跑的暴雪代码会被判成“被 MonetUI 污染”。
-local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
-local Marked = function(o, k) return ns:Marked(o, k) end
+-- 暴雪 HUD 的"收起来 / 还回去"统一走 Widget:Mute / Widget:Unmute（旁表标记在那边）。
 local Widget   = ns.Widget
 local Color    = ns.Color
 local Math     = ns.Math
@@ -341,89 +337,32 @@ Render = function(settle)
     if not settle then QueueRender() end
 end
 
---- 把暴雪的追踪框"静音"：**不 Hide()，只压 alpha + 关鼠标**。
+--- 把暴雪的追踪框"静音"：走全仓唯一的一份 Widget:Mute（alpha 0 + 整棵子树关鼠标，绝不 Hide）。
 ---
---- 三条实机教训：
+--- 三条实机教训留在这里，免得再踩：
 ---   1. 它在 **LoD 包**（Blizzard_ObjectiveTracker）里，登录瞬间 `_G.ObjectiveTrackerFrame`
 ---      还不存在；只在 Skin() 里试一次就永远藏不住（症状：自绘的和默认的同时挂着）。
 ---   2. LoD 包加载时会把它**换成一个新对象** —— 我们藏过的那块已经不是屏幕上那块，
----      所以"藏一次 + ShowWatch"不够（新对象没被登记过）。
+---      所以"藏一次 + ShowWatch"不够（新对象没被登记过）：下面各时机 + 1 秒兜底都要补一刀。
 ---   3. **Hide() 会和暴雪打架**：它一有任务更新就自己 Show 回来，我们 1 秒补一刀，
----      屏幕上就是"一闪一闪、时而可见"。alpha 0 不会触发它的 Show 逻辑（框一直"显示着"），
----      也就不再有拉锯 —— 和收起暴雪动作条用的是同一套（MainActionBar 的结论）。
---- 待机成本为零：alpha 只在第一次登记时写，之后每次调用最多两次 SetAlpha（幂等）。
---- 子树级鼠标静音：Frame 的 EnableMouse **不递归**——本客户端追踪框的点击件是深层
---- 的任务块按钮池（实机探针 2026-10-25：根 mouse=false 但深层 ~17 个无名 Button
---- 各带鼠标，逐目标生成），只关根框照样能点（用户实机："原始的目标追踪的鼠标没
---- 杀掉，还能点击"）。
---- 幂等与恢复：旁表守卫（mutedMouse / muteMousePrior 记**原状态**），恢复时只还回
---- "原本开着鼠标"的那些；新池化的按钮等 1 秒兜底补关。一律旁表，不写暴雪框字段。
-local function MuteMouseTree(root, restore)
-    if not root or not root.EnableMouse then return end
-    -- 战斗中完全跳过（连登记守卫都不落）：追踪器的子按钮可能带 secure 属性，对它
-    -- EnableMouse 在战斗里 = ADDON_ACTION_BLOCKED（实机 ×29 一次一阵的形态：新任务块
-    -- 涌进池的第一批全拦）。脱战之后 1 秒 ticker 自动补关，不丢功能。
-    if not restore and type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown() then
-        return
-    end
-    local function apply(f)
-        if f.EnableMouse then
-            if restore then
-                if Marked(f, "mutedMouse") then
-                    pcall(f.EnableMouse, f, Marked(f, "muteMousePrior") == true)
-                    Mark(f, "mutedMouse", nil)
-                    Mark(f, "muteMousePrior", nil)
-                end
-            else
-                if not Marked(f, "mutedMouse") then
-                    local _, prior = pcall(f.IsMouseEnabled, f)
-                    -- prior == false（本来没开）就只登记守卫不动它，恢复时直接跳过
-                    pcall(f.EnableMouse, f, false)
-                    Mark(f, "mutedMouse", true)
-                    Mark(f, "muteMousePrior", prior == true)
-                end
-            end
-        end
-        for _, c in ipairs({ f:GetChildren() }) do apply(c) end
-    end
-    apply(root)
-end
-
+---      屏幕上就是"一闪一闪、时而可见"。alpha 0 不会触发它的 Show 逻辑（框一直"显示着"）。
+--- 点击件埋在深层的任务块按钮池里（实机探针 2026-10-25：根 mouse=false 但深层 ~17 个无名
+--- Button 各带鼠标），所以 depth 要放到整棵树；新池化的按钮由下一次调用补关。
+--- 战斗里一概不动手（Widget:Mute 的默认）：追踪器的子按钮可能带 secure 属性，对它
+--- EnableMouse 在战斗里 = ADDON_ACTION_BLOCKED（实机 ×29 一次一阵）。
+--- 被挡住时靠谁补：开着 → 1 秒 ticker；关掉 → ticker 不再跑，所以 M:SetEnabled 走
+--- ns:AfterCombat，用返回的 false 把它留在队列里，下一次脱战重试（否则玩家在战斗里
+--- 关掉模块，暴雪那块会一直 alpha 0 地"隐形"挂着）。
+-- @return 是否已处于目标状态（压好了 / 本来就干净）；被战斗挡住或框还没到 → false，
+--         调用方（M:SetEnabled 走 ns:AfterCombat）据此在下一次脱战重试。
 function SuppressBlizzard()
-    -- 战斗中一概不动手：不只是子树静音，根框的 SetAlpha/EnableMouse 同样是被拦面
-    -- （×29 修后残余的 ×2 低频形态与"个别时机从两个入口穿过子树闸"吻合——根框
-    -- 写入每秒都随 ticker 重打，一次性事件路径在战斗里也会进来）。脱战后 ticker 秒级补关。
-    if type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown() then
-        return
-    end
     local bt = _G.ObjectiveTrackerFrame
-    if not bt then return end
-
-    if not Marked(bt, "muted") then
-        Mark(bt, "muted", true)
-        local okA, alpha = pcall(bt.GetAlpha, bt)
-        if okA then Mark(bt, "alpha", alpha) end
-        if bt.IsMouseEnabled then
-            local okM, mouse = pcall(bt.IsMouseEnabled, bt)
-            if okM then Mark(bt, "mouse", mouse) end
-        end
+    if not bt then return false end
+    if not enabled then
+        if not Widget:IsMuted(bt) then return true end
+        return Widget:Unmute(bt, { depth = math.huge })
     end
-
-    if not enabled then return end
-    pcall(bt.SetAlpha, bt, 0)
-    if bt.EnableMouse then pcall(bt.EnableMouse, bt, false) end
-    -- 关键：连带子树（任务块按钮池）一起关鼠标；每秒兜底会再跑一遍补新按钮。
-    MuteMouseTree(bt, false)
-end
-
---- 模块关掉时把透明度 / 鼠标还回去。
-local function UnmuteBlizzard()
-    local bt = _G.ObjectiveTrackerFrame
-    if not bt or not Marked(bt, "muted") then return end
-    pcall(bt.SetAlpha, bt, Marked(bt, "alpha") or 1)
-    if bt.EnableMouse then pcall(bt.EnableMouse, bt, Marked(bt, "mouse") ~= false) end
-    MuteMouseTree(bt, true)
-    Mark(bt, "muted", nil)
+    return Widget:Mute(bt, { depth = math.huge })
 end
 
 --- 1 秒一次的低频兜底：上面那些时机都没赶上（或者框被谁重新显示）时补一刀。
@@ -574,11 +513,9 @@ end
 function M:SetEnabled(value)
     enabled = value and true or false
 
-    if enabled then
-        SuppressBlizzard()
-    else
-        UnmuteBlizzard()
-    end
+    -- 两个方向都由它处理：开着就压住暴雪那套，关掉就把 alpha / 原样还回去。
+    -- 战斗里做不了，交给脱战队列（见 SuppressBlizzard 的注释）。
+    ns:AfterCombat("questTrackerSuppressBlizzard", SuppressBlizzard)
 
     if tracker then
         if enabled then QueueRender() else tracker:Hide() end
