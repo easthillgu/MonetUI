@@ -59,18 +59,78 @@ local function FrameLabel(frame)
             end
         end
     end
+    -- 连父框也没名字（暴雪大量控件是匿名 CreateFrame）时，至少报它是什么类型的对象：
+    -- "无名框"三个字对排查没有任何信息量，"ScrollFrame（无名）"一眼就知道是谁家的东西。
+    if not name then
+        local okT, kind = pcall(function() return frame.GetObjectType and frame:GetObjectType() end)
+        if okT and type(kind) == "string" and not (Secrets and Secrets.IsSecret(kind)) then
+            name = kind .. "（无名）"
+        end
+    end
     return name
 end
 
-local function Visible(frame)
+--- 框的名字要**趁还能读的时候**记下来：对象变 forbidden 之后连 `GetName` 都会抛，
+--- 那时告警只能报"无名框"，等于白报（实机就是这条：一个 forbidden 框全程匿名）。
+--- 三个轮询在登记那一刻各问一次，之后所有报名字的地方读这本账。
+local frameLabels = setmetatable({}, { __mode = "k" })
+local function labelOf(frame)
+    local known = frameLabels[frame]
+    if known then return known end
+    local label = FrameLabel(frame)
+    if label then frameLabels[frame] = label end
+    return label
+end
+
+--- 这个框是不是**根本读不了**（forbidden 对象）。判据只用 `IsVisible`：它是三个驱动的每拍前置，
+--- 也是实机里确定会抛的那一刀（"Attempt to access forbidden object from code tainted by an AddOn"）。
+--- 注意"读不到名字"不能当判据 —— 暴雪大量控件本来就是匿名 `CreateFrame`，`GetName` 老老实实返回
+--- nil，框体完全可读、换肤也没问题；把它们算成 forbidden 会让告警永远指错对象。
+local function Forbidden(frame)
+    if type(frame) ~= "table" or type(frame.IsVisible) ~= "function" then return true end
+    return not pcall(frame.IsVisible, frame)
+end
+
+--- 报名字（无名时返回"无名框"）。皮肤模块的告警也走这里，别再各自 `frame:GetName()`。
+function Widget:FrameLabel(frame)
+    return labelOf(frame) or "无名框"
+end
+
+--- 交给我们轮询/换肤之前先问一句：这个框读得出来吗？
+--- `EnumerateFrames` 会把这个客户端里**所有**帧都给我们，包括被接管的 forbidden 对象。
+function Widget:Readable(frame)
+    return not Forbidden(frame)
+end
+
+--- "谁把这个框交给了我们轮询" —— 只能在**登记那一刻**记下来。
+--- 驱动循环每拍都是同一个 OnUpdate，栈里没有任何线索；而框一旦变成 forbidden，连名字都读不出来，
+--- 到时候再问"你是谁"就永远只能答"无名框"（实机就是这条：一条无主的暂停告警查不下去）。
+--- 所以每个框登记时取一次**调用点那一行**（只一行：多行栈会被后面的加载输出顶出聊天框，
+--- 真正要看的第一行反而看不见），等真出问题的时候跟着告警一起报出来。
+local frameOrigins = setmetatable({}, { __mode = "k" })
+local function Origin(src, frame)
+    if frameOrigins[frame] then return end
+    local at = "?"
+    if type(_G.debugstack) == "function" then
+        at = (_G.debugstack(3, 1, 1) or "?")
+            :gsub("Interface[/\\]AddOns[/\\]MonetUI[/\\]", ""):gsub("^%s+", "")
+    end
+    frameOrigins[frame] = ("%s · %s"):format(src, at)
+end
+
+local function OriginOf(frame)
+    return frameOrigins[frame] or "登记点未知"
+end
+
+local function Visible(frame, src)
     local ok, value = pcall(frame.IsVisible, frame)
     if ok then return value and true or false, true end
 
     forbidWarned = forbidWarned or setmetatable({}, { __mode = "k" })
     if not forbidWarned[frame] then
         forbidWarned[frame] = true
-        ns:Print(("|cffffa940轮询读不到可见性|r：%s（forbidden 对象），暂停它的轮询，%d 秒复检一次。")
-            :format(FrameLabel(frame) or "无名框", PAUSE_RETRY))
+        ns:Print(("|cffffa940轮询读不到可见性|r：%s（forbidden 对象 · 驱动 %s），暂停它的轮询，%d 秒复检一次。登记点：%s")
+            :format(labelOf(frame) or "无名框", src or "?", PAUSE_RETRY, OriginOf(frame)))
     end
     return false, false
 end
@@ -81,13 +141,13 @@ end
 --- `reassertHooked`…），条目没了标记还在，之后这个框就永远没人管了。而"读不到"多半是
 --- **战斗中临时受限**，框本身没错，脱战就该继续被照看 —— 所以只暂停，不除名。
 local pausedUntil = setmetatable({}, { __mode = "k" })
-local function VisibilityOf(frame)
+local function VisibilityOf(frame, src)
     local untilTime = pausedUntil[frame]
     if untilTime then
         if GetTime() < untilTime then return false, false end
         pausedUntil[frame] = nil          -- 到复检点：这一拍真读一次
     end
-    local shown, readable = Visible(frame)
+    local shown, readable = Visible(frame, src)
     if readable then return shown, true end
     pausedUntil[frame] = GetTime() + PAUSE_RETRY
     return false, false
@@ -100,6 +160,21 @@ end
 ns.EventBus:Register("MONETUI_RESTRICTION_CHANGED", function()
     for frame in pairs(pausedUntil) do pausedUntil[frame] = nil end
 end)
+
+--- 现在哪些框被暂停了 + 各自是谁登记进来的（`/mui restrict` 用）。
+--- 告警本身每个框只印一条，聊天一会儿就被 NPC 对话顶掉；这本账在暂停期间一直在，随时能重看。
+--- 复检到能读就自动出账，所以"列出来的"= 此刻真的碰不了的框。
+function Widget:PrintStalled()
+    local n = 0
+    for frame, untilTime in pairs(pausedUntil) do
+        n = n + 1
+        ns:Print(("  %d. %s · 登记点 %s · %0.1f 秒后复检"):format(
+            n, labelOf(frame) or "无名框", OriginOf(frame),
+            math.max(0, (untilTime or 0) - (GetTime() or 0))))
+    end
+    if n == 0 then ns:Print("  （没有）") end
+    return n
+end
 
 local function MouseOver(frame)
     -- 本客户端没有 MouseIsOver / GetMouseFocus（实测都是 nil），但有 frame:IsMouseOver()。
@@ -129,7 +204,7 @@ local function EnsureHoverDriver()
         hoverAcc = 0
         local down = _G.IsMouseButtonDown and _G.IsMouseButtonDown("LeftButton")
         for frame, st in pairs(hoverWatch) do
-            local shown, readable = VisibilityOf(frame)
+            local shown, readable = VisibilityOf(frame, "hover")
             -- 暂停中的框：shown=false → inside=false，状态照常推进但 list 是空的，
             -- 一个回调都不跑（那些回调全是往这个框写东西，跑了也只是多一条拦截）。
             -- 复检到可读时按真实悬停重来一次 enter。
@@ -192,6 +267,8 @@ function Widget:HoverWatch(frame, onEnter, onLeave, onDown, onUp)
     if not st then
         st = { list = {}, inside = false, pressed = false }
         hoverWatch[frame] = st
+        labelOf(frame)                -- 名字趁还能读记下来
+        Origin("hover", frame)
         EnsureHoverDriver()
     end
     for i = 1, #st.list do
@@ -217,7 +294,7 @@ local function EnsureShowDriver()
         if showAcc < 0.2 then return end
         showAcc = 0
         for frame, st in pairs(showWatch) do
-            local shown, readable = VisibilityOf(frame)
+            local shown, readable = VisibilityOf(frame, "show")
             if readable then
                 if shown and not st.shown then
                     for i = 1, #st.list do pcall(st.list[i], frame) end
@@ -232,7 +309,9 @@ function Widget:ShowWatch(frame, fn)
     if not frame or type(fn) ~= "function" then return end
     local st = showWatch[frame]
     if not st then
-        st = { list = {}, shown = VisibilityOf(frame) }
+        labelOf(frame)              -- 名字趁现在还能读记下来
+        Origin("show", frame)       -- 登记点也要趁还能拿到栈时记下（Visible 的告警会用到）
+        st = { list = {}, shown = VisibilityOf(frame, "show") }
         showWatch[frame] = st
         EnsureShowDriver()
     end
@@ -257,9 +336,10 @@ function Widget:PollWatch(frame, fn, interval)
     if not frame or type(fn) ~= "function" then return end
     local list = pollWatch[frame]
     if not list then
-        -- forbidden 对象不进轮询：每拍读可见性必抛，而回调对它的写入同样会被拒。
         list = {}
         pollWatch[frame] = list
+        labelOf(frame)                -- 名字趁还能读记下来
+        Origin("poll", frame)
     end
     for i = 1, #list do
         if list[i].fn == fn then
@@ -277,7 +357,7 @@ function Widget:PollWatch(frame, fn, interval)
         for f, cbs in pairs(pollWatch) do
             -- 隐藏的框不累加时间：等它显示时再从 0 开始算，不会"一显示就补执行一堆"。
             local shown, readable
-            if type(f) == "table" and f.IsVisible then shown, readable = VisibilityOf(f) end
+            if type(f) == "table" and f.IsVisible then shown, readable = VisibilityOf(f, "poll") end
             if shown and readable then
                 for i = 1, #cbs do
                     local cb = cbs[i]

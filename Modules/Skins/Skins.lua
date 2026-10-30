@@ -247,6 +247,14 @@ local DRESSERS = {
 --- 不去重就是每触发一次多塞一条轮询回调。
 function M:SweepDeep(frame, controlOpts)
     if not frame or type(frame.GetChildren) ~= "function" then return end
+    -- 读不出可见性 = forbidden 对象（被引擎接管的安全框那一类）。给它挂常驻轮询没有任何意义：
+    -- 驱动每拍都只能把它暂停掉，5 秒复检一次、永远检不回来，账本里多一条查不下去的"无名框"。
+    -- 直接放手：这个框保持暴雪原样，等下一次 Apply 它若能读了再补。
+    if not Widget:Readable(frame) then
+        Skin:WarnOnce("sweepSkip:" .. Widget:FrameLabel(frame),
+            ("%s 读不出来（forbidden 对象），跳过子控件补扫，不挂轮询。"):format(Widget:FrameLabel(frame)))
+        return
+    end
     -- 轮询里的抛错不在任何 Apply 的 pcall 保护下，而且每秒一次 —— 自己吞，并借
     -- Skin:WarnOnce 报名字（受限框读 GetChildren 就会被拒）。
     local sweep = function()
@@ -256,9 +264,8 @@ function M:SweepDeep(frame, controlOpts)
             M:SkinSlidersIn(frame)
         end)
         if not ok then
-            local label
-            pcall(function() label = frame:GetName() end)
-            label = label or "?"
+            -- 名字走 Widget 那本账：这个框变 forbidden 之后 GetName 自己也会抛。
+            local label = Widget:FrameLabel(frame)
             Skin:WarnOnce("sweep:" .. label,
                 ("补扫 %s 的子控件失败: %s"):format(label, tostring(err)))
         end
@@ -663,7 +670,11 @@ local function PrintVerified(key, names, applied)
     return found, #missing
 end
 
-function M:Diagnose()
+function M:Diagnose(onlyBad)
+    if onlyBad then
+        ns:Print("命中但不是框体的对象（会让 CreateFrame / GetRegions 抛的那一类）：")
+        return Skin:ReportBad()
+    end
     ns:Print("界面美化对象自检（按实际发生的查找）：")
 
     local totalFound, totalMissing = Skin:Report()
@@ -693,6 +704,10 @@ end
 --- `/mui Skins <sub>`.  Returns false when the sub-command is unknown, so the slash handler can fall back to printing the usage line.
 function M:HandleCommand(rest)
     local sub = string.lower(rest or "")
+    if sub == "diagnose bad" or sub == "diag bad" or sub == "probe bad" then
+        self:Diagnose(true)
+        return true
+    end
     if sub == "diagnose" or sub == "diag" or sub == "probe" then
         self:Diagnose()
         return true

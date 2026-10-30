@@ -164,8 +164,18 @@ function Skin:Need(path)
     end
     led.hits = led.hits + 1
     -- "命中了，但不是框体"是第三种结果：只在第一次判，之后复用账本里的值（每个 Apply 都要跑几百次）
+    -- 顺手记下它**到底是什么**：账本里只写"不是框体"，读的人分不清"我们本来就在探一个函数"
+    -- 和"这个真名其实是个 Mixin 表、框体另有其名"（实机三种都出现过）。
     if led.shape == nil then
-        if not self:IsScriptObject(obj) then led.shape = "notObject" end
+        if not self:IsScriptObject(obj) then
+            local kind = type(obj)
+            if kind == "table" and type(obj.GetName) == "function" and type(obj.GetObjectType) == "function" then
+                kind = "Mixin 表"
+            end
+            led.shape = "notObject:" .. kind
+        else
+            led.shape = "frame"
+        end
     end
     return obj
 end
@@ -206,6 +216,22 @@ end
 --- 打印一个作用域的账本行，返回（存在数, 缺失数）。路径是我们自己写的字符串，进 concat 安全。
 --- 缺失名单**分行打**：`print` 一行只吃 255 字符，把 26 个名字塞在一行里会被截掉尾巴，
 --- 看上去就像"那个名字根本不存在"，而真正的原因是打印。
+--- 账本里的"命中但不是框体"标记：`Skin:Need` 写成 `notObject:<类型>`（函数 / 表 / Mixin 表）。
+--- 按前缀认，兼容只写了 "notObject" 的旧记录。
+local function OddShape(led)
+    return type(led.shape) == "string" and led.shape:find("^notObject") ~= nil
+end
+
+--- 报名字时带上它到底是什么：`UpdateMicroButtons（函数）` 一眼就知道是"我们本来在探一个函数"，
+--- `TradePlayerInputMoneyFrame（Mixin 表）` 才是"真名写错了、框体另有其名"。
+local function OddLabel(path, led)
+    local kind = type(led.shape) == "string" and led.shape:match("^notObject:(.+)$") or nil
+    if not kind then return path end
+    if kind == "function" then kind = "函数"
+    elseif kind == "table" then kind = "表" end
+    return ("%s（%s）"):format(path, kind)
+end
+
 function Skin:ReportScope(scope)
     local byPath = self.targets[scope]
     if not byPath then return 0, 0 end
@@ -215,7 +241,7 @@ function Skin:ReportScope(scope)
             found = found + 1
             -- 命中了但拿回来的不是框体：这一类不会 miss，却会让 CreateFrame / GetRegions 抛，
             -- 必须单独列出来，否则 diagnose 只报"全绿"而实机一片红字。
-            if led.shape == "notObject" then odd[#odd + 1] = path end
+            if OddShape(led) then odd[#odd + 1] = OddLabel(path, led) end
         else
             missing[#missing + 1] = path
         end
@@ -245,6 +271,28 @@ function Skin:ReportScope(scope)
         ns:Print(("    |cffffb75c命中但不是框体|r：%s"):format(table.concat(odd, ", ")))
     end
     return found, #missing
+end
+
+--- 只看"命中但不是框体"这一类（`/mui skins diagnose bad`）。
+--- 全量 diagnose 有几百行，聊天框只留最后十几行 —— 恰恰是这一类会被顶掉，等于白报。
+function Skin:ReportBad()
+    local scopes = {}
+    for key in pairs(self.targets) do scopes[#scopes + 1] = key end
+    table.sort(scopes)
+    local n = 0
+    for _, scope in ipairs(scopes) do
+        local odd = {}
+        for path, led in pairs(self.targets[scope]) do
+            if led.hits > 0 and OddShape(led) then odd[#odd + 1] = OddLabel(path, led) end
+        end
+        if #odd > 0 then
+            n = n + #odd
+            table.sort(odd)
+            ns:Print(("|cffffb75c⚠|r [%s] %s"):format(scope, table.concat(odd, ", ")))
+        end
+    end
+    if n == 0 then ns:Print("（没有）：命中的对象全都能当框体用。") end
+    return n
 end
 
 --- 打印所有作用域的账本，返回（存在数, 缺失数）。
@@ -842,21 +890,28 @@ end
 --- 全局兜底：扫一遍所有帧，把 ScrollBox 的细把手 + 上下箭头都换上。
 --- ScrollBox 的滚动条是匿名 Frame + .Thumb + 无名 atlas 箭头，而且标签页懒创建 ——
 --- 逐帧换肤（SkinScrollsIn）常常赶不上。登录后延迟扫几遍兜底（EnumerateFrames 一遍几十毫秒）。
+---
+--- **必须跳过读不了的帧**：`EnumerateFrames` 会把这个客户端里所有帧都交给我们，其中包含
+--- 被引擎接管的安全框（forbidden 对象，任何 `IsVisible` / `GetRegions` / `GetName` 都直接抛）。
+--- 以前把它们一路喂下去，最后连 `HoverWatch` 都挂在了 forbidden 对象上（实机：一个匿名框每拍
+--- 抛一条，暂停后 5 秒复检一次，全程只是噪声）。这个扫尾本来就是"能扫到就扫"，读不到直接放手。
 function Skin:ScanScrollArrows()
     if type(EnumerateFrames) ~= "function" then return end
     local frame = EnumerateFrames()
     local guard = 0
     while frame and guard < 200000 do
         guard = guard + 1
-        pcall(function()
-            if frame.Thumb then
-                self:ScrollThumb(frame.Thumb)
-            end
-            local kind = frame.GetObjectType and frame:GetObjectType()
-            if kind == "Button" then
-                self:ScrollArrowButton(frame)
-            end
-        end)
+        if Widget:Readable(frame) then
+            pcall(function()
+                if frame.Thumb and Widget:Readable(frame.Thumb) then
+                    self:ScrollThumb(frame.Thumb)
+                end
+                local kind = frame.GetObjectType and frame:GetObjectType()
+                if kind == "Button" then
+                    self:ScrollArrowButton(frame)
+                end
+            end)
+        end
         frame = EnumerateFrames(frame)
     end
 end

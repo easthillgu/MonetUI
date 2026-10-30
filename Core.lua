@@ -566,8 +566,10 @@ local function AnyRestrictionActive()
 end
 
 --- 当前哪几类限制是活的（诊断用：`/mui restrict`）。
+--- 第二个返回值 = 这本账是否已经建立（收到过事件、或 PLAYER_ENTERING_WORLD 种子成功）；
+--- false 时账本为空**不代表**一切自由，只代表我们还没听过消息。
 function ns:Restrictions()
-    return restrictionActive
+    return restrictionActive, restrictionKnown
 end
 
 --- 现在是否处在任何一类受限窗口里 = 战斗中，或六类里任何一类活着。
@@ -798,19 +800,44 @@ local function PrintRestrictions()
     end
     local enum = _G.Enum and _G.Enum.AddOnRestrictionType
     ns:Print("  Enum.AddOnRestrictionType：" .. (type(enum) == "table" and "有" or "没有"))
-    local tracked = ns:Restrictions()
+    local tracked, known = ns:Restrictions()
     local live = {}
     for name in pairs(tracked) do live[#live + 1] = name end
     table.sort(live)
-    ns:Print(("当前受限：%s（战斗中 %s · IsRestricted %s · 旗帜 %s）"):format(
+    ns:Print(("当前受限：%s（战斗中 %s · IsRestricted %s · 旗帜 %s · 账本 %s）"):format(
         #live > 0 and table.concat(live, " / ") or "无",
         ns:InCombat() and "是" or "否",
         ns:IsRestricted() and "是" or "否",
-        ns.Restricted and "有" or "无"))
+        ns.Restricted and "有" or "无",
+        known and "已建立" or "还没建立（没收到过事件）"))
+    -- 逐类对照"我们的账"和"客户端的实时答案"：只有两边不一致才说明事件路径有问题。
+    -- 实机踩过一次坑：`当前受限：无` 分不清"真没限制"和"我们压根没记账"。
+    local isActive = RestrictedFn("IsAddOnRestrictionActive")
+    if isActive and enum then
+        for i = 1, #RESTRICTION_ORDER do
+            local name = RESTRICTION_ORDER[i]
+            local t = enum[name]
+            if t ~= nil then
+                local ok, on = pcall(isActive, t)
+                ns:Print(("  %s：账本 %s / 实时 %s"):format(name,
+                    tracked[name] and "活" or "空",
+                    (ok and on) and "活" or "空"))
+            else
+                ns:Print(("  %s：枚举里没有这个值"):format(name))
+            end
+        end
+    end
     local Secrets = ns.Secrets
     if type(Secrets) == "table" and type(Secrets.CanRead) == "function" then
         ns:Print(("  canaccessvalue：%s（没有时 CanRead 退回 not issecretvalue）"):format(
             type(_G.canaccessvalue) == "function" and "有" or "没有"))
+    end
+    -- 被暂停的轮询框也放在这里看：告警每个框只印一条，聊天很快被 NPC 对话顶掉，
+    -- 而这本账（`pausedUntil`）在暂停期间一直有效，随时能重看是谁登记的。
+    local Widget = ns.Widget
+    if type(Widget) == "table" and type(Widget.PrintStalled) == "function" then
+        ns:Print("轮询被暂停的框（forbidden 对象，读不出可见性）：")
+        Widget:PrintStalled()
     end
 end
 
@@ -867,6 +894,7 @@ local function PrintHelp()
     ns:Print("  |cffffd100/mui disable|r    禁用本体（需 /reload）")
     ns:Print("  |cffffd100/mui <模块> on|off|r  单独开关模块")
     ns:Print("  |cffffd100/mui skins diagnose|r 对象名可达性账本（全仓一本账：skins / nameplates / infobar / minimap）")
+    ns:Print("  |cffffd100/mui skins diagnose bad|r 只看\"命中但不是框体\"那一类（全量几百行，聊天框装不下）")
     ns:Print("  |cffffd100/mui reset|r      恢复默认设置（需 /reload）")
 end
 
