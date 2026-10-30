@@ -1281,6 +1281,44 @@ BLP 都是 `enc=3 alphaDepth=8 **alphaType=8**`；我们 32 张全是 `alphaType
   （要开 `taintLog=2` 跑一次战斗进出对比）。
 - 实机清单见 `TODO.md` 的"必须实机复核"一节（9 条）。
 
+### 8.6.4 宠物条收尾（2026-10-30 定稿，全部实机核对过）
+
+**外观参数**（`Modules/ActionBars/PetBar.lua`，改这几个数即可）：
+
+| 项 | 值 |
+|---|---|
+| 条高 | `PET_HEIGHT_RATIO = 0.75`（按钮 28×21，宽度不变） |
+| 图标裁切 | `0.1 / 0.9 / 0.13 / 0.87`（照 Andromeda `bars/pet-bar.lua:33`），竖向再按 0.75 压一次 → 不拉伸 |
+| 像素环 | `count 6`、`pixel 4`、`spacing 4`、`period 1` 秒、颜色 `0.35 / 1.0 / 0.45`（绿） |
+| 自动施法信号 | **只**用像素环（边框回归主题，不再染 highlight） |
+| 当前生效宠物动作 | 自绘金色蒙版 `(1, 0.8, 0, 0.35)`（替掉被压掉的暴雪 `CheckedTexture`） |
+| 「可自动施法」角标 | 12×12、右下 +2/−2、整幅贴图（照 `pet-bar.lua:19-21`） |
+| 暴雪美术层 | `FadeAdoptedArt` 压掉 11 层（含 `SlotArt`、`CheckedTexture`），2 秒一次低权重压兜底 |
+
+**这一轮修的三个坑**（都是实机证据）：
+
+1. **图标"裁不动"**：不是 `SetTexCoord` 失效，是 `ActionButtonTemplate` 的 `.icon` 被
+   `IconMask`（atlas `UI-HUD-ActionBar-IconFrame-Mask`，`SmallActionButtonMixin_OnLoad` 固定
+   45×45）套着 —— 裁切改了采样区，那圈"图标框"照旧画出来，而且比我们 28px 的按钮还大。
+   现在 `Texture:RemoveMaskTexture` 摘掉（摘不掉就把遮罩缩到按钮大小兜底）。
+2. **`PetAutoCastEnabled` 取错值**：`pcall` 后数了 6 个占位符，拿到的是 **spellID** 而不是
+   `autoCastEnabled`（正确顺序 name, texture, isToken, isActive, allowed, enabled）——
+   所以"有 spellID 就发光"。改成 `PetActionState` 一并返回 `isActive / allowed / enabled`。
+3. **暴雪经验条又冒出来**：`SetAlpha(0)` 接管本身对，但兜底用了 `ShowWatch`（**沿触发**）——
+   暴雪把 alpha 写回 1 时框一直显示着、沿不触发。改成 1 秒一次的低频重压
+   （`ReinforceBlizzardXP`，幂等、按全局名查、模块关掉就停）。
+
+**新增闸门**：`tools/audit-locals.js` —— 扫全仓"裸调用但本文件没定义"的 local
+（Mark/Marked/Media/Widget/Color/Secrets/EventBus/Mover/Skin/Math）。起因是
+`PetBar.lua` 用了主文件的 `local Mark` → `PetBar.lua:83: attempt to call a nil value`，
+整个 ActionBars 模块初始化失败、暴雪默认动作条冒出来，而 `wuxian check` 与 `api-audit`
+都判不出这类错。已用"故意删掉那行"验证它会报错。
+
+**推送状态**：截至 2026-10-30 收尾时本机到 `github.com:443` 的 git 连接被重置/超时
+（`Test-NetConnection` 通、`git ls-remote` 不通；`gh` 未安装；`~/.ssh` 无密钥；
+本机 8080 不是可用代理）。所以**这一轮 300+ 个提交只在本地**，联网后按
+`docs/HANDOFF.md` 第 8.6.4 节末尾的命令推。
+
 ---
 
 ## 9. 建议的下一步（按价值排序）

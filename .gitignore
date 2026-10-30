@@ -31,6 +31,8 @@ docs/*
 !docs/CODEX-SETUP.md
 !docs/HANDOFF.md
 !docs/PLAN-refactor.md
+!docs/REVIEW-2026-10-29.md
+!docs/PLAN-refactor-2026-10-29.md
 
 # ---- 过程产物 / 中间文件 ----
 *.tmp

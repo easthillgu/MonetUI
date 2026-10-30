@@ -1,5 +1,69 @@
 # 待办
 
+## 🔧 2026-10-30 按 review 计划执行（docs/PLAN-refactor-2026-10-29.md）
+
+> 基线提交 `32ac509`（上一轮未提交的皮肤层 + BossFrames 初稿 + BLP 直角版）。
+> 之后 17 个提交，每项独立、可单独 revert。三道离线闸门每步都跑：`api-audit` 0 HARD、
+> `audit-taint` 0/0/0、`wuxian check(live:false)` **0 error**（基线那 1 条 BossFrames 已清）。
+
+**P0 已完成（全部代码项）**
+- [x] 0.1 堆叠数改用字符串（`GetActionDisplayCount` 返回 string，以前判 number 所以从没显示）
+- [x] 0.2 `showHotkey` / `showCount` / `showMacro` 三个开关接线（以前全仓无读取点）
+- [x] 0.3 暴雪经验条改 alpha 0 接管 + `InfoBar` 装饰新增 `remove` 钩子还原
+- [x] 0.4 `Bags` 的 `RestoreDragged` 前置声明 + 降级补扫一次性注销
+- [x] 0.5 `Bags` 压守卫让开战斗、`EnableMouse` 加 pcall、间隔 0.05→0.2
+- [x] 0.6 追踪按钮父框改 alpha 0 接管并还原；修徽章还原读错字段
+- [x] 0.7 **不再覆写暴雪 `Minimap` 的 `OnMouseUp`**（覆盖层本来就独占左右键）
+- [x] 0.8 `Color:RoleTint` 过 `Secrets.Bool`
+- [x] 0.9/0.10 `Mover`：机密缩放守卫 + 受保护框战斗内排队
+- [x] 0.11 `/mui reset` 就地清空 + 补默认值 + 二次确认
+- [x] 0.12 登录主题刷新失败不再挡住 `StartModules`
+- [x] 0.13 `EventBus` 派发前快照 + 注销即退引擎注册
+- [x] 0.14 复核：`ButtonMaterial` 无条件 `HookScript("OnSizeChanged")` 属实（会套到暴雪按钮上），已改名字门控 + 轮询
+- [x] 0.15/0.17 BossFrames 改 `SecureUnitButtonTemplate`（`*type1=target` / `*type2=togglemenu`）+ 导出 Groups 样式件
+- [x] 0.16 姓名板仇恨状态机密时保留上次判定（战斗中红边不再闪灭）
+- [x] 0.18 裸测 `IsShown()` 全部过 `Secrets.Bool`
+- [x] 0.19 `UnitClassBase` 先判机密再给 `ClassColor`
+- [ ] 0.20 **取证**：`Blizzard.lua` 的 `OnShow + Hide` 压制方式是否仍必要（要开游戏跑 `taintLog=2`）
+
+**P1 已完成（净删约 640 行）**
+- [x] 1.1/1.2 `Cooldown`：旧钩子路径（`OnCooldownStart` / `OnSetHideCountdownNumbers` / `EnsureHooks`）
+      + 对自建按钮从未生效的图标染色（`TINT` / `IsUsable` / `InRange` / `UpdateState`）
+- [x] 1.3 `BuffFrame` 的 `RebuildCombatAuras`（零调用，且违反"绝不重建容器"判例）
+- [x] 1.4 `ActionBars.BuildButton` 的宠物条死分支 + `InstallDrag` 的 `isPet`
+- [x] 1.5/1.6 旧"接管整条暴雪条"路径 282 行 + `ADOPT_EVENTS`（13 个事件指向 no-op）
+- [x] 顺手修：`PetBar` 的自动施法像素环被 `STYLE_ADOPTED_BARS=false` 静默关掉了 —— 已恢复
+- [x] 1.7 `Trade.lua` 重复文件头、`HookPin`→`TrackPin`、死 `SetHover`、`QuestTracker` 重复注册、`luac.out`
+- [x] 1.8 过时注释（HookScript / actionpage / RegisterActionUIButton）、版本号、`%dxxd`、`Media` 文档错位
+
+**P2 部分完成**
+- [x] 2.2 `HoverWatch`/`ShowWatch` 多监听 + 三表弱键 + 统一 `Unwatch`
+- [x] 2.4 `Media:Mult` 缓存（`UI_SCALE_CHANGED` / `DISPLAY_SIZE_CHANGED` 失效）
+- [x] 2.7 `EventBus` 混用 `Register`/`RegisterUnit` 的防御
+- [ ] 2.1 统一 OnUpdate 调度器（约 52 处驱动）
+- [ ] 2.3 `ns.Mark` 下沉到 Utils，删 20 份包装
+- [ ] 2.5 `FitText` 闭包 / `SetBorderState` 临时表 / `ROUND_SLICE` 单一来源
+- [ ] 2.6 `Skin.tinters` / `Skin.added` 注销句柄；`ScanScrollArrows` 限频
+
+**P3–P7 未开始**（配置面板拆分、ActionBars 拆分、皮肤声明式、单位框共享件、资产决策）
+
+**必须实机复核的清单（这一轮改动都在这几条上）**
+1. 动作条：堆叠数字（可堆叠药水/材料）、热键/宏名开关、宠物条像素环（右键开自动施法）。
+2. 小地图：左键打标记 / 右键菜单 / 中键追踪菜单（0.7 删了脚本覆写）；追踪按钮开关来回切。
+3. 信息栏：暴雪经验条不再闪；关掉 InfoBar 模块后暴雪经验条回来。
+4. 背包：拖过的窗口位置；QuestTracker 出现后背包贴回正确位置；战斗中开背包无 BLOCKED。
+5. 姓名板：战斗中红边不闪灭、脱战后正常消失；目标金边/放大。
+6. 首领框（BossFrames）：有首领目标时出现、左键选中、右键菜单。
+7. 按钮三态：悬停高亮 / 按下 / 禁用变暗同时生效（HoverWatch 多监听）。
+8. `/mui reset` 现在要 `/mui reset confirm`。
+9. `Logs/taint.log` 与 `ADDON_ACTION_BLOCKED` 计数对比基线。
+
+**已知遗留（本轮未动）**
+- `test-mult.js` 3 条、`test-skin-lua.js` 42 条断言在**基线就是红的**（和本轮改动无关），
+  说明这两个静态测试已经跟当前代码脱节，需要单独一轮对齐。
+- `Assets/Textures/monet_barfill_gradient.blp` 是未跟踪的孤儿贴图（没有 TGA 源、Media 也没注册）。
+
+
 ## 📦 交付状态（2026-10-29 收口）
 
 - **交付分支 `square-blp@44a4334`（直角版 BLP）**：四处 `Widget:Theme` 去掉 `round`、遮罩 `rx=0`、
