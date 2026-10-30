@@ -13,9 +13,23 @@
 # ============================================================
 
 # ---- 开发工具与工具链 ----
-tools/
+# 2026-10-30 起：tools/ 的闸门脚本与材质生成器**入库**（api-audit / audit-taint /
+# audit-locals / sync-check / regen-textures / svg-to-tga / tga-to-blp …）——
+# 它们是验证链的一部分，只留在某一台机器上等于随时会丢。只排除生成物与临时文件。
+tools/*
+!tools/*/
+!tools/**/*.js
+!tools/**/*.mjs
+!tools/**/*.ps1
+!tools/**/*.py
+!tools/**/*.svg
+!tools/**/*.html
+!tools/**/*.lua
 node_modules/
 *.json
+# tools/ 的运行前提：npm install 需要它（@napi-rs/canvas / wow-blp-web）
+!package.json
+!package-lock.json
 .opencode/
 
 # ---- 开发记录与过程文档 ----

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- MonetUI —— 经验条 / 施法条底部的三角标记（朝下），与 monet_spark_up 是同一形状的镜像。
+     画布 **64×32**（2 的幂），显示时缩到很小 —— **先画大、再缩小**（同 up）。
+
+     **几何约定**：三角尖端（底边）就是画布下沿 y = 32，游戏里按 BOTTOM 锚摆 ——
+     尖端正好顶住经验线（XP.lua 的 Px(LINE)），不会"差一像素"。
+     需要偏移就改 XP.lua 的锚点，别在画布里加 padding。
+
+     底边保留 4 单位平头（x 28..36），缩小时不会糊没。
+
+     纯白染色模具：颜色全交给 SetVertexColor；透明像素 RGB 由 tools/svg-to-tga.js 补白衬底。 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32" viewBox="0 0 64 32">
+  <polygon points="0,0 64,0 36,32 28,32" fill="#ffffff"/>
+</svg>

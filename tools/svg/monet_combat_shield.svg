@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- MonetUI —— 进出战斗提示的「盾」（tools/svg/monet_combat_shield.svg）
+     画布 256×256（2 倍；viewBox 128 单位），按边 128 对齐，游戏里自动 ÷2（显示尺寸约 124）。
+
+     盾压在交叉的剑上（OVERLAY 层）；离开战斗时它给 0.82 半透明，让背后的剑透出来。
+
+     **染色模具**：运行期 SetVertexColor 染色（红 / 绿 / 金），图内只许明度层次（R==G==B），
+     不许带色相 —— tools/audit-pixels.js 的 STENCIL 名单强制。透明像素用纯白衬底。
+
+     立体感（2026-10-27 玩家："图不够立体"）：
+       外沿  左上受光、右下落影的金属倒角
+       面板  内凹：上沿压暗 → 中段提亮 → 下沿再暗，外加一圈内缝
+       徽钉  偏心径向高光 + 暗环 + 内侧一圈亮环（凸起感）
+       铆钉  五颗，各自带高光
+     要改形状：Inkscape 打开改，然后 `node tools/svg-to-tga.js` + `node tools/audit-pixels.js`。 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 128 128">
+  <defs>
+    <!-- 外沿倒角：光从左上打来 -->
+    <linearGradient id="shieldRim" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0"    stop-color="#ffffff"/>
+      <stop offset="0.40" stop-color="#d8d8d8"/>
+      <stop offset="0.72" stop-color="#ababab"/>
+      <stop offset="1"    stop-color="#8e8e8e"/>
+    </linearGradient>
+    <!-- 面板：内凹（上沿投影 → 中部受光 → 下沿回暗） -->
+    <linearGradient id="shieldFace" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0"    stop-color="#9c9c9c"/>
+      <stop offset="0.30" stop-color="#d2d2d2"/>
+      <stop offset="0.60" stop-color="#c8c8c8"/>
+      <stop offset="1"    stop-color="#8a8a8a"/>
+    </linearGradient>
+    <!-- 徽钉球面 -->
+    <radialGradient id="shieldBoss" cx="0.36" cy="0.30" r="0.80">
+      <stop offset="0"    stop-color="#ffffff"/>
+      <stop offset="0.48" stop-color="#e4e4e4"/>
+      <stop offset="1"    stop-color="#808080"/>
+    </radialGradient>
+    <!-- 铆钉 -->
+    <radialGradient id="shieldRivet" cx="0.34" cy="0.28" r="0.80">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#8a8a8a"/>
+    </radialGradient>
+  </defs>
+
+  <!-- 外沿（倒角金属） -->
+  <path d="M12,14 H116 V58 C116,92 94,112 64,120 C34,112 12,92 12,58 Z" fill="url(#shieldRim)"/>
+  <!-- 面板（内凹） -->
+  <path d="M24,26 H104 V58 C104,84 86,100 64,108 C42,100 24,84 24,58 Z" fill="url(#shieldFace)"/>
+  <!-- 面板内缝：暗 -->
+  <path d="M24,26 H104 V58 C104,84 86,100 64,108 C42,100 24,84 24,58 Z"
+        fill="none" stroke="#828282" stroke-width="1.4"/>
+  <!-- 面板内缝：外侧一圈亮（倒角内缘） -->
+  <path d="M23.2,25.2 H104.8 V58 C104.8,84.6 86.4,100.8 64,108.8 C41.6,100.8 23.2,84.6 23.2,58 Z"
+        fill="none" stroke="#f2f2f2" stroke-width="0.9" opacity="0.65"/>
+  <!-- 中央徽钉：暗环 + 球面 + 内侧亮环 -->
+  <circle cx="64" cy="56" r="14.6" fill="none" stroke="#7c7c7c" stroke-width="1.4"/>
+  <circle cx="64" cy="56" r="13.6" fill="url(#shieldBoss)"/>
+  <circle cx="64" cy="56" r="11.4" fill="none" stroke="#ffffff" stroke-width="0.9" opacity="0.55"/>
+  <!-- 铆钉：五颗 -->
+  <circle cx="40" cy="44" r="2.6" fill="url(#shieldRivet)"/>
+  <circle cx="88" cy="44" r="2.6" fill="url(#shieldRivet)"/>
+  <circle cx="33" cy="65" r="2.6" fill="url(#shieldRivet)"/>
+  <circle cx="95" cy="65" r="2.6" fill="url(#shieldRivet)"/>
+  <circle cx="64" cy="93" r="2.6" fill="url(#shieldRivet)"/>
+</svg>

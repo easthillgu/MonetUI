@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 地图内的难度指示图标：**4:3 横长徽章**（一面盾牌）。
+     画布 64×64（2 的幂），徽章本体 50×37.5 = 4:3，四周留白（x 7..57 / y 13..50.5）。
+     2026-10-29 改细线 + 留白：徽章与符号描边 6 → 3.5（显示 20px 时 ≈1.1px，与关闭按钮同一口径），
+     本体从 58×42 内缩到 50×37.5，不再贴边。
+     整张图是染色模具 —— 运行时按副本难度整体染色（史诗=危险色 / 英雄=资源色 / 普通=生命色）。 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <g>
+    <rect x="7" y="13" width="50" height="37.5" rx="5" ry="5"
+          fill="#2e2e2e" fill-opacity="0.55" stroke="#ffffff" stroke-width="3.5"/>
+    <g fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round">
+      <path d="M 25 18 H 39 V 30 L 32 41 L 25 30 Z"/>
+    </g>
+  </g>
+</svg>

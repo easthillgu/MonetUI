@@ -1220,13 +1220,28 @@ BLP 都是 `enc=3 alphaDepth=8 **alphaType=8**`；我们 32 张全是 `alphaType
 - 部署目标：`...\Blizzards\WOWFOREVER\World of Warcraft\_retail_\Interface\AddOns\MonetUI`。
   `tools/deploy-retail.ps1` 的默认 `-Dest` 指向旧的 `Blizzards\World of Warcraft`，**必须显式传 `-Dest`**。
 
-#### 仍需人工同步（`tools/` 不进库）
+#### `tools/` 已入库（2026-10-30 起）
 
-`.gitignore` 排除了 `tools/` 与 `tools/svg/`，以下三处改动**不在 commit 里**，换平台要手工带过去：
+以前 `.gitignore` 排除了整个 `tools/`，闸门脚本与材质生成器只活在某一台机器上——换机/重装即丢。
+现在改成**只排除生成物**，脚本全部入库（54 个文件，约 500 KB）：
 
-1. `tools/tga-to-blp.js` —— raw3 强制 `alphaType=8`
-2. `tools/regen-textures.js` —— `drawRoundFill` 改有符号距离（仅 r=8 留档用）
-3. `tools/svg/minimap_rect_mask.svg` —— `rx=0`（直角口径）
+```
+tools/*
+!tools/*/            # 允许进子目录
+!tools/**/*.js  !tools/**/*.mjs  !tools/**/*.ps1
+!tools/**/*.py  !tools/**/*.svg  !tools/**/*.html  !tools/**/*.lua
+```
+
+于是 `api-audit.js` / `audit-taint.js` / `audit-locals.js` / `sync-check.js` /
+`api-fetch.js` / `regen-textures.js` / `tga-to-blp.js` / `svg-to-tga.js` /
+`deploy-retail.ps1` / `tools/svg/*.svg` 都跟着仓库走。
+上面 1–3 三条"必须手工同步"的历史遗留因此作废。
+
+仍然不进库的：`node_modules/`、`*.json`（`package.json` 例外除外，见下）、
+`docs/api/` 快照、`docs/texture-preview/` 预览、`.opencode/`。
+
+> `package.json` / `package-lock.json` 被 `*.json` 排除，但它们是 `tools/` 的运行前提
+> （`@napi-rs/canvas`、`wow-blp-web`）—— 换机 `npm install` 需要它们，必要时单独白名单。
 
 ---
 

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 地图内的插件收纳按钮图标：**4:3 横长徽章**（一只箱子）。
+     画布 64×64（2 的幂），徽章本体 50×37.5 = 4:3，四周留白（x 7..57 / y 13..50.5）。
+     2026-10-29 改细线 + 留白：徽章与符号描边 6 → 3.5（显示 20px 时 ≈1.1px，与关闭按钮同一口径），
+     本体从 58×42 内缩到 50×37.5，不再贴边。
+     白色描边 + 中性灰半透明底 + 白色符号 —— 整张图是"染色模具"（运行期 SetVertexColor
+     染出主题色），所以底色必须是中性灰，不能带色相。 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <g>
+    <rect x="7" y="13" width="50" height="37.5" rx="5" ry="5"
+          fill="#2e2e2e" fill-opacity="0.55" stroke="#ffffff" stroke-width="3.5"/>
+    <g fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round">
+      <path d="M 23 23 H 41 V 40 H 23 Z"/>
+      <path d="M 23 31.5 H 41"/>
+    </g>
+  </g>
+</svg>

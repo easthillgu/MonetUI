@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- MonetUI —— 进出战斗提示的「剑」（tools/svg/monet_combat_sword.svg）
+     画布 256×256（2 倍；viewBox 128 单位），按边 128 对齐，游戏里自动 ÷2（显示尺寸约 168）。
+
+     剑身整体旋转 45°（剑尖朝右上），左剑再用 SetTexCoord 水平镜像得到，
+     所以文件里只有一把；两把在屏幕上组成交叉 X（叠压次序在 Modules/CombatText.lua）。
+
+     **染色模具**：运行期 SetVertexColor 染美术色（金 / 青蓝），图内只许明度层次（R==G==B），
+     不许带任何色相 —— tools/audit-pixels.js 的 STENCIL 名单强制。透明像素用纯白衬底。
+
+     立体感（2026-10-27 玩家："图不够立体"）全靠这里的光影分工：
+       刃身 左暗右亮的双面渐变 + 中央高光脊 + 两侧血槽暗线 + 左右刃缘一暗一亮
+       护手 上亮下暗的倒角 + 底缝暗线 + 两端圆头
+       柄   圆柱明暗 + 三道缠带
+       柄首 偏心径向高光 + 镜面点
+     要改形状：直接在 Inkscape 里打开照着改关键点，然后
+     `node tools/svg-to-tga.js` 重出图 + `node tools/audit-pixels.js` 验收。 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 128 128">
+  <defs>
+    <!-- 刃身横切面：左刃暗 → 高光脊 → 右刃略暗，撑出"有厚度"的错觉 -->
+    <linearGradient id="swordBlade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0"    stop-color="#a4a4a4"/>
+      <stop offset="0.30" stop-color="#dcdcdc"/>
+      <stop offset="0.48" stop-color="#ffffff"/>
+      <stop offset="0.60" stop-color="#dedede"/>
+      <stop offset="1"    stop-color="#b0b0b0"/>
+    </linearGradient>
+    <!-- 护手：上表面受光、下表面落影 -->
+    <linearGradient id="swordGuard" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0"    stop-color="#ffffff"/>
+      <stop offset="0.42" stop-color="#d6d6d6"/>
+      <stop offset="1"    stop-color="#878787"/>
+    </linearGradient>
+    <!-- 柄：圆柱明暗（亮带偏右） -->
+    <linearGradient id="swordGrip" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0"    stop-color="#8c8c8c"/>
+      <stop offset="0.34" stop-color="#d4d4d4"/>
+      <stop offset="0.56" stop-color="#f6f6f6"/>
+      <stop offset="1"    stop-color="#969696"/>
+    </linearGradient>
+    <!-- 金属球（护手圆头 / 柄首）：偏心径向高光 -->
+    <radialGradient id="swordBall" cx="0.36" cy="0.30" r="0.78">
+      <stop offset="0"    stop-color="#ffffff"/>
+      <stop offset="0.52" stop-color="#d0d0d0"/>
+      <stop offset="1"    stop-color="#848484"/>
+    </radialGradient>
+  </defs>
+
+  <g transform="rotate(45 64 64)">
+    <!-- 刃身（尖 → 护手，宽 18 收尖） -->
+    <polygon points="64,6 73,22 73,84 55,84 55,22" fill="url(#swordBlade)"/>
+    <!-- 中央高光脊：让刃身有"脊线"而不是平板 -->
+    <rect x="63.3" y="15" width="1.7" height="69" fill="#ffffff"/>
+    <!-- 血槽：脊两侧的细暗线 -->
+    <rect x="60.1" y="24" width="1.1" height="58" fill="#8b8b8b"/>
+    <rect x="66.8" y="24" width="1.1" height="58" fill="#8b8b8b"/>
+    <!-- 刃缘：左侧暗（背光）、右侧亮（受光） -->
+    <rect x="55" y="22" width="0.9" height="62" fill="#9a9a9a"/>
+    <rect x="72.1" y="22" width="0.9" height="62" fill="#f4f4f4"/>
+    <!-- 护手：倒角 + 底缝 + 两端圆头 -->
+    <rect x="36" y="84" width="56" height="10" rx="3" fill="url(#swordGuard)"/>
+    <rect x="36" y="92.8" width="56" height="1.2" fill="#787878"/>
+    <circle cx="38.6" cy="89" r="3.4" fill="url(#swordBall)"/>
+    <circle cx="89.4" cy="89" r="3.4" fill="url(#swordBall)"/>
+    <!-- 柄：圆柱明暗 + 三道缠带 -->
+    <rect x="58" y="94" width="12" height="16" fill="url(#swordGrip)"/>
+    <rect x="58" y="96.6" width="12" height="2.1" fill="#9e9e9e"/>
+    <rect x="58" y="101.1" width="12" height="2.1" fill="#9e9e9e"/>
+    <rect x="58" y="105.6" width="12" height="2.1" fill="#9e9e9e"/>
+    <!-- 柄首：球体 + 镜面点 -->
+    <circle cx="64" cy="115" r="9" fill="url(#swordBall)"/>
+    <ellipse cx="61.4" cy="112.4" rx="2.5" ry="1.7" fill="#ffffff"/>
+  </g>
+</svg>

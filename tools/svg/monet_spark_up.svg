@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- MonetUI —— 施法条火花（朝上），tools/svg/monet_spark_up.svg
+     画布 **64×32**（2 的幂），显示时缩到 6×3 物理像素 —— **先画大、再缩小**：
+     4 倍源缩到 3px 高，边缘才干净；老版本 16×8 缩到这么小会毛。
+
+     **几何约定**：三角尖端（顶边）就是画布上沿 y = 0，游戏里按 TOP 锚摆 ——
+     尖端正好顶住能量条下沿（CAST_GAP = 0），横向扫动时不会上下漂。改图时**顶边不要留白**。
+     需要位置偏移就改 CastBar.lua 的 CAST_GAP，别在画布里加 padding。
+
+     尖端保留 4 单位平头（x 28..36）：64×32 缩到 3px 高后约合 0.2 物理像素，
+     缩小时不会糊成看不见的尖端。
+
+     纯白染色模具：运行期双层上色（红色内芯 + 近黑描边），图内不带色相；
+     透明像素 RGB 由 tools/svg-to-tga.js 补白衬底。 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32" viewBox="0 0 64 32">
+  <polygon points="28,0 36,0 64,32 0,32" fill="#ffffff"/>
+</svg>

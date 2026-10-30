@@ -1,0 +1,44 @@
+const { createCanvas } = require('@napi-rs/canvas');
+const fs = require('fs');
+
+const s = 64;
+const LINE_WIDTH = 2;
+
+function drawCorner(ctx, size, cx, cy, r, startAngle, endAngle) {
+  ctx.strokeStyle = '#fffcf6';
+  ctx.lineWidth = LINE_WIDTH;
+  ctx.lineCap = 'butt';
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, startAngle, endAngle);
+  ctx.stroke();
+}
+
+// 四种可能的左上角弧线方向
+const variants = [
+  { name: 'A: 圆心(s/2,s/2) r=s/2, π→1.5π', cx: s/2, cy: s/2, r: s/2 - LINE_WIDTH/2, start: Math.PI, end: Math.PI * 1.5 },
+  { name: 'B: 圆心(s,s) r=s, π→1.5π', cx: s, cy: s, r: s, start: Math.PI, end: Math.PI * 1.5 },
+  { name: 'C: 圆心(s/2,s/2) r=s/2, 1.5π→2π', cx: s/2, cy: s/2, r: s/2 - LINE_WIDTH/2, start: Math.PI * 1.5, end: Math.PI * 2 },
+  { name: 'D: 圆心(s/2,s/2) r=s/2, 0→0.5π', cx: s/2, cy: s/2, r: s/2 - LINE_WIDTH/2, start: 0, end: Math.PI * 0.5 },
+];
+
+let html = '<html><body style="background:#1a1a2e;color:#eee;font-family:sans-serif;padding:20px;">';
+html += '<h2>Corner 方向测试</h2>';
+html += '<p>代码注释: "The asset is the top-left arc" (左上角弧线)</p>';
+html += '<div style="display:flex;flex-wrap:wrap;gap:20px;">';
+
+for (const v of variants) {
+  const canvas = createCanvas(s, s);
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, s, s);
+  drawCorner(ctx, s, v.cx, v.cy, v.r, v.start, v.end);
+  const dataUri = canvas.toDataURL('image/png');
+  html += '<div style="text-align:center;">';
+  html += '<div style="font-size:12px;margin-bottom:8px;">' + v.name + '</div>';
+  html += '<div style="width:' + s + 'px;height:' + s + 'px;background-image:conic-gradient(#333 25%, #222 0 50%, #333 0 75%, #222 0);background-size:8px 8px;display:inline-block;">';
+  html += '<img src="' + dataUri + '" style="width:' + s + 'px;height:' + s + 'px;">';
+  html += '</div></div>';
+}
+
+html += '</div></body></html>';
+fs.writeFileSync(__dirname + '/../corner-test.html', html);
+console.log('Generated: corner-test.html');
