@@ -992,14 +992,18 @@ local function EnsureAdoptedIcon(btn)
     pcall(icon.ClearAllPoints, icon)
     pcall(icon.SetPoint, icon, "TOPLEFT", btn, "TOPLEFT", 1, -1)
     pcall(icon.SetPoint, icon, "BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
-    -- 竖向裁切比例：宠物条按钮是"扁的"（高 = 宽 × 0.75），把取样区也压扁同样的比例，
-    -- 这样宽高比一致、画面不会被拉伸；姿态条是正方形（没有这个标记 → 1.0，行为不变）。
+    -- 裁切范围：默认 8%（自绘按钮）；收养按钮可由调用方给 Mark 覆盖
+    -- （宠物条照 Andromeda pet-bar.lua:33 的 0.1, 0.9, 0.13, 0.87）。
+    -- iconCropV 再把竖向跨度按条高比例压一次（宠物条高 = 宽 × 0.75），画面不拉伸。
+    local u0 = tonumber(Marked(btn, "iconCropU0")) or CROP
+    local u1 = tonumber(Marked(btn, "iconCropU1")) or (1 - CROP)
+    local v0 = tonumber(Marked(btn, "iconCropV0")) or CROP
+    local v1 = tonumber(Marked(btn, "iconCropV1")) or (1 - CROP)
     local vfrac = tonumber(Marked(btn, "iconCropV")) or 1
     if vfrac > 1 then vfrac = 1 end
-    local y0, y1 = CROP, 1 - CROP
-    local span = (y1 - y0) * vfrac
-    local middle = (y0 + y1) / 2
-    pcall(Skin.CropIcon, Skin, icon, CROP, 1 - CROP, middle - span / 2, middle + span / 2)
+    local middle = (v0 + v1) / 2
+    local span = (v1 - v0) * vfrac
+    pcall(Skin.CropIcon, Skin, icon, u0, u1, middle - span / 2, middle + span / 2)
     Mark(btn, "adoptedIcon", icon)
 end
 
@@ -1062,6 +1066,18 @@ local function SkinAdoptedButton(btn)
 
     -- 图标：内缩 + 裁切 + 摘遮罩（见 EnsureAdoptedIcon）。图标晚到时靠一次低频轮询重试。
     EnsureAdoptedIcon(btn)
+
+    -- 「当前生效的宠物动作」的金色蒙版（照 Andromeda：checked 用 (1,0.8,0,0.35) 平涂）。
+    -- 我们压掉了暴雪的 CheckedTexture，所以状态信号由这块盖上去代替。
+    if not Marked(btn, "activeOverlay") then
+        local active = btn:CreateTexture(nil, "ARTWORK", nil, 2)
+        active:SetPoint("TOPLEFT", btn, "TOPLEFT", 1, -1)
+        active:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
+        active:SetColorTexture(1, 0.8, 0, 0.35)
+        active:Hide()
+        Mark(btn, "activeOverlay", active)
+    end
+
     if not Marked(btn, "adoptedWatch") then
         Mark(btn, "adoptedWatch", true)
         -- 2 秒一次的低频维护：补图标（晚生）/ 补遮罩摘除、重压暴雪美术层

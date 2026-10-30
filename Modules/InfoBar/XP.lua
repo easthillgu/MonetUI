@@ -83,6 +83,27 @@ local BLIZZARD_XP = {
     "MainStatusTrackingBarContainer", "PlayerXPBar", "ExperienceBar", "MainStatusBar",
 }
 
+--- 把 alpha 0 按回去。暴雪自己的刷新（换区域、编辑模式、状态条重建）会把 alpha 写回 1，
+--- 而 ShowWatch 只在"隐藏→显示"沿触发 —— **alpha 被改回 1 时它一直是显示着的，沿不触发**，
+--- 于是经验条就露出来了（2026-10-30 实机）。改成 1 秒一次的低频重压：
+--- 检查的是全局名而不是缓存的对象，暴雪换过新对象也能跟上；模块关掉时不再跑。
+local function ReinforceBlizzardXP()
+    if not M.active then return end
+    for _, name in ipairs(BLIZZARD_XP) do
+        local f = _G[name]
+        if f and Marked(f, "xpHidden") then
+            local ok, alpha = pcall(f.GetAlpha, f)
+            if not ok or not alpha or alpha > 0.01 then
+                pcall(f.SetAlpha, f, 0)
+            end
+            if type(f.EnableMouse) == "function" and type(f.IsMouseEnabled) == "function" then
+                local okM, on = pcall(f.IsMouseEnabled, f)
+                if okM and on then pcall(f.EnableMouse, f, false) end
+            end
+        end
+    end
+end
+
 local function HideBlizzardXP()
     for _, name in ipairs(BLIZZARD_XP) do
         local f = _G[name]
@@ -98,13 +119,10 @@ local function HideBlizzardXP()
             pcall(f.SetAlpha, f, 0)
         end
     end
-    -- 包加载 / 换区域后暴雪可能把这条换成新对象，用低频轮询补一次（不写它的脚本槽）。
-    local container = _G.MainStatusTrackingBarContainer
-    if container and not Marked(container, "xpWatch") and ns.Widget then
-        Mark(container, "xpWatch", true)
-        ns.Widget:ShowWatch(container, function(self)
-            if Marked(self, "xpHidden") then pcall(self.SetAlpha, self, 0) end
-        end)
+    -- 低频兜底：1 秒一次，幂等（alpha 已经是 0 就什么都不做）。
+    if ns.Widget and not Marked(_G.UIParent, "xpReinforce") then
+        Mark(_G.UIParent, "xpReinforce", true)
+        ns.Widget:PollWatch(_G.UIParent, ReinforceBlizzardXP, 1)
     end
 end
 

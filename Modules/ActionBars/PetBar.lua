@@ -85,7 +85,12 @@ local function BuildPetBar(bar, frame, def)
         -- 外壳事件被卸载后，没人再替我们把这 10 个按钮 Show 出来（它们可能停在
         -- 壳隐藏时的 SetShown(false) 状态）——直接显式显示一次。
         pcall(btn.Show, btn)
-        -- 先登记竖向裁切比例，再换肤：EnsureAdoptedIcon 会按它把取样区压扁同样的比例。
+        -- 先登记竖向裁切比例与裁切范围，再换肤：EnsureAdoptedIcon 按它们取采样区。
+        -- 范围照 Andromeda pet-bar.lua:33 的 `0.1, 0.9, 0.13, 0.87`；竖向再按条高（0.75）压一次。
+        Mark(btn, "iconCropU0", 0.1)
+        Mark(btn, "iconCropU1", 0.9)
+        Mark(btn, "iconCropV0", 0.13)
+        Mark(btn, "iconCropV1", 0.87)
         Mark(btn, "iconCropV", PET_HEIGHT_RATIO)
         SkinAdoptedButton(btn)
         bar.buttons[#bar.buttons + 1] = btn
@@ -155,13 +160,57 @@ local function RestoreAutoCastShine(button)
     if shine.Anim then pcall(shine.Anim.Play, shine.Anim) end
 end
 
---- 这个槽位开没开自动施法。返回顺序：name, texture, isToken, isActive, autoCastAllowed,
---- autoCastEnabled, spellID ... -- 第 6 个才是"开着"，第 5 个是"可以开"。
+--- 槽位的三个状态（照 Andromeda pet-bar.lua:110 的取值顺序）：
+--- name, texture, isToken, isActive, autoCastAllowed, autoCastEnabled, spellID。
+--- **注意位置**：isActive 是第 4 个、allowed 第 5、enabled 第 6。
+--- 以前这里 pcall 后数了 6 个占位符，拿到的其实是 spellID —— 于是"有 spellID 就发光"，
+--- 自动施法关掉的技能也会亮（2026-10-30 修正）。
+local function PetActionState(index)
+    if not GetPetActionInfo then return nil end
+    local ok, _, _, _, isActive, allowed, enabled = pcall(GetPetActionInfo, index)
+    if not ok then return nil end
+    return isActive, allowed, enabled
+end
+
+--- 这个槽位开没开自动施法。
 local function PetAutoCastEnabled(index)
-    if not GetPetActionInfo then return false end
-    local ok, _, _, _, _, _, enabled = pcall(GetPetActionInfo, index)
-    if not ok then return false end
+    local _, _, enabled = PetActionState(index)
     return Secrets.Bool(enabled, false)
+end
+
+--- 「可自动施法」角标：照 Andromeda 的参数（12×12，右下角 +2/-2，贴图整幅不裁）。
+--- 客户端把它挂在 AutoCastOverlay.Corners 上，老结构里是按钮自己的 AutoCastable。
+--- 它回答的是"这个技能**可以**开自动施法"，和"已经开了"（像素环）是两件事。
+local function StyleAutoCastCorner(button)
+    local corner = button.AutoCastable
+    if not corner then
+        local overlay = button.AutoCastOverlay
+        corner = overlay and overlay.Corners
+    end
+    if not corner or type(corner.SetPoint) ~= "function" then return end
+    pcall(corner.ClearAllPoints, corner)
+    pcall(corner.SetPoint, corner, "BOTTOMRIGHT", button, "BOTTOMRIGHT", 2, -2)
+    pcall(corner.SetSize, corner, 12, 12)
+    pcall(corner.SetTexCoord, corner, 0, 1, 0, 1)
+end
+
+--- 「当前生效的宠物动作」= 金色蒙版（照 Andromeda button-style.lua:185 的
+--- `checked:SetColorTexture(1, 0.8, 0, 0.35)`）。暴雪的勾选态贴图已经被
+--- FadeAdoptedArt 压成 0，所以它现在的信号由我们自己这块盖上去。
+--- 这不是"自动施法开"的提示（那由像素环负责），别混。
+local ACTIVE_R, ACTIVE_G, ACTIVE_B, ACTIVE_A = 1, 0.8, 0, 0.35
+
+local function SetActiveLook(button, active)
+    if not button then return end
+    local tex = Marked(button, "activeOverlay")
+    if not tex then return end
+    if Marked(button, "activeOn") == active then return end
+    Mark(button, "activeOn", active)
+    if active then
+        pcall(tex.Show, tex)
+    else
+        pcall(tex.Hide, tex)
+    end
 end
 
 --- 像素环的边长：跟着暴雪的自动施法遮罩走（那圈蚂蚁就画在这块遮罩里：45 - 8 = 37），
@@ -191,24 +240,13 @@ local function PetGlowSide(button, entry)
     return side
 end
 
---- 自动施法开启时的**自绘**提示（2026-10-30 玩家要求替换暴雪那套开关效果）。
---- 暴雪的勾选态贴图（CheckedTexture，hover 图）已经被 FadeAdoptedArt 压成 alpha 0，
---- 所以必须给它一个替代信号：收养按钮的边框换成主题的 highlight 色。
---- 关掉时把 borderState 清掉，边框回到主题的默认边色（主题切换也会跟着走）。
+--- 自动施法开启时的提示：**像素环**（照 Andromeda：自动施法只走 PixelGlow）。
+--- 以前这里还把边框染成 highlight 色，参考插件并不这么做 —— 边框留给主题，
+--- 状态信号只有两个：金色蒙版 = "当前生效的宠物动作"，像素环 = "这个技能已开自动施法"。
 local function SetAutoCastLook(button, enabled)
     if not button then return end
-    -- 注意用本文件的 local 别名：`ns.Marked(x, k)` 是**冒号方法**，点号调用会把参数错位
-    -- （self=x、object=k），永远返回 nil。
-    local border = Marked(button, "adoptedBorder")
-    if not border then return end
     if Marked(button, "autoCastLook") == enabled then return end
     Mark(button, "autoCastLook", enabled)
-    if enabled then
-        local r, g, b, a = ns.Color:GetHighlight()
-        Widget:SetBorderState(border, r, g, b, a or 1)
-    else
-        Widget:SetBorderState(border, nil)
-    end
 end
 
 --- 开着自动施法的按钮上跑一圈像素环，其余的干净。
@@ -222,14 +260,27 @@ local function SyncPetGlow(def, entry)
 
         SuppressAutoCastShine(button)
 
-        local enabled = PetAutoCastEnabled(index)
-        SetAutoCastLook(button, enabled)
+        local isActive, _, enabled = PetActionState(index)
+        -- 金色蒙版 = 当前生效的宠物动作（攻击/跟随/防御…），照 Andromeda 的参数
+        SetActiveLook(button, Secrets.Bool(isActive, false))
+        SetAutoCastLook(button, Secrets.Bool(enabled, false))
+        StyleAutoCastCorner(button)
 
-        if enabled then
+        if Secrets.Bool(enabled, false) then
+            -- 玩家 2026-10-30 定稿的外观参数（改这几个数就行）：
+            --   count 6 块、pixel 4 物理像素、spacing 4、period 1 秒一圈、颜色 0.35/1.0/0.45
+            --   pitch/ringAlpha 是"关掉自绘动作条"时的静态环参数。
             Widget:PixelGlow(button, {
-                side   = PetGlowSide(button, entry),
-                scale  = scale,
-                static = isStatic,
+                side     = PetGlowSide(button, entry),
+                scale    = scale,
+                static   = isStatic,
+                count    = 6,
+                pixel    = 4,
+                spacing  = 4,
+                period   = 1,
+                pitch    = 8,
+                ringAlpha = 0.9,
+                r = 0.35, g = 1.0, b = 0.45,
             })
         else
             Widget:StopPixelGlow(button)
@@ -267,6 +318,7 @@ local function TeardownPetGlow()
         if not button then break end
         Widget:StopPixelGlow(button)
         SetAutoCastLook(button, false)
+        SetActiveLook(button, false)
         RestoreAutoCastShine(button)
     end
 end
