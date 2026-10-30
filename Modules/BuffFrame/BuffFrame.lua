@@ -554,6 +554,8 @@ end
 
 function SuppressBlizzard()
     local found = 0
+    -- TempEnchantFrame 在 12.1.5 实测**不存在**（`/mui compat find Enchant` 全 UI 只有 4 个交易附魔框），
+    -- 留着是因为它是 Forever 那边的候选名字；这一趟拿不到就是空枪，不报错。
     for _, name in ipairs({ "BuffFrame", "DebuffFrame", "TempEnchantFrame" }) do
         local blizzard = _G[name]
         if blizzard then

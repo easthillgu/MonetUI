@@ -890,6 +890,7 @@ local function PrintHelp()
     ns:Print("  |cffffd100/mui scale|r      像素网格 / 缩放自检（改完 UI 缩放后再跑一次对比）")
     ns:Print("  |cffffd100/mui blocks|r     机密布尔被拦的调用栈账本（`UNKNOWN()` 归因，加 full 看完整栈）")
     ns:Print("  |cffffd100/mui restrict|r   六类受限窗口自查（战斗只是其中一类）+ 可读性前置是否可用")
+    ns:Print("  |cffffd100/mui compat|r     客户端能力自查：换客户端第一趟跑它（bad 只看与假设不符的，tmpl 连模板一起探，find <片段> 扫暴雪帧真名）")
     ns:Print("  |cffffd100/mui enable|r     启用本体")
     ns:Print("  |cffffd100/mui disable|r    禁用本体（需 /reload）")
     ns:Print("  |cffffd100/mui <模块> on|off|r  单独开关模块")
@@ -1089,6 +1090,21 @@ local function HandleSlash(message)
     elseif command == "restrict" then
         PrintRestrictions()
 
+    elseif command == "compat" then
+        local Compat = ns.Compat
+        if type(Compat) ~= "table" then
+            ns:Print("能力自查没加载：检查 Utils/Utils.xml 里有没有 Compat.lua。")
+        else
+            local arg = string.lower(rest or "")
+            if string.find(arg, "^find") then
+                Compat:Find(string.match(arg, "^find%s+(.*)"))
+            elseif type(Compat.Print) == "function" then
+                Compat:Print({ bad = string.find(arg, "bad") ~= nil, tmpl = string.find(arg, "tmpl") ~= nil })
+            else
+                ns:Print("Compat.Print 不可调用。")
+            end
+        end
+
     elseif command == "help" then
         PrintHelp()
 
@@ -1139,16 +1155,33 @@ SlashCmdList["MONETUI"] = HandleSlash
 
 --- 客户端身份一行（加载横幅用）。两个客户端交替验证（零售 12.1.5 / 无限 1.60），帧名、
 --- 报错文案和能力位都按版本不同 —— 日志里认不出是哪一版就没法定位。
---- GetBuildInfo 的返回值个数按版本不一样（新版第 5 个才是 interface 号），逐位取、取不到就 ?。
+--- GetBuildInfo 的返回值**位次**按版本不一样（12.1.5 实测第 4 个才是 interface 号），
+--- 所以认数不认位：用主/次版本去对 Interface 号的前四位。
 function ns:ClientIdentity()
-    local rel, rev, build, iface
+    local rel, iface, build
     if type(_G.GetBuildInfo) == "function" then
-        local ok, a, _, c, d, e = pcall(_G.GetBuildInfo)
-        if ok then rel, rev, build, iface = a, c, d, e end
+        local vals = { pcall(_G.GetBuildInfo) }
+        if vals[1] then
+            rel = vals[2]
+            -- Interface 号在返回值里的**位置**按版本不一样（12.1.5 实测第 4 个才是 120105，
+            -- 第 5 个是空串），所以不认位置，认**数**：Interface 号的前四位就是主/次版本。
+            local m1, m2 = string.match(tostring(rel), "^(%d+)%.(%d+)")
+            local want = m1 and (tonumber(m1) * 100 + tonumber(m2)) or nil
+            for i = 3, #vals do
+                local v = tonumber(vals[i])
+                if v and v > 1000 then
+                    if want and math.floor(v / 100) == want then
+                        if not iface then iface = v end
+                    elseif not build then
+                        build = v
+                    end
+                end
+            end
+        end
     end
     iface = iface or _G.INTERFACE_VERSION
     return ("%s · build %s · Interface %s"):format(
-        tostring(rel or "?"), tostring(build or rev or "?"), tostring(iface or "?"))
+        tostring(rel or "?"), tostring(build or "?"), tostring(iface or "?"))
 end
 
 -- Boot: EventBus owns the only frame; every listener below is registered on it.

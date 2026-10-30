@@ -408,7 +408,14 @@ const DEPRECATED_SHIMS = new Map([
 ]);
 hard.secureOnly = [...byName.keys()].filter(k => secureOnly.has(k));
 hard.unknownApi = [...byName.keys()].filter(k => !documented.has(k) && !DEPRECATED_SHIMS.has(k)).sort();
-hard.unknownEnum = enumUses.filter(u => u.val ? !(enumNames.has(u.full) && enumValues.has(u.full + "." + u.val)) : !enumNames.has(u.full));
+// Enumerations the client installs but the dump never enumerates.  Same rule as
+// DEPRECATED_SHIMS: every entry must name its evidence -- verify before adding one.
+const CLIENT_ENUMS_NO_DUMP = new Map([
+  ["GameRule", "本站手册「加载开关」：GameRule 枚举编号不在文档里，实际生效值要登录后用 C_GameRules.IsGameRuleActive 读（Utils/Compat.lua 探的就是它）"],
+]);
+const enumOutsideDump = enumUses.filter(u => CLIENT_ENUMS_NO_DUMP.has(u.full));
+hard.unknownEnum = enumUses.filter(u => !CLIENT_ENUMS_NO_DUMP.has(u.full) &&
+  (u.val ? !(enumNames.has(u.full) && enumValues.has(u.full + "." + u.val)) : !enumNames.has(u.full)));
 hard.unknownEvent = eventUses.filter(u => !u.name.startsWith("MONETUI_") && !events.has(u.name));
 hard.restrictedEvent = eventUses.filter(u => restrictedEvents.has(u.name));
 // de-duplicate the protected call list per (file, line, name)
@@ -462,6 +469,8 @@ p("INFO  undocumented method:  " + unknownMethods.length + " of " + methodUses.s
 for (const n of unknownMethods) p("  - " + n + "  " + methodUses.get(n).join("  "));
 p("INFO  undocumented global:  " + undocumentedGlobals.size + "  (not in the docs, not defined here, not a known client global)");
 for (const [n, locs] of [...undocumentedGlobals.entries()].sort()) p("  - " + n + "  " + locs.join("  "));
+p("INFO  enum the client installs but the dump omits:  " + enumOutsideDump.length + "  (exempted with evidence -- not a free pass)");
+for (const u of enumOutsideDump) p("  - " + u.file + ":" + u.line + "  Enum." + u.full + (u.val ? "." + u.val : "") + "  <- " + CLIENT_ENUMS_NO_DUMP.get(u.full));
 
 // ---------------------------------------------------------------- toc
 const tocFile = path.join(ADDON, "MonetUI.toc");
