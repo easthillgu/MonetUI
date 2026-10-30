@@ -73,10 +73,25 @@ function Secrets.IsSecret(value)
     return false
 end
 
+--- 这个值**当前这个调用上下文**能不能读/运算？（1.60 正规前置：`canaccessvalue`）
+--- 与 `IsSecret` 的区别：`issecretvalue` 只说"是不是机密"，`canaccessvalue` 说的是
+--- "我此刻能不能对它做运算/比较" —— 后者才是我们真正要的那道门，而且它不抛（call: ok，插件可调）。
+--- 客户端没有这个名字（老构建/别的客户端）时退回 `not IsSecret`，行为与以前一致。
+function Secrets.CanRead(value)
+    if value == nil then return true end
+    local can = _G.canaccessvalue
+    if can then
+        local ok, res = pcall(can, value)
+        if ok then return res and true or false end
+        return false
+    end
+    return not Secrets.IsSecret(value)
+end
+
 --- Return `value` as a plain number, or nil when it is secret / not numeric.
 function Secrets.Number(value)
     if value == nil then return nil end
-    if Secrets.IsSecret(value) then return nil end
+    if not Secrets.CanRead(value) then return nil end
     local ok, number = pcall(Add0, value)
     if ok and type(number) == "number" then return number end
     return nil
@@ -104,7 +119,7 @@ end
 -- 逐位一致），非机密才真值测试。全仓 30 多个调用点因此不需要逐个改。
 -- 失败路径（例如 issecretvalue 不可用的构建）仍然记账，见 `Secrets.BoolBlocks()`。
 function Secrets.Bool(value, default)
-    if Secrets.IsSecret(value) then return default end
+    if not Secrets.CanRead(value) then return default end
     local ok, result = pcall(TestBool, value)
     if ok then return result end
     -- true 测试被客户端拦了（理论上不该再走到这里）。记调用栈（纯字符串，机密值不进 concat）。

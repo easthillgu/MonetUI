@@ -1583,6 +1583,73 @@ poll 0.2s）每拍对表里每个框读一次可见性，而本客户端有 **fo
 **实机待办**：重部署后看横幅 `客户端：…`、`美化 … 这步失败`、`轮询读不到可见性：<框名>` 三类新行，
 并把 `/mui skins diagnose` 的"命中但不是框体"名单贴回来 —— 那批名字要按真名订正，不是靠加 ALLOW_DYNAMIC 过关。
 
+## 8.11 2026-10-30 接入无限图鉴 MCP：两处手工守卫换成客户端正规 API
+
+`wuxianwow`（无限图鉴，https://wuxianwow.com/mcp）接成 Qoder 用户级连接器（免登录，49 个工具）。
+其中 `addon_api` 就是 `docs/api/` 那份手册的在线版（1.60.1.70634 的 `Blizzard_APIDocumentationGenerated`），
+除函数/事件/枚举外还带手册小节（`topic` = taint / secret / protected / secure-templates / forever-api）
+和 `call: ok|limited|protected` 分级。先拿我们实机实测过的名字验它的可信度：`MouseIsOver`、`GetMouseFocus`
+都是 not_found（与「本客户端这两个全局是 nil」一致），`issecretvalue` 正常返回签名与 `SecretArguments`。
+**但它不收录暴雪框体名**（`WorldMapFrame` 查 `kind=table` 为空）—— 所以 `frames` 名单和「这个框在不在」
+仍然只有实机能证；它能证的是函数 / 事件 / 枚举 / 结构这一层。
+
+### 8.11.1 受限窗口不止战斗：`C_RestrictedActions`（Core.lua）
+
+机密值手册点明限制触发条件由 `C_RestrictedActions` 暴露，六类：`Enum.AddOnRestrictionType` =
+Combat 0 / Encounter 1 / ChallengeMode 2 / PvPMatch 3 / **Map 4** / **Chat 5**；状态 = Inactive 0 /
+Activating 1 / Active 2；事件 `ADDON_RESTRICTION_STATE_CHANGED(type, state)`。两条口径要紧：
+
+- 事件在限制**生效之前**、**解除之后**发 → `Activating` 就该按「已经不自由」处理；
+- **派发期间 `IsAddOnRestrictionActive` 恒为 false** → 状态必须按事件载荷自己记，不能在回调里问 API。
+
+本仓以前只盯 `PLAYER_REGEN_*`（等于只看 Combat 这一类），Map / Chat 是盲区 —— 这和 8.10.3 那个
+「框中途变 forbidden、读不了」是同一族现象。新增：
+
+- `ns:IsRestricted()`：战斗中 **或** 任一类限制活着；客户端没有这套 API 时退回 `ns:InCombat()`，
+  逐位保持旧行为（`restrictionKnown` 只在真拿到 API/事件后才置位，所以不会拿空表当「一切自由」）。
+- `ns:Restrictions()`：当前哪几类活着（诊断读它）。
+- `ns.Restricted`（旗）+ 内部事件 `MONETUI_RESTRICTION_CHANGED`：状态换边时由 `NotifyRestriction`
+  统一推。**这一层本来就在文件末尾另有一份**（`activeTypes` 只按数字类型记账、还直接拿
+  `Enum.AddOnRestrictionState.Inactive` 裸比较，别的构建没有这个枚举就会抛）—— 已并成本仓唯一一本账，
+  四个老订阅方（ActionBars / BuffFrame / Nameplates / UnitFrames）不用改。
+- `ns:AfterCombat` 的「当场就能做」判据由 `not InCombat` 收紧成 `not IsRestricted`；队列排空除了
+  `PLAYER_REGEN_ENABLED`，**非战斗类限制结束时也排一次**（否则 Map / Chat 窗口里排入的动作要压到下次脱战）。
+- 自查命令：`/mui restrict`（四个函数在不在、枚举在不在、当前哪几类活着、`canaccessvalue` 可用否）。
+
+### 8.11.2 读值前置：`Secrets.CanRead(v)`（Utils/Secrets.lua）
+
+客户端的正规问题是 `canaccessvalue(value)` —— 「**我这个调用上下文**能不能读/运算这个值」，
+比 `issecretvalue`（「它是不是机密」）更准：非机密但当前读不了的值它也说 false。同类还有
+`canaccesstable`（能不能索引机密表）、`canaccesssecrets`、`canaccessallvalues`，四个都标 `call: ok`（插件可调）。
+
+- 新增 `Secrets.CanRead(value)`：有 `canaccessvalue` 就用（pcall，抛了按「读不到」处理），
+  没有则退回 `not issecretvalue` —— 调用点不需要知道差异；`nil` 先判可读（AGENTS「nil 不等于机密」那条不变）。
+- `Secrets.Number` / `Secrets.Bool` 的门改走 `CanRead`：这两个是全仓唯一漏斗，30+ 调用点自动受益。
+
+### 8.11.3 轮询暂停改成事件驱动恢复（Utils/Widget.lua）
+
+8.10.3 的 `VisibilityOf` 是固定 5 秒复检；现在 Widget 订阅 `MONETUI_RESTRICTION_CHANGED`，限制状态
+一换边就把 `pausedUntil` 清空，下一拍每个挂起的框各真读一次 —— 脱战 / 关掉地图即刻恢复，不用干等复检点。
+接法只能是"订阅事件"：`Utils.xml` 在 `Core.lua` **之前**加载，Widget 运行的时候 Core 的接口还不存在
+（第一版写成 `ns.OnRestrictionChange(fn)`，既用点号调了个冒号方法、又赶在定义之前，静默挂空 —— 已改）。
+
+### 8.11.4 闸门、顺带发现与待验
+
+`luac -p` 全仓过；`api-audit` **no hard finding**（`ADDON_RESTRICTION_STATE_CHANGED`、
+`C_RestrictedActions.*`、`Enum.AddOnRestrictionType` 都能在本地快照核到，说明在线手册与快照同源）；
+`audit-taint` 0 BLOCKER / 0 HIGH / 0 SOFT；`audit-locals` 49 文件过；`check-frame-list` 名单一致。
+
+**顺带发现（下一件活）**：`api-audit` 现在提示 `InCombatLockdown x29 -> documented as
+C_RestrictedActions.InCombatLockdown` —— 全仓 29 处裸 `InCombatLockdown()` 里，凡是「判能不能碰暴雪对象」的
+都应换成 `ns:IsRestricted()`；纯 CVar / 布局类的调用保持原样。
+
+实机待验（retail 12.1.5 与 Forever 1.60 各一次）：
+
+1. `/mui restrict` 的输出（尤其四个 `C_RestrictedActions.*` 在不在、`canaccessvalue` 在不在）；
+2. 进战斗 / 开地图前后，`轮询读不到可见性：<框名>` 那条是否随限制换边立刻恢复（不再等 5 秒）；
+3. `Secrets.CanRead` 换上后血量 / 能量 / 名字 / 施法条显示没有回退（若 `canaccessvalue` 对普通值误报
+   false，症状会是「东西整体不更新」，那时把 `Bool` / `Number` 的门退回 `IsSecret` 单独提交）。
+
 ## 9. 建议的下一步（按价值排序）
 
 1. **实机回归 P0/P1 的改动面**（`docs/HANDOFF.md` 8.6.2 + `TODO.md` 的 9 条清单）：

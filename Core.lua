@@ -525,7 +525,9 @@ function ns:AfterCombat(key, fn, mode)
         ns.EventBus:Register("PLAYER_REGEN_ENABLED", FlushAfterCombat)
     end
 
-    if mode ~= "regen" and not ns:InCombat() then
+    -- 当场能做的条件从"不在战斗中"放宽成"不在任何一类受限窗口里"（见下面 6 类限制）：
+    -- Map / Chat 这类限制生效时写入同样会被拒，排到队列里等状态清掉。
+    if mode ~= "regen" and not ns:IsRestricted() then
         RunAfterCombat(key, fn)
         return
     end
@@ -535,6 +537,101 @@ function ns:AfterCombat(key, fn, mode)
     end
     afterCombatPending[key] = fn
 end
+
+-- ---- 受限窗口（addon restriction）：本客户端把"什么时候不许插件碰东西"做成 6 类 ------
+-- `C_RestrictedActions` 暴露 Combat / Encounter / ChallengeMode / PvPMatch / Map / Chat 六类，
+-- 并派发 `ADDON_RESTRICTION_STATE_CHANGED`。文档两条要紧的：事件**在生效之前、解除之后**发
+-- （所以 Activating 就该当"已经不自由"处理），且**派发期间 `IsAddOnRestrictionActive` 恒为 false**
+-- （所以状态由我们按事件载荷自己记，不在回调里问 API）。
+-- 以前本仓只盯 PLAYER_REGEN_*，等于只看 Combat 这一类；Map / Chat 是盲区 —— 实机"某个框突然
+-- 读不了、写入被拒"就发生在那些窗口里。客户端没有这套 API 时全部退回战斗标志，行为逐位不变。
+local RESTRICTION_ORDER = { "Combat", "Encounter", "ChallengeMode", "PvPMatch", "Map", "Chat" }
+local restrictionActive = {}
+local restrictionKnown = false
+
+local function RestrictedFn(name)
+    local api = _G.C_RestrictedActions
+    local fn = api and api[name]
+    return type(fn) == "function" and fn or nil
+end
+
+local function RestrictionValue(kind, name)
+    local e = _G.Enum and _G.Enum[kind]
+    return e and tonumber(e[name]) or nil
+end
+
+local function AnyRestrictionActive()
+    for _ in pairs(restrictionActive) do return true end
+    return false
+end
+
+--- 当前哪几类限制是活的（诊断用：`/mui restrict`）。
+function ns:Restrictions()
+    return restrictionActive
+end
+
+--- 现在是否处在任何一类受限窗口里 = 战斗中，或六类里任何一类活着。
+--- 用来代替散落各处的 `InCombatLockdown()`：那一只管 Combat 这一类。
+function ns:IsRestricted()
+    if not restrictionKnown then return ns:InCombat() end
+    if ns:InCombat() then return true end
+    return AnyRestrictionActive()
+end
+
+--- 任一禁限类型激活中（含 Activating 等待态，宁可多守一拍）。
+--- 这面旗以前由文件末尾那段"事件 → activeTypes"自己记账，消费方是 `MONETUI_RESTRICTION_CHANGED`
+--- 的四个订阅（ActionBars / BuffFrame / Nameplates / UnitFrames）；现在六类的账本只留这一本，
+--- 旗和事件都由 `NotifyRestriction` 统一推 —— **Utils 比 Core 先加载，所以别人只能订阅这个事件，
+--- 不能反过来调 Core 的注册接口**（Widget 的轮询恢复就是这么接的）。
+--- 秘值存活窗口**探针测不全**（实机取证：player 的血量是明文、姓名板单位却已在返回机密；
+--- 旗与全局级 ShouldAurasBeSecret 全关时 Blizzard 链内仍读到机密）。哪类单位被加密是客户端
+--- 自己的事 —— 真正的守则仍是"秘值期不从我们的上下文跑暴雪的生产者"（Nameplates:RestoreBlizzardPlate
+--- 不碰 ApplyFrameOptions 那条）。这面旗只做"什么时候该重读"的通用判据，别拿它当探针用。
+ns.Restricted = false
+
+local function NotifyRestriction(name, active)
+    ns.Restricted = AnyRestrictionActive()
+    ns.EventBus:Fire("MONETUI_RESTRICTION_CHANGED", name, active)
+end
+
+-- 登录 / 重载时限制可能已经是活的（事件不补发），用实时查询定初值。
+local function SeedRestrictions()
+    local isActive = RestrictedFn("IsAddOnRestrictionActive")
+    if not isActive then return end
+    restrictionKnown = true
+    for i = 1, #RESTRICTION_ORDER do
+        local name = RESTRICTION_ORDER[i]
+        local t = RestrictionValue("AddOnRestrictionType", name)
+        if t then
+            local ok, active = pcall(isActive, t)
+            restrictionActive[name] = (ok and active) and true or nil
+        end
+    end
+    ns.Restricted = AnyRestrictionActive()
+end
+
+ns.EventBus:Register("ADDON_RESTRICTION_STATE_CHANGED", function(_, typeValue, stateValue)
+    local name
+    for i = 1, #RESTRICTION_ORDER do
+        if RestrictionValue("AddOnRestrictionType", RESTRICTION_ORDER[i]) == typeValue then
+            name = RESTRICTION_ORDER[i]
+            break
+        end
+    end
+    if not name then return end
+    restrictionKnown = true
+    local inactiveValue = RestrictionValue("AddOnRestrictionState", "Inactive") or 0
+    local active = (stateValue ~= nil) and (stateValue ~= inactiveValue)
+    restrictionActive[name] = active and true or nil
+    -- 队列排空以前只挂在 PLAYER_REGEN_ENABLED 上：非战斗类限制（Map / Chat）结束时
+    -- 也得排一次，否则那些窗口里排入的动作要压到下次脱战。
+    if not active and not AnyRestrictionActive() and not ns:InCombat() then
+        pcall(FlushAfterCombat)
+    end
+    NotifyRestriction(name, active)
+end)
+
+ns.EventBus:Register("PLAYER_ENTERING_WORLD", SeedRestrictions)
 
 function ns:GetModuleOrder()
     return moduleOrder
@@ -685,6 +782,38 @@ local function PrintStatus()
     end
 end
 
+--- 受限窗口自查（`/mui restrict`）：本客户端把"不许插件碰东西"做成六类限制
+--- （Combat / Encounter / ChallengeMode / PvPMatch / Map / Chat，`C_RestrictedActions`）。
+--- 以前排查只盯着 PLAYER_REGEN_*，等于只看 Combat；这一条用一次就能看清另外五类
+--- 在这个构建里到底存不存在、现在哪一类是活的，以及 `canaccessvalue` 这类正规前置可用不可用。
+local function PrintRestrictions()
+    local api = _G.C_RestrictedActions
+    if type(api) ~= "table" then
+        ns:Print("这个客户端没有 C_RestrictedActions（退回只看战斗中）。")
+    else
+        for _, name in ipairs({ "InCombatLockdown", "IsAddOnRestrictionActive",
+            "GetAddOnRestrictionState", "CheckAllowProtectedFunctions" }) do
+            ns:Print(("  C_RestrictedActions.%s：%s"):format(name, type(api[name]) == "function" and "有" or "没有"))
+        end
+    end
+    local enum = _G.Enum and _G.Enum.AddOnRestrictionType
+    ns:Print("  Enum.AddOnRestrictionType：" .. (type(enum) == "table" and "有" or "没有"))
+    local tracked = ns:Restrictions()
+    local live = {}
+    for name in pairs(tracked) do live[#live + 1] = name end
+    table.sort(live)
+    ns:Print(("当前受限：%s（战斗中 %s · IsRestricted %s · 旗帜 %s）"):format(
+        #live > 0 and table.concat(live, " / ") or "无",
+        ns:InCombat() and "是" or "否",
+        ns:IsRestricted() and "是" or "否",
+        ns.Restricted and "有" or "无"))
+    local Secrets = ns.Secrets
+    if type(Secrets) == "table" and type(Secrets.CanRead) == "function" then
+        ns:Print(("  canaccessvalue：%s（没有时 CanRead 退回 not issecretvalue）"):format(
+            type(_G.canaccessvalue) == "function" and "有" or "没有"))
+    end
+end
+
 --- 拦截归因账本（`/mui blocks`）。AGENTS 的结论：本客户端对 `ADDON_ACTION_BLOCKED`
 --- **不写 taint.log**，所以只能认我们自己记的栈 —— `Secrets.Bool()` 的失败路径会逐条存
 --- `debugstack`。这一族就是 docs/PLAN-refactor 里那批 `UNKNOWN()`（机密布尔被真值测试）。
@@ -733,6 +862,7 @@ local function PrintHelp()
     ns:Print("  |cffffd100/mui theme|r      重新采样环境色彩")
     ns:Print("  |cffffd100/mui scale|r      像素网格 / 缩放自检（改完 UI 缩放后再跑一次对比）")
     ns:Print("  |cffffd100/mui blocks|r     机密布尔被拦的调用栈账本（`UNKNOWN()` 归因，加 full 看完整栈）")
+    ns:Print("  |cffffd100/mui restrict|r   六类受限窗口自查（战斗只是其中一类）+ 可读性前置是否可用")
     ns:Print("  |cffffd100/mui enable|r     启用本体")
     ns:Print("  |cffffd100/mui disable|r    禁用本体（需 /reload）")
     ns:Print("  |cffffd100/mui <模块> on|off|r  单独开关模块")
@@ -928,6 +1058,9 @@ local function HandleSlash(message)
     elseif command == "blocks" then
         PrintBlockLedger(rest)
 
+    elseif command == "restrict" then
+        PrintRestrictions()
+
     elseif command == "help" then
         PrintHelp()
 
@@ -1047,26 +1180,8 @@ if not ns.hasMonetColorCallback then
     end)
 end
 
--- Restricted states (combat / PvP) may hide values again, so let modules refresh their text once the restriction lifts.
--- 同时维护全局禁限旗帜：事件语义是"激活前先发 / 停用后在停用之后发"，载荷 (type, state)
--- 报的是目标状态（Enum.AddOnRestrictionState: Inactive=0 / Activating=1 / Active=2）。
--- 秘值存活窗口**探针测不全**（实机取证：player 的血量是明文、姓名板单位却已在返回机密；
--- 旗帜与全局级 ShouldAurasBeSecret 全关时 Blizzard 链内仍读到机密）。哪类单位被加密是
--- 客户端自己的事 —— 所以真正的守则是"秘值期不从我们的上下文跑暴雪的生产者"
--- （Nameplates:RestoreBlizzardPlate 不再碰 ApplyFrameOptions，见那条注释）；这面
--- 旗帜保留为未来模块的通用判据，别回去依赖任何单位级探针。
-ns.Restricted = false   -- 任一禁限类型激活中（含 Activating 等待态，宁可多守一拍）
-do
-    local activeTypes = {}
-    ns.EventBus:Register("ADDON_RESTRICTION_STATE_CHANGED", function(_, restrictionType, state)
-        if state == Enum.AddOnRestrictionState.Inactive or state == nil then
-            activeTypes[restrictionType] = nil
-        else
-            activeTypes[restrictionType] = true
-        end
-        ns.Restricted = next(activeTypes) ~= nil
-        ns.EventBus:Fire("MONETUI_RESTRICTION_CHANGED")
-    end)
-end
+-- Restricted states (combat / PvP) may hide values again, so let modules refresh their
+-- text once the restriction lifts —— That re-read is driven by `MONETUI_RESTRICTION_CHANGED`,
+-- which the six-class ledger above fires from `NotifyRestriction` (see 受限窗口 near AfterCombat).
 
 _G.MonetUI = ns

@@ -93,6 +93,14 @@ local function VisibilityOf(frame)
     return false, false
 end
 
+--- 受限窗口换边（进战斗 / 脱战 / 地图 / 聊天锁定…）时把手里挂起的框全部放行：
+--- 下一拍各真读一次，读得出来立刻恢复正常轮询，不用干等 5 秒复检点。
+--- 走 Core 在 `ADDON_RESTRICTION_STATE_CHANGED` 里推的内部事件（Utils 比 Core 先加载，
+--- 所以这里只能订阅，不能反过来调 Core 的注册接口）。
+ns.EventBus:Register("MONETUI_RESTRICTION_CHANGED", function()
+    for frame in pairs(pausedUntil) do pausedUntil[frame] = nil end
+end)
+
 local function MouseOver(frame)
     -- 本客户端没有 MouseIsOver / GetMouseFocus（实测都是 nil），但有 frame:IsMouseOver()。
     -- 顺序：先按最可靠的 frame 方法，再退到全局函数。

@@ -30,6 +30,9 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
 - 访问 Blizzard 帧做存在性 / pcall 防护；失败一次性 print 警告，不刷屏。
 - secure 元素（微按钮等）战斗中禁改：`InCombatLockdown()` 防护 + `PLAYER_REGEN_ENABLED` 一次性重试。
 - **安全单位按钮（`SecureUnitButtonTemplate`）的显隐只能交给 `visibility` state driver**（`[@target,exists] show; hide` 等），任何代码路径都不要再 `Show/Hide/SetShown` —— 战斗中必被拒（`ADDON_ACTION_BLOCKED MonetUITargetFrame:Hide()`），`UNIT_*` 事件驱动的刷新路径尤其容易漏。
+- **受限窗口不止战斗**（2026-10-30 接 `C_RestrictedActions`）：本客户端有**六类**限制 —— Combat / Encounter / ChallengeMode / PvPMatch / **Map** / **Chat**。以前全仓只盯 `InCombatLockdown()`（`api-audit` 数出 29 处），等于只看其中一类，所以「某个框突然读不了 / 写入被拒」在地图、聊天锁定这类窗口里查不出来。现在判"能不能碰"用 `ns:IsRestricted()`（Core.lua 维护六类状态，客户端没有这套 API 时退回战斗标志，行为不变）。两条要紧的文档口径：事件 `ADDON_RESTRICTION_STATE_CHANGED` 在限制**生效之前**、**解除之后**发（Activating 就该当不自由处理），且**派发期间 `IsAddOnRestrictionActive` 恒为 false** —— 所以状态按事件载荷自己记，别在回调里问 API。自查：`/mui restrict`。
+  换边时 Core 统一推内部事件 `MONETUI_RESTRICTION_CHANGED` 并维护 `ns.Restricted` 旗（文件末尾原来
+  另有一份 `activeTypes` 记账，已并成这一本）—— 模块要"限制解除后重读一次"就订阅那个事件，别再自己挂 `ADDON_RESTRICTION_STATE_CHANGED`。
 - 秘密值：数值上下文用 `Secrets.Number` 包裹，受限时保留上次状态。但**"nil" 不等于"机密"**：`UnitThreatSituation` 这类 API 脱战后返回的是普通 nil（表示没有该信息），必须按"0/无"处理，只有 `issecretvalue` 为真才保留上次状态 —— 否则红边之类的状态会永远挂着。
 - **布尔值同理，且必须"值级前置"**：对机密值做真值测试（`if v then`）会被客户端拦成
   `ADDON_ACTION_BLOCKED UNKNOWN()`；而 `issecretvalue`(**读取**本身)不触发拦截。
@@ -45,6 +48,7 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   接着 `unit .. "target"` / `table.concat` 直接抛 `invalid value (secret)`（实机就这样刷了 3 条）。
   **规矩：凡是"从游戏拿到、之后要进 concat / format / 比较"的值（unit 令牌、name、guid、link），
   判完类型必须再过一次 `issecretvalue`**，宁可少显示一行。
+- **读一个值之前问 `Secrets.CanRead(v)`**（2026-10-30）：客户端的正规前置是 `canaccessvalue`（"我这个调用上下文能不能读/运算这个值"），比 `issecretvalue`（"它是不是机密"）更准 —— 非机密但当前读不了的值它也说 false。构建没有 `canaccessvalue` 时自动退回 `not issecretvalue`，所以调用点只管用它；`Secrets.Bool` / `Secrets.Number` 已经走这条，新代码不要再自己手写 `issecretvalue` 分支。
 
 ## 污染（taint）模型 —— 本客户端最贵的一课
 
@@ -202,6 +206,12 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   **新增 `.lua` 必须挂进对应 xml 的 `<Script file>`，并放在正确的先后位置** —— 漏挂不会报错，
   客户端直接不加载（`wuxian check` 会以 `not-loaded` 提示）。组内顺序 = xml 内的次序，
   组间顺序 = toc 内的次序；动顺序时顺手更新该 xml 头部的注释。
+- **跨组调用接口要看加载序：`Utils.xml` 在 `Core.lua` 之前**（toc 的次序就是执行次序）。
+  Utils 里的文件在加载期碰不到 Core 的 `ns:Xxx()` —— 直接调不报错，只是那时候它还是 nil，
+  `if type(...) == "function"` 会静默跳过，功能一行都不生效。Utils 要接收 Core 的运行期通知，
+  **只能订阅 `ns.EventBus` 的内部事件**（`MONETUI_*` 由 `Fire()` 自己派发，注册时不需要客户端认得它）。
+  另一头：`function ns:Xxx()` 是冒号方法，调用必须写 `ns:Xxx()` —— 写成 `ns.Xxx(fn)` 会把 `fn`
+  当成 self，参数全丢，且不会报错。
 - OnShow 重涂一律走 `M:HookShow`（引擎带幂等守卫），调用处勿自行 `HookScript("OnShow")`。
 - 高频事件用 `M:Debounce`；LoD 窗口在面板声明 `addons = { ... }` 门控。
 - 小步改动、可回滚；不顺手重构无关代码。
