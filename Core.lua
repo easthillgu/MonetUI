@@ -976,6 +976,20 @@ SLASH_MONETUI1 = "/monetui"
 SLASH_MONETUI2 = "/mui"
 SlashCmdList["MONETUI"] = HandleSlash
 
+--- 客户端身份一行（加载横幅用）。两个客户端交替验证（零售 12.1.5 / 无限 1.60），帧名、
+--- 报错文案和能力位都按版本不同 —— 日志里认不出是哪一版就没法定位。
+--- GetBuildInfo 的返回值个数按版本不一样（新版第 5 个才是 interface 号），逐位取、取不到就 ?。
+function ns:ClientIdentity()
+    local rel, rev, build, iface
+    if type(_G.GetBuildInfo) == "function" then
+        local ok, a, _, c, d, e = pcall(_G.GetBuildInfo)
+        if ok then rel, rev, build, iface = a, c, d, e end
+    end
+    iface = iface or _G.INTERFACE_VERSION
+    return ("%s · build %s · Interface %s"):format(
+        tostring(rel or "?"), tostring(build or rev or "?"), tostring(iface or "?"))
+end
+
 -- Boot: EventBus owns the only frame; every listener below is registered on it.
 local loginThemeReported = false
 
@@ -1000,6 +1014,7 @@ ns.EventBus:Register("PLAYER_LOGIN", function()
     ns:Print(string.format("v%s 已加载。MonetColor: %s。输入 |cffffd100/mui|r 打开配置。",
         ns.version,
         ns:HasMonetColor() and "|cff00ff00已接入|r" or "|cffff6b6b未找到（使用内置调色板）|r"))
+    ns:Print("客户端：" .. ns:ClientIdentity())
 end)
 
 -- The player moved the game's own UI-scale slider: hand the scale back instead of fighting

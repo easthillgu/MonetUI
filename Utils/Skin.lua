@@ -132,6 +132,27 @@ function Skin.With(scope, fn, ...)
     return a, b
 end
 
+--- 取回来的东西是不是"能挂子件、能读区域"的 ScriptObject。
+--- `Skin:Need` 按名字解析，**命中的不一定是框体**：老窗口名在本客户端可能已经变成一张表
+--- 或一个函数（2026-10-30 实机 12.1.5：11 个面板整批 Apply 失败，报的就是
+--- `Usage: CreateFrame("frameType" ...)` —— 那东西被当成 parent 交给了 CreateFrame）。
+--- 判定用 GetObjectType 而不是 type()：本客户端的框体是带元表的用户数据。
+function Skin:IsScriptObject(obj)
+    if obj == nil then return false end
+    if type(obj) ~= "table" and type(obj) ~= "userdata" then return false end
+    if type(obj.GetObjectType) ~= "function" then return false end
+    local ok, kind = pcall(obj.GetObjectType, obj)
+    return ok and kind ~= nil
+end
+
+--- 一次性提示（同一 topic 只打一次）：Apply 会被三个事件反复触发，不打一次就是几十条同文案。
+local warned = {}
+function Skin:WarnOnce(topic, message)
+    if warned[topic] then return end
+    warned[topic] = true
+    ns:Print(message)
+end
+
 --- 确认并取回一个美化对象：`"CharacterFrame"`，或 `"Minimap.Buttons.DragonkinComp"` 这样的点路径。
 --- 取不到就记一次 miss 并返回 nil —— 调用方照旧"缺了就跳过那一步"，但缺什么从此可查。
 function Skin:Need(path)
@@ -142,6 +163,10 @@ function Skin:Need(path)
         return nil
     end
     led.hits = led.hits + 1
+    -- "命中了，但不是框体"是第三种结果：只在第一次判，之后复用账本里的值（每个 Apply 都要跑几百次）
+    if led.shape == nil then
+        if not self:IsScriptObject(obj) then led.shape = "notObject" end
+    end
     return obj
 end
 
@@ -184,34 +209,41 @@ end
 function Skin:ReportScope(scope)
     local byPath = self.targets[scope]
     if not byPath then return 0, 0 end
-    local missing, found = {}, 0
+    local missing, found, odd = {}, 0, {}
     for path, led in pairs(byPath) do
         if led.hits > 0 then
             found = found + 1
+            -- 命中了但拿回来的不是框体：这一类不会 miss，却会让 CreateFrame / GetRegions 抛，
+            -- 必须单独列出来，否则 diagnose 只报"全绿"而实机一片红字。
+            if led.shape == "notObject" then odd[#odd + 1] = path end
         else
             missing[#missing + 1] = path
         end
     end
     if found == 0 and #missing == 0 then return 0, 0 end
     if #missing == 0 then
-        ns:Print(("|cff88ff88✓|r [%s] %d 个对象全部存在"):format(scope, found))
-        return found, 0
-    end
-    table.sort(missing)
-    ns:Print(("|cffff6b6b✗|r [%s] %d 存在 / %d 缺失"):format(scope, found, #missing))
-    local LINE_MAX = 200
-    local chunk, count = "", 0
-    for i = 1, #missing do
-        local piece = (count > 0) and (", " .. missing[i]) or missing[i]
-        if #chunk + #piece > LINE_MAX then
-            ns:Print("    " .. chunk)
-            chunk, count = missing[i], 1
-        else
-            chunk = chunk .. piece
-            count = count + 1
+        ns:Print(("|cffffb75c⚠|r [%s] %d 个对象存在，其中 %d 个不是框体"):format(scope, found, #odd))
+    else
+        table.sort(missing)
+        ns:Print(("|cffff6b6b✗|r [%s] %d 存在 / %d 缺失"):format(scope, found, #missing))
+        local LINE_MAX = 200
+        local chunk, count = "", 0
+        for i = 1, #missing do
+            local piece = (count > 0) and (", " .. missing[i]) or missing[i]
+            if #chunk + #piece > LINE_MAX then
+                ns:Print("    " .. chunk)
+                chunk, count = missing[i], 1
+            else
+                chunk = chunk .. piece
+                count = count + 1
+            end
         end
+        if chunk ~= "" then ns:Print("    " .. chunk) end
     end
-    if chunk ~= "" then ns:Print("    " .. chunk) end
+    if #odd > 0 then
+        table.sort(odd)
+        ns:Print(("    |cffffb75c命中但不是框体|r：%s"):format(table.concat(odd, ", ")))
+    end
     return found, #missing
 end
 
@@ -302,26 +334,33 @@ local BACKDROP_PIECES = {
 --- Fade the original art of a frame.
 -- @param opts { regions=false, backdrops=false, keep=function(region), keepTexture=tex, art=true } -- false / absent leaves that layer alone.
 function Skin:Strip(frame, opts)
-    if not frame then return frame end
+    if not frame or not self:IsScriptObject(frame) then return frame end
     opts = opts or {}
 
+    -- 读暴雪框的字段 / 区域在受限对象上会被拒（2026-10-30 实机「trade」：
+    -- `Attempt to access forbidden object from code tainted by an AddOn - Usage: self:GetRegions()`）。
+    -- 这类框我们**读不到就别读**，让它保持暴雪原样 —— 少剥一层美术，比整面板 Apply 失败好得多。
     if opts.backdrops ~= false then
-        for i = 1, #BACKDROP_PIECES do
-            local piece = frame[BACKDROP_PIECES[i]]
-            if piece and type(piece.SetAlpha) == "function" then
-                self:Fade(piece)
+        pcall(function()
+            for i = 1, #BACKDROP_PIECES do
+                local piece = frame[BACKDROP_PIECES[i]]
+                if piece and type(piece.SetAlpha) == "function" then
+                    self:Fade(piece)
+                end
             end
-        end
+        end)
     end
 
     if opts.regions ~= false and type(frame.GetRegions) == "function" then
         local keep = opts.keep
-        local regions = { frame:GetRegions() }
-        for i = 1, #regions do
-            local region = regions[i]
-            if IsTexture(region) and region ~= opts.keepTexture then
-                if not (keep and keep(region)) then
-                    self:Fade(region)
+        local ok, regions = pcall(function() return { frame:GetRegions() } end)
+        if ok then
+            for i = 1, #regions do
+                local region = regions[i]
+                if IsTexture(region) and region ~= opts.keepTexture then
+                    if not (keep and keep(region)) then
+                        self:Fade(region)
+                    end
                 end
             end
         end
@@ -386,26 +425,36 @@ function Skin:ColorText(fs, colorKey)
     return fs
 end
 
+--- 造一块挂底衬用的空框。三处都必须容忍"这版客户端不给"：
+--- * parent 不是 ScriptObject（老窗口名现在是表 / 函数）→ 直接不造，返回 nil；
+---   把它交给 CreateFrame 会抛 `Usage: CreateFrame(...)`，一个名字带走整面板。
+--- * 模板不存在 → 退回不带模板的框，只是没有 SetBackdrop 可用（调用方各自判）。
 local function NewBackdropFrame(parent, levelOffset)
-    local frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    if not Skin:IsScriptObject(parent) then return nil end
+    local ok, frame = pcall(CreateFrame, "Frame", nil, parent, "BackdropTemplate")
+    if not ok or not frame then
+        ok, frame = pcall(CreateFrame, "Frame", nil, parent)
+    end
+    if not ok or not frame then return nil end
     local level = (parent.GetFrameLevel and parent:GetFrameLevel() or 1) + (levelOffset or -1)
-    frame:SetFrameLevel(math.max(0, level))
-    frame:EnableMouse(false)
+    pcall(frame.SetFrameLevel, frame, math.max(0, level))
+    pcall(frame.EnableMouse, frame, false)
     return frame
 end
 
 --- A themed backplate behind a Blizzard frame.  Built once, cached on the frame.
 -- @param opts { thickness=, bgAlpha=, borderAlpha=, borderKey=, inset= }
 function Skin:Panel(frame, opts)
-    if not frame then return nil end
+    if not frame or not self:IsScriptObject(frame) then return nil end
     opts = opts or {}
 
     local bg = Marked(frame, "skinBg")
     if not bg then
         bg = NewBackdropFrame(frame, opts.levelOffset or -1)
+        if not bg then return nil end
         local inset = opts.inset or 0
-        bg:SetPoint("TOPLEFT", frame, "TOPLEFT", inset, -inset)
-        bg:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -inset, inset)
+        pcall(bg.SetPoint, bg, "TOPLEFT", frame, "TOPLEFT", inset, -inset)
+        pcall(bg.SetPoint, bg, "BOTTOMRIGHT", frame, "BOTTOMRIGHT", -inset, inset)
         Widget:Theme(bg, {
             thickness   = opts.thickness or 1,
             bgAlpha     = opts.bgAlpha or 0.85,
@@ -416,19 +465,20 @@ function Skin:Panel(frame, opts)
         self:Track(bg)
     end
 
-    bg:Show()
+    pcall(bg.Show, bg)
     return bg
 end
 
 --- A backplate for a control that already sits inside a panel, drawn *under* the control (buttons / drop-downs / edit boxes).
 function Skin:ControlBg(frame, opts)
-    if not frame then return nil end
+    if not frame or not self:IsScriptObject(frame) then return nil end
     opts = opts or {}
 
     local bg = Marked(frame, "controlBg")
     if not bg then
         bg = NewBackdropFrame(frame, -1)
-        bg:SetAllPoints(frame)
+        if not bg then return nil end
+        pcall(bg.SetAllPoints, bg, frame)
         Widget:Theme(bg, {
             thickness   = opts.thickness or 1,
             bgAlpha     = opts.bgAlpha or 0.9,
@@ -439,7 +489,7 @@ function Skin:ControlBg(frame, opts)
         self:Track(bg)
     end
 
-    bg:Show()
+    pcall(bg.Show, bg)
     return bg
 end
 

@@ -216,6 +216,20 @@ local function IsAnyType(obj, ...)
     return false
 end
 
+--- 对象叫什么（诊断用）：命名框给 GetName，匿名件给类型。绝不抛 —— 它就在报错路径上。
+local function ObjectName(obj)
+    if obj == nil then return "?" end
+    if type(obj.GetName) == "function" then
+        local ok, name = pcall(obj.GetName, obj)
+        if ok and type(name) == "string" and name ~= "" then return name end
+    end
+    if type(obj.GetObjectType) == "function" then
+        local ok, kind = pcall(obj.GetObjectType, obj)
+        if ok and kind then return "<" .. tostring(kind) .. ">" end
+    end
+    return tostring(obj)
+end
+
 local DRESSERS = {
     tab      = function(obj, opts) Skin:Tab(obj, opts and opts.control) end,
     button   = function(obj, opts) M:Buttons({ obj }, opts and opts.control) end,
@@ -233,10 +247,21 @@ local DRESSERS = {
 --- 不去重就是每触发一次多塞一条轮询回调。
 function M:SweepDeep(frame, controlOpts)
     if not frame or type(frame.GetChildren) ~= "function" then return end
+    -- 轮询里的抛错不在任何 Apply 的 pcall 保护下，而且每秒一次 —— 自己吞，并借
+    -- Skin:WarnOnce 报名字（受限框读 GetChildren 就会被拒）。
     local sweep = function()
-        M:SkinButtonsIn(frame, controlOpts)
-        M:SkinScrollsIn(frame)
-        M:SkinSlidersIn(frame)
+        local ok, err = pcall(function()
+            M:SkinButtonsIn(frame, controlOpts)
+            M:SkinScrollsIn(frame)
+            M:SkinSlidersIn(frame)
+        end)
+        if not ok then
+            local label
+            pcall(function() label = frame:GetName() end)
+            label = label or "?"
+            Skin:WarnOnce("sweep:" .. label,
+                ("补扫 %s 的子控件失败: %s"):format(label, tostring(err)))
+        end
     end
     sweep()
     if Marked(frame, "deepSweep") then return end
@@ -259,11 +284,27 @@ function M:Dress(spec, opts)
     opts = opts or {}
     local list = Skin:AsList(spec)
 
+    -- **一个控件炸了不能带走整面板**。2026-10-30 实机（12.1.5）：45 个窗口里 11 个整批红字，
+    -- 原因只是名单里某个老窗口名在这版客户端已经变成一张表 —— 它被当成 parent 交给 CreateFrame，
+    -- 抛 `Usage: CreateFrame(...)`，于是那个窗口一点没美化。逐对象 pcall + 一次性报名字，
+    -- 剩下的控件照常涂。
+    local function dressOne(frame, what, fn)
+        local ok, err = pcall(fn)
+        if not ok then
+            local name = ObjectName(frame)
+            Skin:WarnOnce("dress:" .. what .. ":" .. name,
+                ("美化 %s 的「%s」这步失败: %s"):format(name, what, tostring(err)))
+        end
+    end
+
     if opts.as then
         local dress = DRESSERS[string.lower(opts.as)]
         if not dress then return end
         for i = 1, #list do
-            if list[i] then pcall(dress, list[i], opts) end
+            if list[i] then
+                local obj = list[i]
+                dressOne(obj, "as=" .. tostring(opts.as), function() dress(obj, opts) end)
+            end
         end
         return
     end
@@ -271,22 +312,24 @@ function M:Dress(spec, opts)
     for i = 1, #list do
         local frame = list[i]
         if frame then
-            if opts.window then
-                M:SkinWindow(frame, opts)
-            else
-                if not opts.noStrip then Skin:Strip(frame, opts.strip) end
-                if not opts.noPanel then Skin:Panel(frame, opts.panel) end
-            end
-
-            if opts.deep then
-                if opts.lazy ~= false then
-                    M:SweepDeep(frame, opts.control)
+            dressOne(frame, "body", function()
+                if opts.window then
+                    M:SkinWindow(frame, opts)
                 else
-                    M:SkinButtonsIn(frame, opts.control)
-                    M:SkinScrollsIn(frame)
-                    M:SkinSlidersIn(frame)
+                    if not opts.noStrip then Skin:Strip(frame, opts.strip) end
+                    if not opts.noPanel then Skin:Panel(frame, opts.panel) end
                 end
-            end
+
+                if opts.deep then
+                    if opts.lazy ~= false then
+                        M:SweepDeep(frame, opts.control)
+                    else
+                        M:SkinButtonsIn(frame, opts.control)
+                        M:SkinScrollsIn(frame)
+                        M:SkinSlidersIn(frame)
+                    end
+                end
+            end)
         end
     end
 
