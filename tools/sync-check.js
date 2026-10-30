@@ -55,6 +55,10 @@ if (!fs.existsSync(installed)) {
 
 // The deployed toc differs by design: the deploy rewrites ## Interface.
 const stripInterface = (text) => text.replace(/^## Interface:\s*\d+/m, '## Interface: <deployed>');
+// 行尾不算内容差异：本仓混用 CRLF/LF，部署落盘的行尾和源文件不一定一致，
+// 逐字节比会把"刚部署完"的文件报成 STALE（实机误报过 UnitFrames.xml）。
+const stripEol = (text) => text.replace(/\r\n/g, '\n');
+const isText = (name) => /\.(lua|xml|toc|md|txt|js)$/i.test(name);
 
 const repoFiles = new Map();
 for (const dir of DIRS) {
@@ -78,8 +82,10 @@ for (const [name, file] of repoFiles) {
     const there = installedFiles.get(name);
     if (!there) { missing.push(name); continue; }
     let same;
-    if (name.toLowerCase().endsWith('.toc')) {
-        same = stripInterface(fs.readFileSync(file, 'utf8')) === stripInterface(fs.readFileSync(there, 'utf8'));
+    if (isText(name)) {
+        const a = stripEol(fs.readFileSync(file, 'utf8'));
+        const b = stripEol(fs.readFileSync(there, 'utf8'));
+        same = /\.toc$/i.test(name) ? stripInterface(a) === stripInterface(b) : a === b;
     } else {
         const a = fs.statSync(file);
         const b = fs.statSync(there);
