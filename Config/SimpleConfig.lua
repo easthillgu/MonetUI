@@ -702,16 +702,22 @@ function SimpleConfig:Build()
             end
         end)
 
-    local SELF  = { "player", "pet" }
-    local OTHER = { "target", "focus", "targettarget" }
+    -- 分成两组的理由是 2026-10-25 的配色案：玩家 / 宠物 / 目标的目标是一套"反相 + 暗织纹"
+    -- （和小队/团队格同款，见 Groups.lua），目标 / 焦点保持职业色 + 红色空槽。
+    -- 一组一个下拉，组内默认必须一致 —— 否则 UnitSetting 显示的是组里第一个单位的值，
+    -- 玩家一改就整组跟着变。
+    local INVERSE = { "player", "pet", "targettarget" }
+    local TARGET_LIKE = { "target", "focus" }
 
     local FILL_ITEMS = {
+        { value = "inverse",   text = "反相（主题阶梯）" },
         { value = "highlight", text = "高亮色（Monet）" },
         { value = "class",     text = "职业 / 阵营色" },
         { value = "health",    text = "生命绿" },
         { value = "dark",      text = "深色（反相）" },
     }
     local LOST_ITEMS = {
+        { value = "weave",   text = "暗织纹（主题阶梯）" },
         { value = "danger",  text = "高亮红" },
         { value = "black",   text = "黑色（背景）" },
         { value = "light",   text = "浅灰（反相）" },
@@ -722,12 +728,14 @@ function SimpleConfig:Build()
         { value = "theme", text = "统一主题色" },
     }
 
-    MakeDropdown(content, row(28), "玩家 / 宠物 血条",
-        FILL_ITEMS, UnitSetting(SELF, "fillColor", "highlight"))
+    MakeDropdown(content, row(28), "玩家 / 宠物 / 目标的目标 血条",
+        FILL_ITEMS, UnitSetting(INVERSE, "fillColor", "inverse"))
+    MakeDropdown(content, row(28), "玩家 / 宠物 / 目标的目标 损失部分",
+        LOST_ITEMS, UnitSetting(INVERSE, "lostColor", "weave"))
     MakeDropdown(content, row(28), "目标 / 焦点 血条",
-        FILL_ITEMS, UnitSetting(OTHER, "fillColor", "class"))
+        FILL_ITEMS, UnitSetting(TARGET_LIKE, "fillColor", "class"))
     MakeDropdown(content, row(28), "目标 / 焦点 损失部分",
-        LOST_ITEMS, UnitSetting(OTHER, "lostColor", "danger"))
+        LOST_ITEMS, UnitSetting(TARGET_LIKE, "lostColor", "danger"))
     MakeDropdown(content, row(28), "能量条颜色", POWER_ITEMS,
         function() return ns:DB().unitFrames.powerColor end,
         function(value)
@@ -739,7 +747,7 @@ function SimpleConfig:Build()
     fillHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(44))
     fillHint:SetWidth(328)
     fillHint:SetJustifyH("LEFT")
-    fillHint:SetText("玩家单位统一用主题血条色，职业看能量条——选中玩家时能量条直接用它的职业色；NPC 血条保留敌对红 / 友善绿。")
+    fillHint:SetText("默认：玩家 / 宠物 / 目标的目标用「反相 + 暗织纹」，目标 / 焦点用职业或敌我色 + 红空槽。职业辨认主要看能量条——选中玩家时能量条直接用它的职业色。")
 
     -- One row for two settings: 0 means "off", anything else is the pip height.
     local CLASS_ITEMS = {

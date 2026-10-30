@@ -184,21 +184,21 @@ local function Brighten(r, g, b, factor)
     return bump(r), bump(g), bump(b)
 end
 
---- The "current" part of a health bar: "highlight" (player, pet), "class" (target,
---- focus) or "health".
---- 配色案（2026-10-25）：玩家与目标的目标的生命条 = monetcolor.edge 的 RGB 反相（小队/团队
---- 格同款，见 Groups.lua）。目标保持原 class 分支（UnitSelectionColor ×1.15）不变。
---- 玩家单位其余路径用主题血条色：职业辨认交给能量条（血条不再染职业色）。
---- NPC 仍用 UnitSelectionColor 的敌我色（敌对红 / 友善绿）——那是"敌我"信号。
+--- The "current" part of a health bar。样式看设置（fillColor）：
+---   "inverse" = edge 的 RGB 反相，亮度吃 Color 的四级阶梯（fill 档）——玩家 / 目标的目标的默认，
+---               和小队/团队格同款（Groups.lua）；
+---   "class"   = 职业 / 敌我色；"health" = 生命绿；"dark" = 近黑（反相风）；
+---   其余（含 "highlight"）= Monet 奶油压暗 20%。
+--- 2026-10-25 那版是在函数开头给 player / targettarget 硬顶一份反相，把用户设置整个盖掉
+--- （HANDOFF 8.14.4③）；现在它只是一种可选样式 + 默认值，玩家改过就一直生效。
 local function FillColor(unit)
-    -- edge 由 LibMonetColor 从环境色推出（HSL 反相 + 亮度镜像）；这里再取一次 RGB 反相
-    -- 得到"edge 的反色"。GetEdge 无机密值（纯主题色），不用守卫。
-    if unit == "player" or unit == "targettarget" then
-        local r, g, b = Color:GetEdge()
-        return 1 - r, 1 - g, 1 - b, 1
-    end
     local style = Setting(unit, "fillColor")
-    if style == "class" then
+    if style == "inverse" then
+        -- edge 由 LibMonetColor 从环境色推出（HSL 反相 + 亮度镜像）；这里再取一次 RGB 反相
+        -- 得到"edge 的反色"。GetEdge 无机密值（纯主题色），不用守卫；亮度不自己算，交给阶梯。
+        local r, g, b = Color:GetSurface("fill")
+        return r, g, b, 1
+    elseif style == "class" then
         if UnitIsPlayer(unit) then
             local hr, hg, hb = Color:GetHighlight()
             return hr * 0.8, hg * 0.8, hb * 0.8, 1
@@ -226,16 +226,14 @@ local function FillColor(unit)
 end
 
 --- The *missing* part of a health bar: pure background, needs no unit value.
+--- "weave" = 暗色织纹底（阶梯的 lost 档，BarWeave 的发丝线叠在其上）——玩家 / 目标的目标的默认，
+--- 队伍格同款；"danger" / "light" / "theme25" / 其余（黑）照旧。
 local function LostColor(unit)
-    -- 配色案（2026-10-25）：掉血空槽 = 暗色织纹底。玩家 / 团队 / 小队 / 目标的目标走这条；
-    -- 目标保持 danger。BarWeave 的发丝线叠在 lost 之上（:1689），底色调暗后空槽读作
-    -- "暗织纹"而不是黑洞。注意：这优先于 lostColor 设置（同 FillColor 的覆盖语义）。
-    if unit == "player" or unit == "targettarget" then
-        local nr, ng, nb = Color:GetNeutral()
-        return nr * 0.32, ng * 0.32, nb * 0.32, 1
-    end
     local style = Setting(unit, "lostColor")
-    if style == "danger" then
+    if style == "weave" then
+        local r, g, b = Color:GetSurface("lost")
+        return r, g, b, 1
+    elseif style == "danger" then
         return Color:GetDanger()
     elseif style == "light" then
         -- 反相风的"亮底"：填充压暗（fillColor = dark）之后，空血这边提亮才读得出血量。

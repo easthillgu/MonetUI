@@ -722,6 +722,11 @@ end
 --- Restyle a tab button (square, themed, accent underline that follows the selection state).
 function Skin:Tab(tab, opts)
     if not tab then return tab end
+    -- 12.1.5 实测：QuestLogFrameTab1/2 与 InspectFrameTab1/2 在这版客户端是**一张表**
+    -- （页签系统换成了 TabInfo），不是框体。Need 已经把它记成 notObject:table，所以这里
+    -- 必须自己收口 —— 以前直接 tab:CreateTexture 抛 "attempt to call a nil value"，
+    -- 被 Dress 逐件 pcall 兜住后变成 4 条红字，而账本里那条 ✗ 才是有效信息。
+    if not self:IsScriptObject(tab) then return tab end
     self:Button(tab, opts)
 
     if not Marked(tab, "tab") then
@@ -736,7 +741,8 @@ function Skin:Tab(tab, opts)
         underline:SetTexture(Media.texture["monet_hairline"])
         Mark(tab, "tabBar", underline)
         self:Track(underline)
-        WatchTab(self, tab)        self:OnTheme(function()
+        WatchTab(self, tab)
+        self:OnTheme(function()
             local r, g, b = Color:GetBorder()
             underline:SetVertexColor(r, g, b, 1)
             Skin:UpdateTabState(tab)

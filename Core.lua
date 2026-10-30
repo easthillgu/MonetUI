@@ -69,7 +69,7 @@ local DEFAULTS = {
     -- PlayerHealthHeight = 4, PlayerPowerHeight = 1, PlayerWidth = 160, PetWidth = 60 ...).  They used to be half that
     -- (health 2) because Andromeda rescales UIParent while MonetUI draws 1:1, so half its number was the same physical
     -- thickness -- but the woven ground (Widget:BarWeave) needs the room, so the bars are Andromeda's numbers now.
-    -- fillColor/lostColor/powerColor pick the bar colours (class = the colour the game itself draws the unit in; black = missing part reads as background; type = coloured by UnitPowerType); smoothBars eases every bar from the client side so it still works while values are hidden.
+    -- fillColor/lostColor/powerColor pick the bar colours (inverse = edge 的 RGB 反相 + lost = 暗织纹底，两者都吃 Utils/Color.lua 的四级亮度阶梯，玩家/宠物/目标的目标默认这一对；class = the colour the game itself draws the unit in; black = missing part reads as background; type = coloured by UnitPowerType); smoothBars eases every bar from the client side so it still works while values are hidden.
     -- classPower draws the player's combo points as slim pips under the player frame (Blizzard keeps them inside the PlayerFrame this addon hides); threatGlow / hoverGlow are Andromeda-style edge glows re-tinted through Widget:SetBorderState so theme refreshes cannot stomp them.
     unitFrames = {
         hideBlizzard = true,
@@ -90,13 +90,13 @@ local DEFAULTS = {
         -- Target auras: reparent Blizzard's own TargetFrame aura list onto our target frame (Andromeda's layout, growing up) and anchor it above.  Only the position is borrowed, never the data -- C_UnitAuras is hidden mid-fight, so this is the same ForeverUI trick the Nameplates module uses.
         showTargetAuras = true,
         targetAuraGap   = 22,
-        player = { width = 160, health = 4, power = 1, fillColor = "highlight", lostColor = "black",
+        player = { width = 160, health = 4, power = 1, fillColor = "inverse", lostColor = "weave",
                    point = "CENTER", relativeTo = "UIParent", relativePoint = "CENTER", x = 0,    y = -180 },
         target = { width = 160, health = 4, power = 1, fillColor = "class", lostColor = "danger",
                    point = "LEFT",   relativeTo = "player",   relativePoint = "RIGHT",  x = 40,   y = 40 },
-        targettarget = { width = 60, health = 4, power = 1, fillColor = "class", lostColor = "danger",
+        targettarget = { width = 60, health = 4, power = 1, fillColor = "inverse", lostColor = "weave",
                    point = "LEFT",   relativeTo = "target",   relativePoint = "RIGHT",  x = 6,    y = 0 },
-        pet    = { width = 60,  health = 4, power = 1, fillColor = "highlight", lostColor = "black",
+        pet    = { width = 60,  health = 4, power = 1, fillColor = "inverse", lostColor = "weave",
                    point = "RIGHT",  relativeTo = "player",   relativePoint = "LEFT",   x = -6,   y = 0 },
         focus  = { width = 60,  health = 4, power = 1, fillColor = "class", lostColor = "danger",
                    point = "RIGHT",  relativeTo = "player",   relativePoint = "LEFT",   x = -100, y = -40 },
@@ -298,7 +298,7 @@ local function MergeDefaults(dst, src)
 end
 
 --- Database schema.  Bumping this re-applies the settings that changed their meaning in the shipped defaults (see Migrate).
-local SCHEMA = 8
+local SCHEMA = 9
 
 --- One-off adjustments to a database written by an older MonetUI: MergeDefaults only fills in *missing* keys, so a value whose number changed has to be pushed explicitly.  Stored positions are the player's and are never touched here.
 local function Migrate(db)
@@ -366,6 +366,24 @@ local function Migrate(db)
     if (db.schema or 1) < 8 then
         if type(db.nameplates) == "table" and db.nameplates.nameSize == 12 then
             db.nameplates.nameSize = 10
+        end
+    end
+
+    -- v9: 玩家 / 目标的目标的"反相血条 + 暗织纹空槽"从代码硬顶改成两种可选样式
+    -- （fillColor = "inverse"、lostColor = "weave"，见 HANDOFF 8.14.4③）。存档里还写着旧默认值的
+    -- 那两栏（那套观感当时无论如何都由代码决定）换成新样式；玩家真选过的一个不动。
+    if (db.schema or 1) < 9 then
+        local legacy = {
+            player       = { fillColor = "highlight", lostColor = "black" },
+            pet          = { fillColor = "highlight", lostColor = "black" },
+            targettarget = { fillColor = "class",     lostColor = "danger" },
+        }
+        for unit, old in pairs(legacy) do
+            local stored = type(db.unitFrames) == "table" and db.unitFrames[unit]
+            if type(stored) == "table" then
+                if stored.fillColor == old.fillColor then stored.fillColor = "inverse" end
+                if stored.lostColor == old.lostColor then stored.lostColor = "weave" end
+            end
         end
     end
 
@@ -882,6 +900,122 @@ local function PrintBlockLedger(rest)
     end
 end
 
+--- 亮度阶梯自查（`/mui colors`）。HANDOFF 8.14.3 的实测：面板（ambient×0.35）和掉血空槽
+--- （neutral×0.32）在 14 个区域里对比度只有 1.00–1.19 —— 不是色相选错，是两档亮度重合。
+--- 现在这两档都由 Utils/Color.lua 的阶梯按 CIE L* 定死，所以验收只看一个数：CR。
+--- 为什么要账本：一行只装得下四档 hex，CR 的四组 + 每组的判定是十几行，聊天框一定被顶掉；
+--- 读法同 compatReport —— <游戏目录>/WTF/Account/<账号>/SavedVariables/MonetUI.lua 里的
+--- colorReport，而且落盘比 /reload 晚 1–2 分钟。
+local COLOR_CR_MIN = 1.4
+local COLOR_CR_PAIRS = {
+    { key = "panelLost", label = "面板↔空槽" },
+    { key = "lostWeave", label = "空槽↔织纹" },
+    { key = "lostFill",  label = "空槽↔填充" },
+    { key = "panelFill", label = "面板↔填充" },
+}
+
+local function PrintColorLadder()
+    local Color = ns.Color
+    if type(Color) ~= "table" or type(Color.Surface) ~= "function" then
+        ns:Print("Color.Surface 不可用：阶梯层没进去（Utils/Color.lua 是旧的）。")
+        return
+    end
+
+    local su = Color:Surface()
+    local keys = su.keys or { "panel", "lost", "weave", "fill" }
+
+    -- 每档写成"用这个颜色本身显示的文字"：一眼看出四档的明暗次序，数字是那档的 CIE L*。
+    -- 一行只放得下这么多：文字压到"档名 + 一位小数"，颜色靠颜色码自己表观（Compat 的教训是
+    -- 一折行，颜色码就会被转义成字面量）。
+    local hexes = {}
+    for i = 1, #keys do
+        local key = keys[i]
+        local c = su[key]
+        if c then
+            local hex = ns.Math:RGBToHex(c.r, c.g, c.b)
+            local l = su.levels and su.levels[key]
+            hexes[#hexes + 1] = string.format("|cff%s%s %s|r", hex, key,
+                type(l) == "number" and string.format("%.1f", l) or "?")
+        end
+    end
+
+    local source, profile = Color:GetSource()
+    local mapID, zoneName, envSource = Color:GetZoneInfo()
+    ns:Print(string.format("配色阶梯 %s | %s | %s",
+        table.concat(hexes, " "),
+        source == "monet" and ("monet/" .. tostring(profile)) or "fallback",
+        mapID and (tostring(zoneName or "?") .. " " .. tostring(mapID) .. " " .. tostring(envSource or "?")) or "区域未知"))
+
+    -- CR 逐个判定；工具函数缺失时四个数都是 nil，那就直说"退回固定乘数"，不要印 0。
+    local checked, passed, rows = 0, 0, {}
+    for i = 1, #COLOR_CR_PAIRS do
+        local pair = COLOR_CR_PAIRS[i]
+        local cr = su.cr and su.cr[pair.key]
+        local ok = type(cr) == "number" and cr >= COLOR_CR_MIN
+        if type(cr) == "number" then
+            checked = checked + 1
+            if ok then passed = passed + 1 end
+        end
+        rows[#rows + 1] = { label = pair.label, cr = cr, ok = ok and true or false }
+        if type(cr) == "number" then
+            ns:Print(string.format("  %s %s%.2f（阈值 %.1f）|r", pair.label,
+                ok and "|cff88ff88" or "|cffff6b6b", cr, COLOR_CR_MIN))
+        end
+    end
+
+    local colors = {}
+    for i = 1, #keys do
+        local c = su[keys[i]]
+        if c then colors[keys[i]] = { r = c.r, g = c.g, b = c.b } end
+    end
+
+    -- 账本无条件写：判不过的那一趟恰恰最需要留在 WTF 里看（聊天框那时已经全是红字）。
+    -- 为什么要把原因印出来：实机第一次跑就是"4/4 过线 + 账本没落成"，只报"读不到"查不下去。
+    local saved, why = false, "?"
+    local ok, db = pcall(function() return ns:DB() end)
+    if not ok then
+        why = "DB() 抛错：" .. tostring(db)
+    elseif type(db) ~= "table" then
+        why = "DB() 返回 " .. type(db)
+    else
+        local okSet, errSet = pcall(function()
+            db.colorReport = {
+                client = ns:ClientIdentity(),
+                when = (_G.date and _G.date("%Y-%m-%d %H:%M:%S")) or nil,
+                source = source,
+                profile = profile,
+                mapID = mapID,
+                zone = zoneName,
+                envSource = envSource,
+                steps = su.steps,
+                levels = su.levels,
+                colors = colors,
+                cr = su.cr,
+                rows = rows,
+                min = COLOR_CR_MIN,
+                passed = passed,
+                checked = checked,
+            }
+        end)
+        if okSet then
+            saved = true
+        else
+            why = "写入抛错：" .. tostring(errSet)
+        end
+    end
+
+    if checked == 0 then
+        ns:Print("|cffff6b6b没有 ContrastRatio / AtLightness|r：vendored LibMonetColor 早于 1.2.0，阶梯退回旧的固定乘数（观感和升级前一致）。")
+        ns:Print("  修法：把 monetcolors 仓库的 LibMonetColor-1.0.lua 同步进 Libs/ 后 /reload。")
+        return
+    end
+
+    ns:Print(string.format("|cffffd100配色阶梯|r：%d/%d 组过线（阈值 %.1f）%s",
+        passed, checked, COLOR_CR_MIN,
+        saved and "；全量已存 MonetUIDB.colorReport（WTF 里可直接读）"
+            or ("；|cffff6b6b账本没落成 —— " .. tostring(why) .. "|r")))
+end
+
 local function PrintHelp()
     ns:Print("命令：")
     ns:Print("  |cffffd100/mui|r            打开配置面板")
@@ -890,6 +1024,7 @@ local function PrintHelp()
     ns:Print("  |cffffd100/mui scale|r      像素网格 / 缩放自检（改完 UI 缩放后再跑一次对比）")
     ns:Print("  |cffffd100/mui blocks|r     机密布尔被拦的调用栈账本（`UNKNOWN()` 归因，加 full 看完整栈）")
     ns:Print("  |cffffd100/mui restrict|r   六类受限窗口自查（战斗只是其中一类）+ 可读性前置是否可用")
+    ns:Print("  |cffffd100/mui colors|r     配色四级亮度阶梯（面板/空槽/织纹/填充）+ 逐组对比度，账本 MonetUIDB.colorReport")
     ns:Print("  |cffffd100/mui compat|r     客户端能力自查：换客户端第一趟跑它（bad 只看与假设不符的，tmpl 连模板一起探，find <片段> 扫暴雪帧真名）")
     ns:Print("  |cffffd100/mui enable|r     启用本体")
     ns:Print("  |cffffd100/mui disable|r    禁用本体（需 /reload）")
@@ -1089,6 +1224,9 @@ local function HandleSlash(message)
 
     elseif command == "restrict" then
         PrintRestrictions()
+
+    elseif command == "colors" then
+        PrintColorLadder()
 
     elseif command == "compat" then
         local Compat = ns.Compat

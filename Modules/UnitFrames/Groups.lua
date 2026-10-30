@@ -169,8 +169,9 @@ end
 local function StyleHealthBars(button, inner, healthHeight)
     if not button.health then
         button.health = Widget:Bar(button, inner, healthHeight)
-        -- 空的那一半：一层平涂，血条才有体积
-        button.lost = Widget:LostBarBG(button.health, 1, 1, 1, 1)
+        -- 空的那一半：一层平涂，血条才有体积。subLevel 留默认 0 —— BarWeave 的发丝线也是
+        -- BACKGROUND/0 且创建在后，天然压在 lost 之上；这里写 1 会把织纹整条盖住。
+        button.lost = Widget:LostBarBG(button.health, 1, 1, 1)
     end
     button.health:SetSize(inner, healthHeight)
     button.health:ClearAllPoints()
@@ -451,14 +452,15 @@ local function UpdateState(button)
     else
         -- 配色案（2026-10-25）：小队/团队血条 = monetcolor.edge 的 RGB 反相，
         -- 和玩家/目标的目标同款。职业辨认继续只集中在能量条（UpdatePower）。
-        local er, eg, eb = Color:GetEdge()
-        button.health:SetStatusBarColor(1 - er, 1 - eg, 1 - eb)
+        -- 亮度吃 Color 的四级阶梯（fill 档），不自己算反相后的原始值。
+        local r, g, b = Color:GetSurface("fill")
+        button.health:SetStatusBarColor(r, g, b)
     end
 
     -- 空槽 = 暗色织纹底（同 UnitFrames 的暗织纹；BarWeave 发丝线叠在其上，:187）。
     -- 原来是 danger 红空槽——那套留给目标框，队伍这边不再用红色暗示"掉血"。
-    local nr, ng, nb = Color:GetNeutral()
-    button.lost:SetVertexColor(nr * 0.32, ng * 0.32, nb * 0.32, 1)
+    local lr, lg, lb = Color:GetSurface("lost")
+    button.lost:SetVertexColor(lr, lg, lb, 1)
 end
 
 -- 血量文字（Pawprint modules/Frames.lua:349-399 的纪律）：

@@ -642,7 +642,7 @@ function Widget:Bar(parent, width, height, textureKey)
 
     bar.bg = bar:CreateTexture(nil, "BACKGROUND")
     bar.bg:SetAllPoints()
-    local r, g, b = Color:GetNeutral()
+    local r, g, b = Color:GetSurface("lost")
     bar.bg:SetColorTexture(r, g, b, 0.25)
 
     themed[bar] = { kind = "bar", bgAlpha = 0.25, texture = key }
@@ -653,8 +653,8 @@ end
 --- 各自复制 CreateTexture + SetAllPoints + 底色，这里统一。底色走 SetVertexColor 而不是
 --- SetColorTexture 烧 texel —— 底面还要被顶点色动态改（UF / Groups 血量换色、Nameplates
 --- 死亡灰化），烧死 texel 会堵死那条路（黑 texel × 灰顶点色 = 永远黑）。
---- UF / Groups 白底（之后按血量染色），Nameplates 黑底（死亡时贴中性灰）；Groups 需要
---- subLevel 1（垫在 weave 织纹之下），另两处默认 0。
+--- UF / Groups 白底（之后按血量染色），Nameplates 黑底（死亡时贴中性灰）。subLevel 一律留默认 0：
+--- BarWeave 的发丝线也是 BACKGROUND/0 且创建在后，天然压在 lost 之上；传 1 反而把织纹整条盖住。
 --- @return the just-created "lost health" underlay texture
 function Widget:LostBarBG(bar, r, g, b, subLevel)
     local lost = bar:CreateTexture(nil, "BACKGROUND", nil, subLevel)
@@ -716,7 +716,7 @@ function Widget:BarWeave(bar, opts)
     local v1 = v0 + height / (mult * WEAVE_SIZE)
     weave:SetTexCoord(0, cols, v0, v1)
 
-    local r, g, b = Color:GetNeutral()
+    local r, g, b = Color:GetSurface("weave")
     local alpha = opts.alpha or 0.85
     weave:SetVertexColor(r, g, b, alpha)
 
@@ -1076,7 +1076,7 @@ function Widget:Refresh(frame, opts)
         Widget:RefreshPixelGlow(frame)
     elseif opts.kind == "bar" then
         if frame.bg then
-            local r, g, b = Color:GetNeutral()
+            local r, g, b = Color:GetSurface("lost")
             frame.bg:SetColorTexture(r, g, b, opts.bgAlpha or 0.25)
         end
         -- The woven ground follows the theme like the flat background does, and its texcoord
@@ -1087,8 +1087,8 @@ function Widget:Refresh(frame, opts)
     elseif opts.kind == "text" then
         Widget:ColorText(frame, opts.colorKey)
     elseif frame.SetBackdropColor then
-        local ar, ag, ab = Color:GetAmbient()
-        frame:SetBackdropColor(ar * 0.35, ag * 0.35, ab * 0.35, opts.bgAlpha or 0.85)
+        local pr, pg, pb = Color:GetSurface("panel")
+        frame:SetBackdropColor(pr, pg, pb, opts.bgAlpha or 0.85)
 
         local state = opts.borderState
         local kr, kg, kb, ka
@@ -1114,7 +1114,7 @@ function Widget:Refresh(frame, opts)
             local a = opts.bgAlpha or 0.85
             for _, key in ipairs({ "tl", "tr", "bl", "br" }) do
                 st.corner[key]:SetVertexColor(kr, kg, kb, ka)
-                st.fill[key]:SetVertexColor(ar * 0.35, ag * 0.35, ab * 0.35, a)
+                st.fill[key]:SetVertexColor(pr, pg, pb, a)
             end
             for _, key in ipairs({ "top", "bottom", "left", "right" }) do
                 st.edge[key]:SetVertexColor(kr, kg, kb, ka)

@@ -173,11 +173,13 @@ local function StyleButton(button, cfg)
             if type(gf.NameCap) == "function" then
                 button.nameCap = gf.NameCap(cfg)
             end
-            -- 对比度增强：血条/背景太接近时，加深底板让文字在上面读得清
+            -- 底板压到不透明：面板那一档（Color 的 L*10）本来就比血条暗，半透明会让背后的
+            -- 团队框体透上来把对比度吃掉。原来这里想传 bg = {0.06,...}，但 Widget:Theme 不认
+            -- 这个键（背景色只有阶梯一个来源），写了等于没写。
             if button.SetBackdrop then
                 local widget = Widget()
                 if widget then
-                    widget:Theme(button, { thickness = BORDER, bgAlpha = 1.0, bg = { 0.06, 0.06, 0.06 } })
+                    widget:Theme(button, { thickness = BORDER, bgAlpha = 1.0 })
                 end
             end
         end
@@ -190,8 +192,8 @@ local function StyleButton(button, cfg)
     button:SetSize(w, h)
     local widget = Widget()
     if widget and button.SetBackdrop then
-        -- 背景加黑：纯黑底 + 边框 1px，确保名字和血条在上面读得清
-        widget:Theme(button, { thickness = BORDER, bgAlpha = 1.0, bg = { 0.06, 0.06, 0.06 } })
+        -- 底板不透明，吃 Color 的面板档（L*10）：名字和血条都要在它上面读得清。
+        widget:Theme(button, { thickness = BORDER, bgAlpha = 1.0 })
     end
 
     local inner = w - BORDER * 2
