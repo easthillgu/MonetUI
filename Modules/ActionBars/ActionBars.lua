@@ -1003,6 +1003,32 @@ local function EnsureAdoptedIcon(btn)
     Mark(btn, "adoptedIcon", icon)
 end
 
+--- 暴雪在动作按钮上叠的**全部**美术层：把它们全压成 alpha 0（只压、不 Hide、不写字段）。
+--- 以前只压了 5 层，漏掉的正好是最容易看见的几张：
+---   * SlotArt      —— 槽位底纹（ui-hud-actionbar-iconframe-slot，铺满整格）
+---   * CheckedTexture —— 自动施法开启时按钮是"选中"态，这张 hover 图会盖在图标上
+---   * Highlight/Pushed/NewAction/SpellHighlight —— 悬停 / 按下 / 新技能 / 高亮
+--- 玩家 2026-10-30 报"裁切有了，但暴雪那层贴图还在"就是这几张。
+--- 暴雪自己的刷新有时会把 alpha 写回 1，所以收养按钮上有一次 2 秒的低频重压。
+local ADOPTED_ART = {
+    "NormalTexture", "PushedTexture", "HighlightTexture", "CheckedTexture",
+    "SlotBackground", "SlotArt", "Border", "Flash",
+    "NewActionTexture", "SpellHighlightTexture", "QuickKeybindHighlightTexture",
+}
+
+local function FadeAdoptedArt(btn)
+    if not btn then return end
+    for _, key in ipairs(ADOPTED_ART) do
+        local region = btn[key]
+        if region and type(region.SetAlpha) == "function" then
+            pcall(region.SetAlpha, region, 0)
+        end
+    end
+    if btn.AutoCastShine and type(btn.AutoCastShine.SetAlpha) == "function" then
+        pcall(btn.AutoCastShine.SetAlpha, btn.AutoCastShine, 0)
+    end
+end
+
 local function SkinAdoptedButton(btn)
     if not btn or Marked(btn, "adoptedSkinned") then return end
     Mark(btn, "adoptedSkinned", true)
@@ -1010,10 +1036,7 @@ local function SkinAdoptedButton(btn)
     local function fade(region)
         if region and type(region.SetAlpha) == "function" then pcall(region.SetAlpha, region, 0) end
     end
-    fade(btn.NormalTexture)
-    fade(btn.Border)
-    fade(btn.SlotBackground)
-    fade(btn.Flash)
+    FadeAdoptedArt(btn)
     fade(btn.AutoCastShine)
 
     -- 空槽底色：收养来的按钮图标是**铺满整格**的，暴雪自己的灰底（SlotBackground / NormalTexture）
@@ -1039,12 +1062,15 @@ local function SkinAdoptedButton(btn)
 
     -- 图标：内缩 + 裁切 + 摘遮罩（见 EnsureAdoptedIcon）。图标晚到时靠一次低频轮询重试。
     EnsureAdoptedIcon(btn)
-    if not Marked(btn, "adoptedIcon") and not Marked(btn, "iconWatch") then
-        Mark(btn, "iconWatch", true)
+    if not Marked(btn, "adoptedWatch") then
+        Mark(btn, "adoptedWatch", true)
+        -- 2 秒一次的低频维护：补图标（晚生）/ 补遮罩摘除、重压暴雪美术层
+        -- （暴雪自己的刷新偶尔会把 alpha 写回 1，尤其是勾选态与悬停层）。
+        -- 按钮隐藏时 PollWatch 不跑，所以收起宠物条时等于零开销，也就永不注销。
         Widget:PollWatch(btn, function(self)
             EnsureAdoptedIcon(self)
-            if Marked(self, "adoptedIcon") then Widget:Unwatch(self) end
-        end, 1)
+            FadeAdoptedArt(self)
+        end, 2)
     end
 
     -- 收养按钮（宠物/姿态）的热键与堆叠数：和自绘按钮同一套 —— Super Effective + 主题色

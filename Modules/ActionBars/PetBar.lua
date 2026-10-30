@@ -22,6 +22,12 @@ local Widget  = ns.Widget
 local Secrets = ns.Secrets
 local Media   = ns.Media
 
+-- 旁表标记的本地别名（和 ActionBars.lua 同一个口径）：PetBar 是从主文件搬出来的子文件，
+-- 这里**没有**继承主文件的 local Mark/Marked —— 漏了这行调用点就会 `attempt to call a nil value`
+-- （2026-10-30 实机：PetBar.lua:83，动作条整模块初始化失败）。
+local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
+local Marked = function(o, k) return ns:Marked(o, k) end
+
 -- 宠物条按钮的**高度**是宽度的 75%（玩家 2026-10-30 要求，让这条比自绘动作条矮一档）。
 -- 图标同时按同一比例做竖向裁切（取样区变扁），所以画面不会被压扁 —— 见
 -- Modules/ActionBars/ActionBars.lua 的 EnsureAdoptedIcon 与 Mark(btn, "iconCropV")。
@@ -185,6 +191,26 @@ local function PetGlowSide(button, entry)
     return side
 end
 
+--- 自动施法开启时的**自绘**提示（2026-10-30 玩家要求替换暴雪那套开关效果）。
+--- 暴雪的勾选态贴图（CheckedTexture，hover 图）已经被 FadeAdoptedArt 压成 alpha 0，
+--- 所以必须给它一个替代信号：收养按钮的边框换成主题的 highlight 色。
+--- 关掉时把 borderState 清掉，边框回到主题的默认边色（主题切换也会跟着走）。
+local function SetAutoCastLook(button, enabled)
+    if not button then return end
+    -- 注意用本文件的 local 别名：`ns.Marked(x, k)` 是**冒号方法**，点号调用会把参数错位
+    -- （self=x、object=k），永远返回 nil。
+    local border = Marked(button, "adoptedBorder")
+    if not border then return end
+    if Marked(button, "autoCastLook") == enabled then return end
+    Mark(button, "autoCastLook", enabled)
+    if enabled then
+        local r, g, b, a = ns.Color:GetHighlight()
+        Widget:SetBorderState(border, r, g, b, a or 1)
+    else
+        Widget:SetBorderState(border, nil)
+    end
+end
+
 --- 开着自动施法的按钮上跑一圈像素环，其余的干净。
 -- 自绘动作条开着 → 环跟着跑；关着 → 宠物条还是暴雪自己的样子，环改成静态的一圈。
 local function SyncPetGlow(def, entry)
@@ -196,7 +222,10 @@ local function SyncPetGlow(def, entry)
 
         SuppressAutoCastShine(button)
 
-        if PetAutoCastEnabled(index) then
+        local enabled = PetAutoCastEnabled(index)
+        SetAutoCastLook(button, enabled)
+
+        if enabled then
             Widget:PixelGlow(button, {
                 side   = PetGlowSide(button, entry),
                 scale  = scale,
@@ -237,6 +266,7 @@ local function TeardownPetGlow()
         local button = _G[def.pattern:format(index)]
         if not button then break end
         Widget:StopPixelGlow(button)
+        SetAutoCastLook(button, false)
         RestoreAutoCastShine(button)
     end
 end
