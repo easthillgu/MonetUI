@@ -176,7 +176,23 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
 
 ## 代码风格
 
-- 皮肤包用 `M:Panel(key, { ... })` 注册；窗口统一 `M:SkinWindow`。
+- 皮肤包用 `M:Panel(key, { ... })` 注册；**美化一个对象只有一个入口 `M:Dress(spec, opts)`**
+  （2026-10-30 收口）：它内部按固定顺序做"剥原美术 → 挂底衬 → 窗口件 → 深扫 → 可见期补扫"。
+  以前这五行在每个文件里手抄一遍、顺序还各写各的（先挂底衬再 Strip 的把自己的底衬剥掉了）。
+  只处理单个控件用 `opts.as = "tab|button|scroll|slider|dropdown|editbox|fade"`，窗口件走 `window = true`。
+- **确认对象存在只有一个漏斗 `Skin:Need(path)`**（点路径也认，如 `"CharacterFrame.CloseButton"`）：
+  命中/落空都记进账本（`Skin.With(scope, fn)` 定作用域），`/mui skins diagnose` 读的就是这本账。
+  不要再自己写 `_G[x]` 或 `ns.ResolvePath`（已删）——名字写错必须是账本里的一行 ✗，不是静默跳过。
+  非皮肤模块的探针同样要过 Need（Minimap / InfoBar / Nameplates 都已并进来）。
+- **收暴雪 HUD 只有一个原语 `Widget:Mute` / `Widget:Unmute`**（alpha 0 + 子树关鼠标，绝不 `Hide`）：
+  `opts = { depth = 0|2|math.huge, alpha, combat = "write" }`。别在模块里再抄一份静音循环。
+  子树鼠标靠 `muiMouseHeld`（处理过）+ `muiMousePrior`（本来开着）**两个**旁表键；把它们合成一个
+  并把"本来没开"存成 `false`，会让该节点之后被暴雪重新打开鼠标时再也关不掉（本仓实机症状"追踪框还能点"）。
+- `frames` 名单由 `node tools/check-frame-list.js` 对着代码核（171 个名字、`ALLOW_DYNAMIC` 只剩 7 个）：
+  **名单里写了名字而代码没有取用路径 = 缺陷**，不许靠往 `ALLOW_DYNAMIC` 里加名字过关。
+- OnShow 重涂一律走 `M:HookShow`（引擎带幂等守卫），调用处勿自行 `HookScript("OnShow")`。
+  回调必须是**稳定引用**（模块级函数）；在 Apply 里现造闭包每触发一次就多挂一条轮询。
+  只是"给框的直接子控件补扫"就用 `M:SweepDeep`，它自带去重。
 - **加载清单是 xml，不直接在 toc 里列 `.lua`**（2026-10-26 起）：`MonetUI.toc` 只列各组 xml
   （`Libs/Libs.xml`、`Utils/Utils.xml`、`Config/Config.xml`、`Modules/<模块>/<模块>.xml`）与单文件模块的 `.lua`。
   **新增 `.lua` 必须挂进对应 xml 的 `<Script file>`，并放在正确的先后位置** —— 漏挂不会报错，

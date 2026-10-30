@@ -1348,11 +1348,194 @@ git checkout square-blp
 
 ---
 
+## 8.7 2026-10-30 姓名板：机密值前置审查（`Modules/Nameplates/Nameplates.lua`）
+
+按 `.opencode/skills/wow-secret-value-guard-audit` 跑一轮（定位器：`scan-secret-guards.cjs Modules/Nameplates`），
+人工复核后改了 6 处。**这一轮没有实机证据**（游戏没开，`wuxian check` 需要游戏目录），
+全是静态判定；实机回归请连着 8.6.2 一起做。
+
+| # | 位置 | 原写法（会被拦） | 现在 |
+|---|---|---|---|
+| 1 | `UpdateHealth` 血量 | `hp ~= nil and hpMax ~= nil` | 先 `IsSecret` 判，机密走 `SetBar` 透传 |
+| 2 | `UpdateHealth` 连接态 | `if connected == nil then` | `not IsSecret(connected) and connected == nil` |
+| 3 | `UpdateCast` 施法条上下限 | `startMS or 0` / `endMS or 1` | 零值兜底只对非机密做，机密原样给 widget |
+| 4 | `CastTick` | `if not plate.castEndMS then`（每帧真值测试机密） | 改存"有条在走"的普通布尔 `plate.castActive` |
+| 5 | `UpdateText` 等级段宽度 | `if levelW > 0` | 加 `type` + `IsSecret` 两道（`GetStringWidth` 会变机密） |
+| 6 | `Added` / `Removed` 令牌入口 | 直接 `plates[unit]` | `type(unit) ~= "string" or IsSecret(unit)` 前置 |
+| 7 | `ApplyPlateSize` 保存原尺寸 | `savedPlateSize = { w, h }` | 机密不存（否则 Restore 只能原样传一串读不出的值） |
+
+要点：**1 和 3 是本轮 ×8 的同族形态** —— 值本身是机密（pcall 成功、不是 nil），
+`~= nil` / `or` 这类看起来"无害"的兜底判断就是被拦的那一句。4 是隐匿型：`castEndMS` 存的是
+**原始 endMS**，机密时 `CastTick` 每帧真值测试一次，量级大且只进日志、不弹窗。
+
+定位器残留（用 `~/.qoder-cn/skills/` 那份复跑，快照做生产者过滤器后全仓 80 条）：姓名板只剩 1 条
+`:74` `OnOff(value)` ← 值来自 `GetCVar`（CVar 不机密），**不必改代码**。
+（早先装的旧版脚本还会多报 `opaque` / `enabled and true or false` 这类自家人；旧版没有"名字在不在快照里"
+这层过滤，所以 208 条噪音 —— 见 `docs/CODEX-SETUP.md` 6 节的同步规矩。）
+
+闸门：`luac -p` 0、`api-audit` no hard finding、`audit-taint` 0/0/0、`audit-locals` 全过；
+`check-frame-list` 仍报 21 个（`skins/System|Trade|WorldMap` 的帧名）——**改动前就是 21 个**，
+属于 8.6 那批皮肤 WIP，与本次无关。
+
+### 8.7.1 同一轮的另外三处（全仓扫描的 SUSPECT 归零）
+
+- `Modules/Tooltip.lua` Alt 法术 ID：`if ok and spellID ~= nil` 写在 `Secrets.Number(spellID)` **之前**
+  —— 受限时 `GetSpell` 返回的是机密数字，这句比较就是被拦调用（pcall 的 `ok` 是普通值，被 pcall 的
+  返回值不是）。改成 `local n = ok and Secrets.Number(spellID) or nil`。
+- `Modules/InfoBar/Blocks.lua` 已关注货币：`not info.isHeader and info.isShowInBackpack` 是两次
+  机密布尔真值测试（`UNKNOWN()` 一族），改走 `Secrets.Bool`；`name` 的 `IsSecret` 保持原位。
+- `Modules/InfoBar/XP.lua` 暴雪经验条低频回压：`alpha > 0.01`（`GetAlpha` 会返回机密数）改成
+  `keep = ok and not IsSecret(alpha) and alpha ~= nil and alpha <= 0.01`，顺序即语义；
+  同一段里的 `IsMouseEnabled` 结果也过 `Secrets.Bool`（帧的鼠标状态读回来同样可能机密）。
+
+> 判例补充：本仓 `Utils/Tooltip` 一侧已有 `Plain()` 兜底（`nil` 与机密都返回 nil），所以
+> 它下游的 `name ~= ""` / `if classFile` 是**安全的**，扫描器报出来的是误报（它看不见 `Plain`）。
+> 反过来说：**凡是把"取值"和"判空"写在同一句里的地方，都要先想一遍这句是否在机密值上执行。**
+
+## 8.8 2026-10-30 美化层功能收口：一个确认漏斗 + 一个上身入口 + 一个静音原语
+
+这一轮不加新皮肤，把"同一件事在七八个文件里各写一遍、还各写歪"的三处并成一份。
+
+### 8.8.1 对象确认：`Skin:Need` + 一本账（`Utils/Skin.lua`）
+
+- `Skin.targets[scope][path] = { hits, misses }` 是全仓**唯一**的"这个名字存不存在"的账；
+  `Skin.With(scope, fn)` 把 fn 里的 Need 记到 scope 名下；`Skin:Need(path)` 过 `ns.ResolveObject`。
+- `Core.lua` 里那份只回 bool 的 `ns.ResolvePath` 删了（没有调用点，留着就会有人继续用它绕开账本）。
+- 之前只查名字不记账的地方全部改为过 Need：`M:Apply` 的名单、`Skins` 各面板的 `Skin:Need` 点路径、
+  以及三个**非皮肤模块**的诊断（Minimap / InfoBar / Nameplates 的探针现在也进同一本账，
+  用 `Skin.With("minimap", ...)` 之类的作用域包住循环）。
+- `/mui skins diagnose` 只有一个读法：优先读真账本（`Skin:Report()`），只从没跑过的面板才退回声明名单。
+
+### 8.8.2 上身方式：`M:Dress(spec, opts)`（`Modules/Skins/Skins.lua`）
+
+以前每个皮肤文件手抄那五行"剥原美术 → 挂底衬 → 窗口件 → 深扫 → 显示时补扫"，**顺序还各写各的**：
+先挂底衬再 Strip 的把自己的底衬剥掉了，忘补扫的 ScrollBox 把手永远是暴雪 atlas。现在：
+
+- `M:Dress` 是本仓唯一的"美化一个对象"入口；`opts` = `window` / `panel` / `strip` / `noStrip` /
+  `noPanel` / `deep` / `lazy` / `control` / `as` / `tabs|buttons|scrolls`。
+- `M:SweepDeep` 负责懒建内容：先扫一遍直接子控件，再按**可见性**用 `Widget:PollWatch` 补扫
+  （标签页/列表的行是在帧已经显示着的时候建出来的，OnShow 那一刻它们还不存在）。
+  登记用 `Mark(frame, "deepSweep")` 去重 —— `M:Apply` 会被三个事件反复触发，不去重就是每触发一次多一条轮询。
+- `opts.as` 走 `DRESSERS` 表（tab / button / scroll / slider / dropdown / editbox / fade），
+  只处理单个控件、不碰窗口装饰。
+
+### 8.8.3 藏暴雪 HUD：`Widget:Mute` / `Widget:Unmute`（`Utils/Widget.lua`）
+
+五份手抄（BuffFrame、QuestTracker、Tooltip、宠物条壳、姿态条壳、暴雪条 Park）并成一份。
+三条纪律不变：`SetAlpha(0)` + 子树 `EnableMouse(false)`，**绝不 Hide**（会和暴雪的 Show 拉锯成闪烁）、
+不写字段 / 不卸事件 / 不换父。`opts = { depth, alpha, combat }`：
+
+- `depth = 0` 只根框（光环按钮要留鼠标）、`2` 默认、`math.huge` 整棵树（追踪框的任务块按钮池）。
+- `combat` 默认**跳过**（返回 false）；暴雪动作条的 Park / Restore 那两条传 `combat = "write"`。
+- 战斗判定从 `_G.InCombatLockdown()` 换成 `ns:InCombat()` —— regen 事件派发当拍前者还是旧值（Core 的注释）。
+- 子树鼠标用**两个**旁表键：`muiMouseHeld`（我处理过）+ `muiMousePrior`（它本来就开着）。
+  合成一个键并把"本来没开"存成 `false` 是本轮 review 抓出来的缺陷：那次 `false` 既会被下一轮的
+  `== nil` 判成"已处理"、又不会被还原分支清掉，于是暴雪复用池化按钮、把鼠标重新打开之后**再也没人关回去**
+  （实机症状就是当年那条"原始目标追踪还能点击"）。
+- 顺带修掉两个原来就有的漏：`ActionBars.Blizzard.Restore` 还原时不分子树鼠标（一次搬家后永远关着）、
+  `Tooltip` 的状态栏重新显示后鼠标仍是关的。
+- `Widget:IsMuted(frame)` 给"被战斗挡住、要等脱战"的调用方判断还有没有活干：
+  QuestTracker 关掉模块时 1 秒 ticker 已经停了，所以 `M:SetEnabled` 走 `ns:AfterCombat`，
+  靠 `SuppressBlizzard` 返回 false 把它留在队列里（否则战斗里关模块，暴雪那块会一直隐形挂着）。
+
+### 8.8.4 闸门：`tools/check-frame-list.js` 重写（这一轮的证明层）
+
+它核对"面板 `frames` 名单 ↔ 代码里真的有取用"。v1 读不懂新的名单形状（const 表 + 点路径），
+v2 认三种：直接取用（`Skin:Need("A.B")`）、const 表被真实代码引用、窗口装饰的 `CloseButton` 隐式回退。
+`ALLOW_DYNAMIC`（"我宣布它运行期拼出来，别查了"）从 17 个减到 **7 个** —— 只剩 `StaticPopup1..4Button*`
+和两个 LFG 成员名；其余全部由 `isReached()` 真查出来，不许停在这里当免检牌。
+
+- 修 v2 自己的两个坑：花括号扫描遇到 `} })` 时 `depth` 会穿到负数，`=== 0` 永远不成立 →
+  frames 范围吞掉整文件（52 个假孤儿）；注释剥离按多行正则会吃掉引号之间的中文注释 →
+  必须**逐行**先去注释、再把字符串置空，只用于"这是不是一次真取用"的判定。
+- 它抓到的是**真漂移**，不是工具噪音：内存里写的 close 按钮名、一个早已不存在的 hook 名、
+  `ScrollFrame` 裸名 vs 点路径不一致、一个只有名单没有代码的深扫名，外加 `skins/Trade.lua`
+  里遗留的一整块重复面板（已删）。
+- 单个名字为什么算"取用到了"：`node tools/check-frame-list.js <Name>` 逐规则打证据。
+
+### 8.8.5 闸门结果（本机，无游戏）
+
+`luac -p` 全过（`tools/api-audit-selftest/Broken.lua` 是故意的语法错误样本，扫描要排除它）；
+`node tools/check-frame-list.js` → 171 个名字 / 7 个 ALLOW_DYNAMIC / 名单与代码一致（8.7 里那句
+"仍报 21 个"作废）；`node tools/api-audit.js` → `result: no hard finding`（INFO 是原有的：
+`ResolveMode`、`CanExitVehicle`、`EnumerateFrames`）。
+
+**实机没做**：`/mui skins diagnose` 要看的是账本里 `misses` 是否为 0（尤其 8.8.2 那批点路径），
+以及追踪框/宠物条/姿态条/光环压制在战斗内外的表现。见第 9 节 1、2 条。
+
+## 8.9 2026-10-30 收尾：距离变暗事件化 + 拦截账本 + 探针
+
+### 8.9.1 动作条「超出距离变暗」改吃事件载荷
+
+实机 ×8 `ADDON_ACTION_BLOCKED UNKNOWN()` 的嫌疑点落在 `IsOutOfRange`：`raw == nil` 写在
+`issecretvalue` **之前** —— 受限环境里这一句本身就是"对机密值做比较"。
+
+- 判定顺序改成 `IsSecret` 最前，机密一律**保留上次判定**（不猜）。
+- 更根本的改法：`ACTION_RANGE_CHECK_UPDATE` 的载荷 `(slot, isInRange, checksRange)` 就是答案，
+  直接结算这一格，**不再回头读** `C_ActionBar.IsActionInRange`（战斗里读回来仍是机密值，
+  等于战斗中永不更新）。一次换目标能推几十条，所以攒 **0.1 秒**一起结算
+  （`FlushRanges` / `QueueRanges` / `QueueRangeFor`，整条重算与逐槽分开记账）。
+- `EnableActionRangeCheck` 一开就是整场逐帧算一格，所以只给**真正画出来的槽**开
+  （`EnsureRangeCheck`），模块停用整批归还（`ReleaseRangeChecks`）。
+- 没有目标时不动：这时敌对技能普遍报"不在范围"，一律变暗会把整条压灰（暴雪自己也不这样）。
+
+### 8.9.2 `/mui blocks` —— 机密布尔被拦的归因账本
+
+本客户端对 `ADDON_ACTION_BLOCKED` **不写 taint.log**，所以这一族只认我们自己记的栈：
+`Secrets.Bool` 的失败路径存 `debugstack`，`/mui blocks` 按栈首行去重打前 8 个调用点与次数，
+`/mui blocks full` 打最早一条的完整栈。**只覆盖 `Secrets.Bool`** —— 引擎容器 / 半套压制那类
+仍然要靠关模块二分。
+
+### 8.9.3 探针：`/mui actionbars probe pet|art|overlay|range [off]`
+
+| 子命令 | 打印什么 |
+|---|---|
+| `pet` | `GetPetActionInfo` 逐格 7 个返回值（哪一位变了就说明它是那个状态；自动施法曾经数错过） |
+| `art` | 按钮上 18 个美术字段的存在性 + `GetRegions()` 的**真实名字**（字段名与纹理名不一定同名） |
+| `overlay` | `AutoCastOverlay` 的 `Shine` / `Corners` / `Mask` + `Shine.Anim` / alpha（蚂蚁、角标、像素环靠它定） |
+| `range` | 临时挂 `ACTION_RANGE_CHECK_UPDATE`，打印三个载荷在战斗内外是否机密 |
+
+实机结论一条：**本客户端没有 `button.AutoCastable`**（`probe art` 确认），"可自动施法"角标
+一直挂在 `AutoCastOverlay.Corners` 上 —— `PetBar.StyleAutoCastCorner` 不再去找那一位。
+
+### 8.9.4 顺手三处
+
+- `Groups.lua`：小队框的 incoming / absorb 条用的是未注册的 `"barfill"` 键，实际没材质；
+  改成 `"monet_barfill"`（8.6.1 换材质时漏改）。
+- `tools/sync-check.js`：文本类（lua/xml/toc/md/txt/js）先归一 `\r\n → \n` 再比 ——
+  本仓混用 CRLF/LF，逐字节比会把"刚部署完"的文件报成 STALE（实机误报过 `UnitFrames.xml`）。
+  toc 的 `## Interface` 仍按部署改写排除。
+- `PetBar.lua` 注释按探针结论订正（事件不能卸的原因照旧）。
+
+### 8.9.5 本机实机状态（2026-10-30 首次跑 8.8 的收口）
+
+| 项 | 值 |
+|---|---|
+| 模块 | `17/17` 已加载、全部 enabled |
+| 日志 | 启动至今 **0 ERR / 0 BLOCKED**（只有 INFO/OUT/RUN） |
+| `Secrets.BoolBlocks()` | **0 条**（`/mui blocks` 账本为空） |
+| 名字账本 `Skin.targets` | 183 命中 / **148 缺失** |
+
+那 148 条**不能直接当缺陷读**，得拆开看（本机实测的分法）：
+
+- **127 条 = 根对象根本不存在**（`TrainerFrame` / `InspectFrame` / `WarbandBankFrame` …）：
+  这些是 LoD 面板或本会话**没打开过**的窗口，`Skin:Need` 在 Apply 时就查了，自然落空。
+- **15 条 = 根在、子路径写错**（真缺陷）：`LootFrame.LootFrameScrollFrame`、
+  `QuestMapFrame.QuestLog`、`WorldMapFrame.{ZoomInButton,ZoomOutButton,CloseButton,TitleText,
+  MaximizeMinimizeFrame.*}`；另有 `LootFramePrevPageButton` / `LootFrameScrollFrame` /
+  `LootFrameNextPageButton` 被当成**全局名**查（本客户端它们是 `LootFrame` 的子件）。
+
+**所以 diagnose 的正确读法是**：先把没开过的面板逐个打开（世界地图 / 交易 / 拾取 / 训练师 /
+银行 / 角色信息），再跑 `/mui skins diagnose` —— 那时还报缺失的才是名字写错。
+这条已经写进第 9 节第 1 项。
+
 ## 9. 建议的下一步（按价值排序）
 
 1. **实机回归 P0/P1 的改动面**（`docs/HANDOFF.md` 8.6.2 + `TODO.md` 的 9 条清单）：
    动作条堆叠数/三个开关、宠物条像素环、小地图三种鼠标操作、经验条不闪、背包位置、
    姓名板红边与细条剖面、首领框点击、按钮悬停三态、`/mui reset confirm`。
+   顺带按 8.9.5 的读法把名字账本清一遍：**先把没打开过的面板都开一次**（世界地图 / 交易 /
+   拾取 / 训练师 / 银行 / 角色信息）再跑 `/mui skins diagnose`，修掉那 15 条子路径漂移。
 2. **回归一遍编辑模式**（改动最密集的地方），确认 `oldR` 与 BLOCKED 都不再出现。
 3. **P5 剩余文件拆分**：Auras/CastBar 试水已通过，按同一模式拆
    `UnitFrames` 的 Blizzard/ClassPower、`ActionBars` 的 Secure/DragDrop/PetBar/暴雪条处置

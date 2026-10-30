@@ -17,6 +17,12 @@ description: 审查魔兽世界插件 Lua 代码中因"秘密值(Secret Values)"
 - 单位框体 / 队伍团队框架 / Buff·Debuff / 冷却 / 姓名板 / 动作条模块的适配审查。
 - commit 前自查：`node tools/audit-taint.js`（启发式扫描，BLOCKER 清零才算过闸）。
 
+> 分工：**只管"机密值未经守卫就被比较 / 真值测试 / 当表键 / 送进 concat-format"这一族**
+> （含 `ADDON_ACTION_BLOCKED <插件> UNKNOWN()` 归因、`invalid value (secret)`、`taint.log` 为什么是空的）
+> 时，走专精 skill **`wow-secret-value-guard-audit`**（自带定位器
+> `.opencode/skills/wow-secret-value-guard-audit/scripts/scan-secret-guards.cjs`）；
+> 本 skill 负责污染/受保护对象/引擎生产件那一家族。
+
 ## 绝对红线（触发即拒，先说明原因）
 
 1. **只检测与降级，绝不绕过。** 不提供反推秘密值（数学还原血量/CD/剩余时间）、私有锚点探测、

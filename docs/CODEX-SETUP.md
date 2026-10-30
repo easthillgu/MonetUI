@@ -116,3 +116,15 @@ startup_timeout_sec = 60
 - **每次开新坑**：`TODO.md` 加"未决"，做完挪到"已决"并写清验证方式。
 - `docs/`、`tools/`、`*.md` 都被 `.gitignore` 排除（作者有意：git 只跟踪插件源码），
   所以这些文档**不会进版本库**，换机/换平台要**整目录拷贝**（含 `.git`）。
+- **技能的权威副本在 `~/.qoder-cn/skills/<名字>/`（CLI 实际加载的那份）**，仓库里的
+  `.opencode/skills/<名字>/` 只是本机镜像、而且被 `.gitignore:33` 排除 —— 换机不会跟着走。
+  同步时**三个文件一起拷**，别只拷脚本（SKILL.md 与 references 每次都会跟着改，只拷 cjs 会出现
+  "文档写 80 条 / 脚本报 208 条"这种对不上的情况，2026-10-30 就踩过一次）：
+
+  ```
+  cp -f ~/.qoder-cn/skills/wow-secret-value-guard-audit/SKILL.md                     .opencode/skills/wow-secret-value-guard-audit/SKILL.md
+  cp -f ~/.qoder-cn/skills/wow-secret-value-guard-audit/references/guard-and-attribution.md .opencode/skills/wow-secret-value-guard-audit/references/
+  cp -f ~/.qoder-cn/skills/wow-secret-value-guard-audit/scripts/scan-secret-guards.cjs     .opencode/skills/wow-secret-value-guard-audit/scripts/
+  ```
+  拷完用 `Get-FileHash` 逐个核对三份一致，再跑一次全仓扫描（基线：50 个 .lua、
+  `NEEDS-LOOK 80 / SUSPECT 0`；数字明显变大就说明装的是旧版）。
