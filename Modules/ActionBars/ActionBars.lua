@@ -589,6 +589,14 @@ local function UpdateButtonContent(button, slot)
     PaintCooldown(button, slot)
 
     -- 这一格现在画的是哪个槽：距离检测靠它（**不读**安全属性 action，那个可能机密）。
+    -- 槽位换了就是内容换了，先清掉旧的"超距变暗"（回白）：不清的话翻页 / 拖放之后这一格
+    -- 还挂着上一个法术的灰，而战斗里重读距离又是机密值（只能保留上次），等于要等脱战才纠正。
+    if Marked(button, "slot") ~= slot then
+        Mark(button, "rangeDim", nil)
+        if button.icon and button.icon.SetVertexColor then
+            pcall(button.icon.SetVertexColor, button.icon, 1, 1, 1)
+        end
+    end
     Mark(button, "slot", slot)
 end
 
@@ -811,24 +819,38 @@ end
 -- ---------------------------------------------------------------------------
 -- 目标距离检测：超出施法距离的按钮变暗（2026-10-30 玩家要求）
 --
--- 判定用 C_ActionBar.IsActionInRange(slot)。它在受限环境会返回**机密布尔**，
--- 所以每次先过 Secrets.IsSecret：机密就保留上一次的判定（AGENTS 的规矩，不猜）。
--- nil = 这个动作本来就不检查距离（buff / 无目标技能）→ 按"在范围内"处理。
+-- 答案优先用 ACTION_RANGE_CHECK_UPDATE 的**载荷**（slot, isInRange, checksRange ——
+-- 本地快照 docs/api 里这条事件就带这三个参数）：受限环境里 C_ActionBar.IsActionInRange
+-- 回给我们的是机密布尔，只能"保留上次"，客户端都把结果推到门口了再不接，这一层等于
+-- 在战斗里从不生效。载荷也是机密 → 同样保留上次（不猜）。
+-- checksRange 为假 = 这个动作本来就不检查距离（buff / 无目标技能）→ 按"在范围内"处理。
 -- 槽位来自我们自己画的 slot（`Marked(button,"slot")`），**不读**安全属性 action。
 -- 收养来的宠物/姿态按钮不参与：暴雪自己的按钮本来就会做距离着色。
 -- ---------------------------------------------------------------------------
 local RANGE_DIM = 0.45        -- 超出距离时图标的顶点色（灰色压暗，不上色相）
 
+-- EnableActionRangeCheck 一开就是整场，客户端每帧多算一格，所以两条纪律：
+--   * 只给**我们真正画出来的槽**开（EnsureRangeCheck 只在遍历到已登记的 slot 时调）；
+--   * 模块停用时整批归还（ReleaseRangeChecks，由 SetEnabled(false) 调）。
 local rangeCheckEnabled = {}
 
+local function SetClientRangeCheck(slot, enable)
+    local api = _G.C_ActionBar
+    if not api or type(api.EnableActionRangeCheck) ~= "function" then return end
+    pcall(api.EnableActionRangeCheck, slot, enable)
+end
+
 --- 让客户端把这一格的进出距离推给我们（ACTION_RANGE_CHECK_UPDATE）。
---- 每个槽只在第一次用到时调一次（最多 96 次），之后不再打扰客户端。
 local function EnsureRangeCheck(slot)
     if rangeCheckEnabled[slot] then return end
     rangeCheckEnabled[slot] = true
-    local api = _G.C_ActionBar
-    if api and type(api.EnableActionRangeCheck) == "function" then
-        pcall(api.EnableActionRangeCheck, slot, true)
+    SetClientRangeCheck(slot, true)
+end
+
+local function ReleaseRangeChecks()
+    for slot in pairs(rangeCheckEnabled) do
+        rangeCheckEnabled[slot] = nil
+        SetClientRangeCheck(slot, false)
     end
 end
 
@@ -846,27 +868,27 @@ local function ApplyRangeTint(button, outOfRange)
 end
 
 --- 读一次距离：true = 超出距离；nil = 读不到（机密 / 没有 API），调用方保留上次。
+--- **IsSecret 必须排在任何比较之前**（AGENTS：机密值一律不比较）：`raw == nil` 写在
+--- `issecretvalue` 前面，受限环境里这一句本身就是一次被拦的比较 →
+--- `ADDON_ACTION_BLOCKED MonetUI UNKNOWN()`（2026-10-30 实机 ×8 的嫌疑点）。
 local function IsOutOfRange(slot)
     local api = _G.C_ActionBar
     if not api or type(api.IsActionInRange) ~= "function" then return nil end
     local ok, raw = pcall(api.IsActionInRange, slot)
     if not ok then return nil end
-    if raw == nil then return false end                 -- 不检查距离
     if Secrets.IsSecret(raw) then return nil end        -- 机密：保留上次
+    if raw == nil then return false end                 -- 不检查距离
     if raw == false or raw == 0 then return true end
     return false
 end
 
---- 只重算一个槽（同槽位可能出现在多条条上：各条页号不同）。
-local function RefreshRangeFor(slot)
-    if type(slot) ~= "number" then return end
-    EnsureRangeCheck(slot)
+--- 把一个判定落到所有画上这个槽的按钮（同槽位可能出现在多条条上：各条页号不同）。
+local function ApplyRangeToSlot(slot, outOfRange)
     for _, bar in pairs(bars) do
         if not IsAdopted(bar) then
             for _, button in ipairs(bar.buttons) do
                 if Marked(button, "slot") == slot then
-                    local out = IsOutOfRange(slot)
-                    if out ~= nil then ApplyRangeTint(button, out) end
+                    ApplyRangeTint(button, outOfRange)
                 end
             end
         end
@@ -901,25 +923,47 @@ local function RefreshRanges()
     end
 end
 
--- 距离事件会成串到达（一次切换目标能触发几十条），0.1 秒合并一次。
+-- 一次换目标能推几十条事件，所以都攒到 0.1 秒后一起结算：逐槽的判定记在 rangeSlots，
+-- 需要整条重算的置 rangeAll（它本来就会把每一格重新读一遍，逐槽的可以作废）。
 local rangeQueued = false
-local function QueueRanges()
-    if rangeQueued then return end
-    rangeQueued = true
-    if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
-        C_Timer.After(0.1, function()
-            rangeQueued = false
-            RefreshRanges()
-        end)
-    else
-        rangeQueued = false
+local rangeAll = false
+local rangeSlots = {}
+
+local function FlushRanges()
+    rangeQueued = false
+    local all, slots = rangeAll, rangeSlots
+    rangeAll, rangeSlots = false, {}
+    if all then
         RefreshRanges()
+        return
+    end
+    for slot, out in pairs(slots) do
+        ApplyRangeToSlot(slot, out)
     end
 end
 
-M.RefreshRanges = RefreshRanges
-M.RefreshRangeFor = RefreshRangeFor
-M.QueueRanges = QueueRanges
+local function ScheduleRanges()
+    if rangeQueued then return end
+    rangeQueued = true
+    if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+        C_Timer.After(0.1, FlushRanges)
+    else
+        FlushRanges()
+    end
+end
+
+--- 整条重算：目标变化 / 可用性变化 / 槽位内容变化 / 换区域时用。
+local function QueueRanges()
+    rangeAll = true
+    ScheduleRanges()
+end
+
+--- 单槽更新：判定直接用事件载荷，不再回头读 API（读了在受限环境也是机密值）。
+local function QueueRangeFor(slot, outOfRange)
+    if rangeAll then return end
+    rangeSlots[slot] = outOfRange
+    ScheduleRanges()
+end
 
 -- 页号是**客户端**写的：状态驱动每 0.2 秒才结算一次，然后 _onstate-page 片段把
 -- 新页号写进条自己的 "actionpage" 属性。我们的事件（翻页 / 槽位变化）发生在
@@ -1014,6 +1058,10 @@ end
 ---   * Highlight/Pushed/NewAction/SpellHighlight —— 悬停 / 按下 / 新技能 / 高亮
 --- 玩家 2026-10-30 报"裁切有了，但暴雪那层贴图还在"就是这几张。
 --- 暴雪自己的刷新有时会把 alpha 写回 1，所以收养按钮上有一次 2 秒的低频重压。
+--- 名单里的每一张都在本客户端实机存在（`/mui actionbars probe art`）。
+--- **不在这里**的两个名字：`AutoCastShine` / `AutoCastable` 本客户端根本没有（探针实机确认），
+--- 自动施法的美术全在 `AutoCastOverlay` 的子件里。整块 overlay 不能压 —— 它的 `Corners`
+--- 是"这个技能可以自动施法"的角标，要留着；旋转蚂蚁由 PetBar 的 SuppressAutoCastShine 单压。
 local ADOPTED_ART = {
     "NormalTexture", "PushedTexture", "HighlightTexture", "CheckedTexture",
     "SlotBackground", "SlotArt", "Border", "Flash",
@@ -1022,14 +1070,14 @@ local ADOPTED_ART = {
 
 local function FadeAdoptedArt(btn)
     if not btn then return end
+    -- 我们认作图标的那张贴图不能压：EnsureAdoptedIcon 的第三级兜底就是 GetNormalTexture()，
+    -- 压了它等于把刚裁好的图标抹没（宠物图标整格消失）。
+    local iconRegion = Marked(btn, "adoptedIcon")
     for _, key in ipairs(ADOPTED_ART) do
         local region = btn[key]
-        if region and type(region.SetAlpha) == "function" then
+        if region and region ~= iconRegion and type(region.SetAlpha) == "function" then
             pcall(region.SetAlpha, region, 0)
         end
-    end
-    if btn.AutoCastShine and type(btn.AutoCastShine.SetAlpha) == "function" then
-        pcall(btn.AutoCastShine.SetAlpha, btn.AutoCastShine, 0)
     end
 end
 
@@ -1037,11 +1085,10 @@ local function SkinAdoptedButton(btn)
     if not btn or Marked(btn, "adoptedSkinned") then return end
     Mark(btn, "adoptedSkinned", true)
 
-    local function fade(region)
-        if region and type(region.SetAlpha) == "function" then pcall(region.SetAlpha, region, 0) end
-    end
+    -- 先认图标、再压美术层：FadeAdoptedArt 要靠 adoptedIcon 这个标记避开"我们认作图标"
+    -- 的那张贴图（GetNormalTexture 兜底路径），顺序反过来就会先把图标压成 alpha 0。
+    EnsureAdoptedIcon(btn)
     FadeAdoptedArt(btn)
-    fade(btn.AutoCastShine)
 
     -- 空槽底色：收养来的按钮图标是**铺满整格**的，暴雪自己的灰底（SlotBackground / NormalTexture）
     -- 又被上面几行关掉了 —— 于是没有动作的槽位（宠物条 8..10 格）整格透明，实机就是玩家说的
@@ -1063,9 +1110,6 @@ local function SkinAdoptedButton(btn)
     border:EnableMouse(false)
     Widget:Theme(border, { thickness = 1, bgAlpha = 0 })
     Mark(btn, "adoptedBorder", border)
-
-    -- 图标：内缩 + 裁切 + 摘遮罩（见 EnsureAdoptedIcon）。图标晚到时靠一次低频轮询重试。
-    EnsureAdoptedIcon(btn)
 
     -- 「当前生效的宠物动作」的金色蒙版（照 Andromeda：checked 用 (1,0.8,0,0.35) 平涂）。
     -- 我们压掉了暴雪的 CheckedTexture，所以状态信号由这块盖上去代替。
@@ -1217,12 +1261,9 @@ local function BuildStanceBar(bar, frame, def)
 
     local shell = _G.StanceBar
     if shell then
-        pcall(shell.SetAlpha, shell, 0)
-        pcall(shell.EnableMouse, shell, false)
-        pcall(shell.EnableMouseMotion, shell, false)
-        -- 事件不能卸载：图标 / 选中态 / 冷却都是它自己的 UpdateState 在刷（同宠物条）。
-        -- 代价是它的 UpdateShownButtons 会对这几个已搬家的受保护按钮 SetShown，
-        -- 日志里多几条 BLOCKED（只进日志、不弹窗、功能正常）。
+        -- 同宠物条：只压根框 alpha + 关鼠标，**事件一条都不卸载**（图标 / 选中态 / 冷却
+        -- 都是它自己的 UpdateState 在刷；UpdateGridLayout 动的是容器，不是我们搬走的按钮）。
+        Widget:Mute(shell, { depth = 0, combat = "write" })
     end
 
     bar.visibility = STANCE_VISIBILITY
@@ -1254,9 +1295,7 @@ local function ReleaseStance(bar)
         end
     end
     if shell then
-        pcall(shell.SetAlpha, shell, 1)
-        pcall(shell.EnableMouse, shell, true)
-        pcall(shell.EnableMouseMotion, shell, true)
+        Widget:Unmute(shell, { depth = 0, combat = "write" })
     end
 end
 
@@ -1574,23 +1613,36 @@ function M:RegisterEvents()
         EventBus:Register(event, function() M:UpdateCooldowns() end)
     end
 
-    -- 目标距离：客户端只推"这一格刚进出距离"（ACTION_RANGE_CHECK_UPDATE，槽位在参数里）；
-    -- 目标/可用性变化则整条重算一次。都走 0.1 秒合并，不逐帧。
-    EventBus:Register("ACTION_RANGE_CHECK_UPDATE", function(_, slot)
-        if type(slot) == "number" then
-            RefreshRangeFor(slot)
-        else
-            QueueRanges()
-        end
+    -- 目标距离：ACTION_RANGE_CHECK_UPDATE 的载荷就是答案（slot, isInRange, checksRange），
+    -- 直接结算这一格；重读 API 在受限环境只会拿到机密值（等于战斗里永不更新）。
+    -- 槽位不是数字 / 判定读不到 = 我们没在画这一格，整条重算交给别的入口。
+    EventBus:Register("ACTION_RANGE_CHECK_UPDATE", function(_, slot, isInRange, checksRange)
+        if type(slot) ~= "number" then return end
+        if Secrets.IsSecret(slot) then return end       -- 先挡机密：下面要用它当表键、要比较
+        if not rangeCheckEnabled[slot] then return end        -- 不是我们开的，忽略
+        if Secrets.IsSecret(isInRange) or Secrets.IsSecret(checksRange) then return end
+        -- checks=false = 这一格现在**不**检查距离（换目标 / 无目标技能最常见）→ 必须回白。
+        -- 以前这里是 return，实机载荷 `slot=1 inRange=false checks=false` 就是一次"说清
+        -- 楚了不检查、我们却没退暗"，上一次的超距状态会一直挂着。
+        if checksRange == false then QueueRangeFor(slot, false) return end
+        if isInRange == nil then QueueRanges() return end      -- 载荷没有这一项：退回整条重算
+        QueueRangeFor(slot, not isInRange)
     end)
+    -- 这几个事件没有逐槽载荷（或压根没有槽位参数），整条重算一次；
+    -- ACTIONBAR_UPDATE_USABLE / PLAYER_ENTERING_WORLD 不在这儿，它们走 SLOT_EVENTS →
+    -- UpdateAll，UpdateAll 末尾已经排了一次重算，别登记三遍。
     for _, event in ipairs({
-        "ACTIONBAR_UPDATE_USABLE", "SPELL_UPDATE_USABLE", "UPDATE_BONUS_ACTIONBAR",
-        "PLAYER_TARGET_CHANGED", "PLAYER_ENTERING_WORLD",
+        "SPELL_UPDATE_USABLE", "UPDATE_BONUS_ACTIONBAR", "PLAYER_TARGET_CHANGED",
     }) do
         EventBus:Register(event, QueueRanges)
     end
 
-    EventBus:Register("MONETUI_THEME_CHANGED", function() M:UpdateAll() end)
+    -- 主题色变了要连收养按钮的热键/堆叠数一起重染：那两处是直接写在暴雪 FontString 上的
+    -- （不在 themed 表里），只有 UpdateHotkeys 会补；UpdateAll 管不到它们。
+    EventBus:Register("MONETUI_THEME_CHANGED", function()
+        M:UpdateAll()
+        M:UpdateHotkeys()
+    end)
     EventBus:Register("MONETUI_RESTRICTION_CHANGED", function() M:UpdateAll() end)
 end
 
@@ -1618,6 +1670,11 @@ function M:UpdateAll()
     end
 
     RefreshRings()
+
+    -- 内容刷完（slot 标记是新的了）再排一次距离重算：0.1 秒合并，最多 10 次/秒。
+    -- 放在这里而不是各事件里，是为了让"槽位换了"的每一条路径都覆盖到（翻页 / 拖放 /
+    -- 载具 / 法术书变化），不用各自再记一遍。
+    QueueRanges()
 
     if leaveVehicle and not InCombatLockdown() then
         -- 这是个 SecureHandler 框体：战斗中 SetSize / SetPoint 会被客户端拒
@@ -1812,7 +1869,6 @@ function M:Apply()
     ReassignBindings()
     self:UpdateAll()
     self:UpdateHotkeys()
-    M.QueueRanges()   -- 建成/改过之后按当前目标重算一次距离变暗
 
     -- 宠物条的自动施法提示：自绘条开着是动画环，关着是静态环（这条路径不依赖 AdoptAll）。
     M.petbar.SyncPetGlowNow()
@@ -1835,6 +1891,10 @@ function M:SetEnabled(enabled)
         ClearBindings()
         self:RestoreBlizzard()
         M.petbar.TeardownPetGlow()
+        -- 距离检测：客户端那侧是一开整场，停用要归还；我们这侧的攒批状态一起清掉，
+        -- 免得排队中的 0.1 秒回调在关条之后还去改图标顶点色。
+        ReleaseRangeChecks()
+        rangeAll, rangeSlots = false, {}
     end
 end
 
@@ -1858,5 +1918,181 @@ M.ResolveContainer   = ResolveContainer
 M.bars               = bars
 M.adopted            = adopted
 M.PET_DEF            = PET_DEF
+
+-- ---------------------------------------------------------------------------
+-- /mui actionbars probe … —— 实机取证（AGENTS：帧名与返回顺序一律不凭记忆）
+--   pet    逐格打印 GetPetActionInfo 的 7 个返回值：这条旧全局**不在**本地 API 快照里，
+--          所以"第 4 位是 isActive、第 6 位是 autoCastEnabled"只能靠改状态看哪一位跟着变。
+--   art    点名收养按钮的子件：ADOPTED_ART 是按名字压 alpha 的，名字错就是静默不压，
+--          同时打印每个子对象的真实名字（字段名和纹理名不一定同名）。
+--   range  挂一次事件，打印 ACTION_RANGE_CHECK_UPDATE 的三个载荷在战斗内外是否机密。
+--   overlay 自动施法遮罩的子件（Shine / Corners / Mask）—— 蚂蚁和角标都压/留谁，靠它定。
+-- 机密值一律先过 Secrets.IsSecret 再 tostring（否则 table.concat 直接抛 invalid value）。
+-- ---------------------------------------------------------------------------
+local PROBE_FRAMES = { "PetActionButton1", "StanceButton1", "ActionButton1" }
+local PROBE_ART = {
+    "NormalTexture", "PushedTexture", "HighlightTexture", "CheckedTexture",
+    "SlotBackground", "SlotArt", "Border", "Flash", "NewActionTexture",
+    "SpellHighlightTexture", "QuickKeybindHighlightTexture", "AutoCastShine",
+    "AutoCastable", "AutoCastOverlay", "IconMask", "icon", "HotKey", "Count",
+}
+
+local function ProbeShow(value)
+    if Secrets.IsSecret(value) then return "|cffffa940SEC|r" end
+    if type(value) == "table" and value.GetName then
+        local ok, name = pcall(value.GetName, value)
+        if ok and Secrets.IsSecret(name) then return "SEC-name" end
+        if ok and type(name) == "string" and name ~= "" then return name end
+        return "table"
+    end
+    return tostring(value)
+end
+
+local function ProbePet()
+    if type(_G.GetPetActionInfo) ~= "function" then
+        ns:Print("|cffff6b6b本客户端没有 GetPetActionInfo|r，宠物状态得换 API。")
+        return
+    end
+    ns:Print("GetPetActionInfo 逐格（改一个状态跑一次，比对哪一位变了）：")
+    for i = 1, 10 do
+        local ok, a, b, c, d, e, f, g = pcall(_G.GetPetActionInfo, i)
+        if not ok then
+            ns:Print(("|cffff6b6bP%d 调用失败|r %s"):format(i, tostring(a)))
+        elseif a == nil then
+            break
+        else
+            ns:Print(("P%d: 1=%s | 2=%s | 3=%s | 4=%s | 5=%s | 6=%s | 7=%s")
+                :format(i, ProbeShow(a), ProbeShow(b), ProbeShow(c), ProbeShow(d),
+                        ProbeShow(e), ProbeShow(f), ProbeShow(g)))
+        end
+    end
+end
+
+local function ProbeArt()
+    for _, name in ipairs(PROBE_FRAMES) do
+        local f = _G[name]
+        if not f then
+            ns:Print(("|cffff6b6b%s|r 这个客户端不存在"):format(name))
+        else
+            local yes, no = {}, {}
+            for _, key in ipairs(PROBE_ART) do
+                local region = f[key]
+                if region == nil then
+                    no[#no + 1] = key
+                else
+                    yes[#yes + 1] = key .. "=" .. ProbeShow(region)
+                end
+            end
+            ns:Print(("%s |cff88ff88有|r: %s"):format(name, table.concat(yes, ", ")))
+            if #no > 0 then ns:Print(("   |cffff6b6b无|r: %s"):format(table.concat(no, ", "))) end
+
+            local regions, count = {}, select("#", f:GetRegions())
+            for i = 1, count do
+                local r = select(i, f:GetRegions())
+                local rn = r and r.GetName and r:GetName()
+                if rn and not Secrets.IsSecret(rn) and rn ~= "" then regions[#regions + 1] = rn end
+            end
+            ns:Print(("   子件真实名（%d 个）: %s"):format(count, table.concat(regions, ", ")))
+        end
+    end
+end
+
+--- 自动施法遮罩的子件：`probe art` 只能点名按钮自己那一层的字段，overlay 的
+--- Shine / Corners / Mask 挂在 overlay 下面，所以单独一层再点一次。
+--- 这三块决定三件事：蚂蚁要不要压（Shine）、角标能不能摆（Corners）、像素环边长跟谁（Mask）。
+local PROBE_OVERLAY = { "Shine", "Corners", "Mask" }
+
+local function ProbeOverlay()
+    for _, name in ipairs({ "PetActionButton1", "PetActionButton2", "StanceButton1" }) do
+        local btn = _G[name]
+        if not btn then
+            ns:Print(("|cffff6b6b%s|r 这个客户端不存在"):format(name))
+        elseif not btn.AutoCastOverlay then
+            ns:Print(("%s |cffff6b6b没有 AutoCastOverlay|r"):format(name))
+        else
+            local overlay = btn.AutoCastOverlay
+            local yes, no = {}, {}
+            for _, key in ipairs(PROBE_OVERLAY) do
+                local child = overlay[key]
+                if child == nil then
+                    no[#no + 1] = key
+                else
+                    local size = ""
+                    if child.GetWidth and child.GetHeight then
+                        local okW, w = pcall(child.GetWidth, child)
+                        local okH, h = pcall(child.GetHeight, child)
+                        if okW and okH then size = (":%s×%s"):format(ProbeShow(w), ProbeShow(h)) end
+                    end
+                    yes[#yes + 1] = key .. "=" .. ProbeShow(child) .. size
+                end
+            end
+            ns:Print(("%s overlay=%s |cff88ff88有|r: %s"):format(name, ProbeShow(overlay), table.concat(yes, ", ")))
+            if #no > 0 then ns:Print(("   |cffff6b6b无|r: %s"):format(table.concat(no, ", "))) end
+
+            -- SuppressAutoCastShine 找的是 shine.Anim：蚂蚁有没有动画、当前是不是显示着
+            local shine = overlay.Shine
+            if shine then
+                local okS, shown = pcall(shine.IsShown, shine)
+                local okA, alpha = pcall(shine.GetAlpha, shine)
+                ns:Print(("   Shine: Anim=%s | shown=%s alpha=%s"):format(ProbeShow(shine.Anim),
+                        okS and ProbeShow(Secrets.Bool(shown, "SEC")) or "读不到",
+                        okA and ProbeShow(alpha) or "读不到"))
+            end
+
+            local regions, count = {}, select("#", overlay:GetRegions())
+            for i = 1, count do
+                local r = select(i, overlay:GetRegions())
+                local rn = r and r.GetName and r:GetName()
+                if rn and not Secrets.IsSecret(rn) and rn ~= "" then regions[#regions + 1] = rn end
+            end
+            ns:Print(("   overlay 子件真实名（%d 个）: %s"):format(count, table.concat(regions, ", ")))
+        end
+    end
+end
+
+local rangeProbe
+
+local function ProbeRange(turnOn)
+    if not turnOn then
+        if rangeProbe then
+            rangeProbe:UnregisterAllEvents()
+            rangeProbe:SetScript("OnEvent", nil)
+            rangeProbe = nil
+        end
+        ns:Print("距离事件探针已关闭。")
+        return
+    end
+    if rangeProbe then
+        ns:Print("探针已经开着（关掉：/mui actionbars probe range off）")
+        return
+    end
+    rangeProbe = CreateFrame("Frame")
+    rangeProbe:RegisterEvent("ACTION_RANGE_CHECK_UPDATE")
+    rangeProbe:SetScript("OnEvent", function(_, _, slot, inRange, checks)
+        ns:Print(("RANGE slot=%s inRange=%s checks=%s")
+            :format(ProbeShow(slot), ProbeShow(inRange), ProbeShow(checks)))
+    end)
+    ns:Print("探针已开：选一个有距离要求的法术，靠近/远离目标各一次，战斗内外各一次。")
+end
+
+function M:HandleCommand(rest)
+    local words = {}
+    for w in string.gmatch(string.lower(rest or ""), "%S+") do words[#words + 1] = w end
+    if words[1] ~= "probe" then return false end
+
+    local what = words[2] or ""
+    if what == "pet" then
+        ProbePet()
+    elseif what == "art" then
+        ProbeArt()
+    elseif what == "range" then
+        ProbeRange(words[3] ~= "off")
+    elseif what == "overlay" then
+        ProbeOverlay()
+    else
+        ns:Print("用法：/mui actionbars probe pet|art|range|overlay [off]")
+    end
+    return true
+end
 
 ns:Register("ActionBars", M)
