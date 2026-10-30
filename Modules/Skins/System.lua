@@ -14,162 +14,108 @@ local Marked = function(o, k) return ns:Marked(o, k) end
 
 local Skin = ns.Skin
 
+local LOOT_ARROWS = { "LootFramePrevPageButton", "LootFrameNextPageButton" }
+
+local GROUP_LOOT_FRAMES = { "GroupLootFrame1", "GroupLootFrame2", "GroupLootFrame3", "GroupLootFrame4" }
+
 local function SkinLoot()
-    local frame = _G.LootFrame
-    if frame then
-        M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-        -- The close button is handled by SkinWindow; only the pager arrows go through the text-button skin.
-        M:Buttons({ "LootFramePrevPageButton", "LootFrameNextPageButton" })
-        Skin:PageArrow(_G.LootFramePrevPageButton, "left")
-        Skin:PageArrow(_G.LootFrameNextPageButton, "right")
-        Skin:ScrollFrame(frame.LootFrameScrollFrame)
-    end
+    M:Dress("LootFrame", { window = true, panel = { bgAlpha = 0.96 }, buttons = LOOT_ARROWS })
+    -- The close button is handled by SkinWindow; the pager arrows above get the plate, then their glyphs.
+    Skin:PageArrow(Skin:Need("LootFramePrevPageButton"), "left")
+    Skin:PageArrow(Skin:Need("LootFrameNextPageButton"), "right")
+    -- 老框架把滚动区挂在名字全局上，新框架挂在帧的成员上；短路取第一个，只有真找不到的那个才记账。
+    local scroll = Skin:Need("LootFrame.LootFrameScrollFrame") or Skin:Need("LootFrameScrollFrame")
+    if scroll then Skin:ScrollFrame(scroll) end
 
-    M:Controls({ "GroupLootFrame1", "GroupLootFrame2", "GroupLootFrame3", "GroupLootFrame4" }, function(roll)
-        Skin:Strip(roll)
-        Skin:Panel(roll, { bgAlpha = 0.96 })
-    end)
+    M:Dress(GROUP_LOOT_FRAMES, { panel = { bgAlpha = 0.96 } })
 
-    -- The rolling history window builds its entry buttons lazily on open, so the list gets re-skinned on every show (HookShow is one handler per frame).
-    local history = _G.GroupLootHistoryFrame
-    if history then
-        local function skinHistory()
-            M:SkinWindow(history, { panel = { bgAlpha = 0.96 } })
-            M:SkinScrollsIn(history)
-            M:SkinButtonsIn(history)
-        end
-        skinHistory()
-        M:HookShow(history, skinHistory)
-    end
+    -- The rolling history window builds its entry buttons lazily on open（deep 的显示时补扫就是为它）.
+    M:Dress("GroupLootHistoryFrame", { window = true, panel = { bgAlpha = 0.96 }, deep = true })
 end
 
+local POPUP_FRAMES = { "LFGListInviteDialog", "LFGInvitePopup" }
+local READYCHECK_FRAMES = { "ReadyCheckFrame", "ReadyCheckListenerFrame" }
+local NOTICE_FRAMES = { "QueueStatusFrame", "BNToastFrame" }
+
 local function SkinPopups()
+    -- 四个静态弹窗是运行期拼名字的：一次只处理确实存在的那个，按钮名同样过 Need 记账。
     for index = 1, 4 do
-        local popup = _G["StaticPopup" .. index]
+        local popup = Skin:Need("StaticPopup" .. index)
         if popup then
-            Skin:Strip(popup)
-            Skin:Panel(popup, { bgAlpha = 0.97 })
-            M:Controls({
-                _G["StaticPopup" .. index .. "Button1"],
-                _G["StaticPopup" .. index .. "Button2"],
-                _G["StaticPopup" .. index .. "Button3"],
-            }, function(button)
-                Skin:Button(button, { bgAlpha = 0.9 })
-            end)
+            M:Dress(popup, {
+                panel = { bgAlpha = 0.97 },
+                buttons = {
+                    "StaticPopup" .. index .. "Button1",
+                    "StaticPopup" .. index .. "Button2",
+                    "StaticPopup" .. index .. "Button3",
+                },
+                control = { bgAlpha = 0.9 },
+            })
         end
     end
 
     -- 数量拆分框：顶部金色条是帧自己的美术，去掉；内容（加减号、输入框）保留。
-    local split = _G.StackSplitFrame
-    if split then
-        Skin:Strip(split)
-        Skin:Panel(split, { bgAlpha = 0.97 })
-        if split.SingleItemSplitBackground then Skin:Fade(split.SingleItemSplitBackground) end
-        if split.MultiItemSplitBackground then Skin:Fade(split.MultiItemSplitBackground) end
-        M:SkinButtonsIn(split)
-    end
+    M:Dress("StackSplitFrame", { panel = { bgAlpha = 0.97 }, deep = true })
+    M:Dress({
+        "StackSplitFrame.SingleItemSplitBackground",
+        "StackSplitFrame.MultiItemSplitBackground",
+    }, { as = "fade" })
 
-    -- 组队邀请弹窗：零售式与经典式两个模板都试，缺的那个自动跳过。
-    for _, name in ipairs({ "LFGListInviteDialog", "LFGInvitePopup" }) do
-        local dialog = _G[name]
-        if dialog then
-            Skin:Strip(dialog)
-            Skin:Panel(dialog, { bgAlpha = 0.97 })
-            M:SkinButtonsIn(dialog)
-        end
-    end
-
-    -- 就绪确认：主框（发确认者）与监听框（参与者）是两个独立窗口。
-    for _, name in ipairs({ "ReadyCheckFrame", "ReadyCheckListenerFrame" }) do
-        local frame = _G[name]
-        if frame then
-            Skin:Strip(frame)
-            Skin:Panel(frame, { bgAlpha = 0.97 })
-            M:SkinButtonsIn(frame)
-        end
-    end
-
-    -- 地下城队列状态气泡（小地图按钮弹出的那张列表）。
-    local queue = _G.QueueStatusFrame
-    if queue then
-        Skin:Strip(queue)
-        Skin:Panel(queue, { bgAlpha = 0.97 })
-    end
-
-    -- Battle.net 提示。
-    local toast = _G.BNToastFrame
-    if toast then
-        Skin:Strip(toast)
-        Skin:Panel(toast, { bgAlpha = 0.97 })
-    end
+    M:Dress(POPUP_FRAMES, { panel = { bgAlpha = 0.97 }, deep = true })
+    M:Dress(READYCHECK_FRAMES, { panel = { bgAlpha = 0.97 }, deep = true })
+    M:Dress(NOTICE_FRAMES, { panel = { bgAlpha = 0.97 } })
 end
 
+local GAMEMENU_BUTTONS = {
+    "GameMenuButtonContinue", "GameMenuButtonSettings", "GameMenuButtonMacros",
+    "GameMenuButtonAddons", "GameMenuButtonLogout", "GameMenuButtonQuit",
+    "GameMenuButtonExit", "GameMenuButtonStore",
+}
+
 local function SkinGameMenu()
-    local frame = _G.GameMenuFrame
-    if not frame then return end
-    Skin:Strip(frame)
-    Skin:Panel(frame, { bgAlpha = 0.97 })
-    M:Controls({ "GameMenuButtonContinue", "GameMenuButtonSettings", "GameMenuButtonMacros",
-        "GameMenuButtonAddons", "GameMenuButtonLogout", "GameMenuButtonQuit",
-        "GameMenuButtonExit", "GameMenuButtonStore" }, function(button)
-        Skin:Button(button)
-    end)
+    M:Dress("GameMenuFrame", { panel = { bgAlpha = 0.97 }, buttons = GAMEMENU_BUTTONS })
 end
 
 local function SkinSettings()
-    local frame = _G.SettingsPanel
-    if not frame then return end
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.97 } })
-    M:SkinScrollsIn(frame)
+    M:Dress("SettingsPanel", { window = true, panel = { bgAlpha = 0.97 }, deep = true })
 end
 
 -- Edit Mode: the manager bar plus the three dialogs it opens.  Without this, moving a bar leaves you
 -- staring at stock Blizzard chrome with no indication of what the click did.
+local EDITMODE_DIALOGS = {
+    "EditModeManagerFrame", "EditModeUnsavedChangesDialog", "EditModeLayoutDialog",
+}
+
+-- 管理条那两个按钮在不同构建里叫 Accept/Cancel 还是 AcceptChanges/CancelChanges，两份参考各说一种。
+-- 两种拼法都列进名单：存在的那个被换肤，不存在的那个在账本留一行 ✗。实机跑一次 `/mui skins diagnose`
+-- 就知道该删哪一个 —— 以前这里是"凭记忆猜一个，猜错就静默跳过"，屏幕上永远是原皮，谁也不知道为什么。
+local EDITMODE_BUTTONS = {
+    "EditModeManagerFrameAccept", "EditModeManagerFrameAcceptChanges",
+    "EditModeManagerFrameCancel", "EditModeManagerFrameCancelChanges",
+    "EditModeSystemSettingsDialogAccept", "EditModeSystemSettingsDialogCancel",
+    "EditModeUnsavedChangesDialogOkay", "EditModeUnsavedChangesDialogCancel",
+    "EditModeLayoutDialogSave", "EditModeLayoutDialogCancel",
+}
+
 local function SkinEditMode()
-    local manager = _G.EditModeManager
-    if manager then
-        Skin:Strip(manager)
-        Skin:Panel(manager, { bgAlpha = 0.97 })
-    end
-
-    M:Controls({
-        "EditModeSystemSettingsDialog", "EditModeUnsavedChangesDialog", "EditModeLayoutDialog",
-    }, function(dialog)
-        if not dialog then return end
-        Skin:Strip(dialog)
-        Skin:Panel(dialog, { bgAlpha = 0.97 })
-    end)
-
-    M:Buttons({
-        "EditModeManagerFrameAcceptChanges", "EditModeManagerFrameCancelChanges",
-        "EditModeSystemSettingsDialogAccept", "EditModeSystemSettingsDialogCancel",
-        "EditModeUnsavedChangesDialogOkay", "EditModeUnsavedChangesDialogCancel",
-        "EditModeLayoutDialogSave", "EditModeLayoutDialogCancel",
-    })
-
-    -- The system-settings dialog builds its rows lazily from a button pool, so restyle whatever has
-    -- been created by the time the panel is applied (HookShow covers the rest on each open).
-    local settings = _G.EditModeSystemSettingsDialog
-    if settings then
-        local function skinRows()
-            M:SkinButtonsIn(settings)
-            M:SkinSlidersIn(settings)
-            M:SkinScrollsIn(settings)
-        end
-        skinRows()
-        M:HookShow(settings, skinRows)
-    end
+    M:Dress(EDITMODE_DIALOGS, { panel = { bgAlpha = 0.97 } })
+    M:Dress(EDITMODE_BUTTONS, { as = "button" })
+    -- 系统设置对话框的行由按钮池懒建，所以单独走 deep：显示时把行 / 滑块 / 滚动区补扫一遍。
+    M:Dress("EditModeSystemSettingsDialog", { panel = { bgAlpha = 0.97 }, deep = true })
 end
 
 local function SkinAddonList()
-    local frame = _G.AddonList
-    if not frame then return end
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.97 } })
-    Skin:ScrollFrame(frame.AddonListScrollFrame or frame.ScrollFrame)
-    M:Buttons({ "AddonListEnableAllButton", "AddonListDisableAllButton" })
-    M:Controls({ "AddonListFilterButton" }, function(button)
-        Skin:Dropdown(button)
-    end)
+    M:Dress("AddonList", {
+        window = true,
+        panel = { bgAlpha = 0.97 },
+        buttons = {
+            "AddonListEnableAllButton", "AddonListDisableAllButton",
+            "AddonList.EnableAllButton", "AddonList.DisableAllButton",
+        },
+    })
+    local scroll = Skin:Need("AddonList.AddonListScrollFrame") or Skin:Need("AddonList.ScrollFrame")
+    if scroll then Skin:ScrollFrame(scroll) end
+    M:Dress({ "AddonListFilterButton", "AddonList.FilterButton" }, { as = "dropdown" })
 end
 
 --- NineSlice 面板（本客户端的 GameTooltip / ItemRefTooltip 都是这种）：边框和底色不是 backdrop，
@@ -272,11 +218,12 @@ local function TintPanel(frame)
 end
 
 local function SkinMenus()
-    if Marked(_G.UIParent, "menuPoll") then return end
-    Mark(_G.UIParent, "menuPoll", true)
+    local up = Skin:Need("UIParent")
+    if not up or Marked(up, "menuPoll") then return end
+    Mark(up, "menuPoll", true)
     -- 不再 hooksecurefunc("UIDropDownMenu_CreateFrames")（全局函数钩子 = 污染，见 AGENTS）。
     -- 改成轮询：每 0.5 秒把可见的下拉列表重新染一遍（只染显示中的，成本可忽略）。
-    ns.Widget:PollWatch(_G.UIParent, function()
+    ns.Widget:PollWatch(up, function()
         for level = 1, 8 do
             local list = _G["DropDownList" .. level]
             if list and list.IsShown and list:IsShown() then TintPanel(list) end
@@ -293,14 +240,14 @@ end
 --- 挂到那个函数上补一刀：只补「默认样式」；暴雪自己的特殊样式（符文锻造金、腐化紫、Azerite）保留原样。
 local tooltipStyleWatched = false
 local function WatchTooltipStyle()
-    if tooltipStyleWatched or type(_G.SharedTooltip_SetBackdropStyle) ~= "function" then return end
+    if tooltipStyleWatched or type(Skin:Need("SharedTooltip_SetBackdropStyle")) ~= "function" then return end
     tooltipStyleWatched = true
 
     -- 不再 hooksecurefunc("SharedTooltip_SetBackdropStyle")（全局函数钩子 = 污染）：
     -- 改成轮询——提示框显示期间每 0.5 秒补一次九宫格染色。暴雪自己换特殊样式
     -- （符文锻造金 / 腐化紫 / Azerite）时，Mark 里的 nineTint 仍在，但颜色会被它覆盖，
     -- 所以这里只在"还是我们标记过的那个框"时补色。
-    local tip = _G.GameTooltip
+    local tip = Skin:Need("GameTooltip")
     if tip then
         ns.Widget:PollWatch(tip, function(self)
             if not self:IsShown() then return end
@@ -379,14 +326,15 @@ end
 
 local function SkinTooltip()
     -- 先立背板：PaintNine 看到 tooltipPlate 标记就把暴雪那层刷成透明
-    PlateTooltip(_G.GameTooltip)
-    TintPanel(_G.GameTooltip)
+    local tip = Skin:Need("GameTooltip")
+    PlateTooltip(tip)
+    TintPanel(tip)
     WatchTooltipStyle()
 
     -- ItemRefTooltip is the *separate* frame a ctrl-clicked item link opens in.  It has its own
     -- chrome and its own close button and nothing in the game touches either, so every item link the
     -- player inspects shows stock Blizzard chrome even when the tooltip option is on.
-    local ref = _G.ItemRefTooltip
+    local ref = Skin:Need("ItemRefTooltip")
     if ref then
         PlateTooltip(ref)
         TintPanel(ref)
@@ -394,12 +342,13 @@ local function SkinTooltip()
     end
 end
 
+-- 下面这些面板的 frames 名单一律直接引用代码里那份表（M:Panel 会展平嵌套表），不再手抄第二遍：
+-- 抄一遍就会漂（本轮就抓到 EditModeManager / AcceptChanges / MacroEditBox 三处名单和代码不一致）。
+-- 闸门 tools/check-frame-list.js 会把表名解析回具体字符串再核对取用路径。
 M:Panel("loot", { label = "拾取 / 掷骰", group = "系统", apply = SkinLoot,
     frames = {
-        "LootFrame", "LootFrameCloseButton",
-        "LootFramePrevPageButton", "LootFrameNextPageButton", "LootFrameScrollFrame",
-        "GroupLootFrame1", "GroupLootFrame2", "GroupLootFrame3", "GroupLootFrame4",
-        "GroupLootHistoryFrame",
+        "LootFrame", "LootFrameCloseButton", "LootFrame.LootFrameScrollFrame",
+        LOOT_ARROWS, GROUP_LOOT_FRAMES, "GroupLootHistoryFrame",
     } })
 
 M:Panel("popups", { label = "确认弹窗", group = "系统", apply = SkinPopups,
@@ -409,41 +358,30 @@ M:Panel("popups", { label = "确认弹窗", group = "系统", apply = SkinPopups
         "StaticPopup3", "StaticPopup3Button1",
         "StaticPopup4", "StaticPopup4Button1",
         "StackSplitFrame",
-        "LFGListInviteDialog", "LFGInvitePopup",
-        "ReadyCheckFrame", "ReadyCheckListenerFrame",
-        "QueueStatusFrame", "BNToastFrame",
+        POPUP_FRAMES, READYCHECK_FRAMES, NOTICE_FRAMES,
     } })
 
 M:Panel("gamemenu", { label = "游戏菜单", group = "系统", apply = SkinGameMenu,
-    frames = {
-        "GameMenuFrame",
-        "GameMenuButtonContinue", "GameMenuButtonSettings", "GameMenuButtonMacros",
-        "GameMenuButtonAddons", "GameMenuButtonLogout", "GameMenuButtonQuit",
-        "GameMenuButtonExit", "GameMenuButtonStore",
-    } })
+    frames = { "GameMenuFrame", GAMEMENU_BUTTONS } })
 
 M:Panel("settings", { label = "设置面板", group = "系统", apply = SkinSettings,
     frames = { "SettingsPanel", "SettingsPanel.CloseButton" } })
 
 M:Panel("editmode", { label = "编辑模式", group = "系统", apply = SkinEditMode,
-    frames = {
-        "EditModeManagerFrame", "EditModeManagerFrameAccept", "EditModeManagerFrameCancel",
-        "EditModeSystemSettingsDialog", "EditModeUnsavedChangesDialog", "EditModeLayoutDialog",
-        "EditModeSystemSettingsDialogAccept", "EditModeSystemSettingsDialogCancel",
-        "EditModeUnsavedChangesDialogOkay", "EditModeUnsavedChangesDialogCancel",
-        "EditModeLayoutDialogSave", "EditModeLayoutDialogCancel",
-    } })
+    frames = { EDITMODE_DIALOGS, EDITMODE_BUTTONS } })
 
 M:Panel("addonlist", { label = "插件列表", group = "系统", apply = SkinAddonList,
     frames = {
-        "AddonList", "AddonList.EnableAllButton", "AddonList.DisableAllButton",
-        "AddonList.FilterButton", "AddonList.ScrollFrame",
+        "AddonList", "AddonList.AddonListScrollFrame", "AddonList.ScrollFrame",
+        "AddonListEnableAllButton", "AddonListDisableAllButton",
+        "AddonList.EnableAllButton", "AddonList.DisableAllButton",
+        "AddonListFilterButton", "AddonList.FilterButton",
     } })
 
 M:Panel("menus", { label = "下拉菜单", group = "系统", apply = SkinMenus, default = false,
-    -- Only the hook itself: every DropDownListN is reached inside the hook from the level argument,
-    -- so listing them here would be decoration (see ALLOW_DYNAMIC in tools/check-frame-list.js).
-    frames = { "UIDropDownMenu_CreateFrames" } })
+    -- DropDownList1..8 / DropDownListNMenu1..8 全在轮询回调里由 level、menu 两个循环变量拼出来，
+    -- 静态列不出来；能确认的只有承载轮询的 UIParent。
+    frames = { "UIParent" } })
 
 M:Panel("tooltip", { label = "鼠标提示边框", group = "系统", apply = SkinTooltip, default = true,
     -- Same for ItemRefTooltipCloseButton: reached as ref.CloseButton (a member), not a global.
@@ -452,90 +390,77 @@ M:Panel("tooltip", { label = "鼠标提示边框", group = "系统", apply = Ski
 -- 宏编辑器：Blizzard_MacroUI 无 game-type 门控（wow-ui-source forever 分支），本客户端存在。
 -- 图标选择弹窗（MacroPopupFrame）是独立的 LoD 窗口，名字/图标网格是内容，不动。
 local function SkinMacroPopup()
-    local popup = _G.MacroPopupFrame
-    if not popup then return end
-    if Marked(popup, "macroPopupSkinned") then return end
+    local popup = Skin:Need("MacroPopupFrame")
+    if not popup or Marked(popup, "macroPopupSkinned") then return end
     Mark(popup, "macroPopupSkinned", true)
-
-    M:SkinWindow(popup, { panel = { bgAlpha = 0.97 } })
-    M:SkinButtonsIn(popup)
+    M:Dress(popup, { window = true, panel = { bgAlpha = 0.97 }, deep = true })
 end
 
 local function SkinMacros()
-    local frame = _G.MacroFrame
+    local frame = Skin:Need("MacroFrame")
     if not frame then return end
 
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-    M:Tabs({ "MacroFrameTab1", "MacroFrameTab2" })
-    M:SkinButtonsIn(frame)
-    M:SkinScrollsIn(frame)
-    M:Controls({ "MacroEditBox" }, function(box) Skin:EditBox(box) end)
+    M:Dress(frame, {
+        window = true,
+        panel = { bgAlpha = 0.96 },
+        deep = true,
+        tabs = { "MacroFrameTab1", "MacroFrameTab2" },
+    })
+    -- 编辑区两种拼法都见过；短路取第一个存在的，另一个才记账为缺失。
+    local box = Skin:Need("MacroFrameEditBox") or Skin:Need("MacroEditBox")
+    if box then Skin:EditBox(box) end
 
     -- MacroPopupFrame 是点"选图标"时才创建的：那时主窗口一定开着，所以挂在主窗口的
     -- PollWatch 上等它出现（主窗口关着时轮询不跑，零成本）。
-    SkinMacroPopup()
-    ns.Widget:PollWatch(frame, SkinMacroPopup)
+    -- 轮询回调跑在 Apply 之外，作用域得自己带上，否则账目会落到 "_" 名下。
+    Skin.With("macros", SkinMacroPopup)
+    ns.Widget:PollWatch(frame, function() Skin.With("macros", SkinMacroPopup) end)
 end
 
 M:Panel("macros", { label = "宏编辑器", group = "系统", apply = SkinMacros,
     addons = { Blizzard_MacroUI = true },
     frames = {
         "MacroFrame", "MacroFrameTab1", "MacroFrameTab2",
-        "MacroFrameEditBox",
+        "MacroFrameEditBox", "MacroEditBox",
         "MacroPopupFrame",
     } })
 
 -- 时钟 / 秒表：Blizzard_TimeManager 带 camelot 专属覆写文件（Camelot\Blizzard_TimeManagerOverrides.lua）。
--- 秒表是独立小窗（StopwatchFrame）；关闭按钮的全局名是 TimeManagerCloseButton
--- （不带 Frame 后缀，SkinWindow 的 name.."CloseButton" 推导够不到，显式接）。
+-- 秒表是独立小窗（StopwatchFrame）。两者的关闭按钮都挂在帧自己身上（成员，不是全局名），
+-- M:Dress 的 window 档会依次试 frame.CloseButton → BorderFrame.CloseButton → name.."CloseButton"。
 local function SkinTimeManager()
-    local frame = _G.TimeManagerFrame
-    if frame then
-        M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-        M:SkinButtonsIn(frame)
-    end
-    -- 正式服 12.1.5 TimeManagerFrame.CloseButton 是成员不是全局名
-    if frame and frame.CloseButton then Skin:CloseButton(frame.CloseButton) end
-    M:Controls({ "StopwatchFrame" }, function(watch)
-        M:SkinWindow(watch, { panel = { bgAlpha = 0.96 } })
-    end)
+    M:Dress({ "TimeManagerFrame", "StopwatchFrame" },
+        { window = true, panel = { bgAlpha = 0.96 }, deep = true })
+    -- 全局名不带 Frame 后缀，M:SkinWindow 的 name.."CloseButton" 推导够不到，显式接一次。
+    Skin:CloseButton(Skin:Need("TimeManagerCloseButton"))
 end
 
 M:Panel("timemanager", { label = "时钟 / 秒表", group = "系统", apply = SkinTimeManager,
     addons = { Blizzard_TimeManager = true },
-    frames = { "TimeManagerFrame", "TimeManagerFrame.CloseButton", "StopwatchFrame" } })
+    frames = { "TimeManagerFrame", "TimeManagerFrame.CloseButton",
+        "TimeManagerCloseButton", "StopwatchFrame" } })
 
--- 帮助 / 客服：Blizzard_HelpFrame 是 AllowLoad: Game。关闭按钮同理显式接全局名。
+-- 帮助 / 客服：Blizzard_HelpFrame 是 AllowLoad: Game。
 local function SkinHelp()
-    local frame = _G.HelpFrame
-    if not frame then return end
-
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-    M:SkinButtonsIn(frame)
-    M:SkinScrollsIn(frame)
-    -- 正式服 12.1.5 HelpFrame.CloseButton 是成员不是全局名
-    if frame.CloseButton then Skin:CloseButton(frame.CloseButton) end
+    M:Dress("HelpFrame", { window = true, panel = { bgAlpha = 0.96 }, deep = true })
 end
 
 M:Panel("help", { label = "帮助", group = "系统", apply = SkinHelp,
     addons = { Blizzard_HelpFrame = true },
     frames = { "HelpFrame", "HelpFrame.CloseButton" } })
 
--- 拾色器：设置面板等处弹出，无门控。12.1.5 正式服按钮是 Footer 成员 + ColorPickerFrameOkay/ColorPickerFrameCancel 全局名。
+-- 拾色器：设置面板等处弹出，无门控。12.1.5 正式服按钮是 Footer 成员 + Okay/Cancel 全局名两套并存。
 local function SkinColorPicker()
-    local frame = _G.ColorPickerFrame
-    if not frame then return end
-
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.97 } })
-    M:Buttons({ "ColorPickerFrameOkay", "ColorPickerFrameCancel" })
-    local footer = frame.Footer
-    if footer then
-        local members = {}
-        if footer.OkayButton then members[#members + 1] = footer.OkayButton end
-        if footer.CancelButton then members[#members + 1] = footer.CancelButton end
-        M:Controls(members, function(button) Skin:Button(button) end)
-    end
+    M:Dress("ColorPickerFrame", {
+        window = true,
+        panel = { bgAlpha = 0.97 },
+        buttons = {
+            "ColorPickerFrameOkay", "ColorPickerFrameCancel",
+            "ColorPickerFrame.Footer.OkayButton", "ColorPickerFrame.Footer.CancelButton",
+        },
+    })
 end
 
 M:Panel("colorpicker", { label = "拾色器", group = "系统", apply = SkinColorPicker,
-    frames = { "ColorPickerFrame", "ColorPickerFrameOkay", "ColorPickerFrameCancel" } })
+    frames = { "ColorPickerFrame", "ColorPickerFrameOkay", "ColorPickerFrameCancel",
+        "ColorPickerFrame.Footer.OkayButton", "ColorPickerFrame.Footer.CancelButton" } })

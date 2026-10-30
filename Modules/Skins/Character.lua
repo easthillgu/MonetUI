@@ -3,8 +3,7 @@
 
 local ADDON_NAME, ns = ...
 
-local M    = ns.Skins
-local Skin = ns.Skin
+local M = ns.Skins
 
 local CHARACTER_TABS = {
     "CharacterFrameTab1", "CharacterFrameTab2", "CharacterFrameTab3",
@@ -18,37 +17,20 @@ local INSPECT_TABS = { "InspectFrameTab1", "InspectFrameTab2" }
 
 local INSPECT_PANELS = { "InspectPaperDollFrame", "InspectPVPFrame", "InspectTalentFrame" }
 
+-- 子面板的处理和窗口不同：不剥标题/关闭，只剥自己的原美术 + 挂底衬 + 扫直接子控件。
+-- 标签页内容（滚动条、上下箭头）是懒建的，`Dress` 默认会在显示时再扫一遍。
+local SUB_PANEL = { panel = { bgAlpha = 0.96 }, deep = true }
+
 local function SkinCharacter()
-    local frame = _G.CharacterFrame
-    if not frame then return end
-
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-    M:Tabs(CHARACTER_TABS)
-
-    M:Controls(CHARACTER_PANELS, function(panel)
-        Skin:Strip(panel)
-        Skin:Panel(panel, { bgAlpha = 0.96 })
-        M:SkinButtonsIn(panel)
-        M:SkinScrollsIn(panel)
-        -- 标签页内容是懒加载的（滚动条 / 上下箭头在显示时才建），显示时再扫一次。
-        M:HookShow(panel, function() M:SkinScrollsIn(panel) end)
-    end)
+    M:Dress("CharacterFrame", { window = true, panel = { bgAlpha = 0.96 } })
+    M:Dress(CHARACTER_TABS, { as = "tab" })
+    M:Dress(CHARACTER_PANELS, SUB_PANEL)
 end
 
 local function SkinInspect()
-    local frame = _G.InspectFrame
-    if not frame then return end
-
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-    M:Tabs(INSPECT_TABS)
-
-    M:Controls(INSPECT_PANELS, function(panel)
-        Skin:Strip(panel)
-        Skin:Panel(panel, { bgAlpha = 0.96 })
-        M:SkinButtonsIn(panel)
-        M:SkinScrollsIn(panel)
-        M:HookShow(panel, function() M:SkinScrollsIn(panel) end)
-    end)
+    M:Dress("InspectFrame", { window = true, panel = { bgAlpha = 0.96 } })
+    M:Dress(INSPECT_TABS, { as = "tab" })
+    M:Dress(INSPECT_PANELS, SUB_PANEL)
 end
 
 M:Panel("character", {

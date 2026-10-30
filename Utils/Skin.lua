@@ -90,6 +90,163 @@ EventBus:Register("MONETUI_THEME_CHANGED", function()
     Skin:RefreshThemes()
 end)
 
+-- ---------------------------------------------------------------------------
+-- 美化对象确认（AGENTS：帧名 / 对象名永不凭记忆，也不照抄参考插件）
+--
+-- 皮肤层每一次"找一个暴雪对象"都走 `Skin:Need`：解析和记账是同一次动作。账本记的是
+-- **实际发生过的查找**，所以诊断报的是这台客户端真实缺什么，而不是我们手写名单的期望值 ——
+-- 名字写错的地方从"静默跳过"变成"一行 ✗"。面板关掉 / LoD 没加载时一次查找都没发生，
+-- 那种情况由调用方退回声明名单（见 Skins:Diagnose）。
+--
+-- 只存字符串和计数，**不存对象引用**：暴雪随时可能换掉一个框（LoD 重载、编辑模式重建），
+-- 缓存住旧对象就是"美化没生效"的那种 bug。
+-- ---------------------------------------------------------------------------
+
+Skin.targets = {}   -- [scope] = { [path] = { hits = n, misses = n } }
+Skin.scope  = nil   -- 当前作用域（一张面板 / 一个模块），没有就记在 "_" 名下
+
+--- 某作用域某条路径的账本行（没有就建）。
+function Skin:Ledger(scope, path)
+    local byPath = self.targets[scope]
+    if not byPath then
+        byPath = {}
+        self.targets[scope] = byPath
+    end
+    local led = byPath[path]
+    if not led then
+        led = { hits = 0, misses = 0 }
+        byPath[path] = led
+    end
+    return led
+end
+
+--- 在 scope 名下跑 fn，fn 里的 Need 全部记到它那里。
+--- 出错时原样把错误抛回调用方（谁 pcall 谁负责报，这里不吞信息）。
+function Skin.With(scope, fn, ...)
+    if type(fn) ~= "function" then return nil end
+    local outer = Skin.scope
+    Skin.scope = scope
+    local ok, a, b = pcall(fn, ...)
+    Skin.scope = outer
+    if not ok then error(a, 0) end
+    return a, b
+end
+
+--- 确认并取回一个美化对象：`"CharacterFrame"`，或 `"Minimap.Buttons.DragonkinComp"` 这样的点路径。
+--- 取不到就记一次 miss 并返回 nil —— 调用方照旧"缺了就跳过那一步"，但缺什么从此可查。
+function Skin:Need(path)
+    local obj = ns.ResolveObject(path)
+    local led = self:Ledger(Skin.scope or "_", path)
+    if obj == nil then
+        led.misses = led.misses + 1
+        return nil
+    end
+    led.hits = led.hits + 1
+    return obj
+end
+
+--- 把"对象 / 对象名 / 它们的列表"统一成列表，名字一律过 Need。
+--- 皮肤文件里那种"同一个窗口名在两个表里各写一遍"的写法因此可以退休。
+function Skin:AsList(spec)
+    if spec == nil then return {} end
+    if type(spec) == "string" then return { self:Need(spec) } end
+    if type(spec) == "table" then
+        if spec[1] ~= nil then
+            -- 逐个解析后**紧凑追加**：取不到的名字直接不进列表。
+            -- 按原下标写会留下空洞，而 Lua 的 `#` 遇到空洞可能截断 —— 名单第一个名字
+            -- 写错就会把后面所有正确的控件一起丢掉，那比少画一个还难查。
+            local out = {}
+            for i = 1, #spec do
+                local item = spec[i]
+                local obj = type(item) == "string" and self:Need(item) or item
+                if obj then out[#out + 1] = obj end
+            end
+            return out
+        end
+        return { spec }     -- 单个对象（框体在 Lua 眼里就是 table）
+    end
+    return {}
+end
+
+--- 这个作用域跑过查找吗？（诊断用它决定是读账本还是退回声明名单）
+function Skin:HasScope(scope)
+    local byPath = self.targets[scope]
+    if not byPath then return false end
+    for _, led in pairs(byPath) do
+        if led.hits > 0 or led.misses > 0 then return true end
+    end
+    return false
+end
+
+--- 打印一个作用域的账本行，返回（存在数, 缺失数）。路径是我们自己写的字符串，进 concat 安全。
+--- 缺失名单**分行打**：`print` 一行只吃 255 字符，把 26 个名字塞在一行里会被截掉尾巴，
+--- 看上去就像"那个名字根本不存在"，而真正的原因是打印。
+function Skin:ReportScope(scope)
+    local byPath = self.targets[scope]
+    if not byPath then return 0, 0 end
+    local missing, found = {}, 0
+    for path, led in pairs(byPath) do
+        if led.hits > 0 then
+            found = found + 1
+        else
+            missing[#missing + 1] = path
+        end
+    end
+    if found == 0 and #missing == 0 then return 0, 0 end
+    if #missing == 0 then
+        ns:Print(("|cff88ff88✓|r [%s] %d 个对象全部存在"):format(scope, found))
+        return found, 0
+    end
+    table.sort(missing)
+    ns:Print(("|cffff6b6b✗|r [%s] %d 存在 / %d 缺失"):format(scope, found, #missing))
+    local LINE_MAX = 200
+    local chunk, count = "", 0
+    for i = 1, #missing do
+        local piece = (count > 0) and (", " .. missing[i]) or missing[i]
+        if #chunk + #piece > LINE_MAX then
+            ns:Print("    " .. chunk)
+            chunk, count = missing[i], 1
+        else
+            chunk = chunk .. piece
+            count = count + 1
+        end
+    end
+    if chunk ~= "" then ns:Print("    " .. chunk) end
+    return found, #missing
+end
+
+--- 打印所有作用域的账本，返回（存在数, 缺失数）。
+function Skin:Report(header)
+    if header then ns:Print(header) end
+
+    local scopes = {}
+    for key in pairs(self.targets) do scopes[#scopes + 1] = key end
+    table.sort(scopes)
+
+    local totalFound, totalMissing = 0, 0
+    for _, scope in ipairs(scopes) do
+        local found, missing = self:ReportScope(scope)
+        totalFound = totalFound + found
+        totalMissing = totalMissing + missing
+    end
+    if #scopes == 0 then
+        ns:Print("|cff808080账本为空|r：还没有任何美化真正跑过（模块关闭？LoD 未加载？）。")
+    end
+    return totalFound, totalMissing
+end
+
+--- 非皮肤模块也用同一本账：把"这个模块假设存在的名字"（API 函数或暴雪对象）逐条确认、
+--- 记在 scope 名下，然后打印这个作用域。这样 `/mui skins diagnose` 一处就能看全仓库的
+--- 名字可达性，各模块不必再各自抄一份 ✓/✗ 打印循环。
+-- @return 存在数, 缺失数
+function Skin:Verify(scope, names, header)
+    if header then ns:Print(header) end
+    Skin.With(scope, function()
+        for i = 1, #names do Skin:Need(names[i]) end
+    end)
+    return self:ReportScope(scope)
+end
+
 local function IsTexture(region)
     return region and type(region.IsObjectType) == "function" and region:IsObjectType("Texture")
 end

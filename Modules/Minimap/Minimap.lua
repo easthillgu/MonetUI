@@ -22,6 +22,7 @@ local ADDON_NAME, ns = ...
 local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
 local Marked = function(o, k) return ns:Marked(o, k) end
 local Widget   = ns.Widget
+local Skin     = ns.Skin
 local EventBus = ns.EventBus
 local Secrets  = ns.Secrets
 
@@ -148,17 +149,9 @@ local BUTTONS = {
 local RETAIL_MICRO = (_G.PlayerSpellsMicroButton ~= nil) and (_G.SpellbookMicroButton == nil)
 
 --- 走点号路径取对象（MinimapCluster.ZoneTextButton 这类 parentKey 路径）。
---- 帧是 userdata，取子字段不会报错，但仍逐段 pcall，免得碰到没有 __index 的对象。
-local function Resolve(path)
-    local node = _G
-    for segment in path:gmatch("[^%.]+") do
-        if node == nil then return nil end
-        local ok, value = pcall(function() return node[segment] end)
-        if not ok then return nil end
-        node = value
-    end
-    return node
-end
+--- 全仓唯一的实现是 Core.lua 的 `ns.ResolveObject`（逐段 pcall，帧是带元表的用户数据也照样取得到），
+--- 这里不再抄第二份。
+local Resolve = ns.ResolveObject
 
 --- 一次性提示（不刷屏）。
 local function WarnOnce(topic, message)
@@ -1110,20 +1103,24 @@ function M:HandleCommand(rest)
     if rest ~= "diagnose" and rest ~= "diag" then return false end
 
     ns:Print("---- 小地图自检 ----")
-    for _, entry in ipairs(BUTTONS) do
-        local found, names = false, {}
-        for _, path in ipairs(entry.paths) do
-            if Resolve(path) then
-                found = true
-                names[#names + 1] = path
+    -- 名字可达性记进美化层那本公共账（Skin:Need），`/mui skins diagnose` 一处就能看全；
+    -- 这里只额外报小地图特有的"一个键位有哪几种拼法、命中了哪一种"。
+    Skin.With("minimap", function()
+        for _, entry in ipairs(BUTTONS) do
+            local found, names = false, {}
+            for _, path in ipairs(entry.paths) do
+                if Skin:Need(path) then
+                    found = true
+                    names[#names + 1] = path
+                end
+            end
+            if found then
+                ns:Print(string.format("  %-16s |cff00ff00存在|r  %s", entry.key, table.concat(names, ", ")))
+            else
+                ns:Print(string.format("  %-16s |cffff6b6b缺失|r  （本客户端没有这个对象，已跳过）", entry.key))
             end
         end
-        if found then
-            ns:Print(string.format("  %-16s |cff00ff00存在|r  %s", entry.key, table.concat(names, ", ")))
-        else
-            ns:Print(string.format("  %-16s |cffff6b6b缺失|r  （本客户端没有这个对象，已跳过）", entry.key))
-        end
-    end
+    end)
 
     local minimap = _G.Minimap
     if minimap then

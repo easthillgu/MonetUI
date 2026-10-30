@@ -1,5 +1,7 @@
 -- Modules/Skins/Collections.lua
 -- Collections (mounts / pets / toys / heirlooms / appearances), the achievement window and the adventure guide.  Journal rows are item buttons, so they are skipped by SkinButtonsIn; only chrome (filters, search boxes, tabs, scroll bars) is restyled.
+-- 统一入口 M:Dress：名字过 Skin:Need 记账，缺哪个 `/mui skins diagnose` 就报哪个；顺序固定，
+-- 不再在每个函数里把 Strip / Panel / 深扫各写一遍。
 
 local ADDON_NAME, ns = ...
 
@@ -21,31 +23,19 @@ local COLLECTIONS_SEARCH = {
     "ToyBoxSearchBox", "HeirloomsJournalSearchBox", "WardrobeCollectionFrameSearchBox",
 }
 
+-- 筛选下拉直接挂在主收藏窗和各个子面板上。
+local COLLECTIONS_FILTERS = {
+    "MountJournalFilterButton", "PetJournalFilterButton", "ToyBoxFilterButton",
+    "HeirloomsJournalFilterButton", "CollectionsJournalFilterButton",
+}
+
 local function SkinCollections()
-    local frame = _G.CollectionsJournal
-    if not frame then return end
-
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-    M:Tabs(COLLECTIONS_TABS)
-
-    M:Controls(COLLECTIONS_PANELS, function(panel)
-        Skin:Strip(panel)
-        Skin:Panel(panel, { bgAlpha = 0.96 })
-        M:SkinButtonsIn(panel)
-        M:SkinScrollsIn(panel)
-    end)
-
-    -- Filter drop-downs sit directly on the journal / sub panels.
-    M:Controls({
-        "MountJournalFilterButton", "PetJournalFilterButton", "ToyBoxFilterButton",
-        "HeirloomsJournalFilterButton", "CollectionsJournalFilterButton",
-    }, function(button)
-        Skin:Dropdown(button)
-    end)
-
-    M:Controls(COLLECTIONS_SEARCH, function(editBox)
-        Skin:EditBox(editBox)
-    end)
+    M:Dress("CollectionsJournal", { window = true, panel = { bgAlpha = 0.96 }, tabs = COLLECTIONS_TABS })
+    -- 子面板：剥原美术 + 挂底衬 + 深扫（收藏格子是带图标的按钮，LooksLikeItemButton 会跳过）。
+    -- 面板里的行是切页时才建的，deep 的可见期补扫负责之后每次翻页。
+    M:Dress(COLLECTIONS_PANELS, { panel = { bgAlpha = 0.96 }, deep = true })
+    M:Dress(COLLECTIONS_FILTERS, { as = "dropdown" })
+    M:Dress(COLLECTIONS_SEARCH, { as = "editbox" })
 end
 
 -- The talent / spell book.  PlayerSpells is the modern window; SpellBookFrame is its older name and
@@ -55,77 +45,50 @@ local PLAYERSPELLS_TABS = {
     "PlayerSpellsTab1", "PlayerSpellsTab2", "PlayerSpellsTab3", "PlayerSpellsTab4",
 }
 
-local function SkinPlayerSpells()
-    M:Controls({ "PlayerSpellsFrame", "SpellBookFrame" }, function(frame)
-        if not frame then return end
-        M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-        M:SkinScrollsIn(frame)
-        M:SkinButtonsIn(frame)
-    end)
-    M:Tabs(PLAYERSPELLS_TABS)
+local PLAYERSPELLS_EDITS = { "PlayerSpellsSearchBox", "SpellBookSearchBox" }
 
-    M:Controls({
-        "PlayerSpellsSearchBox", "SpellBookSearchBox",
-        "AssistedCombatRotationFrame", "PlayerSpellsCloseButton",
-    }, function(control)
-        if not control then return end
-        local kind = type(control.GetObjectType) == "function" and control:GetObjectType()
-        if kind == "EditBox" or kind == "SearchBox" then
-            Skin:EditBox(control)
-        else
-            Skin:Button(control)
-        end
-    end)
+local PLAYERSPELLS_BUTTONS = { "AssistedCombatRotationFrame", "PlayerSpellsCloseButton" }
+
+local function SkinPlayerSpells()
+    M:Dress({ "PlayerSpellsFrame", "SpellBookFrame" }, {
+        window = true, panel = { bgAlpha = 0.96 }, deep = true, tabs = PLAYERSPELLS_TABS,
+    })
+    -- 搜索框两种模板（EditBox / SearchBox）都认；另一个名字若是按钮会被 editbox 档跳过，
+    -- 所以两类分开点名，不再在一个循环里判类型。
+    M:Dress(PLAYERSPELLS_EDITS, { as = "editbox" })
+    M:Dress(PLAYERSPELLS_BUTTONS, { as = "button" })
 end
 
 local ACHIEVEMENT_TABS = { "AchievementFrameTab1", "AchievementFrameTab2" }
 
+local ACHIEVEMENT_PANELS = {
+    "AchievementFrameCategories", "AchievementFrameAchievements", "AchievementFrameSummary",
+}
+
+local ACHIEVEMENT_SCROLLS = {
+    "AchievementFrameCategoriesContainer", "AchievementFrameAchievementsContainer",
+}
+
 local function SkinAchievements()
-    local frame = _G.AchievementFrame
-    if not frame then return end
-
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-    M:Tabs(ACHIEVEMENT_TABS)
-
-    M:Controls({
-        "AchievementFrameCategories", "AchievementFrameAchievements", "AchievementFrameSummary",
-    }, function(panel)
-        Skin:Strip(panel)
-        M:SkinScrollsIn(panel)
-    end)
-
-    M:Controls({
-        "AchievementFrameCategoriesContainer", "AchievementFrameAchievementsContainer",
-    }, function(scroll)
-        Skin:ScrollFrame(scroll)
-    end)
-
-    M:Controls({ "AchievementFrameFilterButton", "AchievementFrameSearchBox" }, function(control)
-        if control and type(control.GetObjectType) == "function"
-            and control:GetObjectType() == "EditBox" then
-            Skin:EditBox(control)
-        else
-            Skin:Dropdown(control)
-        end
-    end)
+    M:Dress("AchievementFrame", { window = true, panel = { bgAlpha = 0.96 }, tabs = ACHIEVEMENT_TABS })
+    -- 这三块只剥原美术、不另挂底衬：成就列表要贴着窗口自己的背景读，多一层板子会把行距压脏。
+    M:Dress(ACHIEVEMENT_PANELS, { noPanel = true, deep = true })
+    M:Dress(ACHIEVEMENT_SCROLLS, { as = "scroll" })
+    M:Dress({ "AchievementFrameSearchBox" }, { as = "editbox" })
+    M:Dress({ "AchievementFrameFilterButton" }, { as = "dropdown" })
 end
 
 local ENCOUNTER_TABS = { "EncounterJournalTab1", "EncounterJournalTab2", "EncounterJournalTab3" }
 
+-- 副本选择列表 + 首领页签按钮：同样只剥原美术，内容（首领图标、正文）不动。
+local ENCOUNTER_PANELS = {
+    "EncounterJournalInstanceSelect", "EncounterJournalBossButton1",
+    "EncounterJournalBossButton2", "EncounterJournalBossButton3",
+}
+
 local function SkinEncounterJournal()
-    local frame = _G.EncounterJournal
-    if not frame then return end
-
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-    M:Tabs(ENCOUNTER_TABS)
-
-    M:Controls({
-        "EncounterJournalInstanceSelect", "EncounterJournalBossButton1",
-        "EncounterJournalBossButton2", "EncounterJournalBossButton3",
-    }, function(panel)
-        Skin:Strip(panel)
-        M:SkinScrollsIn(panel)
-    end)
+    M:Dress("EncounterJournal", { window = true, panel = { bgAlpha = 0.96 }, tabs = ENCOUNTER_TABS })
+    M:Dress(ENCOUNTER_PANELS, { noPanel = true, deep = true })
 end
 
 M:Panel("playerspells", {
@@ -134,9 +97,7 @@ M:Panel("playerspells", {
     apply = SkinPlayerSpells,
     frames = {
         "PlayerSpellsFrame", "SpellBookFrame",
-        "PlayerSpellsTab1", "PlayerSpellsTab2", "PlayerSpellsTab3", "PlayerSpellsTab4",
-        "PlayerSpellsSearchBox", "SpellBookSearchBox", "AssistedCombatRotationFrame",
-        "PlayerSpellsCloseButton",
+        PLAYERSPELLS_TABS, PLAYERSPELLS_EDITS, PLAYERSPELLS_BUTTONS,
     },
 })
 
@@ -146,12 +107,7 @@ M:Panel("collections", {
     apply = SkinCollections,
     frames = {
         "CollectionsJournal", "CollectionsJournalCloseButton",
-        "CollectionsJournalTab1", "CollectionsJournalTab2", "CollectionsJournalTab3",
-        "CollectionsJournalTab4", "CollectionsJournalTab5", "CollectionsJournalTab6",
-        "MountJournal", "PetJournal", "ToyBox", "HeirloomsJournal",
-        "WardrobeCollectionFrame", "CampsitesJournal",
-        "MountJournalFilterButton", "PetJournalFilterButton", "ToyBoxFilterButton",
-        "HeirloomsJournalFilterButton", "CollectionsJournalFilterButton",
+        COLLECTIONS_TABS, COLLECTIONS_PANELS, COLLECTIONS_FILTERS, COLLECTIONS_SEARCH,
     },
 })
 
@@ -161,9 +117,7 @@ M:Panel("achievements", {
     apply = SkinAchievements,
     frames = {
         "AchievementFrame", "AchievementFrameCloseButton",
-        "AchievementFrameTab1", "AchievementFrameTab2",
-        "AchievementFrameCategories", "AchievementFrameAchievements", "AchievementFrameSummary",
-        "AchievementFrameCategoriesContainer", "AchievementFrameAchievementsContainer",
+        ACHIEVEMENT_TABS, ACHIEVEMENT_PANELS, ACHIEVEMENT_SCROLLS,
         "AchievementFrameFilterButton", "AchievementFrameSearchBox",
     },
 })
@@ -174,21 +128,14 @@ M:Panel("encounterjournal", {
     apply = SkinEncounterJournal,
     frames = {
         "EncounterJournal", "EncounterJournalCloseButton",
-        "EncounterJournalTab1", "EncounterJournalTab2", "EncounterJournalTab3",
-        "EncounterJournalInstanceSelect",
-        "EncounterJournalBossButton1", "EncounterJournalBossButton2", "EncounterJournalBossButton3",
+        ENCOUNTER_TABS, ENCOUNTER_PANELS,
     },
 })
 
 -- 幻化：Blizzard_Transmog 是 AllowLoad: Game（不限 game-type），本客户端有幻化（外观/试衣间数据齐全）。
--- 装备格子带图标，SkinButtonsIn 自动跳过。
+-- 装备格子带图标，深扫会自动跳过。
 local function SkinTransmog()
-    local frame = _G.TransmogFrame
-    if not frame then return end
-
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-    M:SkinButtonsIn(frame)
-    M:SkinScrollsIn(frame)
+    M:Dress("TransmogFrame", { window = true, panel = { bgAlpha = 0.96 }, deep = true })
 end
 
 M:Panel("transmog", {
@@ -196,26 +143,21 @@ M:Panel("transmog", {
     group = "收藏",
     apply = SkinTransmog,
     addons = { Blizzard_Transmog = true },
-    frames = {
-        "TransmogFrame", "TransmogFrameCloseButton",
-    },
+    frames = { "TransmogFrame", "TransmogFrameCloseButton" },
 })
 
--- 试衣间：camelot 在 UIPanels_Game 里带 DressUpFramesOverrides.lua（本客户端专属覆写），窗口存在。
+-- 试衣间：camelot 在 UIPanels_Game 里带 DressUpFramesOverrides.lua（本客户端专属名单），窗口存在。
 -- 3D 模型区是内容，不动；只收拾窗口壳与动作按钮。
 local function SkinDressUp()
-    local frame = _G.DressUpFrame
-    if not frame then return end
-
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-    M:Buttons({ "DressUpFrameResetButton", "DressUpFrameCancelButton" })
-    -- Link / 外观切换是 parentKey 成员，不是全局名；表构造不能有 nil 空洞，逐个有再加。
-    local members = {}
-    if frame.LinkButton then members[#members + 1] = frame.LinkButton end
-    if frame.ToggleOutfitDetailsButton then members[#members + 1] = frame.ToggleOutfitDetailsButton end
-    M:Controls(members, function(button)
-        Skin:Button(button)
-    end)
+    -- Link / 外观切换挂在帧的成员上（不是全局名），点路径同样能查，缺了只是账本上一行 ✗。
+    M:Dress("DressUpFrame", {
+        window = true,
+        panel = { bgAlpha = 0.96 },
+        buttons = {
+            "DressUpFrameResetButton", "DressUpFrameCancelButton",
+            "DressUpFrame.LinkButton", "DressUpFrame.ToggleOutfitDetailsButton",
+        },
+    })
 end
 
 M:Panel("dressup", {
@@ -225,5 +167,6 @@ M:Panel("dressup", {
     frames = {
         "DressUpFrame", "DressUpFrameCloseButton",
         "DressUpFrameResetButton", "DressUpFrameCancelButton",
+        "DressUpFrame.LinkButton", "DressUpFrame.ToggleOutfitDetailsButton",
     },
 })

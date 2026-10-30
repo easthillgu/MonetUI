@@ -1,5 +1,7 @@
 -- Modules/Skins/Social.lua
 -- Friends / who, communities, guild and the calendar.  List rows are left alone; only the windows, tabs, close buttons and the main scroll bars are dressed.
+-- 本文件的所有美化都走 M:Dress：名字先过 Skin:Need 记账（缺什么 `/mui skins diagnose` 直接报），
+-- 顺序固定为"剥原美术 → 挂底衬 → 窗口件 → 子控件深扫"，不在这里各写各的。
 
 local ADDON_NAME, ns = ...
 
@@ -11,69 +13,60 @@ local FRIENDS_TABS = {
     "FriendsFrameTab4", "FriendsFrameTab5",
 }
 
+local FRIENDS_BUTTONS = {
+    "FriendsFrameSendMessageButton", "FriendsFrameAddFriendButton",
+    "FriendsFrameAddIgnoreButton", "FriendsFrameBroadcastButton",
+}
+
 local function SkinFriends()
-    local frame = _G.FriendsFrame
-    if not frame then return end
+    -- 各标签页（好友 / 声望 / 团队 / 公会…）的列表用 ScrollBox，滚动条是无名 Frame + Thumb，
+    -- 而且行在切页时才建出来。以前这里给每个子 Frame 各挂一条永久 ShowWatch（帧多、且切页
+    -- 不触发父帧的显示瞬间）；deep 改成"一帧一条轮询，只在窗口可见时跑"，切页也能补上。
+    M:Dress("FriendsFrame", {
+        window = true,
+        panel = { bgAlpha = 0.96 },
+        deep = true,
+        tabs = FRIENDS_TABS,
+        buttons = FRIENDS_BUTTONS,
+        scrolls = { "FriendsFrameListScrollFrame" },
+    })
+end
 
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-    M:Tabs(FRIENDS_TABS)
+local WHO_BUTTONS = { "WhoFrameWhoButton", "WhoFrameAddFriendButton", "WhoFrameGroupInviteButton" }
 
-    M:Controls({
-        "FriendsFrameSendMessageButton", "FriendsFrameAddFriendButton",
-        "FriendsFrameAddIgnoreButton", "FriendsFrameBroadcastButton",
-    }, function(button)
-        Skin:Button(button)
-    end)
+local function SkinWho()
+    -- Who 在本客户端要么是独立窗口，要么就是 FriendsFrame 的第 4 页（查无独立窗口时退回它）。
+    local frame = Skin:Need("WhoFrame") or Skin:Need("FriendsFrame")
+    M:Dress(frame, {
+        window = true, noTitle = true, panel = { bgAlpha = 0.96 },
+        buttons = WHO_BUTTONS, scrolls = { "WhoListScrollFrame" },
+    })
+end
 
-    M:Scrolls({ "FriendsFrameListScrollFrame" })
+local COMMUNITIES_TABS = { "CommunitiesFrameTab1", "CommunitiesFrameTab2", "CommunitiesFrameTab3" }
 
-    -- 各标签页（好友 / 声望 / 团队 / 公会…）的列表用 ScrollBox，滚动条是无名 Frame + Thumb；
-    -- 递归扫一遍把它们也换上我们的细把手。标签内容懒加载，面板显示时再补一次。
-    M:SkinScrollsIn(frame)
-    M:HookShow(frame, function() M:SkinScrollsIn(frame) end)
-    if type(frame.GetChildren) == "function" then
-        for _, child in ipairs({ frame:GetChildren() }) do
-            local okKind, kind = pcall(child.GetObjectType, child)
-            if okKind and kind == "Frame" then
-                pcall(M.HookShow, M, child, function() M:SkinScrollsIn(child) end)
-            end
-        end
+local function SkinCommunities()
+    M:Dress("CommunitiesFrame", {
+        window = true, panel = { bgAlpha = 0.96 }, deep = true, tabs = COMMUNITIES_TABS,
+    })
+end
+
+local GUILD_FRAMES = { "GuildFrame", "GuildControlUI", "GuildRegistrarFrame", "GuildInviteFrame" }
+
+local function SkinGuild()
+    M:Dress(GUILD_FRAMES, { window = true, panel = { bgAlpha = 0.96 } })
+    -- 名单滚动区挂在各窗口自己的成员上，两种命名都见过；逐个窗口短路取第一个存在的。
+    for _, name in ipairs(GUILD_FRAMES) do
+        local scroll = Skin:Need(name .. ".GuildRosterScrollFrame")
+            or Skin:Need(name .. ".RosterScrollFrame")
+        if scroll then Skin:ScrollFrame(scroll) end
     end
 end
 
-local function SkinWho()
-    local frame = _G.WhoFrame or _G.FriendsFrame
-    if not frame then return end
-    M:SkinWindow(frame, { noTitle = true, panel = { bgAlpha = 0.96 } })
-    M:Scrolls({ "WhoListScrollFrame" })
-    M:Controls({ "WhoFrameWhoButton", "WhoFrameAddFriendButton", "WhoFrameGroupInviteButton" }, function(button)
-        Skin:Button(button)
-    end)
-end
-
-local function SkinCommunities()
-    local frame = _G.CommunitiesFrame
-    if not frame then return end
-
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-    M:Controls({ "CommunitiesFrameTab1", "CommunitiesFrameTab2", "CommunitiesFrameTab3" }, function(tab)
-        Skin:Tab(tab)
-    end)
-    M:SkinScrollsIn(frame)
-end
-
-local function SkinGuild()
-    M:Controls({ "GuildFrame", "GuildControlUI", "GuildRegistrarFrame", "GuildInviteFrame" }, function(frame)
-        M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-        Skin:ScrollFrame(frame.GuildRosterScrollFrame or frame.RosterScrollFrame)
-    end)
-end
+local CALENDAR_FRAMES = { "CalendarFrame", "GameCalendarFrame", "GameCalendarFrameSet" }
 
 local function SkinCalendar()
-    M:Controls({ "CalendarFrame", "GameCalendarFrame", "GameCalendarFrameSet" }, function(frame)
-        M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-        M:SkinButtonsIn(frame)
-    end)
+    M:Dress(CALENDAR_FRAMES, { window = true, panel = { bgAlpha = 0.96 }, deep = true })
 end
 
 -- Chat: the window chrome, its scroll bars, the toggle / channel buttons and the input box.  The chat
@@ -81,6 +74,24 @@ end
 -- stay readable-through rather than opaque.  ChatFrameN's Background texture is in BACKDROP_PIECES, so
 -- Strip already fades Blizzard's blue; the plate replaces it.
 local CHAT_FRAMES = { "ChatFrame1", "ChatFrame2", "ChatFrame3", "ChatFrame4" }
+
+local CHAT_SCROLLS = {
+    "ChatFrame1ScrollFrame", "ChatFrame2ScrollFrame",
+    "ChatFrame3ScrollFrame", "ChatFrame4ScrollFrame",
+}
+
+local CHAT_BUTTONS = { "ChatFrameToggleButton", "ChatFrameChannelButton" }
+
+local CHAT_EDITS = {
+    "ChatFrame1EditBox", "ChatFrame2EditBox", "ChatFrame3EditBox", "ChatFrame4EditBox",
+}
+
+local CHAT_CHANNEL_POPUPS = { "ChatChannelManagerPopup", "CreateChannelPopup", "EditChannelPopup" }
+
+local CHAT_CHANNEL_BUTTONS = {
+    "ChatChannelManagerPopupAcceptButton", "ChatChannelManagerPopupCancelButton",
+    "ChatChannelManagerPopupDeleteButton",
+}
 
 --- 聊天框"贴底"已移除（2026-10-29）。
 --- **原因：ChatFrame1 是暴雪 EditMode 的系统帧（system=8），从插件里对它做
@@ -97,12 +108,12 @@ local CHAT_FRAMES = { "ChatFrame1", "ChatFrame2", "ChatFrame3", "ChatFrame4" }
 --- 扩散污染（脏字段数不变、taint.log 空），而 SetPoint / SetClampRectInsets 会把帧标脏
 --- （见下方"贴底已移除"的说明）。所以只对齐**高度**，位置和宽度完全交给暴雪/玩家。
 local function MatchChatHeight()
-    local mm = _G.Minimap
+    local mm = Skin:Need("Minimap")
     if not mm or type(mm.GetHeight) ~= "function" then return end
     local ok, h = pcall(mm.GetHeight, mm)
     if not ok or type(h) ~= "number" or h <= 0 then return end
     for _, name in ipairs(CHAT_FRAMES) do
-        local f = _G[name]
+        local f = Skin:Need(name)
         if f and type(f.SetHeight) == "function" then
             local gok, cur = pcall(f.GetHeight, f)
             if not gok or math.abs((cur or 0) - h) > 0.5 then
@@ -118,55 +129,23 @@ if ns.EventBus then
 end
 
 local function SkinChat()
-    M:Controls(CHAT_FRAMES, function(chat)
-        ns.Skin:Strip(chat)
-        ns.Skin:Panel(chat, { thickness = 1, bgAlpha = 0.35 })
-    end)
+    M:Dress(CHAT_FRAMES, { panel = { thickness = 1, bgAlpha = 0.35 } })
 
     MatchChatHeight()
 
-    M:Controls({
-        "ChatFrame1ScrollFrame", "ChatFrame2ScrollFrame",
-        "ChatFrame3ScrollFrame", "ChatFrame4ScrollFrame",
-    }, function(scroll)
-        ns.Skin:ScrollFrame(scroll)
-    end)
-
-    M:Controls({
-        "ChatFrameToggleButton", "ChatFrameChannelButton",
-        "ChatFrame1EditBox", "ChatFrame2EditBox", "ChatFrame3EditBox", "ChatFrame4EditBox",
-    }, function(control)
-        if not control then return end
-        local kind = type(control.GetObjectType) == "function" and control:GetObjectType()
-        if kind == "EditBox" then
-            ns.Skin:EditBox(control)
-        else
-            ns.Skin:Button(control)
-        end
-    end)
+    M:Dress(CHAT_SCROLLS, { as = "scroll" })
+    M:Dress(CHAT_BUTTONS, { as = "button" })
+    M:Dress(CHAT_EDITS, { as = "editbox" })
 
     -- Channel management: the popup list, and the two create/edit dialogs it opens.
-    M:Controls({ "ChatChannelManagerPopup", "CreateChannelPopup", "EditChannelPopup" }, function(popup)
-        if popup then M:SkinWindow(popup, { panel = { bgAlpha = 0.97 } }) end
-    end)
-    M:Controls({
-        "ChatChannelManagerPopupAcceptButton", "ChatChannelManagerPopupCancelButton",
-        "ChatChannelManagerPopupDeleteButton",
-    }, function(button)
-        if button then ns.Skin:Button(button) end
-    end)
+    M:Dress(CHAT_CHANNEL_POPUPS, { window = true, panel = { bgAlpha = 0.97 } })
+    M:Dress(CHAT_CHANNEL_BUTTONS, { as = "button" })
 end
 
 M:Panel("chat", { label = "聊天", group = "社交", apply = SkinChat,
     frames = {
-        "ChatFrame1", "ChatFrame2", "ChatFrame3", "ChatFrame4",
-        "ChatFrame1ScrollFrame", "ChatFrame2ScrollFrame",
-        "ChatFrame3ScrollFrame", "ChatFrame4ScrollFrame",
-        "ChatFrameToggleButton", "ChatFrameChannelButton",
-        "ChatFrame1EditBox", "ChatFrame2EditBox", "ChatFrame3EditBox", "ChatFrame4EditBox",
-        "ChatChannelManagerPopup", "CreateChannelPopup", "EditChannelPopup",
-        "ChatChannelManagerPopupAcceptButton", "ChatChannelManagerPopupCancelButton",
-        "ChatChannelManagerPopupDeleteButton",
+        CHAT_FRAMES, CHAT_SCROLLS, CHAT_BUTTONS, CHAT_EDITS,
+        CHAT_CHANNEL_POPUPS, CHAT_CHANNEL_BUTTONS,
     } })
 
 M:Panel("friends", {
@@ -178,13 +157,8 @@ M:Panel("friends", {
     end,
     frames = {
         "FriendsFrame", "FriendsFrameCloseButton",
-        "FriendsFrameTab1", "FriendsFrameTab2", "FriendsFrameTab3",
-        "FriendsFrameTab4", "FriendsFrameTab5",
-        "FriendsFrameSendMessageButton", "FriendsFrameAddFriendButton",
-        "FriendsFrameAddIgnoreButton", "FriendsFrameBroadcastButton",
-        "FriendsFrameListScrollFrame",
-        "WhoFrame", "WhoListScrollFrame",
-        "WhoFrameWhoButton", "WhoFrameAddFriendButton", "WhoFrameGroupInviteButton",
+        FRIENDS_TABS, FRIENDS_BUTTONS, "FriendsFrameListScrollFrame",
+        "WhoFrame", "WhoListScrollFrame", WHO_BUTTONS,
     },
 })
 
@@ -192,10 +166,7 @@ M:Panel("communities", {
     label = "社区",
     group = "社交",
     apply = SkinCommunities,
-    frames = {
-        "CommunitiesFrame", "CommunitiesFrameCloseButton",
-        "CommunitiesFrameTab1", "CommunitiesFrameTab2", "CommunitiesFrameTab3",
-    },
+    frames = { "CommunitiesFrame", "CommunitiesFrameCloseButton", COMMUNITIES_TABS },
 })
 
 M:Panel("guild", {
@@ -203,7 +174,8 @@ M:Panel("guild", {
     group = "社交",
     apply = SkinGuild,
     frames = {
-        "GuildFrame", "GuildControlUI", "GuildRegistrarFrame", "GuildInviteFrame",
+        GUILD_FRAMES,
+        "GuildFrame.GuildRosterScrollFrame", "GuildFrame.RosterScrollFrame",
     },
 })
 
@@ -211,43 +183,36 @@ M:Panel("calendar", {
     label = "日历",
     group = "社交",
     apply = SkinCalendar,
-    frames = {
-        "CalendarFrame", "GameCalendarFrame", "GameCalendarFrameSet",
-    },
+    frames = { CALENDAR_FRAMES },
 })
 
 -- 签名请愿（公会/战队登记表）：UIPanels_Game 的 [Family] PetitionFrame 无 game-type 门控。
-local function SkinPetition()
-    local frame = _G.PetitionFrame
-    if not frame then return end
+local PETITION_BUTTONS = {
+    "PetitionFrameSignButton", "PetitionFrameRequestButton",
+    "PetitionFrameRenameButton", "PetitionFrameCancelButton",
+}
 
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-    M:Buttons({
-        "PetitionFrameSignButton", "PetitionFrameRequestButton",
-        "PetitionFrameRenameButton", "PetitionFrameCancelButton",
+local function SkinPetition()
+    M:Dress("PetitionFrame", {
+        window = true, panel = { bgAlpha = 0.96 }, deep = true, buttons = PETITION_BUTTONS,
     })
-    M:SkinScrollsIn(frame)
 end
 
 M:Panel("petition", {
     label = "签名请愿",
     group = "社交",
     apply = SkinPetition,
-    frames = {
-        "PetitionFrame", "PetitionFrameCloseButton",
-        "PetitionFrameSignButton", "PetitionFrameRequestButton",
-        "PetitionFrameRenameButton", "PetitionFrameCancelButton",
-    },
+    frames = { "PetitionFrame", "PetitionFrameCloseButton", PETITION_BUTTONS },
 })
 
 -- 战袍设计（公会注册官处）：[Family] TabardFrame 无门控。
--- 自定义区的箭头/图标按钮带贴图内容，不做 SkinButtonsIn，只收拾确定/取消。
+-- 自定义区的箭头/图标按钮带贴图内容，不做深扫，只收拾确定 / 取消。
 local function SkinTabard()
-    local frame = _G.TabardFrame
-    if not frame then return end
-
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-    M:Buttons({ "TabardFrameAcceptButton", "TabardFrameCancelButton" })
+    M:Dress("TabardFrame", {
+        window = true,
+        panel = { bgAlpha = 0.96 },
+        buttons = { "TabardFrameAcceptButton", "TabardFrameCancelButton" },
+    })
 end
 
 M:Panel("tabard", {

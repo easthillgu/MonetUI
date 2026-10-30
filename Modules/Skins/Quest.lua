@@ -34,16 +34,22 @@ local function UpdateWeave(panel)
 end
 
 -- 递归提亮暗色 FontString（暴雪正文 0,0,0 / 深棕，深底上看不清）
+-- 每一步都 pcall：任务面板里有受保护的子控件，`GetObjectType` / `GetChildren` 在零售构建上
+-- 会直接抛 "forbidden object"。以前不包，一条抛错就把整棵树的提亮中断在半路（表现为"一半文字还是黑的"）。
 local function BrightenTree(f)
-    if not f or not f.GetObjectType then return end
-    if f:GetObjectType() == "FontString" then
+    if not f or type(f.GetObjectType) ~= "function" then return end
+    local okKind, kind = pcall(f.GetObjectType, f)
+    if okKind and kind == "FontString" then
         local ok, r, g, b = pcall(f.GetTextColor, f)
         if ok and r and r < 0.55 and g < 0.55 and b < 0.55 then
             pcall(f.SetTextColor, f, 0.88, 0.86, 0.82, 1)
         end
     end
-    if f.GetChildren then
-        for _, c in ipairs({ f:GetChildren() }) do BrightenTree(c) end
+    if type(f.GetChildren) == "function" then
+        local ok, kids = pcall(function() return { f:GetChildren() } end)
+        if ok and kids then
+            for i = 1, #kids do BrightenTree(kids[i]) end
+        end
     end
 end
 
@@ -80,36 +86,49 @@ local function WeavePanel(panel, opts)
     BrightenTree(panel)
 end
 
--- 面板显示时再亮一次（暴雪 quest 数据是 Show 后才塞进去的）
-local function HookQuestBrighten(frame)
-    M:HookShow(frame, function()
-        local panels = {
-            _G.QuestFrameGreetingPanel, _G.QuestFrameProgressPanel,
-            _G.QuestFrameRewardPanel, _G.QuestFrameDetailPanel,
-        }
-        for _, panel in ipairs(panels) do
-            if panel then
-                UpdateWeave(panel)
-                BrightenTree(panel)
-            end
-        end
+-- 任务窗口的四块正文底板：换肤一次，暴雪 Show 之后再提亮一次（任务数据是 Show 后才塞进来的）。
+local QUEST_PANELS = {
+    "QuestFrameGreetingPanel", "QuestFrameProgressPanel",
+    "QuestFrameRewardPanel", "QuestFrameDetailPanel",
+}
 
-        -- 全局 FontString 也一起提亮
-        local questFonts = {
-            "QuestProgressText", "QuestGreetingText", "QuestDetailText",
-            "QuestRewardText", "QuestProgressRequiredItemsText",
-            "QuestProgressRequiredMoneyText", "QuestProgressCompleteText",
-            "QuestProgressShowItemsText", "QuestRewardChoiceRequiredText",
-            "QuestRewardTextRequiredText",
-        }
-        for _, name in ipairs(questFonts) do
-            local f = _G[name]
-            if f and f.SetTextColor then
-                local ok, r, g, b = pcall(f.GetTextColor, f)
-                if ok and r and r < 0.55 and g < 0.55 and b < 0.55 then
-                    pcall(f.SetTextColor, f, 0.88, 0.86, 0.82, 1)
-                end
-            end
+local QUEST_FONTS = {
+    "QuestProgressText", "QuestGreetingText", "QuestDetailText",
+    "QuestRewardText", "QuestProgressRequiredItemsText",
+    "QuestProgressRequiredMoneyText", "QuestProgressCompleteText",
+    "QuestProgressShowItemsText", "QuestRewardChoiceRequiredText",
+    "QuestRewardTextRequiredText",
+}
+
+-- 模块级函数 = 稳定引用：SkinQuestFrame 会被 QUEST_LOG_UPDATE 反复触发，
+-- 在 Apply 里现造闭包的话每次触发都多挂一条回调（M:HookShow 按引用去重）。
+local function BrightenQuestPanels()
+    M:Controls(QUEST_PANELS, function(panel)
+        UpdateWeave(panel)
+        BrightenTree(panel)
+    end)
+    -- 正文是挂在窗口外的全局 FontString，也要一起提亮
+    M:Controls(QUEST_FONTS, function(fs)
+        local ok, r, g, b = pcall(fs.GetTextColor, fs)
+        if ok and r and r < 0.55 and g < 0.55 and b < 0.55 then
+            pcall(fs.SetTextColor, fs, 0.88, 0.86, 0.82, 1)
+        end
+    end)
+end
+
+local function HookQuestBrighten(frame)
+    M:HookShow(frame, BrightenQuestPanels)
+end
+
+-- 对话选项按钮（GossipGreetingButton1..8）是暴雪在 Show 那一刻才建出来 / 复用的。
+-- 模块级函数 + 稳定引用，重复 Apply 不会重复登记回调；查找记在 questframe 名下。
+local function RestyleGossipButtons()
+    Skin.With("questframe", function()
+        if not (Skin:Need("GossipFrame.GreetingPanel") or Skin:Need("GossipFrameGreetingPanel")) then
+            return
+        end
+        for index = 1, 8 do
+            M:Dress("GossipGreetingButton" .. index, { as = "button" })
         end
     end)
 end
@@ -126,23 +145,13 @@ local QUESTLOG_SCROLLS = {
 }
 
 local function SkinQuestLog()
-    local log = _G.QuestLogFrame
-    if log then
-        M:SkinWindow(log, { panel = { bgAlpha = 0.95 } })
-        M:Buttons(QUESTLOG_BUTTONS)
-        M:Tabs(QUESTLOG_TABS)
-        M:Scrolls(QUESTLOG_SCROLLS)
-    end
+    M:Dress("QuestLogFrame", { window = true, panel = { bgAlpha = 0.95 } })
+    M:Dress(QUESTLOG_BUTTONS, { as = "button" })
+    M:Dress(QUESTLOG_TABS, { as = "tab" })
+    M:Dress(QUESTLOG_SCROLLS, { as = "scroll" })
 
-    local detail = _G.QuestLogDetailFrame
-    if detail then
-        M:SkinWindow(detail, { noTitle = true, panel = { bgAlpha = 0.95 } })
-    end
-
-    local popup = _G.QuestLogPopupDetailFrame
-    if popup then
-        M:SkinWindow(popup, { noTitle = true, panel = { bgAlpha = 0.96 } })
-    end
+    M:Dress("QuestLogDetailFrame", { window = true, noTitle = true, panel = { bgAlpha = 0.95 } })
+    M:Dress("QuestLogPopupDetailFrame", { window = true, noTitle = true, panel = { bgAlpha = 0.96 } })
 end
 
 local QUESTFRAME_BUTTONS = {
@@ -155,46 +164,42 @@ local QUESTFRAME_SCROLLS = {
 }
 
 local function SkinQuestFrame()
-    local quest = _G.QuestFrame
-    if quest then
-        M:SkinWindow(quest, { panel = { bgAlpha = 0.95 } })
-        M:Buttons(QUESTFRAME_BUTTONS)
-        M:Scrolls(QUESTFRAME_SCROLLS)
+    M:Dress("QuestFrame", { window = true, panel = { bgAlpha = 0.95 } })
+    M:Dress(QUESTFRAME_BUTTONS, { as = "button" })
+    M:Dress(QUESTFRAME_SCROLLS, { as = "scroll" })
 
-        -- 斜纹底板：暗色衬底 + monet_stripe_weave，解决暴雪正文在深底上看不清的问题
-        M:Controls({
-            "QuestFrameGreetingPanel", "QuestFrameProgressPanel",
-            "QuestFrameRewardPanel", "QuestFrameDetailPanel",
-        }, function(panel)
-            WeavePanel(panel, { baseAlpha = 0.70, weaveAlpha = 0.30 })
-        end)
+    -- 斜纹底板：暗色衬底 + monet_stripe_weave，解决暴雪正文在深底上看不清的问题
+    M:Controls(QUEST_PANELS, function(panel)
+        WeavePanel(panel, { baseAlpha = 0.70, weaveAlpha = 0.30 })
+    end)
 
-        -- Show 后再亮一次（暴雪 quest 数据是 Show 后才塞的）
-        HookQuestBrighten(quest)
-    end
+    -- Show 后再亮一次（暴雪 quest 数据是 Show 后才塞的）
+    HookQuestBrighten(Skin:Need("QuestFrame"))
 
-    local gossip = _G.GossipFrame
-    if gossip then
-        M:SkinWindow(gossip, { panel = { bgAlpha = 0.95 } })
-        M:Scrolls(QUESTFRAME_SCROLLS)
-        M:Controls({ "GossipFrameGreetingGoodbyeButton" }, function(button) ns.Skin:Button(button) end)
+    M:Dress("GossipFrame", { window = true, panel = { bgAlpha = 0.95 } })
+    M:Dress(QUESTFRAME_SCROLLS, { as = "scroll" })
+    M:Dress("GossipFrameGreetingGoodbyeButton", { as = "button" })
 
-        -- Greeting option buttons are created lazily; restyle them on show.
-        M:HookShow(gossip, function()
-            local panel = gossip.GreetingPanel or _G.GossipFrameGreetingPanel
-            if not panel then return end
-            for index = 1, 8 do
-                local button = _G["GossipGreetingButton" .. index]
-                if button then ns.Skin:Button(button) end
-            end
-        end)
-    end
+    M:HookShow(Skin:Need("GossipFrame"), RestyleGossipButtons)
 end
 
 -- The quest objective tracker that sits under the minimap.  It has no tabs and no chrome of its own --
 -- just a header, a scroll and a list of tracker blocks, so the header font and the scroll carry it.
+local TRACKER_HEADERS = { "ObjectiveTrackerHeader", "QuestLogObjectiveHeader" }
+
+-- 追踪框每次显示都会重建/复用里面的行，所以显示时把滚动条补扫一遍、原底板再压一次。
+-- 写成模块级函数：SkinObjectiveTracker 会被每次 Apply 触发，闭包会重复登记。
+local function RepressObjectiveTracker()
+    Skin.With("objectivetracker", function()
+        local tracker = Skin:Need("ObjectiveTrackerFrame")
+        if not tracker then return end
+        M:SkinScrollsIn(tracker)
+        ns.Skin:Strip(tracker, { regions = false, backdrops = true })
+    end)
+end
+
 local function SkinObjectiveTracker()
-    local tracker = _G.ObjectiveTrackerFrame
+    local tracker = Skin:Need("ObjectiveTrackerFrame")
     if not tracker then return end
 
     -- QuestTracker 模块默认开着，并且把暴雪的追踪框整个隐藏、自己画一份（QuestTracker.lua:305
@@ -206,30 +211,20 @@ local function SkinObjectiveTracker()
     if ns:IsModuleEnabled("QuestTracker") then return end
 
     -- Only the header: the blocks below it are content and must stay legible.
-    M:Controls({
-        "ObjectiveTrackerHeader", "QuestLogObjectiveHeader",
-    }, function(header)
-        if not header then return end
+    M:Controls(TRACKER_HEADERS, function(header)
         local text = header.Text or (type(header.GetName) == "function"
             and header:GetName() and _G[header:GetName() .. "Text"])
         if text then ns.Skin:Font(text, 12, "pixel", nil, "edge") end
     end)
 
-    -- The tracker rows are created lazily and reused, so restyle them on every show.  Header keeps its
-    -- own level; we only walk the containers below it.
-    M:HookShow(tracker, function()
-        M:SkinScrollsIn(tracker)
-        ns.Skin:Strip(tracker, { regions = false, backdrops = true })
-    end)
+    M:HookShow(tracker, RepressObjectiveTracker)
 end
 
 M:Panel("objectivetracker", {
     label = "目标追踪",
     group = "任务",
     apply = SkinObjectiveTracker,
-    frames = {
-        "ObjectiveTrackerFrame", "ObjectiveTrackerHeader", "QuestLogObjectiveHeader",
-    },
+    frames = { "ObjectiveTrackerFrame", TRACKER_HEADERS },
 })
 
 M:Panel("questlog", {
@@ -238,10 +233,7 @@ M:Panel("questlog", {
     apply = SkinQuestLog,
     frames = {
         "QuestLogFrame", "QuestLogDetailFrame", "QuestLogPopupDetailFrame",
-        "QuestLogFrameAbandonButton", "QuestLogFrameTrackButton", "QuestLogFrameShareButton",
-        "QuestLogFrameCancelButton", "QuestLogFramePushQuestButton",
-        "QuestLogFrameTab1", "QuestLogFrameTab2",
-        "QuestLogListScrollFrame", "QuestLogDetailScrollFrame", "QuestLogObjectiveScrollFrame",
+        QUESTLOG_BUTTONS, QUESTLOG_TABS, QUESTLOG_SCROLLS,
     },
 })
 
@@ -250,13 +242,12 @@ M:Panel("questframe", {
     group = "任务",
     apply = SkinQuestFrame,
     frames = {
-        "QuestFrame", "GossipFrame", "GossipFrameGreetingPanel",
-        "QuestFrameGreetingPanel", "QuestFrameProgressPanel",
-        "QuestFrameRewardPanel", "QuestFrameDetailPanel",
-        "QuestFrameAcceptButton", "QuestFrameDeclineButton", "QuestFrameCompleteButton",
-        "QuestFrameCompleteQuestButton", "QuestFrameGoodbyeButton", "QuestFramePushQuestButton",
-        "QuestProgressScrollFrame", "GossipGreetingScrollFrame", "QuestInfoObjectiveScrollFrame",
-        "GossipFrameGreetingGoodbyeButton", "GossipGreetingButton1",
+        "QuestFrame", "GossipFrame", "GossipFrame.GreetingPanel", "GossipFrameGreetingPanel",
+        QUEST_PANELS, QUEST_FONTS, QUESTFRAME_BUTTONS, QUESTFRAME_SCROLLS,
+        "GossipFrameGreetingGoodbyeButton",
+        -- 对话选项按钮只有 1 号写在名单里：其余 7 个在同一趟循环里按名拼接（见 RestyleGossipButtons），
+        -- 全列出来只是把"暴雪有没有建到第 8 个"当成我们的错报。
+        "GossipGreetingButton1",
     },
 })
 
@@ -268,18 +259,18 @@ end)
 
 -- 书籍 / 信件正文阅读窗：UIPanels_Game 的 [Family] ItemTextFrame 无 game-type 门控，本客户端存在。
 local function SkinItemText()
-    local frame = _G.ItemTextFrame
-    if not frame then return end
-
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-    M:Buttons({ "ItemTextCloseButton", "ItemTextNextPageButton", "ItemTextPrevPageButton" })
-    Skin:PageArrow(_G.ItemTextPrevPageButton, "left")
-    Skin:PageArrow(_G.ItemTextNextPageButton, "right")
-    M:Scrolls({ "ItemTextScrollFrame" })
+    M:Dress("ItemTextFrame", {
+        window = true,
+        panel = { bgAlpha = 0.96 },
+        buttons = { "ItemTextNextPageButton", "ItemTextPrevPageButton" },
+        scrolls = { "ItemTextScrollFrame" },
+    })
+    Skin:PageArrow(Skin:Need("ItemTextPrevPageButton"), "left")
+    Skin:PageArrow(Skin:Need("ItemTextNextPageButton"), "right")
 end
 
 M:Panel("itemtext", { label = "书籍 / 阅读", group = "任务", apply = SkinItemText,
     frames = {
-        "ItemTextFrame", "ItemTextCloseButton",
+        "ItemTextFrame", "ItemTextFrame.CloseButton",
         "ItemTextNextPageButton", "ItemTextPrevPageButton", "ItemTextScrollFrame",
     } })

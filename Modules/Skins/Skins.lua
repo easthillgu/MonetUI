@@ -24,8 +24,27 @@ M.registry = {}   -- ordered list of panel entries
 M.byKey    = {}   -- key -> entry
 M.active   = false
 
+--- 展平 `frames` 名单：字符串照收，表递归展开。
+--- 名单允许直接引用皮肤文件里那份**代码在用的**常量表，不再手抄第二遍 —— 抄的那份会漂
+--- （本轮就抓到 EditModeManager / EditModeManagerFrameAcceptChanges / MacroEditBox 三处
+--- 名单与代码不一致）。Lua 5.1 的 `unpack` 只有摆在表构造器**最末位**才展开全部返回值，
+--- 中间位置会被截成一个，所以这里不用 unpack，用嵌套表。
+local function FlattenFrames(spec, out)
+    out = out or {}
+    if type(spec) ~= "table" then return out end
+    for i = 1, #spec do
+        local item = spec[i]
+        if type(item) == "string" then
+            out[#out + 1] = item
+        else
+            FlattenFrames(item, out)
+        end
+    end
+    return out
+end
+
 --- Register one window / group of windows for beautification.
--- @param opts { label, group, apply = function(entry) (idempotent), default = false to ship off, addons = { ... }, frames = { ... } }
+-- @param opts { label, group, apply = function(entry) (idempotent), default = false to ship off, addons = { ... }, frames = { ... 字符串或常量表 } }
 function M:Panel(key, opts)
     assert(type(key) == "string", "Skins:Panel needs a string key")
     opts = opts or {}
@@ -38,8 +57,9 @@ function M:Panel(key, opts)
         default = opts.default ~= false,
         -- Blizzard load-on-demand addons this pack waits for, e.g. { Blizzard_Collections = true }; the pack is applied once one is loaded, and re-applied the moment one arrives.
         addons  = opts.addons,
-        -- Every Blizzard object this skin looks up, as dotted paths; a wrong name skips that control silently rather than erroring, which is exactly why they are recorded here for `/mui skins diagnose` to probe.
-        frames  = opts.frames,
+        -- 这个皮肤包**打算**碰的暴雪对象（点路径）。诊断优先读实际查找的账本，这一份只在
+        -- 面板从没跑过时兜底核对；同时它是离线闸门 tools/check-frame-list.js 的输入。
+        frames  = FlattenFrames(opts.frames),
     }
 
     if not self.byKey[key] then
@@ -116,7 +136,7 @@ function M:Apply(entry)
     if not self:IsApplicable(entry) then return end
     if not self:IsEnabled(entry.key) then return end
 
-    local ok, err = pcall(entry.apply, entry)
+    local ok, err = pcall(Skin.With, entry.key, entry.apply, entry)
     if not ok then
         -- Report a given panel once, not once per pass.  A pack that throws on this client is re-applied
         -- by every ApplyAll, every ADDON_LOADED burst, every PLAYER_ENTERING_WORLD and its own
@@ -157,16 +177,21 @@ function M:SkinWindow(frame, opts)
     Skin:Strip(frame, opts.strip)
     Skin:Panel(frame, opts.panel)
 
+    -- 标题字串和关闭按钮的位置各家不同：新框架挂在 TitleContainer 里，老框架直接挂在框上，
+    -- 还有一批（WorldMapFrame 这类）两者都在 BorderFrame 那一层。
+    local border = frame.BorderFrame
+
     if not opts.noTitle then
         local title = (frame.TitleContainer and frame.TitleContainer.TitleText)
             or frame.TitleText or frame.Title
+            or (border and (border.TitleText or border.Title))
         if title then
             Skin:Font(title, opts.titleSize or 12, "pixel", nil, "edge")
         end
     end
 
     if not opts.noClose then
-        local close = frame.CloseButton
+        local close = frame.CloseButton or (border and border.CloseButton)
         if not close and type(frame.GetName) == "function" then
             local name = frame:GetName()
             if name then close = _G[name .. "CloseButton"] end
@@ -177,12 +202,107 @@ function M:SkinWindow(frame, opts)
     return frame
 end
 
---- Run `fn` over a list of named controls; each may be a string (looked up in _G) or a table, and missing ones are skipped.
+--- 点名控件的换肤器（`Dress(spec, { as = "tab" })` 用它分派）。
+--- 点名控件的换肤器（`M:Dress(spec, { as = "tab" })` 用它分派）。
+--- 只有 editbox / slider 需要认类型：名单里的名字在本客户端可能是别的控件
+--- （拍卖行的 BrowseMinLevel 就既见过 EditBox 也见过 Slider），认错就跳过，不硬套。
+local function IsAnyType(obj, ...)
+    if type(obj.GetObjectType) ~= "function" then return false end
+    local ok, got = pcall(obj.GetObjectType, obj)
+    if not ok then return false end
+    for i = 1, select("#", ...) do
+        if got == select(i, ...) then return true end
+    end
+    return false
+end
+
+local DRESSERS = {
+    tab      = function(obj, opts) Skin:Tab(obj, opts and opts.control) end,
+    button   = function(obj, opts) M:Buttons({ obj }, opts and opts.control) end,
+    scroll   = function(obj) Skin:ScrollFrame(obj) end,
+    slider   = function(obj) if IsAnyType(obj, "Slider") then Skin:Slider(obj) end end,
+    dropdown = function(obj, opts) Skin:Dropdown(obj, opts and opts.control) end,
+    editbox  = function(obj) if IsAnyType(obj, "EditBox", "SearchBox") then Skin:EditBox(obj) end end,
+    fade     = function(obj) Skin:Fade(obj) end,
+}
+
+--- 深扫一个框的直接子控件，并在它**可见期间**继续补扫。
+--- 为什么不是"显示时补扫一次"：标签页 / 列表的行是在帧**已经显示着**的时候懒建出来的
+--- （切标签、翻页、滚进视野），OnShow 那一刻它们还不存在。轮询按可见性计时，隐藏的框不跑。
+--- 登记以帧去重：`M:Apply` 会被 QUEST_LOG_UPDATE / ADDON_LOADED / PLAYER_ENTERING_WORLD 反复触发，
+--- 不去重就是每触发一次多塞一条轮询回调。
+function M:SweepDeep(frame, controlOpts)
+    if not frame or type(frame.GetChildren) ~= "function" then return end
+    local sweep = function()
+        M:SkinButtonsIn(frame, controlOpts)
+        M:SkinScrollsIn(frame)
+        M:SkinSlidersIn(frame)
+    end
+    sweep()
+    if Marked(frame, "deepSweep") then return end
+    Mark(frame, "deepSweep", true)
+    Widget:PollWatch(frame, sweep)
+end
+
+--- 本仓唯一的"美化一个对象"入口：确认对象 → 剥暴雪原美术 → 挂我们的底衬 →
+--- 窗口件（标题 / 关闭）→ 子控件深扫 → 懒建内容在显示时补扫。
+--- 以前这一段在每个皮肤文件里手抄一遍，而且**顺序各写各的**：有的先挂底衬再 Strip
+--- （我们的底衬被自己剥掉），有的忘了补扫（懒建的 ScrollBox 把手永远是暴雪的 atlas）。
+--- 新皮肤一律走这里，别再复制那五行。
+-- @param spec  对象、对象名（可点路径，每个都过 `Skin:Need` 记账）、或它们的列表
+-- @param opts  { window=true 走窗口装饰, panel={底衬参数}, strip={剥的参数}, noStrip,
+--               deep=true 扫直接子控件并在可见期间补扫, lazy=false 关掉补扫,
+--               control={传给单个控件的参数}, as="tab|button|scroll|slider|dropdown|editbox|fade",
+--               tabs / buttons / scrolls = { 点名的控件 } }
+--               （window 档还吃 titleSize / noTitle / noClose；noPanel 只剥原美术、不挂底衬）
+function M:Dress(spec, opts)
+    opts = opts or {}
+    local list = Skin:AsList(spec)
+
+    if opts.as then
+        local dress = DRESSERS[string.lower(opts.as)]
+        if not dress then return end
+        for i = 1, #list do
+            if list[i] then pcall(dress, list[i], opts) end
+        end
+        return
+    end
+
+    for i = 1, #list do
+        local frame = list[i]
+        if frame then
+            if opts.window then
+                M:SkinWindow(frame, opts)
+            else
+                if not opts.noStrip then Skin:Strip(frame, opts.strip) end
+                if not opts.noPanel then Skin:Panel(frame, opts.panel) end
+            end
+
+            if opts.deep then
+                if opts.lazy ~= false then
+                    M:SweepDeep(frame, opts.control)
+                else
+                    M:SkinButtonsIn(frame, opts.control)
+                    M:SkinScrollsIn(frame)
+                    M:SkinSlidersIn(frame)
+                end
+            end
+        end
+    end
+
+    -- 深扫够不到的（不在直接子层）再点名补一遍。
+    if opts.tabs then M:Tabs(opts.tabs, opts.control) end
+    if opts.buttons then M:Buttons(opts.buttons, opts.control) end
+    if opts.scrolls then M:Scrolls(opts.scrolls) end
+end
+
+--- Run `fn` over a list of named controls; each may be a string (resolved and counted by
+--- `Skin:Need`) or an object, and missing ones are skipped.
 function M:Controls(list, fn)
     if not list then return end
     for i = 1, #list do
         local item = list[i]
-        local object = type(item) == "string" and _G[item] or item
+        local object = type(item) == "string" and Skin:Need(item) or item
         if object then pcall(fn, object) end
     end
 end
@@ -288,16 +408,28 @@ function M:SkinSlidersIn(frame)
     end
 end
 
---- Re-run a skin whenever a Blizzard frame is shown (some content is built lazily).
+--- 让 `fn` 在某个暴雪框从隐藏变显示的那一刻跑一次（懒建内容的皮肤靠这个补）。
 --- **不再 HookScript("OnShow")**：那是往暴雪框体的脚本槽里写我们的函数（污染源）。
 --- 改用 Widget:ShowWatch 轮询"从隐藏变显示"这一个瞬间。
+--- 同一帧可以挂多个**不同**的回调（以前用标记位判重，第二个调用点会被静默丢掉，实机表现是
+--- "皮肤时有时无"，取决于哪个 Apply 先跑）。因此**回调必须是稳定引用**：模块级函数，
+--- 或 `SweepDeep` 那样自己带去重的一次性登记。在 Apply 里现造的闭包每次都是新函数，
+--- 每触发一次 Apply 就多挂一条 —— 需要补扫子控件时用 M:SweepDeep，别在这里造闭包。
 function M:HookShow(frame, fn)
     if not frame or type(fn) ~= "function" then return end
-    if Marked(frame, "showHook") then return end
-    Mark(frame, "showHook", true)
-    ns.Widget:ShowWatch(frame, function()
-        if M.active then pcall(fn) end
-    end)
+    local list = Marked(frame, "showHook")
+    if not list then
+        list = {}
+        Mark(frame, "showHook", list)
+        ns.Widget:ShowWatch(frame, function()
+            if not M.active then return end
+            for i = 1, #list do pcall(list[i]) end
+        end)
+    end
+    for i = 1, #list do
+        if list[i] == fn then return end
+    end
+    list[#list + 1] = fn
 end
 
 --- Run `fn` on a WoW event, but only while the module is active.
@@ -332,26 +464,29 @@ function M:ApplyFont()
     local key = self:GetFontKey()
     if not key then return end
 
-    for i = 1, #FONT_OBJECTS do
-        local fs = _G[FONT_OBJECTS[i]]
-        if fs and type(fs.SetFont) == "function" then
-            if not Marked(fs, "globalFont") then
-                Mark(fs, "globalFont", true)
-                local oldPath, oldSize, oldFlags = fs:GetFont()
-                if oldPath then
-                    Skin:Record(function()
-                        if fs.SetFont then fs:SetFont(oldPath, oldSize, oldFlags) end
-                        Mark(fs, "globalFont", nil)
-                    end)
+    -- 记账在"统一字体"这个作用域下：哪个字体对象在本客户端不存在，`/mui skins diagnose` 直接读账本。
+    Skin.With("统一字体", function()
+        for i = 1, #FONT_OBJECTS do
+            local fs = Skin:Need(FONT_OBJECTS[i])
+            if fs and type(fs.SetFont) == "function" then
+                if not Marked(fs, "globalFont") then
+                    Mark(fs, "globalFont", true)
+                    local oldPath, oldSize, oldFlags = fs:GetFont()
+                    if oldPath then
+                        Skin:Record(function()
+                            if fs.SetFont then fs:SetFont(oldPath, oldSize, oldFlags) end
+                            Mark(fs, "globalFont", nil)
+                        end)
+                    end
                 end
+                local _, size = fs:GetFont()
+                -- Keep Blizzard's own size (their layouts are built around it); 字体与标志按字号
+                -- 换挡（<12px 点阵苹方硬边，≥12px 文楷抗锯齿），见 Media 双轨漏斗。
+                size = size or 12
+                pcall(fs.SetFont, fs, Media:FontFor(key, size), size, Media:EffectiveFlags(Media.fontFlags, size))
             end
-            local _, size = fs:GetFont()
-            -- Keep Blizzard's own size (their layouts are built around it); 字体与标志按字号
-            -- 换挡（<12px 点阵苹方硬边，≥12px 文楷抗锯齿），见 Media 双轨漏斗。
-            size = size or 12
-            pcall(fs.SetFont, fs, Media:FontFor(key, size), size, Media:EffectiveFlags(Media.fontFlags, size))
         end
-    end
+    end)
 end
 
 local hooksInstalled = false
@@ -453,57 +588,62 @@ function M:SetEnabled(enabled)
     end
 end
 
--- Frame names are our own recall of the retail UI (never lifted from a reference addon, which may target another build); a guarded `_G` lookup fails silently, so `/mui skins diagnose` turns that silence into an exact missing-name list.
-local ResolvePath = ns.ResolvePath
+-- Frame names are our own recall of the retail UI (never lifted from a reference addon, which may target another build); a guarded lookup fails silently, so `/mui skins diagnose` turns that silence into an exact list.
+-- 优先读 `Skin:Need` 的账本 —— 那是**这个客户端上真实发生过的查找**。只有从没跑过的面板
+-- （关着 / LoD 未到 / 选项没打开）才退回声明名单核一遍，两种情况分开报，别混成一个数。
+-- 退回核对也走 `Skin:Need`：全仓只有这一个"确认对象存在"的入口，核过的名字同样进账。
+
+--- 当场核对一份声明名单，返回（存在数, 缺失名列表）。
+local function VerifyList(scope, names)
+    local missing, found = {}, 0
+    Skin.With(scope, function()
+        for i = 1, #names do
+            if Skin:Need(names[i]) then
+                found = found + 1
+            else
+                missing[#missing + 1] = names[i]
+            end
+        end
+    end)
+    return found, missing
+end
+
+local function PrintVerified(key, names, applied)
+    local found, missing = VerifyList(key, names)
+    if #missing == 0 then
+        local tone = applied and "88ff88" or "808080"
+        ns:Print(("|c%s%s|r [%s] %d/%d 对象存在"):format(tone, applied and "✓" or "○", key, found, #names))
+    else
+        ns:Print(("|cffff6b6b✗|r [%s] %d/%d 存在，缺少: %s"):format(
+            key, found, #names, table.concat(missing, ", ")))
+    end
+    return found, #missing
+end
 
 function M:Diagnose()
-    local totalFound, totalMissing = 0, 0
+    ns:Print("界面美化对象自检（按实际发生的查找）：")
 
-    ns:Print("界面美化对象自检（本客户端实测）：")
+    local totalFound, totalMissing = Skin:Report()
 
     for _, entry in ipairs(self.registry) do
         local names = entry.frames
-        if names and #names > 0 then
-            local missing, found = {}, 0
-            for i = 1, #names do
-                if ResolvePath(names[i]) then
-                    found = found + 1
-                else
-                    missing[#missing + 1] = names[i]
-                end
-            end
-
+        if names and #names > 0 and not Skin:HasScope(entry.key) then
+            local found, missing = PrintVerified(entry.key, names, false)
             totalFound = totalFound + found
-            totalMissing = totalMissing + #missing
-
-            if #missing == 0 then
-                ns:Print(("|cff88ff88✓|r [%s] %d/%d 对象存在"):format(entry.key, found, #names))
-            else
-                ns:Print(("|cffff6b6b✗|r [%s] %d/%d 存在，缺少: %s"):format(
-                    entry.key, found, #names, table.concat(missing, ", ")))
-            end
+            totalMissing = totalMissing + missing
         end
     end
 
-    -- Shared font objects belong to no window, so they are checked separately; a wrong name would be invisible until the player switches the option on.
-    local fontMissing = {}
-    for i = 1, #FONT_OBJECTS do
-        if not ResolvePath(FONT_OBJECTS[i]) then
-            fontMissing[#fontMissing + 1] = FONT_OBJECTS[i]
-        end
-    end
-    totalFound = totalFound + (#FONT_OBJECTS - #fontMissing)
-    totalMissing = totalMissing + #fontMissing
-    if #fontMissing == 0 then
-        ns:Print(("|cff88ff88✓|r [统一字体] %d 个共享字体对象全部存在"):format(#FONT_OBJECTS))
-    else
-        ns:Print(("|cffff6b6b✗|r [统一字体] %d/%d 存在，缺少: %s"):format(
-            #FONT_OBJECTS - #fontMissing, #FONT_OBJECTS, table.concat(fontMissing, ", ")))
+    -- 共享字体对象不属于任何窗口；全局字体开关没打开时也没有查找发生过，这里补核一遍。
+    if not Skin:HasScope("统一字体") then
+        local found, missing = PrintVerified("统一字体", FONT_OBJECTS, false)
+        totalFound = totalFound + found
+        totalMissing = totalMissing + missing
     end
 
     ns:Print(("合计 %d 存在 / %d 缺失。"):format(totalFound, totalMissing))
     if totalMissing > 0 then
-        ns:Print("上面缺失的对象在本客户端用了别的名字，按行补进对应皮肤文件即可。")
+        ns:Print("缺失的那些在本客户端用了别的名字：改皮肤文件里的字符串即可，查找会自动跟着记账。")
     end
 end
 

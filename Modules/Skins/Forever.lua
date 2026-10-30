@@ -15,10 +15,10 @@ local function SideTab(tab)
     Skin:FadeButtonArt(tab)
 end
 
-local function SideTabs(frame, names)
-    if not frame then return end
+local function SideTabs(parentPath, names)
     for i = 1, #names do
-        SideTab(frame[names[i]])
+        -- 成员访问也走点路径：这样每一个页签都被记进账本，写错的名字会在 diagnose 冒出来。
+        SideTab(Skin:Need(parentPath .. "." .. names[i]))
     end
 end
 
@@ -34,13 +34,10 @@ local LFG_BUTTONS = {
 local LFG_SIDE_TABS = { "ListingTab", "BrowsingTab", "WhoListingTab" }
 
 local function SkinLFG()
-    local frame = _G.LFGParentFrame
-    if not frame then return end
-
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
+    M:Dress("LFGParentFrame", { window = true, panel = { bgAlpha = 0.96 } })
 
     -- The animated eye in the portrait slot is a button of its own: alpha it away AND take the mouse, so the idle 64px region cannot swallow clicks.
-    local eye = _G.LFGParentFramePortrait
+    local eye = Skin:Need("LFGParentFramePortrait")
     if eye then
         Skin:Fade(eye)
         if eye.EnableMouse then eye:EnableMouse(false) end
@@ -51,8 +48,8 @@ local function SkinLFG()
         Skin:Strip(view)
         M:SkinButtonsIn(view)
     end)
-    M:Buttons(LFG_BUTTONS)
-    SideTabs(frame, LFG_SIDE_TABS)
+    M:Dress(LFG_BUTTONS, { as = "button" })
+    SideTabs("LFGParentFrame", LFG_SIDE_TABS)
 end
 
 M:Panel("lfg", {
@@ -62,12 +59,11 @@ M:Panel("lfg", {
     -- LoD gate: this pack waits for the vanilla-style group finder addon instead of re-skinning on every addon load.
     addons = { Blizzard_GroupFinder_VanillaStyle = true },
     frames = {
-        "LFGParentFrame", "LFGParentFrameCloseButton", "LFGParentFramePortrait",
-        "ListingTab", "BrowsingTab", "WhoListingTab",
+        "LFGParentFrame", "LFGParentFramePortrait",
+        "LFGParentFrame.ListingTab", "LFGParentFrame.BrowsingTab", "LFGParentFrame.WhoListingTab",
         "LFGBrowseFrame", "LFGListingFrame", "LFGWhoListFrame",
         "LFGBrowseFrameSendMessageButton", "LFGBrowseFrameGroupInviteButton",
         "LFGListingFrameBackButton", "LFGListingFramePostButton",
-        "LFGBrowseFrameCategoryDropdown", "LFGBrowseFrameActivityDropdown",
     },
 })
 
@@ -75,11 +71,8 @@ local LEGACY_SIDE_TABS = { "LegacyRewardTrackTab", "LegacyChallengeTab", "Legacy
 local LEGACY_PAGES     = { "RewardTrackPage", "ChallengesPage" }
 
 local function SkinLegacySystem()
-    local frame = _G.LegacySystemFrame
-    if not frame then return end
-
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-    SideTabs(frame, LEGACY_SIDE_TABS)
+    M:Dress("LegacySystemFrame", { window = true, panel = { bgAlpha = 0.96 } })
+    SideTabs("LegacySystemFrame", LEGACY_SIDE_TABS)
 
     M:Controls(LEGACY_PAGES, function(page)
         Skin:Strip(page)
@@ -94,8 +87,9 @@ M:Panel("legacy", {
     apply = SkinLegacySystem,
     addons = { Blizzard_LegacySystem = true },
     frames = {
-        "LegacySystemFrame", "LegacySystemFrameCloseButton",
-        "LegacyRewardTrackTab", "LegacyChallengeTab", "LegacyTreeTab",
+        "LegacySystemFrame",
+        "LegacySystemFrame.LegacyRewardTrackTab", "LegacySystemFrame.LegacyChallengeTab",
+        "LegacySystemFrame.LegacyTreeTab",
         "RewardTrackPage", "ChallengesPage",
     },
 })
@@ -113,7 +107,7 @@ local MICRO_BUTTONS = {
 }
 
 local function SkinOneMicroButton(name)
-    local button = _G[name]
+    local button = Skin:Need(name)
     if not button then return end
     -- The icon texture stays; only the button's own sprite edges go.
     Skin:FadeButtonArt(button)
@@ -125,7 +119,7 @@ local function SkinMicroMenuCore()
     end
 
     -- Forever's MicroMenu keeps a Blizzard container strip; fade it by alpha only -- the container is Edit-Mode-owned and must never be hidden.
-    local menu = _G.MicroMenu
+    local menu = Skin:Need("MicroMenu")
     if menu then
         if menu.BackgroundArt then Skin:Fade(menu.BackgroundArt) end
         if menu.BorderArt then Skin:Fade(menu.BorderArt) end
@@ -139,7 +133,7 @@ local function SkinMicroMenu()
     -- repaint to combat end instead of failing silently.
     if InCombatLockdown() then
         ns:AfterCombat("skins-micromenu", function()
-            if M.active then SkinMicroMenuCore() end
+            if M.active then Skin.With("micromenu", SkinMicroMenuCore) end
         end)
         return
     end
@@ -147,19 +141,22 @@ local function SkinMicroMenu()
     SkinMicroMenuCore()
 
     -- UpdateMicroButtons can fire several times per frame; one debounced repaint absorbs each burst.
-    if not microHooked and _G.UpdateMicroButtons then
+    if not microHooked and Skin:Need("UpdateMicroButtons") then
         -- 不 hooksecurefunc("UpdateMicroButtons")（全局函数钩子，会污染调用链）：
         -- 改成每 1 秒轮询一次（Debounce 内部本来就合并）。
         microHooked = true
         local repaint = M:Debounce(function()
             if InCombatLockdown() then return end
-            for i = 1, #MICRO_BUTTONS do
-                SkinOneMicroButton(MICRO_BUTTONS[i])
-            end
+            -- 轮询回调不在任何面板的作用域里，自己套一层，账本才不会把这 19 个名字记到 "_" 名下。
+            Skin.With("micromenu", function()
+                for i = 1, #MICRO_BUTTONS do
+                    SkinOneMicroButton(MICRO_BUTTONS[i])
+                end
+            end)
         end)
         if ns.Widget and ns.Widget.PollWatch then
-            local driver = _G.UIParent
-            ns.Widget:PollWatch(driver, repaint)
+            local driver = Skin:Need("UIParent")
+            if driver then ns.Widget:PollWatch(driver, repaint) end
         end
     end
 end
@@ -168,5 +165,6 @@ M:Panel("micromenu", {
     label = "微菜单按钮",
     group = "窗口",
     apply = SkinMicroMenu,
-    frames = { "MicroMenu" },   -- the button names above are checked per-button
+    -- 每个微按钮都在查找时记了账，所以直接把 MICRO_BUTTONS 摊进声明名单：一处定义，别处不再抄。
+    frames = { "MicroMenu", MICRO_BUTTONS },
 })

@@ -7,150 +7,131 @@ local ADDON_NAME, ns = ...
 local M    = ns.Skins
 local Skin = ns.Skin
 
--- The trade window plus the two money frames that pop up inside it.  Both are separate frames that
+-- 交易窗口 plus the two money frames that pop up beside it.  Both are separate frames that
 -- stay on screen while the trade is open, so they need their own treatment, not the main frame's.
+local TRADE_BUTTONS = {
+    -- AcceptAllTradesButton 是新版合并的"全部接受"；其余是经典的一对按钮加两个"展示物品"开关。
+    "AcceptTradeButton", "CancelTradeButton", "AcceptAllTradesButton",
+    "TradeShowPlayerTargetItems", "TradeFrameToggleReciprocate", "TradeTargetToggleReciprocate",
+}
+
+local TRADE_MONEY_FRAMES = { "TradePlayerInputMoneyFrame", "TradeRecipientInputMoneyFrame" }
+
+local TRADE_MONEY_BUTTONS = {
+    "TradePlayerInputMoneyFrameOkayButton", "TradePlayerInputMoneyFrameCancelButton",
+    "TradeRecipientInputMoneyFrameOkayButton", "TradeRecipientInputMoneyFrameCancelButton",
+}
+
 local function SkinTrade()
-    local frame = _G.TradeFrame
-    if not frame then return end
-
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-
-    M:Controls({ "TradePlayerInputMoneyFrame", "TradeRecipientInputMoneyFrame" }, function(money)
-        if not money then return end
-        Skin:Strip(money)
-        Skin:Panel(money, { noTitle = true, panel = { bgAlpha = 0.96 } })
-        M:Buttons({ "TradePlayerInputMoneyFrameOkayButton", "TradePlayerInputMoneyFrameCancelButton",
-                    "TradeRecipientInputMoneyFrameOkayButton", "TradeRecipientInputMoneyFrameCancelButton" })
-    end)
-
-    -- AcceptAllTradesButton is the newer combined accept button; the rest are the classic pair plus the
-    -- two "show items" toggles.  All optional -- M:Controls skips whatever this client does not have.
-    M:Buttons({
-        "AcceptTradeButton", "CancelTradeButton", "AcceptAllTradesButton",
-        "TradeShowPlayerTargetItems", "TradeFrameToggleReciprocate", "TradeTargetToggleReciprocate",
+    M:Dress("TradeFrame", {
+        window = true, panel = { bgAlpha = 0.96 }, deep = true, buttons = TRADE_BUTTONS,
     })
-
-    M:SkinScrollsIn(frame)
+    -- 金额输入框：以前把 `panel` 塞进 Skin:Panel 的参数里（它读的是 opts.bgAlpha），
+    -- 底衬一直是默认的 0.85 而不是 0.96；走 Dress 之后参数只有一层，不会再套错。
+    M:Dress(TRADE_MONEY_FRAMES, { panel = { bgAlpha = 0.96 }, deep = true })
+    M:Dress(TRADE_MONEY_BUTTONS, { as = "button" })
 end
+
+local MAIL_FRAMES = { "MailFrame", "InboxFrame", "SendMailFrame", "OpenMailFrame" }
+
+local MAIL_BUTTONS = {
+    "InboxFrameOpenButton", "InboxFrameReplyButton", "InboxFrameDeleteButton",
+    "InboxPrevPageButton", "InboxNextPageButton",
+    "SendMailMailButton", "SendMailCancelButton",
+    -- 70450 起邮件收取走 C_SecureTransfer（TakeMailMoney + MAIL_OPEN_ALL_CANCELED），
+    -- 收件箱多了"一键收取"按钮 OpenAllMail（全局名，Ellesmere 同客户端实机名单佐证）。
+    "OpenAllMail",
+}
 
 local function SkinMail()
-    M:Controls({ "MailFrame", "InboxFrame", "SendMailFrame", "OpenMailFrame" }, function(frame)
-        M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-        -- The scroll frame is reached through the inbox sub-window when the window is the mail frame
-        -- itself.  Passing `frame.InboxFrame` straight to Skin:ScrollFrame handed it a Window where a
-        -- ScrollFrame was expected: no ScrollBar member, so it returned silently and the mail list's
-        -- scroll bar was never skinned at all.
-        local scroll = frame.MailListScrollFrame
-            or (frame.InboxFrame and frame.InboxFrame.MailListScrollFrame)
-        Skin:ScrollFrame(scroll)
-    end)
-    M:Buttons({
-        "InboxFrameOpenButton", "InboxFrameReplyButton", "InboxFrameDeleteButton",
-        "InboxPrevPageButton", "InboxNextPageButton",
-        "SendMailMailButton", "SendMailCancelButton",
-        -- 70450 起邮件收取走 C_SecureTransfer（TakeMailMoney + MAIL_OPEN_ALL_CANCELED），
-        -- 收件箱多了"一键收取"按钮 OpenAllMail（全局名，Ellesmere 同客户端实机名单佐证）。
-        "OpenAllMail",
+    M:Dress(MAIL_FRAMES, {
+        window = true, panel = { bgAlpha = 0.96 }, deep = true, buttons = MAIL_BUTTONS,
     })
+    -- 收件箱列表的滚动区在两种布局里挂在不同对象上：全局名，或 MailFrame 的子窗成员。
+    -- 以前传的是 `frame.InboxFrame`（一个 Window，没有 ScrollBar），Skin:ScrollFrame 静默返回，
+    -- 邮件列表的滚动条从来没被美化过。
+    local scroll = Skin:Need("MailListScrollFrame")
+        or Skin:Need("MailFrame.InboxFrame.MailListScrollFrame")
+        or Skin:Need("InboxFrame.MailListScrollFrame")
+    if scroll then Skin:ScrollFrame(scroll) end
     -- 翻页按钮换成细线左右箭头。
-    Skin:PageArrow(_G.InboxPrevPageButton, "left")
-    Skin:PageArrow(_G.InboxNextPageButton, "right")
+    Skin:PageArrow(Skin:Need("InboxPrevPageButton"), "left")
+    Skin:PageArrow(Skin:Need("InboxNextPageButton"), "right")
 end
 
+local MERCHANT_BUTTONS = {
+    "MerchantNextPageButton", "MerchantPrevPageButton", "MerchantRepairButton",
+    "MerchantRepairAllButton", "MerchantSellButton", "MerchantBuyBackButton",
+}
+
 local function SkinMerchant()
-    local frame = _G.MerchantFrame
-    if not frame then return end
-
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-
-    M:Buttons({
-        "MerchantNextPageButton", "MerchantPrevPageButton", "MerchantRepairButton",
-        "MerchantRepairAllButton", "MerchantSellButton", "MerchantBuyBackButton",
+    M:Dress("MerchantFrame", {
+        window = true,
+        panel = { bgAlpha = 0.96 },
+        buttons = MERCHANT_BUTTONS,
+        scrolls = { "MerchantFrameScrollFrame" },
     })
-
     -- 翻页按钮换成细线左右箭头（monet_arrow_left/right）。
-    Skin:PageArrow(_G.MerchantPrevPageButton, "left")
-    Skin:PageArrow(_G.MerchantNextPageButton, "right")
-
-    M:Scrolls({ "MerchantFrameScrollFrame" })
+    Skin:PageArrow(Skin:Need("MerchantPrevPageButton"), "left")
+    Skin:PageArrow(Skin:Need("MerchantNextPageButton"), "right")
 end
 
 local function SkinTrainer()
-    M:Controls({ "ClassTrainerFrame", "TrainerFrame" }, function(frame)
-        M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-        M:SkinButtonsIn(frame)
-        M:SkinScrollsIn(frame)
-    end)
-    M:Buttons({ "ClassTrainerTrainButton", "ClassTrainerCancelButton" })
+    M:Dress({ "ClassTrainerFrame", "TrainerFrame" }, {
+        window = true,
+        panel = { bgAlpha = 0.96 },
+        deep = true,
+        buttons = { "ClassTrainerTrainButton", "ClassTrainerCancelButton" },
+    })
 end
 
+local AUCTION_TABS = { "AuctionFrameTab1", "AuctionFrameTab2", "AuctionFrameTab3" }
+
+local AUCTION_PANELS = { "AuctionFrameBrowse", "AuctionFrameAuctions", "AuctionFrameBid" }
+
+local AUCTION_BUTTONS = {
+    "BrowseSearchButton", "BrowseResetButton", "BrowseBuyoutButton",
+    "AuctionsCreateAuctionButton", "AuctionsCancelAuctionButton", "BidBidButton",
+}
+
+local AUCTION_EDITS = { "BrowseName", "BrowseMinLevel", "BrowseMaxLevel", "BrowsePrice" }
+
 local function SkinAuction()
-    local frame = _G.AuctionFrame
-    if not frame then return end
-
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-    M:Tabs({ "AuctionFrameTab1", "AuctionFrameTab2", "AuctionFrameTab3" })
-
-    M:Controls({ "AuctionFrameBrowse", "AuctionFrameAuctions", "AuctionFrameBid" }, function(panel)
-        Skin:Strip(panel)
-        Skin:Panel(panel, { bgAlpha = 0.96 })
-        M:SkinScrollsIn(panel)
-    end)
-
-    M:Controls({
-        "BrowseSearchButton", "BrowseResetButton", "BrowseBuyoutButton",
-        "AuctionsCreateAuctionButton", "AuctionsCancelAuctionButton", "BidBidButton",
-    }, function(button)
-        Skin:Button(button)
-    end)
-
-    M:Controls({ "BrowseName", "BrowseMinLevel", "BrowseMaxLevel", "BrowsePrice" }, function(control)
-        if control and type(control.GetObjectType) == "function" and control:GetObjectType() == "EditBox" then
-            Skin:EditBox(control)
-        end
-    end)
+    M:Dress("AuctionFrame", { window = true, panel = { bgAlpha = 0.96 }, tabs = AUCTION_TABS })
+    M:Dress(AUCTION_PANELS, { panel = { bgAlpha = 0.96 }, deep = true })
+    M:Dress(AUCTION_BUTTONS, { as = "button" })
+    -- BrowseMinLevel 一类在别的构建里是 Slider：editbox 档会先认类型，认错就跳过。
+    M:Dress(AUCTION_EDITS, { as = "editbox" })
 end
 
 local function SkinProfessions()
-    M:Controls({ "ProfessionsFrame", "TradeSkillFrame" }, function(frame)
-        M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-        M:Tabs({ "ProfessionsFrameTab1", "ProfessionsFrameTab2", "TradeSkillFrameTab1" })
-        M:SkinScrollsIn(frame)
-        M:SkinButtonsIn(frame)
-    end)
+    M:Dress({ "ProfessionsFrame", "TradeSkillFrame" }, {
+        window = true,
+        panel = { bgAlpha = 0.96 },
+        deep = true,
+        tabs = { "ProfessionsFrameTab1", "ProfessionsFrameTab2", "TradeSkillFrameTab1" },
+    })
 end
 
 local function SkinBank()
-    M:Controls({ "BankFrame", "WarbandBankFrame" }, function(frame)
-        M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-    end)
+    M:Dress({ "BankFrame", "WarbandBankFrame" }, { window = true, panel = { bgAlpha = 0.96 } })
 end
 
 M:Panel("trade", { label = "交易", group = "交易", apply = SkinTrade,
     frames = {
         "TradeFrame", "TradeFrameCloseButton",
-        "AcceptTradeButton", "CancelTradeButton", "AcceptAllTradesButton",
-        "TradeShowPlayerTargetItems", "TradeFrameToggleReciprocate", "TradeTargetToggleReciprocate",
-        "TradePlayerInputMoneyFrame", "TradeRecipientInputMoneyFrame",
-        "TradePlayerInputMoneyFrameOkayButton", "TradePlayerInputMoneyFrameCancelButton",
-        "TradeRecipientInputMoneyFrameOkayButton", "TradeRecipientInputMoneyFrameCancelButton",
+        TRADE_BUTTONS, TRADE_MONEY_FRAMES, TRADE_MONEY_BUTTONS,
     } })
 
 M:Panel("mail", { label = "邮箱", group = "交易", apply = SkinMail,
     frames = {
-        "MailFrame", "InboxFrame", "SendMailFrame", "OpenMailFrame",
-        "InboxFrameOpenButton", "InboxFrameReplyButton", "InboxFrameDeleteButton",
-        "InboxPrevPageButton", "InboxNextPageButton",
-        "SendMailMailButton", "SendMailCancelButton",
-        "OpenAllMail",
+        MAIL_FRAMES, MAIL_BUTTONS,
+        "MailListScrollFrame", "MailFrame.InboxFrame.MailListScrollFrame",
+        "InboxFrame.MailListScrollFrame",
     } })
 
 M:Panel("merchant", { label = "商贩", group = "交易", apply = SkinMerchant,
-    frames = {
-        "MerchantFrame", "MerchantNextPageButton", "MerchantPrevPageButton",
-        "MerchantRepairButton", "MerchantRepairAllButton",
-        "MerchantSellButton", "MerchantBuyBackButton", "MerchantFrameScrollFrame",
-    } })
+    frames = { "MerchantFrame", MERCHANT_BUTTONS, "MerchantFrameScrollFrame" } })
 
 M:Panel("trainer", { label = "训练师", group = "交易", apply = SkinTrainer,
     frames = {
@@ -159,13 +140,7 @@ M:Panel("trainer", { label = "训练师", group = "交易", apply = SkinTrainer,
     } })
 
 M:Panel("auction", { label = "拍卖行", group = "交易", apply = SkinAuction,
-    frames = {
-        "AuctionFrame", "AuctionFrameTab1", "AuctionFrameTab2", "AuctionFrameTab3",
-        "AuctionFrameBrowse", "AuctionFrameAuctions", "AuctionFrameBid",
-        "BrowseSearchButton", "BrowseResetButton", "BrowseBuyoutButton",
-        "AuctionsCreateAuctionButton", "AuctionsCancelAuctionButton", "BidBidButton",
-        "BrowseName", "BrowseMinLevel", "BrowseMaxLevel", "BrowsePrice",
-    } })
+    frames = { "AuctionFrame", AUCTION_TABS, AUCTION_PANELS, AUCTION_BUTTONS, AUCTION_EDITS } })
 
 M:Panel("professions", { label = "专业 / 制造", group = "交易", apply = SkinProfessions,
     frames = {
@@ -179,29 +154,25 @@ M:Panel("bank", { label = "银行", group = "交易", apply = SkinBank,
 -- 宝石镶嵌：无 game-type 门控（wow-ui-source forever 分支），本客户端存在。
 -- 宝石格子是带图标的槽位，SkinButtonsIn 会自动跳过。
 local function SkinSocketing()
-    local frame = _G.ItemSocketingFrame
-    if not frame then return end
-
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-    M:SkinScrollsIn(frame)
-    M:Buttons({ "ItemSocketingSocketButton" })
+    M:Dress("ItemSocketingFrame", {
+        window = true,
+        panel = { bgAlpha = 0.96 },
+        deep = true,
+        buttons = { "ItemSocketingSocketButton" },
+    })
 end
 
 M:Panel("socket", { label = "宝石镶嵌", group = "交易", apply = SkinSocketing,
     addons = { Blizzard_ItemSocketingUI = true },
     frames = {
         "ItemSocketingFrame", "ItemSocketingFrameCloseButton",
-        "ItemSocketingScrollFrame", "ItemSocketingSocketButton",
+        "ItemSocketingSocketButton",
     } })
 
 -- 制造订单：Blizzard_ProfessionsCustomerOrders 无 game-type 门控。
 local function SkinCraftOrders()
-    local frame = _G.ProfessionsCustomerOrdersFrame
-    if not frame then return end
-
-    M:SkinWindow(frame, { panel = { bgAlpha = 0.96 } })
-    M:SkinButtonsIn(frame)
-    M:SkinScrollsIn(frame)
+    M:Dress("ProfessionsCustomerOrdersFrame",
+        { window = true, panel = { bgAlpha = 0.96 }, deep = true })
 end
 
 M:Panel("craftorders", { label = "制造订单", group = "交易", apply = SkinCraftOrders,

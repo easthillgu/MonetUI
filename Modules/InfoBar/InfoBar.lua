@@ -678,21 +678,10 @@ local PROBED = {
 }
 
 function M:Diagnose()
-    ns:Print("信息栏对象自检（本客户端实测）：")
-
-    local missing = 0
-    for i = 1, #PROBED do
-        local name = PROBED[i]
-        if ns.ResolvePath(name) then
-            ns:Print(("|cff88ff88✓|r %s"):format(name))
-        else
-            missing = missing + 1
-            ns:Print(("|cffff6b6b✗|r %s（缺失）"):format(name))
-        end
-    end
-    if missing == 0 then
-        ns:Print("全部函数存在。")
-    else
+    -- 逐条确认 + 打印走美化层那本公共账（`Skin:Verify`），这样 `/mui skins diagnose` 一处能看全：
+    -- 哪个名字在本客户端不存在，不再各模块自己抄一份 ✓/✗ 循环。
+    local _, missing = ns.Skin:Verify("infobar", PROBED, "信息栏对象自检（本客户端实测）：")
+    if missing > 0 then
         ns:Print(string.format("%d 个缺失：对应数据块会自动留空，不影响其它块。", missing))
     end
 
