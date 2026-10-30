@@ -103,13 +103,11 @@ local function BuildPetBar(bar, frame, def)
 
     local shell = _G.PetActionBar
     if shell then
-        pcall(shell.SetAlpha, shell, 0)
-        pcall(shell.EnableMouse, shell, false)
-        pcall(shell.EnableMouseMotion, shell, false)
-        -- **事件不能卸载**：实测卸载之后没人再更新这套按钮的图标/冷却（冷却圈直接不转），
-        -- 也没人再 Show 它们。代价就是壳的 Update → UpdateShownButtons 会对这 10 个已经
-        -- 搬家的受保护按钮 SetShown，日志里出现 10 条 BLOCKED（只进日志、不弹窗）。
-        -- 功能优先，接受这个代价。
+        -- 只压根框 alpha + 关鼠标（Widget:Mute 的 depth 0）；**事件不能卸载**：实测卸载之后
+        -- 没人再更新这套按钮的图标/冷却（冷却圈直接不转），也没人再 Show 它们。
+        -- 代价就是壳的 Update → UpdateShownButtons 会对这 10 个已经搬家的受保护按钮 SetShown，
+        -- 日志里出现 10 条 BLOCKED（只进日志、不弹窗）。功能优先，接受这个代价。
+        Widget:Mute(shell, { depth = 0, combat = "write" })
     end
     if RegisterStateDriver then
         pcall(RegisterStateDriver, frame, "visibility", "[pet] show; hide")
@@ -179,14 +177,12 @@ local function PetAutoCastEnabled(index)
 end
 
 --- 「可自动施法」角标：照 Andromeda 的参数（12×12，右下角 +2/-2，贴图整幅不裁）。
---- 客户端把它挂在 AutoCastOverlay.Corners 上，老结构里是按钮自己的 AutoCastable。
+--- 本客户端挂在 `AutoCastOverlay.Corners` 上；老结构的 `button.AutoCastable` 在这里不存在
+--- （`/mui actionbars probe art` 实机确认），别再去找它。
 --- 它回答的是"这个技能**可以**开自动施法"，和"已经开了"（像素环）是两件事。
 local function StyleAutoCastCorner(button)
-    local corner = button.AutoCastable
-    if not corner then
-        local overlay = button.AutoCastOverlay
-        corner = overlay and overlay.Corners
-    end
+    local overlay = button.AutoCastOverlay
+    local corner = overlay and overlay.Corners
     if not corner or type(corner.SetPoint) ~= "function" then return end
     pcall(corner.ClearAllPoints, corner)
     pcall(corner.SetPoint, corner, "BOTTOMRIGHT", button, "BOTTOMRIGHT", 2, -2)

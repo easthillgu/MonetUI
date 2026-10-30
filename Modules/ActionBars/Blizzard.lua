@@ -16,6 +16,7 @@ if not M then return end
 
 local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
 local Marked = function(o, k) return ns:Marked(o, k) end
+local Widget = ns.Widget
 
 -- 8 条动作条：暴雪那几条只做 alpha 0（见 Park），点击板盖住它们看不见的裸按钮；
 -- 显示与施法全部由我们自己的按钮承担（槽位由安全片段写，见 Secure.lua 的 PAGE_CHILD 段）。
@@ -137,7 +138,9 @@ local function KeepParked()
                 -- ParkBag 那条路：暴雪把它 Show 回来就再藏一次。
                 if frame:IsShown() then pcall(frame.Hide, frame) end
             elseif frame:GetAlpha() > 0 then
-                pcall(frame.SetAlpha, frame, 0)
+                -- 暴雪在变形 / 载具 / 翻页之后把 alpha 顶回来了：再压一次（子树鼠标顺带复检，
+                -- 新池化出来的按钮也在这一步被关掉）。
+                Widget:Mute(frame, { depth = 2, combat = "write" })
                 KillPagerMouse(frame)
             end
         end
@@ -165,7 +168,6 @@ local function Park(name)
     local frame = _G[name]
     if not frame or Marked(frame, "parked") then return false end
     Mark(frame, "parked", true)
-    Mark(frame, "alpha", frame:GetAlpha())
     Mark(frame, "parent", frame:GetParent())
 
     -- **一律留在暴雪的父链上，只做"看不见 + 不吃鼠标"。**
@@ -185,11 +187,14 @@ local function Park(name)
     -- 所以只剩这一套（原本只用在 MainActionBar 上）：alpha 0 + 关鼠标（含翻页箭头）
     -- + 每次 Show 后把 alpha 压回去。位置让暴雪随便排 —— 反正看不见，
     -- 换来的是它的安全重排不再被拒。
-    pcall(frame.SetAlpha, frame, 0)
+    -- 全仓唯一的一份"收起暴雪 HUD"：alpha 0 + 整棵子树关鼠标，原状态记在旁表里，
+    -- Restore 逐项还原（以前这里只关根框，子树是漏的）。
+    -- 战斗里照写：暴雪每次 Show 都会把 alpha 顶回来，而我们的补刀在 0.5 秒驱动里，
+    -- 跳过战斗会让条先露一拍。
+    Widget:Mute(frame, { depth = 2, combat = "write" })
     -- 整棵子树都关鼠标：alpha 0 只是看不见，按钮/容器照样收 OnEnter，而一进战斗
     -- 暴雪按钮的 OnEnter（ActionButton.lua:1391）会 UpdateAction → SetAttribute，
     -- 那一下会被判 BLOCKED（taint.log 里 335 条全是这一类）。
-    KillMouse(frame, 2)
     KillPagerMouse(frame)
 
     -- 变形 / 载具 / 翻页 / 骑乘 / 召唤宠物时，暴雪会重新 Show 这些条。**不能用
@@ -238,10 +243,8 @@ local function Restore(name)
         pcall(frame.SetAlpha, frame, Marked(frame, "alpha") or 1)
         return true
     end
-    pcall(frame.SetAlpha, frame, Marked(frame, "alpha") or 1)
-    pcall(frame.EnableMouse, frame, true)
-    if frame.EnableMouseClicks then pcall(frame.EnableMouseClicks, frame, true) end
-    if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, true) end
+    -- alpha 与整棵子树的鼠标状态由 Mute 记在旁表里的那一份还原。
+    Widget:Unmute(frame, { depth = 2, combat = "write" })
     if Marked(frame, "leftManager") then
         frame.ignoreFramePositionManager = nil    -- 交还：让编辑模式的托管系统重新接管它
     end
