@@ -1316,8 +1316,20 @@ BLP 都是 `enc=3 alphaDepth=8 **alphaType=8**`；我们 32 张全是 `alphaType
 
 **推送状态**：截至 2026-10-30 收尾时本机到 `github.com:443` 的 git 连接被重置/超时
 （`Test-NetConnection` 通、`git ls-remote` 不通；`gh` 未安装；`~/.ssh` 无密钥；
-本机 8080 不是可用代理）。所以**这一轮 300+ 个提交只在本地**，联网后按
-`docs/HANDOFF.md` 第 8.6.4 节末尾的命令推。
+本机 8080 不是可用代理）。所以**这一轮 300+ 个提交只在本地**。联网后二选一：
+
+```powershell
+# A. 只备份分支（最安全，main 不动）
+git push -u origin square-blp
+
+# B. 把 main 快进到 square-blp 再推（square-blp 是 main 的超集，可 ff）
+git checkout main
+git merge --ff-only square-blp
+git push origin main
+git checkout square-blp
+```
+
+推送前照 AGENTS 的规矩确认远端仍是 **private**（转公开要等游戏上线且初步测试通过）。
 
 ---
 
