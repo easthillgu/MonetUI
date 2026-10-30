@@ -265,6 +265,88 @@ function Widget:Unwatch(frame, fn)
     end
 end
 
+--- 子树级鼠标静音：本客户端的 HUD 框（追踪框的任务块按钮池尤甚）点击件埋在深层，
+--- 只关根框照样能点。
+--- 两个旁表键各管一件事，**不能合成一个**："本来就没开鼠标"的节点要登记"已经处理过"，
+--- 但还原时不能替它打开。如果只存一个键、并用 false 表示"本来没开"，那次 false 会同时
+--- 被下一次的 `== nil` 判成"已处理"，而 Unmute 又只认真值、永远不清它 —— 于是这个节点
+--- 之后被暴雪打开鼠标（池化按钮复用）就再也没人关回去，实机症状是"原始目标追踪还能点"。
+local function MuteMouseTree(node, depth, on)
+    if not node then return end
+    if node.EnableMouse then
+        if on then
+            if not Marked(node, "muiMouseHeld") then
+                Mark(node, "muiMouseHeld", true)
+                local ok, was = pcall(node.IsMouseEnabled, node)
+                if ok and was == true then Mark(node, "muiMousePrior", true) end
+                pcall(node.EnableMouse, node, false)
+                if node.EnableMouseClicks then pcall(node.EnableMouseClicks, node, false) end
+                if node.EnableMouseMotion then pcall(node.EnableMouseMotion, node, false) end
+            end
+        elseif Marked(node, "muiMouseHeld") then
+            local prior = Marked(node, "muiMousePrior")
+            Mark(node, "muiMouseHeld", nil)
+            Mark(node, "muiMousePrior", nil)
+            if prior then
+                pcall(node.EnableMouse, node, true)
+                if node.EnableMouseClicks then pcall(node.EnableMouseClicks, node, true) end
+                if node.EnableMouseMotion then pcall(node.EnableMouseMotion, node, true) end
+            end
+        end
+    end
+    if depth <= 0 then return end
+    local ok, kids = pcall(function() return { node:GetChildren() } end)
+    if not ok or not kids then return end
+    for i = 1, #kids do MuteMouseTree(kids[i], depth - 1, on) end
+end
+
+--- 把暴雪的 HUD 框收起来：alpha 0 + 关鼠标。各模块以前各自抄一份
+--- （BuffFrame / QuestTracker / Tooltip / 宠物条壳 / 姿态条壳），纪律却完全一样，抄的
+--- 那份迟早漏一条 —— 现在只有这一处。
+---
+--- * **不 Hide()**：暴雪"一有更新就 Show 一次"，我们补一刀它顶一刀，屏幕上就是一闪一闪；
+---   alpha 0 的框一直算显示着，不触发它的 Show 逻辑，拉锯就不存在。
+--- * **不写字段 / 不卸事件 / 不换父**：那都会把这个框标成"被 MonetUI 写过"，之后它自己跑的
+---   暴雪代码全记在我们名下（见 AGENTS.md 的污染模型）。
+--- * 原状态存进 ns:Mark 的旁表（对象为弱键），所以重复调用只是一次表查询；
+---   暴雪后来新建的池化子按钮由下一次调用补关（这就是各模块保留低频兜底的原因）。
+---
+-- @param opts { depth = 子树关鼠标的层数（0 = 只根框，默认 2；math.huge = 整棵树）,
+--               alpha = 压到几（默认 0）, combat = "write" 时战斗里也写（默认跳过） }
+-- @return 是否真的动了手（战斗里跳过返回 false）
+function Widget:Mute(frame, opts)
+    if not frame then return false end
+    opts = opts or {}
+    if opts.combat ~= "write" and ns:InCombat() then return false end
+    if not Marked(frame, "muiMuted") then
+        Mark(frame, "muiMuted", true)
+        local ok, alpha = pcall(frame.GetAlpha, frame)
+        if ok then Mark(frame, "muiMuteAlpha", alpha) end
+    end
+    pcall(frame.SetAlpha, frame, opts.alpha or 0)
+    MuteMouseTree(frame, opts.depth or 2, true)
+    return true
+end
+
+--- 放开：alpha 与鼠标状态都还原成 Mute 之前记下的那一份（只还我们改过的节点）。
+function Widget:Unmute(frame, opts)
+    if not frame or not Marked(frame, "muiMuted") then return false end
+    opts = opts or {}
+    if opts.combat ~= "write" and ns:InCombat() then return false end
+    local prior = Marked(frame, "muiMuteAlpha")
+    Mark(frame, "muiMuted", nil)
+    Mark(frame, "muiMuteAlpha", nil)
+    pcall(frame.SetAlpha, frame, prior or 1)
+    MuteMouseTree(frame, opts.depth or 2, false)
+    return true
+end
+
+--- 这块框现在是不是被我们压着。给"战斗里被跳过、要等脱战补一刀"的调用方判断还有没有活干：
+--- 没压过就没什么可还原的，不必留在队列里空转。
+function Widget:IsMuted(frame)
+    return frame ~= nil and Marked(frame, "muiMuted") == true
+end
+
 ns.Widget = Widget
 
 -- weak keys so hidden / discarded widgets do not leak
@@ -335,7 +417,13 @@ function Widget:Size(frame, width, height)
 end
 
 function Widget:Width(frame, width)   if frame then frame:SetWidth(Media:SnapUnit(width)) end return frame end
-function Widget:Height(frame, height) if frame then frame:SetHeight(Media:SnapUnit(height)) end return frame end
+function Widget:Height(frame, height)
+    if frame then
+        frame:SetHeight(Media:SnapUnit(height))
+        if Widget.SyncBarFill then Widget:SyncBarFill(frame) end
+    end
+    return frame
+end
 
 --- 建一个框体。
 --- kind = "Frame"（默认）/ "CheckButton" / "Button"……
@@ -364,14 +452,15 @@ end
 local barFill = setmetatable({}, { __mode = "k" })
 
 --- 按条**当前**高度重选剖面。只对 Widget:Bar 建出来的、且没显式指定材质的条生效。
---- 之所以需要这一步：有的条是 `Widget:Bar(frame)` 先建、再 `SetHeight(...)` 定高，
---- 建的时候还拿不到最终高度；只按创建时的高度选，1px 的条会拿到"粗条"那张剖面
---- （1px 只采样到最顶一行，整条看着和预期不一致）。
+--- 触发点是 Widget:Size / Widget:Height：条可以是"先建、后定高"的，建的时候拿不到最终
+--- 高度；只按创建时的高度选，1px 的条会拿到"粗条"那张剖面（1px 只采样到最顶一行，
+--- 整条看着和预期不一致）。用裸 SetHeight 改高的条接不到这一步 —— 走 Widget:Size/Height。
 --- 能量条不走这条路径：它显式指定了扁平材质（纯高亮平涂）。
-function Widget:SyncBarFill(bar)
+function Widget:SyncBarFill(bar, height)
     if not bar then return end
     if barFill[bar] ~= true then return end
-    local h = bar.GetHeight and bar:GetHeight()
+    -- height 可省：调用方是"按锚点定高"（GetHeight 这一帧可能还没结算）时显式给一个。
+    local h = height or (bar.GetHeight and bar:GetHeight())
     local key = Widget:BarFillTexture(h)
     if Marked(bar, "fillKey") == key then return end
     Mark(bar, "fillKey", key)
@@ -390,9 +479,11 @@ function Widget:Bar(parent, width, height, textureKey)
     bar:SetStatusBarTexture(Media:Texture(key))
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(1)
-    if width then Widget:Size(bar, width, height or 18) end
+    -- 登记必须**在** Widget:Size 之前：Size 会调 SyncBarFill 按最终高度复核剖面，
+    -- 这时 barFill[bar] 还是 nil 的话那次复核就是空转（创建时选的那张就此定死）。
     barFill[bar] = textureKey or true
     Mark(bar, "fillKey", key)
+    if width then Widget:Size(bar, width, height or 18) end
 
     bar.bg = bar:CreateTexture(nil, "BACKGROUND")
     bar.bg:SetAllPoints()
