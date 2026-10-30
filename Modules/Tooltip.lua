@@ -383,10 +383,10 @@ local function CollectLines(tip)
             end
             if not id and type(tip.GetSpell) == "function" then
                 local ok, _, spellID = pcall(tip.GetSpell, tip)
-                if ok and spellID ~= nil then
-                    local n = Secrets.Number(spellID)
-                    if n then label, id = SPELL_ID_LABEL, tostring(n) end
-                end
+                -- `spellID ~= nil` 不能写在 Secrets.Number 前面：受限时它是机密数字，
+                -- 这一句比较本身就是被拦调用（pcall 的 ok 是普通值，被 pcall 的返回值不是）。
+                local n = ok and Secrets.Number(spellID) or nil
+                if n then label, id = SPELL_ID_LABEL, tostring(n) end
             end
         end
         if id then
@@ -458,17 +458,16 @@ end
 
 --- 收掉提示框底部的绿色生命条（GameTooltipStatusBar）。
 -- 玩家 2026-10-27：它贴在提示框最下沿，正好和我们补的「目标 / ID」小框抢位置。
--- 手法按本仓规矩：**SetAlpha(0) + 关鼠标，不 Hide** —— Hide 会被暴雪自己的 Show 顶回来
--- （一有更新就 Show 一次），屏幕上一闪一闪；alpha 0 的框一直算"显示着"，拉锯就没了。
--- 只调方法、不写字段；ns:Mark 记开关，模块关掉时还原。
+-- 手法走全仓唯一的一份 Widget:Mute / Unmute（alpha 0 + 关鼠标，不 Hide；Hide 会被暴雪的
+-- Show 顶回来，屏幕上一闪一闪）。
 local function SuppressHealthBar(on)
     local bar = _G.GameTooltipStatusBar
     if not bar then return end
-    local now = Marked(bar, "hbHidden") and true or false
-    if now == (on and true or false) then return end
-    Mark(bar, "hbHidden", on and true or nil)
-    bar:SetAlpha(on and 0 or 1)
-    bar:EnableMouse(false)
+    if on then
+        ns.Widget:Mute(bar, { depth = 0, combat = "write" })
+    else
+        ns.Widget:Unmute(bar, { depth = 0, combat = "write" })
+    end
 end
 
 local function Install()
