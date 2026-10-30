@@ -992,7 +992,14 @@ local function EnsureAdoptedIcon(btn)
     pcall(icon.ClearAllPoints, icon)
     pcall(icon.SetPoint, icon, "TOPLEFT", btn, "TOPLEFT", 1, -1)
     pcall(icon.SetPoint, icon, "BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
-    pcall(Skin.CropIcon, Skin, icon, CROP, 1 - CROP, CROP, 1 - CROP)
+    -- 竖向裁切比例：宠物条按钮是"扁的"（高 = 宽 × 0.75），把取样区也压扁同样的比例，
+    -- 这样宽高比一致、画面不会被拉伸；姿态条是正方形（没有这个标记 → 1.0，行为不变）。
+    local vfrac = tonumber(Marked(btn, "iconCropV")) or 1
+    if vfrac > 1 then vfrac = 1 end
+    local y0, y1 = CROP, 1 - CROP
+    local span = (y1 - y0) * vfrac
+    local middle = (y0 + y1) / 2
+    pcall(Skin.CropIcon, Skin, icon, CROP, 1 - CROP, middle - span / 2, middle + span / 2)
     Mark(btn, "adoptedIcon", icon)
 end
 

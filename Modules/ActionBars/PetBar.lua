@@ -20,6 +20,12 @@ if not M then return end
 
 local Widget  = ns.Widget
 local Secrets = ns.Secrets
+local Media   = ns.Media
+
+-- 宠物条按钮的**高度**是宽度的 75%（玩家 2026-10-30 要求，让这条比自绘动作条矮一档）。
+-- 图标同时按同一比例做竖向裁切（取样区变扁），所以画面不会被压扁 —— 见
+-- Modules/ActionBars/ActionBars.lua 的 EnsureAdoptedIcon 与 Mark(btn, "iconCropV")。
+local PET_HEIGHT_RATIO = 0.75
 
 -- 主文件导出的共享件。**名字保持一致**，搬过来的函数体因此可以一行都不改。
 local ButtonSize        = M.ButtonSize
@@ -60,17 +66,21 @@ end
 -- 宠物条本体。抽自 CreateBar（P4 拆分，逐条保留语义）。
 local function BuildPetBar(bar, frame, def)
     local size, spacing = ButtonSize(), Spacing()
+    -- 高度 = 宽度 × 0.75（吸附到像素格）。宽度不动，所以每格是"扁的"，条整体矮一档。
+    local height = Media:SnapUnit(size * PET_HEIGHT_RATIO)
     for i = 1, 10 do
         local btn = _G["PetActionButton" .. i]
         if not btn then break end
         pcall(btn.SetParent, btn, frame)
         pcall(btn.ClearAllPoints, btn)
-        pcall(btn.SetSize, btn, size, size)
+        pcall(btn.SetSize, btn, size, height)
         pcall(btn.SetScale, btn, 1)
         pcall(btn.SetPoint, btn, "TOPLEFT", frame, "TOPLEFT", (i - 1) * (size + spacing), 0)
         -- 外壳事件被卸载后，没人再替我们把这 10 个按钮 Show 出来（它们可能停在
         -- 壳隐藏时的 SetShown(false) 状态）——直接显式显示一次。
         pcall(btn.Show, btn)
+        -- 先登记竖向裁切比例，再换肤：EnsureAdoptedIcon 会按它把取样区压扁同样的比例。
+        Mark(btn, "iconCropV", PET_HEIGHT_RATIO)
         SkinAdoptedButton(btn)
         bar.buttons[#bar.buttons + 1] = btn
     end
@@ -78,7 +88,7 @@ local function BuildPetBar(bar, frame, def)
         pcall(frame.Hide, frame)
         return nil
     end
-    pcall(frame.SetSize, frame, #bar.buttons * size + math.max(#bar.buttons - 1, 0) * spacing, size)
+    pcall(frame.SetSize, frame, #bar.buttons * size + math.max(#bar.buttons - 1, 0) * spacing, height)
 
     local shell = _G.PetActionBar
     if shell then
@@ -150,17 +160,29 @@ end
 
 --- 像素环的边长：跟着暴雪的自动施法遮罩走（那圈蚂蚁就画在这块遮罩里：45 - 8 = 37），
 --- 遮罩不在就按按钮宽度推。取的是像素环该落在哪，不是图标本身的大小。
+--- **宠物条现在是扁的（高 = 宽 × 0.75）**，而像素环只支持正方形：边长夹到按钮的短边，
+--- 否则环会上下溢出按钮（姿态条仍是正方形，走不到这个夹取）。
 local function PetGlowSide(button, entry)
+    local side
     local overlay = button.AutoCastOverlay
     local mask = overlay and overlay.Mask
     if mask and mask.GetWidth then
         local ok, width = pcall(mask.GetWidth, mask)
         if ok then
             local size = Secrets.Number(width)
-            if size and size > 4 then return size end
+            if size and size > 4 then side = size end
         end
     end
-    return (entry.base or 30) + 7
+    side = side or ((entry.base or 30) + 7)
+
+    if button.GetWidth and button.GetHeight then
+        local okW, w = pcall(button.GetWidth, button)
+        local okH, h = pcall(button.GetHeight, button)
+        local pw = okW and Secrets.Number(w) or nil
+        local ph = okH and Secrets.Number(h) or nil
+        if pw and ph and ph > 4 and ph < side then side = ph end
+    end
+    return side
 end
 
 --- 开着自动施法的按钮上跑一圈像素环，其余的干净。
