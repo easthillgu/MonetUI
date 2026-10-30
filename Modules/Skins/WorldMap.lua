@@ -6,33 +6,12 @@ local ADDON_NAME, ns = ...
 local M    = ns.Skins
 local Skin = ns.Skin
 
--- 本客户端的 WorldMap 没有独立的 MaximizeButton / MinimizeButton / ZoomIn/OutButton 全局名，
--- 它们挂在 WorldMapFrame.MaximizeMinimizeFrame 下面 —— 点路径照样能确认（ns.ResolveObject 逐段走）。
-local MINMAX_PATHS = {
-    "WorldMapFrame.MaximizeMinimizeFrame.MaximizeButton",
-    "WorldMapFrame.MaximizeMinimizeFrame.MinimizeButton",
-}
-
---- 最大/最小化：先上底板（Skin:Button 那套框），再换字形贴图 —— 否则两颗就是一模一样的空白板。
---- monet_win_maximize 故意留着烤好的金色（"标题栏 = 这是个窗口"的信号），
---- monet_win_minimize 是无色模具（纯白），跟着主题走。
-local function StyleMinMaxGlyphs()
-    for i = 1, #MINMAX_PATHS do
-        local button = Skin:Need(MINMAX_PATHS[i])
-        if button then
-            local name = button.GetName and select(2, pcall(button.GetName, button))
-            local isMax = type(name) == "string" and string.find(name, "Maximize")
-            local key = isMax and "monet_win_maximize" or "monet_win_minimize"
-            local normal = Skin:SwapArt(button.GetNormalTexture and button:GetNormalTexture(), key)
-            local pushed = Skin:SwapArt(button.GetPushedTexture and button:GetPushedTexture(), key)
-            if not isMax and normal and normal.SetVertexColor then
-                local r, g, b = ns.Color:GetBorder()
-                normal:SetVertexColor(r, g, b)
-                if pushed and pushed.SetVertexColor then pushed:SetVertexColor(r, g, b) end
-            end
-        end
-    end
-end
+-- 12.1.5 实机（`/mui skins diagnose` + 探针）：世界地图**没有**标题文字、缩放钮，也没有
+-- MaximizeMinimizeFrame —— `WorldMapFrame` 只有 Close / Overflow / Home 三颗按钮，
+-- `BorderFrame` 的 3 个 region 全是 Texture（没有 TitleText）。旧版照 retail 老布局写的
+-- `WorldMapFrame.TitleText` / `.ZoomInButton` / `.MaximizeMinimizeFrame.*` 在本客户端一个都不存在，
+-- 那些 Dress 只是往账本里堆 miss，皮肤本身什么也没做，已删。
+local MAP_BUTTONS = { "WorldMapFrameHomeButton", "WorldMapFrameOverflowButton" }
 
 local function SkinQuestMap()
     M:Dress("QuestMapFrame", { panel = { bgAlpha = 0.95 } })
@@ -44,11 +23,14 @@ local function SkinQuestMap()
         M:Dress(details, { panel = { bgAlpha = 0.96 }, deep = true })
     end
 
-    local list = Skin:Need("QuestMapFrame.QuestLog") or Skin:Need("QuestMapFrameQuestLog")
+    local list = Skin:Need("QuestScrollFrame")
     if list then
         M:Dress(list, { panel = { bgAlpha = 0.96 } })
         M:SkinScrollsIn(list)
     end
+    -- 图例列表：与任务列表同族的具名全局，只有滚动条要收。
+    local legend = Skin:Need("MapLegendScrollFrame")
+    if legend then M:SkinScrollsIn(legend) end
 end
 
 local function SkinWorldMap()
@@ -57,17 +39,10 @@ local function SkinWorldMap()
     -- 两条都不走 window 档：地图画布和它的标点是内容，不能连 region 一起剥掉。
     M:Dress("WorldMapFrame", { panel = { bgAlpha = 0.96 } })
     M:Dress("WorldMapFrame.BorderFrame", { panel = { bgAlpha = 0.96 } })
-
-    local title = Skin:Need("WorldMapFrame.BorderFrame.TitleText") or Skin:Need("WorldMapFrame.TitleText")
-    if title then Skin:Font(title, 12, "pixel", nil, "edge") end
-
-    M:Dress({ "WorldMapFrame.ZoomInButton", "WorldMapFrame.ZoomOutButton" },
-        { as = "button", control = { thickness = 1 } })
-    M:Dress(MINMAX_PATHS, { as = "button", control = { thickness = 1 } })
-    StyleMinMaxGlyphs()
+    M:Dress(MAP_BUTTONS, { as = "button", control = { thickness = 1 } })
 
     -- 关闭按钮保留自己的字形：那是我们的图，不是被压平的底板。
-    Skin:CloseButton(Skin:Need("WorldMapFrame.CloseButton") or Skin:Need("WorldMapFrameCloseButton"))
+    Skin:CloseButton(Skin:Need("WorldMapFrameCloseButton"))
 
     SkinQuestMap()
 end
@@ -78,12 +53,8 @@ M:Panel("worldmap", {
     apply = SkinWorldMap,
     frames = {
         "WorldMapFrame", "WorldMapFrame.BorderFrame",
-        "WorldMapFrame.TitleText", "WorldMapFrame.CloseButton", "WorldMapFrameCloseButton",
-        "WorldMapFrame.BorderFrame.TitleText",
-        "WorldMapFrame.ZoomInButton", "WorldMapFrame.ZoomOutButton",
-        "WorldMapFrame.MaximizeMinimizeFrame.MaximizeButton",
-        "WorldMapFrame.MaximizeMinimizeFrame.MinimizeButton",
-        "QuestMapFrame", "QuestMapFrame.DetailsFrame", "QuestMapFrameQuestLog",
+        "WorldMapFrameCloseButton", "WorldMapFrameHomeButton", "WorldMapFrameOverflowButton",
+        "QuestMapFrame", "QuestMapFrame.DetailsFrame", "QuestScrollFrame", "MapLegendScrollFrame",
     },
 })
 

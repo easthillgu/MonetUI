@@ -9,18 +9,14 @@ local Skin = ns.Skin
 
 -- 交易窗口 plus the two money frames that pop up beside it.  Both are separate frames that
 -- stay on screen while the trade is open, so they need their own treatment, not the main frame's.
-local TRADE_BUTTONS = {
-    -- AcceptAllTradesButton 是新版合并的"全部接受"；其余是经典的一对按钮加两个"展示物品"开关。
-    "AcceptTradeButton", "CancelTradeButton", "AcceptAllTradesButton",
-    "TradeShowPlayerTargetItems", "TradeFrameToggleReciprocate", "TradeTargetToggleReciprocate",
-}
+-- 12.1.5 实机取到的真名：判定 / 取消是 `TradeFrameTradeButton` / `TradeFrameCancelButton` ——
+-- `AcceptTradeButton` / `CancelTradeButton` / `AcceptAllTradesButton` / `TradeFrameToggleReciprocate`
+-- 在本客户端一个都不存在（那些只会让 `Skin:Need` 记 miss，按钮保持原样）。
+local TRADE_BUTTONS = { "TradeFrameTradeButton", "TradeFrameCancelButton" }
 
-local TRADE_MONEY_FRAMES = { "TradePlayerInputMoneyFrame", "TradeRecipientInputMoneyFrame" }
-
-local TRADE_MONEY_BUTTONS = {
-    "TradePlayerInputMoneyFrameOkayButton", "TradePlayerInputMoneyFrameCancelButton",
-    "TradeRecipientInputMoneyFrameOkayButton", "TradeRecipientInputMoneyFrameCancelButton",
-}
+-- 金额输入：接受方那个叫 `TradeRecipientMoneyFrame`（不是 `...InputMoneyFrame`）；
+-- 旁边那组 Okay / Cancel 小按钮整组不存在（金额是内联输入框），所以只收拾两个 money frame。
+local TRADE_MONEY_FRAMES = { "TradePlayerInputMoneyFrame", "TradeRecipientMoneyFrame" }
 
 local function SkinTrade()
     M:Dress("TradeFrame", {
@@ -29,7 +25,6 @@ local function SkinTrade()
     -- 金额输入框：以前把 `panel` 塞进 Skin:Panel 的参数里（它读的是 opts.bgAlpha），
     -- 底衬一直是默认的 0.85 而不是 0.96；走 Dress 之后参数只有一层，不会再套错。
     M:Dress(TRADE_MONEY_FRAMES, { panel = { bgAlpha = 0.96 }, deep = true })
-    M:Dress(TRADE_MONEY_BUTTONS, { as = "button" })
 end
 
 local MAIL_FRAMES = { "MailFrame", "InboxFrame", "SendMailFrame", "OpenMailFrame" }
