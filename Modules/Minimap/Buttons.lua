@@ -57,17 +57,9 @@ end
 
 -- ------------------------------------------------------------------ 小工具
 
---- 走点号路径取对象（MinimapCluster.Tracking.Button 这类 parentKey 路径）。
-local function Resolve(path)
-    local node = _G
-    for segment in path:gmatch("[^%.]+") do
-        if node == nil then return nil end
-        local ok, value = pcall(function() return node[segment] end)
-        if not ok then return nil end
-        node = value
-    end
-    return node
-end
+--- 走点号路径取对象（MinimapCluster.Tracking.Button 这类 parentKey 路径）：
+--- 用 Core.lua 里的唯一实现，不在模块里另抄一份。
+local Resolve = ns.ResolveObject
 
 --- 记下暴雪按钮被搬走之前的父级、锚点、尺寸与贴图透明度（还原时放回去）。
 --- layout 是我们给它安排的锚点（还原按钮时按它摆回去，重入钩子也靠它复原）。

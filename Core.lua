@@ -391,16 +391,21 @@ function ns:DB()
     return _G.MonetUIDB
 end
 
---- Walk a dotted path through the global table ("WorldMapFrame.BorderFrame") and report whether it resolves (true / false).  Intermediate nodes must be tables, so indexing can never raise.
--- Modules use this to *probe* the objects they assume exist on this client: a wrong name fails silently (every real lookup is a guarded `_G[name]`), and this makes that silence queryable via `/mui skins diagnose`.
-function ns.ResolvePath(path)
-    if type(path) ~= "string" or path == "" then return false end
+--- Walk a dotted path through the global table ("WorldMapFrame.BorderFrame") and return the object, or nil.
+-- 每一段都用 pcall 取：中间节点既可能是表也可能是**帧对象（本客户端的框体是带元表的用户数据）**，
+-- 对它们取字段要靠 __index；碰上字符串 / 数字 / nil 会抛，吞掉当成"这条路径到不了"。
+-- 这是本仓唯一的"按名字找对象"：皮肤层每个调用点都过它（见 `Skin:Need`），
+-- 所以名字写错不再是静默跳过，而是 `/mui skins diagnose` 里的一行 ✗。
+function ns.ResolveObject(path)
+    if type(path) ~= "string" or path == "" then return nil end
     local node = _G
     for segment in string.gmatch(path, "[^%.]+") do
-        if type(node) ~= "table" then return false end
-        node = node[segment]
+        if node == nil then return nil end
+        local ok, value = pcall(function() return node[segment] end)
+        if not ok then return nil end
+        node = value
     end
-    return node ~= nil
+    return node
 end
 
 function ns:Register(name, module)
