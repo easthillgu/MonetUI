@@ -35,6 +35,38 @@ Widget.TEXT_GAP = 3   -- 文字行与条顶边之间的空隙
 -- 弱键：自建框体被丢弃后条目跟着回收（以前是强引用，永不释放）。
 local hoverWatch, hoverDriver, hoverAcc = setmetatable({}, { __mode = "k" }), nil, 0
 
+--- 读一个框的可见性。本客户端里有**forbidden 对象**（被接管的安全框、战斗里的单位框等）：
+--- 对它们调 `IsVisible` 会抛 "Attempt to access forbidden object from code tainted by an AddOn"，
+--- 而三个轮询驱动（hover 0.1s / show 0.2s / poll 0.2s）每拍都要读一次 —— 实机一个框就能刷
+--- 2000+ 条。读不出来时按"显示着"继续（回调都是幂等的重涂，多跑一次无害），
+--- 并**每个框只警告一次**，好让我们知道到底是谁。
+local forbidWarned
+local function Visible(frame)
+    local ok, value = pcall(frame.IsVisible, frame)
+    if ok then return value and true or false end
+
+    forbidWarned = forbidWarned or setmetatable({}, { __mode = "k" })
+    if not forbidWarned[frame] then
+        forbidWarned[frame] = true
+        local name
+        local okName, n = pcall(function() return frame.GetName and frame:GetName() end)
+        local Secrets = ns.Secrets
+        if okName and type(n) == "string" and not (Secrets and Secrets.IsSecret(n)) then name = n end
+        if not name then
+            local okP, parent = pcall(function() return frame.GetParent and frame:GetParent() end)
+            if okP and parent and parent ~= frame then
+                local okN, pn = pcall(function() return parent.GetName and parent:GetName() end)
+                if okN and type(pn) == "string" and not (Secrets and Secrets.IsSecret(pn)) then
+                    name = pn .. " 的子框"
+                end
+            end
+        end
+        ns:Print(("|cffffa940轮询读不到可见性|r：%s（forbidden 对象），按显示着继续。")
+            :format(name or "无名框"))
+    end
+    return true
+end
+
 local function MouseOver(frame)
     -- 本客户端没有 MouseIsOver / GetMouseFocus（实测都是 nil），但有 frame:IsMouseOver()。
     -- 顺序：先按最可靠的 frame 方法，再退到全局函数。
@@ -64,7 +96,7 @@ local function EnsureHoverDriver()
         local down = _G.IsMouseButtonDown and _G.IsMouseButtonDown("LeftButton")
         for frame, st in pairs(hoverWatch) do
             local list = st.list
-            local inside = frame:IsVisible() and MouseOver(frame)
+            local inside = Visible(frame) and MouseOver(frame)
             if inside ~= st.inside then
                 st.inside = inside
                 if inside then
@@ -147,7 +179,7 @@ local function EnsureShowDriver()
         if showAcc < 0.2 then return end
         showAcc = 0
         for frame, st in pairs(showWatch) do
-            local shown = frame:IsVisible()
+            local shown = Visible(frame)
             if shown and not st.shown then
                 for i = 1, #st.list do pcall(st.list[i], frame) end
             end
@@ -160,7 +192,7 @@ function Widget:ShowWatch(frame, fn)
     if not frame or type(fn) ~= "function" then return end
     local st = showWatch[frame]
     if not st then
-        st = { list = {}, shown = frame:IsVisible() }
+        st = { list = {}, shown = Visible(frame) }
         showWatch[frame] = st
         EnsureShowDriver()
     end
@@ -203,7 +235,7 @@ function Widget:PollWatch(frame, fn, interval)
         elapsed = elapsed or 0
         for f, cbs in pairs(pollWatch) do
             -- 隐藏的框不累加时间：等它显示时再从 0 开始算，不会"一显示就补执行一堆"。
-            if type(f) == "table" and f.IsVisible and f:IsVisible() then
+            if type(f) == "table" and f.IsVisible and Visible(f) then
                 for i = 1, #cbs do
                     local cb = cbs[i]
                     cb.acc = cb.acc + elapsed
