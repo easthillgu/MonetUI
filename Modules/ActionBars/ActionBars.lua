@@ -952,6 +952,50 @@ end
 ---   * 图标裁外圈 8%（CropIcon 现在是轮询实现，不挂钩子）；
 ---   * 热键/数量换像素字体；冷却文字接我们那套渲染。
 --- 全部 pcall：这个客户端对受保护按钮的某些方法会拒绝，失败就保持原生样子，不能崩。
+--- 收养按钮的图标：内缩 1px + 裁掉暴雪那 8% 边框，并且**摘掉 IconMask**。
+---
+--- **为什么以前"看起来没裁切"**：ActionButtonTemplate 的 `.icon` 被一块 MaskTexture 套着
+--- （`IconMask`，atlas `UI-HUD-ActionBar-IconFrame-Mask`，SmallActionButtonMixin_OnLoad 里固定
+--- SetSize(45,45)）。SetTexCoord 只改采样区域，那圈"图标框"遮罩照样画在图标上，而且它固定
+--- 45×45、我们的按钮只有 28–30 —— 所以看上去还是暴雪那个带框的样子。
+--- 先 RemoveMaskTexture；摘不掉就把遮罩缩到按钮大小兜底。
+--- 成功才写 `adoptedIcon` 标记，图标晚到（或当时还没建出来）会由下面的轮询重试。
+local function EnsureAdoptedIcon(btn)
+    if not btn or Marked(btn, "adoptedIcon") then return end
+
+    local icon = btn.icon
+    if not icon and btn.GetName and type(btn.GetName) == "function" then
+        local name = btn:GetName()
+        icon = name and _G[name .. "Icon"]
+    end
+    if not icon and type(btn.GetNormalTexture) == "function" then
+        icon = btn:GetNormalTexture()
+    end
+    if not icon or not icon.ClearAllPoints or not icon.SetPoint then return end
+
+    local size = ButtonSize()
+    local mask = btn.IconMask
+    if mask then
+        local removed = false
+        if type(icon.RemoveMaskTexture) == "function" then
+            removed = pcall(icon.RemoveMaskTexture, icon, mask)
+        end
+        if not removed then
+            pcall(mask.SetSize, mask, size, size)
+            if mask.ClearAllPoints and mask.SetPoint then
+                pcall(mask.ClearAllPoints, mask)
+                pcall(mask.SetPoint, mask, "CENTER", btn, "CENTER", 0, 0)
+            end
+        end
+    end
+
+    pcall(icon.ClearAllPoints, icon)
+    pcall(icon.SetPoint, icon, "TOPLEFT", btn, "TOPLEFT", 1, -1)
+    pcall(icon.SetPoint, icon, "BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
+    pcall(Skin.CropIcon, Skin, icon, CROP, 1 - CROP, CROP, 1 - CROP)
+    Mark(btn, "adoptedIcon", icon)
+end
+
 local function SkinAdoptedButton(btn)
     if not btn or Marked(btn, "adoptedSkinned") then return end
     Mark(btn, "adoptedSkinned", true)
@@ -986,17 +1030,14 @@ local function SkinAdoptedButton(btn)
     Widget:Theme(border, { thickness = 1, bgAlpha = 0 })
     Mark(btn, "adoptedBorder", border)
 
-    -- 图标内缩 1px，和我们自绘按钮完全一致（露出来的那 1px 就是边框）。
-    local icon = btn.icon
-    if not icon and btn.GetName and type(btn.GetName) == "function" then
-        local name = btn:GetName()
-        icon = name and _G[name .. "Icon"]
-    end
-    if icon and icon.ClearAllPoints and icon.SetPoint then
-        pcall(icon.ClearAllPoints, icon)
-        pcall(icon.SetPoint, icon, "TOPLEFT", btn, "TOPLEFT", 1, -1)
-        pcall(icon.SetPoint, icon, "BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
-        pcall(Skin.CropIcon, Skin, icon, CROP, 1 - CROP, CROP, 1 - CROP)
+    -- 图标：内缩 + 裁切 + 摘遮罩（见 EnsureAdoptedIcon）。图标晚到时靠一次低频轮询重试。
+    EnsureAdoptedIcon(btn)
+    if not Marked(btn, "adoptedIcon") and not Marked(btn, "iconWatch") then
+        Mark(btn, "iconWatch", true)
+        Widget:PollWatch(btn, function(self)
+            EnsureAdoptedIcon(self)
+            if Marked(self, "adoptedIcon") then Widget:Unwatch(self) end
+        end, 1)
     end
 
     -- 收养按钮（宠物/姿态）的热键与堆叠数：和自绘按钮同一套 —— Super Effective + 主题色
