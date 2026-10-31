@@ -56,31 +56,57 @@ local function clamp01(v)
     return v
 end
 
+--- 引擎工具函数的唯一入口：老 vendored 副本没有 1.2.0 的 AtLightness / RGBToLab /
+-- ContrastRatio，名字查不到、调用抛错、返回不是数都算「拿不到」，一律回 nil 让调用方
+-- 退回旧观感（AtLightness 回三值，所以数到第一个非数为止全部转发）。
+-- pcall 这层不许省：实机教训是缺守卫时引擎一抛就带崩整次主题刷新。
+local function optionalLMC(name, ...)
+    if not (LMC and type(LMC[name]) == "function") then return nil end
+    local args = { ... }
+    local ok, results = pcall(function()
+        local out = {}
+        for i, v in ipairs({ LMC[name](unpack(args)) }) do
+            if type(v) ~= "number" then break end
+            out[i] = v
+        end
+        return out
+    end)
+    if not ok or #results == 0 then return nil end
+    return unpack(results)
+end
+
 --- 把一块颜色放到指定的 CIE L*（色相、饱和都不动）。
--- 只走 LMC.AtLightness（点调用，不是方法），拿不到结果就返回 nil 让调用方退回旧乘数。
+-- 拿不到结果就返回 nil 让调用方退回旧乘数。
 local function place(r, g, b, targetL)
-    if not (LMC and type(LMC.AtLightness) == "function") then return nil end
-
-    local ok, pr, pg, pb = pcall(LMC.AtLightness, r, g, b, targetL)
-    if not ok then return nil end
-
+    local pr, pg, pb = optionalLMC("AtLightness", r, g, b, targetL)
     local cr, cg, cb = clamp01(pr), clamp01(pg), clamp01(pb)
     if not (cr and cg and cb) then return nil end
     return cr, cg, cb
 end
 
 local function lightnessOf(c)
-    if not (LMC and type(LMC.RGBToLab) == "function") then return nil end
-    local ok, l = pcall(LMC.RGBToLab, c.r, c.g, c.b)
-    if ok and type(l) == "number" then return l end
-    return nil
+    return optionalLMC("RGBToLab", c.r, c.g, c.b)
 end
 
 local function contrastOf(a, b)
-    if not (LMC and type(LMC.ContrastRatio) == "function") then return nil end
-    local ok, cr = pcall(LMC.ContrastRatio, a.r, a.g, a.b, b.r, b.g, b.b)
-    if ok and type(cr) == "number" then return cr end
-    return nil
+    return optionalLMC("ContrastRatio", a.r, a.g, a.b, b.r, b.g, b.b)
+end
+
+--- 一档阶梯的最终颜色：先按 L* 重定位（色相家族不变），拿不到就退回旧的固定乘数。
+-- fill 档不在 SURFACE_HUE 里 = edge 的 RGB 反相（先反相再定位），旧口径是反相后直接用。
+local function surfaceColor(t, key, step)
+    local srcKey = SURFACE_HUE[key]
+    local src = t[srcKey or "edge"] or t.neutral
+    local r, g, b = src.r, src.g, src.b
+    if not srcKey then
+        r, g, b = 1 - (r or 0), 1 - (g or 0), 1 - (b or 0)
+    end
+    local pr, pg, pb = place(r, g, b, step)
+    if not pr then
+        local mul = SURFACE_MUL_LEGACY[key]
+        return r * mul, g * mul, b * mul
+    end
+    return pr, pg, pb
 end
 
 --- 算出这一套主题的四级阶梯（每刷新一次主题只算一遍，调用点 GetSurface 是 O(1) 读表）。
@@ -91,26 +117,7 @@ local function computeSurface(t)
 
     for i = 1, #SURFACE_KEYS do
         local key = SURFACE_KEYS[i]
-        local src = t[SURFACE_HUE[key] or "edge"]
-        if not src then src = t.neutral end
-
-        local r, g, b
-        if SURFACE_HUE[key] then
-            r, g, b = place(src.r, src.g, src.b, s.steps[key])
-            if not r then
-                local mul = SURFACE_MUL_LEGACY[key]
-                r, g, b = src.r * mul, src.g * mul, src.b * mul
-            end
-        else
-            -- fill：edge 的 RGB 反相（先反相，再按 L* 重定位），旧口径就是反相后直接用。
-            local ir, ig, ib = 1 - (src.r or 0), 1 - (src.g or 0), 1 - (src.b or 0)
-            r, g, b = place(ir, ig, ib, s.steps[key])
-            if not r then
-                local mul = SURFACE_MUL_LEGACY[key]
-                r, g, b = ir * mul, ig * mul, ib * mul
-            end
-        end
-
+        local r, g, b = surfaceColor(t, key, s.steps[key])
         s[key] = { r = clamp01(r) or 0, g = clamp01(g) or 0, b = clamp01(b) or 0 }
     end
 
