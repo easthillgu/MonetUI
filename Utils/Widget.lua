@@ -1112,35 +1112,48 @@ function Widget:FitText(fs, text, maxWidth, baseSize, flags, minSize, boxWidth)
     return size
 end
 
-function Widget:ColorText(fs, colorKey)
-    if not fs or not fs.SetTextColor then return fs end
-
-    local r, g, b, a
+--- 把一个颜色键解析成 r, g, b, a；返回 nil = 不认识的键（调用方决定回退）。
+---
+--- **这是唯一的键表**：`Widget:ColorText` 和 `Skin:ColorText` 都走它。
+--- 以前两处各写一份映射，`Skin:ColorText` 那份还是 `Color:Get(key)` —— 于是任何新键
+--- （比如 2026-10-31 加的 "bright"）在皮肤层会**静默落成 edge**（实机：主菜单大字仍然
+--- 是 0.41/0.47/0.53，一看就是 edge 的色）。新增键只改这里，两处一起生效。
+---
+--- 认的键：table{r,g,b,a} / "edge" / "ambient" / "highlight" / "border" / "health" /
+--- "resource" / "danger" / "neutral" / "bright"
+function Widget:PaletteColor(colorKey)
     if type(colorKey) == "table" then
-        r, g, b, a = colorKey.r, colorKey.g, colorKey.b, colorKey.a or 1
-    elseif colorKey == "edge" then
-        r, g, b, a = Color:GetEdge()
-    elseif colorKey == "highlight" then
-        r, g, b, a = Color:GetHighlight()
-    elseif colorKey == "border" then
+        return colorKey.r, colorKey.g, colorKey.b, colorKey.a or 1
+    end
+    if colorKey == "edge" then return Color:GetEdge() end
+    if colorKey == "ambient" then return Color:GetAmbient() end
+    if colorKey == "highlight" then return Color:GetHighlight() end
+    if colorKey == "border" then
         -- 跟随用户的边框槽（edge / ambient / highlight / neutral）：文字和描边用同一套主题色。
-        r, g, b, a = Color:GetBorder()
-        a = 1
-    elseif colorKey == "health" then
-        r, g, b, a = Color:GetHealth()
-    elseif colorKey == "danger" then
-        r, g, b, a = Color:GetDanger()
-    elseif colorKey == "resource" then
-        r, g, b, a = Color:GetResource()
-    elseif colorKey == "bright" then
+        local r, g, b = Color:GetBorder()
+        return r, g, b, 1
+    end
+    if colorKey == "health" then return Color:GetHealth() end
+    if colorKey == "danger" then return Color:GetDanger() end
+    if colorKey == "resource" then return Color:GetResource() end
+    if colorKey == "neutral" then return Color:GetNeutral() end
+    if colorKey == "bright" then
         -- 大字 / 大按钮用的高对比文字色：从 neutral 往白推，**不带任何彩相**。
-        -- 为什么需要新键：neutral 是给正文的（0.51/0.49/0.49 @0.85），摆在主菜单那种
+        -- 为什么需要这一档：neutral 是给正文的（0.51/0.49/0.49 @0.85），摆在主菜单那种
         -- 200×36 的深色大按钮上会读成"禁用"；而 highlight 是职业色，按
         -- docs/DESIGN-LANGUAGE.md §7-a 不许进通用静态文字。所以只加这一档中性的亮字。
         local nr, ng, nb = Color:GetNeutral()
         local k = 0.62
-        r, g, b, a = nr + (1 - nr) * k, ng + (1 - ng) * k, nb + (1 - nb) * k, 1
-    else
+        return nr + (1 - nr) * k, ng + (1 - ng) * k, nb + (1 - nb) * k, 1
+    end
+    return nil
+end
+
+function Widget:ColorText(fs, colorKey)
+    if not fs or not fs.SetTextColor then return fs end
+
+    local r, g, b, a = Widget:PaletteColor(colorKey)
+    if not r then
         r, g, b, a = Color:GetNeutral()
     end
 

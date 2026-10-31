@@ -449,11 +449,11 @@ end
 function Skin:ColorText(fs, colorKey)
     if not fs or type(fs.SetTextColor) ~= "function" then return fs end
 
-    local r, g, b, a
-    if type(colorKey) == "table" then
-        r, g, b, a = colorKey.r, colorKey.g, colorKey.b, colorKey.a or 1
-    else
-        r, g, b, a = Color:Get(colorKey or "neutral")
+    -- 走 Widget:PaletteColor 这唯一一份键表：以前这里用 Color:Get(key)，任何新键都会
+    -- 静默落成 edge（Color:Get 的未知键回退），皮肤层的文字颜色和 Widget 层就对不上了。
+    local r, g, b, a = Widget:PaletteColor(colorKey or "neutral")
+    if not r then
+        r, g, b, a = Color:GetNeutral()
     end
 
     if not Marked(fs, "color") then
