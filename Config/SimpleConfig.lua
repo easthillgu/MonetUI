@@ -704,10 +704,14 @@ function SimpleConfig:Build()
 
     -- 分成两组的理由是 2026-10-25 的配色案：玩家 / 宠物 / 目标的目标是一套"反相 + 暗织纹"
     -- （和小队/团队格同款，见 Groups.lua），目标 / 焦点保持职业色 + 红色空槽。
-    -- 一组一个下拉，组内默认必须一致 —— 否则 UnitSetting 显示的是组里第一个单位的值，
-    -- 玩家一改就整组跟着变。
-    local INVERSE = { "player", "pet", "targettarget" }
-    local TARGET_LIKE = { "target", "focus" }
+    -- 一组两个下拉（血条 + 损失部分），组内默认必须一致 —— 否则 UnitSetting 显示的是
+    -- 组里第一个单位的值，玩家一改就整组跟着变。
+    local COLOR_GROUPS = {
+        { label = "玩家 / 宠物 / 目标的目标", units = { "player", "pet", "targettarget" },
+          fill = "inverse", lost = "weave" },
+        { label = "目标 / 焦点", units = { "target", "focus" },
+          fill = "class", lost = "danger" },
+    }
 
     local FILL_ITEMS = {
         { value = "inverse",   text = "反相（主题阶梯）" },
@@ -728,14 +732,12 @@ function SimpleConfig:Build()
         { value = "theme", text = "统一主题色" },
     }
 
-    MakeDropdown(content, row(28), "玩家 / 宠物 / 目标的目标 血条",
-        FILL_ITEMS, UnitSetting(INVERSE, "fillColor", "inverse"))
-    MakeDropdown(content, row(28), "玩家 / 宠物 / 目标的目标 损失部分",
-        LOST_ITEMS, UnitSetting(INVERSE, "lostColor", "weave"))
-    MakeDropdown(content, row(28), "目标 / 焦点 血条",
-        FILL_ITEMS, UnitSetting(TARGET_LIKE, "fillColor", "class"))
-    MakeDropdown(content, row(28), "目标 / 焦点 损失部分",
-        LOST_ITEMS, UnitSetting(TARGET_LIKE, "lostColor", "danger"))
+    for _, group in ipairs(COLOR_GROUPS) do
+        MakeDropdown(content, row(28), group.label .. " 血条",
+            FILL_ITEMS, UnitSetting(group.units, "fillColor", group.fill))
+        MakeDropdown(content, row(28), group.label .. " 损失部分",
+            LOST_ITEMS, UnitSetting(group.units, "lostColor", group.lost))
+    end
     MakeDropdown(content, row(28), "能量条颜色", POWER_ITEMS,
         function() return ns:DB().unitFrames.powerColor end,
         function(value)
