@@ -18,6 +18,14 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   返回游戏数据时**先 `issecretvalue` 再 `tostring`**，否则机密值会让 `table.concat` 直接抛 `invalid value (secret)`。
 
 - 每次改完 Lua/TOC：跑 `tools.wuxian.check`（离线用 `live: false`），0 错误 0 警告才算完成。
+- **静态闸门抓不到"引用了还没声明的 local"**（2026-10-31 实证）：把 helper 写在它引用的
+  `local`（如 `local Secrets = ns.Secrets`）**之前**，函数体里的名字会变成**全局 nil**，
+  只在运行到那一刻才抛 `attempt to index global 'X'`；`audit-locals` / `audit-taint` / 语法检查
+  **全部通过**。后果可以很隐蔽：它在 `Initialize` 里抛错，后面的 `StartBlizzardGuard()` 根本没跑，
+  表现出来是"守卫不工作 / 按钮建不出来"，而不是一条红字。**新增 helper 一律放在依赖之后，
+  并实机跑一次那条路径。**
+- **登录落在战斗里的 `/reload` 要单独验一遍**（`37a19df` 那一轮）：这类问题只在
+  "战斗中重载"这个时序出现，静态闸门和普通登录都看不出来。
 - 帧名/对象名永不凭记忆、也不照抄参考插件：一律 `_G` 护卫查找 + 登记进面板 `frames` 名单，实机用 `/mui skins diagnose` 复核。
 - 客户端 API 以 `docs/api/` 里的本地快照为准（`node tools/api-lookup.js <名字>`；正文见 `docs/api/MANUAL.md`）。快照抓自 <https://wuxianwow.com/api/>，就是本客户端的 `Blizzard_APIDocumentationGenerated`：名字、参数、返回、机密/受保护标记都查它，效力**高于** `hated-wow` MCP（后者是正式服数据，只当补充；查暴雪插件 Lua 实现仍可用它）。快照没更新时 `node tools/api-fetch.js` 重新抓。
 - 改到 `C_*` 名字 / 事件名 / `Enum.X.Y` 值时另跑 `node tools/api-audit.js`：默认对撞 `docs/api` 的本地快照（HARD 项退出码 1；`--gethe` 才走旧的 `Gethe/wow-ui-source` 转储）。它同时给 CHECK（受保护全局，要在 `InCombatLockdown` 之外）、SOFT（实参个数、旧全局）、INFO（会返回机密值的 API 清单 + 文档外方法名 + TOC 指令校验）。`wuxian check` 对未知名字只给 `unresolved` note，判不死，所以这一层不能省。
@@ -43,6 +51,31 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   所有诊断必须是 `/mui <模块> ...` 子命令。Forever 部署：
   `tools/deploy-retail.ps1 -Dest "...\WOWFOREVER\World of Warcraft\_cn_beta_" -Interface 16001`
   （那台里已有 `!WuxianWorkshop` / `WoWBridge` / `163UI_Info`，只加 MonetUI 目录，别人的一个字节都不碰）。
+
+## 客户端行为细则（12.1.5 实测，2026-10-31 补）
+
+这几条都是"代码看着对、闸门全绿、实机不一样"，只能记下来别再踩：
+
+- **`GetAlpha()` 和顶点色的 alpha 是同一个存储**：`SetAlpha(0.25)` 之后 `GetVertexColor()` 的 a
+  也是 0.25；反过来 `SetVertexColor(r,g,b,0.9)` 会让 `GetAlpha()` 变成 0.9。所以"调淡一张贴图"
+  只能走**一个**旋钮 —— 用 `SetAlpha` 调、之后任何一次 `SetVertexColor` 都会把它顶回去
+  （血条织纹就是这么被顶回 0.85 的，见 HANDOFF 8.17）。要持久就记在旁表上，让重涂方读它。
+- **`InCombatLockdown()` 在登录 / 重载当拍会给假的 `false`**（客户端还没把受限状态铺开）。
+  一切"战斗中不能做"的判断都要 `InCombatLockdown() or UnitAffectingCombat("player")`，
+  否则那一拍会去建受保护的模板按钮 / 对受保护子按钮 `EnableMouse`，直接弹「界面行为失效」。
+  反过来，**`PLAYER_REGEN_ENABLED` 派发当拍这两个标志仍可能是旧值 `true`** —— 在脱战回调里
+  再判断一次"是否战斗"会二次延后到下一次脱战（等于永远不做）。做法：脱战回调里换成新 tick
+  （`C_Timer.After(0, ...)`）再判断（模块里 `Bags` 的停车就是这么修的）。
+- **12.x 的 UIMenu 是 `assertsafe` 包起来的**：`menu:CreateTexture()` / `CreateFontString()` /
+  `SetFont` **返回 nil**，同时把 `Use of function 'X' is disallowed` **打到玩家屏幕上**。
+  菜单能做的只有两件：改**已有 region 的颜色**，和挂一个**我们自己的子框体**
+  （`CreateFrame` 是全局，不在名单里）。见 HANDOFF 8.16。
+- **12.x 的主菜单按钮是匿名 + 按需创建的**（`GameMenuButtonSettings` 这类全局名已不存在）：
+  任何"按名字列表换皮"的写法一个都命中不了，而且它们要等菜单第一次打开才建出来。
+  做法：`GetChildren()` 遍历 + `M:HookShow` 补扫。见 HANDOFF 8.19。
+- **颜色键只有一张表 `Widget:PaletteColor`**（`Widget:ColorText` / `Skin:ColorText` 共用）。
+  以前皮肤层用 `Color:Get(key)`，**不认识的键静默回退 `edge`** —— 新增一档颜色（如 `bright`）
+  在皮肤层就永远不生效，还没有任何报错。新增键只改那一处。
 
 ## 安全边界
 

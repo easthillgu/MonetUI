@@ -1,5 +1,31 @@
 # 待办
 
+## 🐞 2026-10-31 战斗/登录相关的背包问题（已修，剩登录复验）
+
+- [x] 战斗里 `/reload` → 背包只有标题、弹「界面行为失效」：`InCombatLockdown()` 登录当拍假 false +
+      空窗口指纹不变不重建 + 停车延后在脱战当拍二次延后（`37a19df`，HANDOFF 8.20）
+- [x] 暴雪背包脱战后没停车（`alpha=1`，会和我们同屏）：延后回调换新 tick 判断（同一提交）
+- [x] 登录时分类背包自动打开：登录先 `Hide()` 暴雪背包并把守卫基线设成"关"（`3e93d5c`，HANDOFF 8.21）
+- [ ] **登录复验**：重开客户端后确认分类背包是关着的、按 `B` 只出现我们这一套
+      （客户端在验证前退出，探针还没跑）
+
+## 🎨 2026-10-31 视觉语言收口（docs/DESIGN-LANGUAGE.md）
+
+**已落地**
+- [x] `docs/DESIGN-LANGUAGE.md`：透明度阶梯 / 颜色槽纪律 / 字号四档 / 点缀四语法 / 与 Aurora 的取舍
+- [x] 三个决策拍板并落地：a 通用文字 `neutral`（`highlight` 只给 hover/选中/焦点/自身血条）、
+      b 标题线默认关逐窗口开（`TimeManager` 已开，`ruleTop = 26`）、c 阅读型窗口独立一档 `0.965`
+- [x] 任务追踪头部两个小按钮"安静化"（平时 0.55、悬停 1）
+- [x] 主菜单大字用 `bright`；颜色键收成 `Widget:PaletteColor` 一张表
+- [x] 游戏菜单 11 个匿名按钮换皮（按子控件遍历 + `M:HookShow` 补扫）
+- [x] 血量颜色设置重排：组名成行 + 12×12 实色块（`UnitFrames:PreviewColor` 与实机同一套函数）
+
+**下一批（按性价比）**
+- [ ] 其余 Blizzard 窗口的标题线：按 `TimeManager` 的流程逐个截图确认后 `rule = true`（标题矩形小的配 `ruleTop`）
+- [ ] 背包窗口 / 每个背包小标题的标题线（我们自己的框，`ruleTop` 好用）
+- [ ] 把 `docs/DESIGN-LANGUAGE.md` 的阶梯表补进 `docs/CHECKS.md` 的验收清单
+- [ ] `Skin:Button` 的 hover 边框仍用 `highlight`（决策 a 允许），确认观感是否要改成 `edge`
+
 ## 🎨 2026-10-31 视觉语言收口（docs/DESIGN-LANGUAGE.md）
 
 **已落地**

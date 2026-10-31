@@ -2,7 +2,7 @@
 
 > 写于 2026-10-24 22:30，跟着 `36b7280` 这个提交；**2026-10-25 追加了"拦截族 + 战斗中 buff"这一轮的收档（见第 3.5 节）**。
 > 读者：接手这个仓库的 AI agent（Codex）或未来的自己。
-> 先读顺序：**本文件 → `AGENTS.md`（硬规则）→ `TODO.md`（待办）→ `MonetUI.md`（设计/决策，147KB，别整篇塞进上下文，按标题查）**。
+> 先读顺序：**本文件 → `AGENTS.md`（硬规则）→ `TODO.md`（待办）→ `docs/DESIGN-LANGUAGE.md`（视觉语言/配色阶梯）→ `MonetUI.md`（设计/决策，147KB，别整篇塞进上下文，按标题查）**。
 
 ---
 
@@ -11,11 +11,11 @@
 | 事 | 值 |
 |---|---|
 | 仓库 | `C:\Users\EastHillGu\Documents\wowaddonsdev\MonetUI`（2026-10-26 转正：原 `MonetUI-refactor` 改名为 `MonetUI`，旧版封存在 `MonetUI-archive`） |
-| 游戏 | `C:\Users\EastHillGu\Documents\Blizzards\World of Warcraft\_retail_\Wow.exe`（客户端 12.1.5.70575） |
-| 插件安装目录 | `...\_retail_\Interface\AddOns\MonetUI`（由 `tools/deploy-retail.ps1` 从仓库拷过去） |
+| 游戏 | `C:\Users\EastHillGu\Documents\Blizzards\WOWFOREVER\World of Warcraft\_retail_\Wow.exe`（2026-10-31 实测 **12.1.5.70688**；`_cn_beta_` 那套是交付目标 1.60，暂未部署） |
+| 插件安装目录 | `...\WOWFOREVER\World of Warcraft\_retail_\Interface\AddOns\MonetUI`（由 `tools/deploy-retail.ps1` 从仓库拷过去；同目录还装着 Aurora，两者重叠面见 `docs/AURORA-COVERAGE.md`） |
 | 客户端日志 | `...\_retail_\Logs\`（`taint.log` 是污染日志，`EditMode.log` 是编辑模式布局的二进制转储） |
 | 版本 | `MonetUI.toc` 0.12.0，`## Interface: 16001`（部署脚本会按客户端改写） |
-| 当前 HEAD | `36b7280`（2026-10-24 22:17），比 `origin/main` 领先 48 个提交 |
+| 当前 HEAD | `4fece67`（2026-10-31），比 `origin/main` 领先 **14** 个提交（含本轮 6 个 bug/视觉提交 + 2 个 make-lane 车道提交） |
 | 远端 | `origin` = github.com/easthillgu/MonetUI，**私有备份**。**在游戏上线并通过初步测试之前一律不 push**（作者定的，见 `TODO.md` 末尾） |
 | 参考插件（只读） | `../Andromeda`、`../EllesmereUI-v9.4`（Ellesmere 是**这个客户端**的实机皮肤代码，优先级最高） |
 
@@ -52,11 +52,24 @@ node tools/sync-check.js         # 仓库 vs 已安装副本（退出码 0 = 游
 - 模块化：`Modules/*` 每个模块可单独开关，关掉**完整还原**暴雪原样；
 - 每个数值都要过 `Utils/Secrets.lua`（这个客户端会把很多值标成"机密值"，直接算术/比较会抛错）。
 
-模块清单见 `README.md`；模块的结构性说明见 `MonetUI.md` 第五节。
+模块清单见 `README.md`；模块的结构性说明见 `MonetUI.md` 第五节；视觉语言与配色阶梯见 `docs/DESIGN-LANGUAGE.md`。
 
 ---
 
 ## 2. 当前状态（做到哪了）
+
+**2026-10-31 这一轮（6 个提交，全部实机验过）**
+
+| 提交 | 内容 |
+|---|---|
+| `6845a76` | 视觉语言收口（`docs/DESIGN-LANGUAGE.md` + 决策 a/b/c）+ 血条"空槽高亮红无效"修复（织纹盖色 / `GetAlpha` 与顶点色同存储） |
+| `6ec877b` | 游戏菜单 11 个按钮的暴雪红石头（12.x 按钮匿名 + 按需创建，名单命中不了） |
+| `93abc0c` | 主菜单大字提亮（`bright`）+ 血量颜色设置重排（组名成行 + 实色块 + 修 multi-return 落到 setter 的坑） |
+| `1fb5caf` | 颜色键收成一张表（`Widget:PaletteColor`；`Color:Get` 未知键回退 edge 导致 `bright` 静默失效） |
+| `37a19df` | 战斗里 `/reload` 后背包只有标题（`InCombatLockdown` 登录当拍假 false / 空窗口指纹不变不重建 / 停车延后在脱战当拍二次延后） |
+| `3e93d5c` | 登录时不再自动打开分类背包（客户端恢复暴雪背包 shown 被守卫当成"按了 B"） |
+
+**待实机**：`3e93d5c` 的登录复验（客户端当时退出了，见 8.21）。
 
 **总体**：15 个模块全部实装、默认开启。**2026-10-26 这一轮的功能改动已实机验收通过**（见 3.24），
 剩下的活是排错型（污染 / 已知小问题），不是加功能阶段。这一阶段的主要敌人是**污染（taint）**，见第 4 节。
@@ -71,7 +84,7 @@ node tools/sync-check.js         # 仓库 vs 已安装副本（退出码 0 = 游
 | Minimap | 可用 | 矩形遮罩 + 面板 + 三个集群按钮；**集群不动，只搬 `Minimap` 帧**（见 3.1） |
 | QuestTracker | 可用 | 自绘追踪框 + 压制暴雪追踪框（alpha 0） |
 | Nameplates | 可用（实机验收 2026-10-26） | 细条血条 / 施法条 / **不显示光环**；**当前目标是金色边 + 1.1 倍**（见 3.12） |
-| Bags | 可用（实机验收 2026-10-26） | 分类背包；**连按 B 不会再冒出暴雪背包**（见 3.21/3.22） |
+| Bags | 可用 | 分类背包；**连按 B 不会再冒出暴雪背包**（见 3.21/3.22）；**登录不再默认打开**（2026-10-31，8.21）；**战斗里 reload 后脱战自动补齐图标**（2026-10-31，8.20） |
 | InfoBar | 可用（实机验收 2026-10-26） | 底边经验线 + 三角标记（尖端顶在线的上沿，见 3.15） |
 | Tooltip | 可用（实机验收 2026-10-26） | 三摆法（跟随 / 小地图右上角 / 暴雪默认）、1px 主题边、边缘翻转、Alt 常显 ID；见 3.13/3.18/3.19 |
 | Cursor / Toast / Durability | 可用 | 纯装饰 / 提示类，实机过过一遍 |
