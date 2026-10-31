@@ -10,11 +10,27 @@ local ADDON_NAME, ns = ...
 -- 否则那个框体之后跑的暴雪代码会被判成“被 MonetUI 污染”。
 local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
 local Marked = function(o, k) return ns:Marked(o, k) end
+
 local Widget   = ns.Widget
 local Math     = ns.Math
 local Color    = ns.Color
 local EventBus = ns.EventBus
 local Secrets  = ns.Secrets
+
+--- 战斗中为真。**不要只用 InCombatLockdown**：登录 / 重载正好落在战斗里时，它有一小段时间
+--- 返回 false（客户端还没把受限状态铺开），于是"模板按钮不能在战斗里出生"这条就被绕过了。
+--- 实机症状（玩家 2026-10-31 报）：战斗里 /reload 之后背包窗口只有标题、没有物品图标。
+--- 用 UnitAffectingCombat("player") 兜住这一段（1.60 有，返回普通 bool）。
+--- 注意位置：必须写在 `local Secrets = ns.Secrets` **之后** —— 第一版放在它前面，
+--- 里面的 `Secrets` 被当成全局（nil），于是每次调用都抛 "attempt to index global 'Secrets'"，
+--- 物品按钮一个都建不出来（外壳 0 个、暴雪背包也停不了车）。
+local function InCombat()
+    local ok, locked = pcall(InCombatLockdown)
+    if ok and locked then return true end
+    local ok2, fighting = pcall(UnitAffectingCombat, "player")
+    if ok2 then return Secrets.Bool(fighting, false) end
+    return false
+end
 
 local M = { name = "Bags" }
 
@@ -239,7 +255,7 @@ end
 -- 该名额，BAG_UPDATE 在脱战后自然重排；自己的簿记 rec/上次边框全部入 ns:Mark 旁表，
 -- 模板按钮上不写自定义字段。
 local function AcquireButton(parent)
-    if InCombatLockdown() then return nil end
+    if InCombat() then return nil end
 
     local shell = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     local btn = CreateFrame("ItemButton", nil, shell, "ContainerFrameItemButtonTemplate")
@@ -591,12 +607,7 @@ local shown = false             -- 我们的分类窗口开没开（守卫边沿
 
 --- 战斗中为真。暴雪背包框里有受保护子按钮，战斗里对它们 EnableMouse 会被拦
 --- （QuestTracker 2026-10-26 实机记录过同类 ×29）；鼠标这一半要跳战斗、脱战补做。
-local function InCombat()
-    local fn = _G.InCombatLockdown
-    if type(fn) ~= "function" then return false end
-    local ok, value = pcall(fn)
-    return ok and value and true or false
-end
+--- 判定用文件顶部的 InCombat()（InCombatLockdown 在登录当拍可能还是旧的 false）。
 
 --- 暴雪的背包框：零售 12.x 默认是**合并背包**（ContainerFrameCombinedBags），
 --- 老客户端才是 ContainerFrame1..N。两个都得管；BackpackTokenFrame 跟着背包一起出现。
@@ -629,7 +640,13 @@ local function ParkBlizzardBags(park)
     -- 停车要整树关鼠标（受保护子按钮）—— 战斗中这一半做不了，排队到脱战再补。
     -- alpha 0 本身不受保护，但一起跳过更简单，且停车只在装载 / 脱战时发生。
     if park and InCombat() then
-        ns:AfterCombat("bags-park", function() ParkBlizzardBags(true) end)
+        ns:AfterCombat("bags-park", function()
+            -- **脱战当拍别急着判断**：PLAYER_REGEN_ENABLED 派发时 InCombatLockdown /
+            -- UnitAffectingCombat 可能还是旧值 true（HANDOFF 3.26 的老毛病），于是这里会
+            -- 二次延后到"下一次脱战" —— 实际上等于永远不 park，玩家按 B 会看到暴雪背包
+            -- 和我们那套同屏。换个新 tick 再判断，标志这时才是新的。
+            C_Timer.After(0, function() ParkBlizzardBags(true) end)
+        end)
         return
     end
     for _, frame in ipairs(BlizzardBagFrames()) do
@@ -761,6 +778,16 @@ local function BagSignature(indexes)
 end
 
 local pollDriver, pollAcc, bagSig, bankSig
+
+-- 战斗里 reload 的收尾：模板物品按钮不能出生（AcquireButton 返回 nil），窗口只剩标题；
+-- 而签名轮询只认"背包内容指纹"——空窗口和满窗口的指纹一样，所以脱战后**不会**自己补。
+-- 这里强制把指纹清掉并重建一次（玩家 2026-10-31 报的那条就是这个缺口）。
+EventBus:Register("PLAYER_REGEN_ENABLED", function()
+    if not ns:IsModuleEnabled("Bags") then return end
+    bagSig, bankSig = nil, nil
+    if shown then Rebuild("bags") end
+    if bankOpen then Rebuild("bank") end
+end)
 
 local function StartPolling()
     bagSig, bankSig = nil, nil      -- 重开窗口先强制对一次

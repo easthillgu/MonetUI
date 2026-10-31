@@ -2266,6 +2266,40 @@ alpha 1，面板本身已经换皮了 —— 只有按钮没动。
 （全部 alpha 0.00），文字 `0.51/0.49/0.49`（= 主题 neutral）、按钮底板是我们 1px 边。
 截图确认：无红、无双层边、无残留 atlas。
 
+## 8.20 2026-10-31 战斗里 /reload：背包只有标题、没有图标（+ 弹「界面行为失效」）
+
+**玩家报的**：背包默认是开着的；战斗中 reload 之后背包只剩标题、没有物品图标，并弹「插件导致界面行为失效」。
+
+**三个根因（同一个场景叠出来的）**
+
+1. **`InCombatLockdown()` 在登录/重载当拍会给假的 false**。`AcquireButton` 靠它判"是不是战斗"，
+   于是那一拍会去建**受保护的** `ContainerFrameItemButtonTemplate`、`ParkBlizzardBags` 也会对
+   暴雪背包的受保护子按钮 `EnableMouse` —— 两者都会弹「界面行为失效」。
+   改成文件里唯一的 `InCombat()`：`InCombatLockdown() or UnitAffectingCombat("player")`（后者兜住那一段）。
+2. **战斗里 0 个格子是设计内**（模板按钮战斗里出生天生带污染，Ellesmere 同结论），
+   但**脱战后没人补**：刷新靠 BAG_UPDATE + 0.5s 的"内容指纹轮询"，而**空窗口和满窗口的指纹一模一样**
+   → 指纹没变 → 不重建 → 永远停在"只有标题"。
+   补 `PLAYER_REGEN_ENABLED` 收尾：清 `bagSig/bankSig` + 重建已打开的窗口。
+3. **停车延后在脱战当拍又判断成"还在战斗"**（HANDOFF 3.26 那个老毛病：`PLAYER_REGEN_ENABLED`
+   派发时 `InCombatLockdown` / `UnitAffectingCombat` 还是旧值）→ 二次延后到"下一次脱战" = **永不 park**，
+   玩家按 B 会看到暴雪背包和我们那套同屏。改成延后回调里换一个**新 tick** 再判断
+   （`C_Timer.After(0, ...)`）。
+
+**我自己引入又修掉的一个坑（教训）**：第一版把 `InCombat()` 写在 `local Secrets = ns.Secrets`
+**之前**，函数体里的 `Secrets` 就成了全局（nil）——每次调用抛 `attempt to index global 'Secrets'`，
+于是物品按钮一个都建不出来、暴雪背包也停不了车。`audit-locals` **抓不到这种**（它查未使用/遮蔽，
+不查"引用了还没声明的 local"）。**新增 helper 一律放在它引用的 local 之后**；Lua 只有运行到才报错，
+静态闸门给不了保险。
+
+**实机验证（12.1.5.70688，玩家配合打的怪）**
+
+| 场景 | 结果 |
+|---|---|
+| 战斗中 reload 后立刻探 | `shells=0`（设计内）、`blocked=0`、`errors=0` ← 不再弹框 |
+| 脱战（什么都不做） | `totalShells=90`，7 个窗口自动补满 |
+| 暴雪背包停车 | `ContainerFrameCombinedBags alpha=0 mouse=false`、`ContainerFrame1 alpha=0` |
+| 最终态 | `windows=7 totalShells=91`、0 错误 0 blocked |
+
 ## 9. 建议的下一步（按价值排序）
 
 1. **实机回归 P0/P1 的改动面**（`docs/HANDOFF.md` 8.6.2 + `TODO.md` 的 9 条清单）：
