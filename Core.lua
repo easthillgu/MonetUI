@@ -301,90 +301,99 @@ end
 local SCHEMA = 9
 
 --- One-off adjustments to a database written by an older MonetUI: MergeDefaults only fills in *missing* keys, so a value whose number changed has to be pushed explicitly.  Stored positions are the player's and are never touched here.
-local function Migrate(db)
-    if (db.schema or 1) >= SCHEMA then return end
+--- One entry per schema version, keyed by the version it migrates *to*; the loop below runs exactly the entries newer than the stored schema, in version order.  Adding a setting whose meaning changed = append MIGRATIONS[SCHEMA + 1] and bump SCHEMA -- never a new if-block inside a previous entry.
+local MIGRATIONS = {}
 
-    -- v2: health bars halved to Andromeda's real thickness, plus the fillColor / lostColor colour rules.
-    if (db.schema or 1) < 2 then
-        for unit, defaults in pairs(DEFAULTS.unitFrames) do
-            if type(defaults) == "table" then
-                local stored = db.unitFrames[unit]
-                if type(stored) == "table" then
-                    stored.health    = defaults.health
-                    stored.power     = defaults.power
-                    stored.fillColor = defaults.fillColor
-                    stored.lostColor = defaults.lostColor
-                end
-            end
-        end
-    end
-
-    -- v3: the bars go back to Andromeda's configured size (health 4, power 1) -- the woven ground needs the room.
-    -- Only the sizes are pushed; the position the player dragged the frame to is left alone.
-    if (db.schema or 1) < 3 then
-        for unit, defaults in pairs(DEFAULTS.unitFrames) do
-            if type(defaults) == "table" then
-                local stored = db.unitFrames[unit]
-                if type(stored) == "table" then
-                    stored.health = defaults.health
-                    stored.power  = defaults.power
-                end
-            end
-        end
-    end
-
-    -- v4: 小地图曾经把默认形状翻成 "mask"（非正方形 SetSize 会把正方渲染拉伸）。
-    -- v5: 现在形状只剩一套，"shape" 这个键作废 —— 顺手从老存档里删掉，免得以后有人问它是干什么的。
-    if (db.schema or 1) < 5 then
-        if type(db.minimap) == "table" then
-            db.minimap.shape = nil
-        end
-    end
-
-    -- v6: 战斗辅助换方向 —— 战斗数字默认回到暴雪自己的（机密值拿不到明文），我们自己的
-    -- 三类从"开"强制翻成"关"；"combat"（压暴雪进出战斗小字）这个键由 alert 接管，作废删除。
-    if (db.schema or 1) < 6 then
-        if type(db.combatText) == "table" then
-            db.combatText.damage = false
-            db.combatText.heal   = false
-            db.combatText.avoid  = false
-            db.combatText.combat = nil
-        end
-    end
-
-    -- v7: 撤销"战斗数字显示区域偏移" —— 该功能往 CombatText.textLocations 写值，会污染
-    -- 暴雪在机密比较里读的字段（CombatText.lua:364 比较机密的 lowestMessage 时读
-    -- textLocations.startY），按玩家规矩"涉及机密值则不改"作废，键删掉。
-    if (db.schema or 1) < 7 then
-        if type(db.combatText) == "table" then
-            db.combatText.area = nil
-        end
-    end
-
-    -- v8: 姓名板名字 12 → 10。暴雪自己的名牌名是 9.6 号，我们原来跟它平级用 12 反而更大
-    -- （玩家 2026-10-27："名字字体缩小到 10 或 12"）。只降"还是旧默认 12"的库，玩家自己改过的不动。
-    if (db.schema or 1) < 8 then
-        if type(db.nameplates) == "table" and db.nameplates.nameSize == 12 then
-            db.nameplates.nameSize = 10
-        end
-    end
-
-    -- v9: 玩家 / 目标的目标的"反相血条 + 暗织纹空槽"从代码硬顶改成两种可选样式
-    -- （fillColor = "inverse"、lostColor = "weave"，见 HANDOFF 8.14.4③）。存档里还写着旧默认值的
-    -- 那两栏（那套观感当时无论如何都由代码决定）换成新样式；玩家真选过的一个不动。
-    if (db.schema or 1) < 9 then
-        local legacy = {
-            player       = { fillColor = "highlight", lostColor = "black" },
-            pet          = { fillColor = "highlight", lostColor = "black" },
-            targettarget = { fillColor = "class",     lostColor = "danger" },
-        }
-        for unit, old in pairs(legacy) do
-            local stored = type(db.unitFrames) == "table" and db.unitFrames[unit]
+-- v2: health bars halved to Andromeda's real thickness, plus the fillColor / lostColor colour rules.
+MIGRATIONS[2] = function(db)
+    for unit, defaults in pairs(DEFAULTS.unitFrames) do
+        if type(defaults) == "table" then
+            local stored = db.unitFrames[unit]
             if type(stored) == "table" then
-                if stored.fillColor == old.fillColor then stored.fillColor = "inverse" end
-                if stored.lostColor == old.lostColor then stored.lostColor = "weave" end
+                stored.health    = defaults.health
+                stored.power     = defaults.power
+                stored.fillColor = defaults.fillColor
+                stored.lostColor = defaults.lostColor
             end
         end
+    end
+end
+
+-- v3: the bars go back to Andromeda's configured size (health 4, power 1) -- the woven ground needs the room.
+-- Only the sizes are pushed; the position the player dragged the frame to is left alone.
+MIGRATIONS[3] = function(db)
+    for unit, defaults in pairs(DEFAULTS.unitFrames) do
+        if type(defaults) == "table" then
+            local stored = db.unitFrames[unit]
+            if type(stored) == "table" then
+                stored.health = defaults.health
+                stored.power  = defaults.power
+            end
+        end
+    end
+end
+
+-- v4: 小地图曾经把默认形状翻成 "mask"（非正方形 SetSize 会把正方渲染拉伸）。
+-- v5: 现在形状只剩一套，"shape" 这个键作废 —— 顺手从老存档里删掉，免得以后有人问它是干什么的。
+MIGRATIONS[5] = function(db)
+    if type(db.minimap) == "table" then
+        db.minimap.shape = nil
+    end
+end
+
+-- v6: 战斗辅助换方向 —— 战斗数字默认回到暴雪自己的（机密值拿不到明文），我们自己的
+-- 三类从"开"强制翻成"关"；"combat"（压暴雪进出战斗小字）这个键由 alert 接管，作废删除。
+MIGRATIONS[6] = function(db)
+    if type(db.combatText) == "table" then
+        db.combatText.damage = false
+        db.combatText.heal   = false
+        db.combatText.avoid  = false
+        db.combatText.combat = nil
+    end
+end
+
+-- v7: 撤销"战斗数字显示区域偏移" —— 该功能往 CombatText.textLocations 写值，会污染
+-- 暴雪在机密比较里读的字段（CombatText.lua:364 比较机密的 lowestMessage 时读
+-- textLocations.startY），按玩家规矩"涉及机密值则不改"作废，键删掉。
+MIGRATIONS[7] = function(db)
+    if type(db.combatText) == "table" then
+        db.combatText.area = nil
+    end
+end
+
+-- v8: 姓名板名字 12 → 10。暴雪自己的名牌名是 9.6 号，我们原来跟它平级用 12 反而更大
+-- （玩家 2026-10-27："名字字体缩小到 10 或 12"）。只降"还是旧默认 12"的库，玩家自己改过的不动。
+MIGRATIONS[8] = function(db)
+    if type(db.nameplates) == "table" and db.nameplates.nameSize == 12 then
+        db.nameplates.nameSize = 10
+    end
+end
+
+-- v9: 玩家 / 目标的目标的"反相血条 + 暗织纹空槽"从代码硬顶改成两种可选样式
+-- （fillColor = "inverse"、lostColor = "weave"，见 HANDOFF 8.14.4③）。存档里还写着旧默认值的
+-- 那两栏（那套观感当时无论如何都由代码决定）换成新样式；玩家真选过的一个不动。
+MIGRATIONS[9] = function(db)
+    local legacy = {
+        player       = { fillColor = "highlight", lostColor = "black" },
+        pet          = { fillColor = "highlight", lostColor = "black" },
+        targettarget = { fillColor = "class",     lostColor = "danger" },
+    }
+    for unit, old in pairs(legacy) do
+        local stored = type(db.unitFrames) == "table" and db.unitFrames[unit]
+        if type(stored) == "table" then
+            if stored.fillColor == old.fillColor then stored.fillColor = "inverse" end
+            if stored.lostColor == old.lostColor then stored.lostColor = "weave" end
+        end
+    end
+end
+
+local function Migrate(db)
+    local from = db.schema or 1
+    if from >= SCHEMA then return end
+
+    for v = from + 1, SCHEMA do
+        local step = MIGRATIONS[v]
+        if step then step(db) end
     end
 
     db.schema = SCHEMA
