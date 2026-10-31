@@ -35,6 +35,36 @@ local function pad(s, w)
     return s .. string.rep(" ", w - #s)
 end
 
+--- 表的键排序后逐行拼（cr、存档顶层键这么印）。
+local function sortedKeys(t, fmt, sep)
+    local keys = {}
+    for k in pairs(t) do keys[#keys + 1] = k end
+    table.sort(keys)
+    for i = 1, #keys do keys[i] = fmt(keys[i], t[keys[i]]) end
+    return table.concat(keys, sep or "\n")
+end
+
+--- 阶梯的固定档序（panel/lost/weave/fill = 暗到亮）。存档里没有 keys 字段，
+--- 顺序就是这个声明序，不是字母序。
+local LADDER = { "panel", "lost", "weave", "fill" }
+local LADDER_SET = {}
+for i = 1, #LADDER do LADDER_SET[LADDER[i]] = i end
+
+--- 档名按 LADDER 声明序逐行拼；表里多出来的未知键排序补在尾部。
+local function ladderKeys(t, fmt, sep)
+    local out = {}
+    for _, k in ipairs(LADDER) do
+        if t[k] ~= nil then out[#out + 1] = fmt(k, t[k]) end
+    end
+    local extra = {}
+    for k in pairs(t) do
+        if not LADDER_SET[k] then extra[#extra + 1] = k end
+    end
+    table.sort(extra)
+    for _, k in ipairs(extra) do out[#out + 1] = fmt(k, t[k]) end
+    return table.concat(out, sep or "\n")
+end
+
 local wanted = arg[2]
 
 local function showColor(r)
@@ -42,31 +72,20 @@ local function showColor(r)
         pad(r.when or "?", 19), pad(r.client or "?", 28), pad(r.source or "?", 8)))
     print(string.format("  区域 %s mapID=%s 来源=%s 档位=%s 阈值=%s 过线 %s/%s",
         tostring(r.zone or "?"), tostring(r.mapID or "?"), tostring(r.envSource or "?"),
-        r.steps and (table.concat((function()
-            local out = {}
-            for _, key in ipairs(r.keys or { "panel", "lost", "weave", "fill" }) do
-                out[#out + 1] = key .. "=" .. tostring(r.steps[key])
-            end
-            return out
-        end)(), "/")) or "?",
+        r.steps and ladderKeys(r.steps, function(k, v)
+            return k .. "=" .. tostring(v)
+        end, "/") or "?",
         tostring(r.min or "?"), tostring(r.passed or "?"), tostring(r.checked or "?")))
     if type(r.cr) == "table" then
-        local keys = {}
-        for k in pairs(r.cr) do keys[#keys + 1] = k end
-        table.sort(keys)
-        for i = 1, #keys do
-            print(string.format("  %-10s %s", keys[i], tostring(r.cr[keys[i]])))
-        end
+        print("  " .. sortedKeys(r.cr, function(k, v)
+            return string.format("%-10s %s", k, tostring(v))
+        end):gsub("\n", "\n  "))
     end
     if type(r.colors) == "table" then
-        local keys = {}
-        for k in pairs(r.colors) do keys[#keys + 1] = k end
-        table.sort(keys)
-        for i = 1, #keys do
-            local c = r.colors[keys[i]]
-            print(string.format("  %-6s r=%.3f g=%.3f b=%.3f  L*=%s",
-                keys[i], c.r or 0, c.g or 0, c.b or 0, tostring(r.levels and r.levels[keys[i]] or "?")))
-        end
+        print("  " .. sortedKeys(r.colors, function(k, c)
+            return string.format("%-6s r=%.3f g=%.3f b=%.3f  L*=%s",
+                k, c.r or 0, c.g or 0, c.b or 0, tostring(r.levels and r.levels[k] or "?"))
+        end):gsub("\n", "\n  "))
     end
 end
 
@@ -98,10 +117,5 @@ if (not wanted or wanted == "compatReport") and type(db.compatReport) == "table"
 end
 if printed == 0 then
     print("存档里没有" .. (wanted or "colorReport / compatReport") .. "：命令跑过吗？落盘要等 1–2 分钟。")
-    print("现有的顶层键： " .. table.concat((function()
-        local out = {}
-        for k in pairs(db) do out[#out + 1] = k end
-        table.sort(out)
-        return out
-    end)(), ", "))
+    print("现有的顶层键： " .. sortedKeys(db, tostring, ", "))
 end

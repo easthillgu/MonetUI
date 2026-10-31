@@ -18,6 +18,9 @@ local Widget   = ns.Widget
 local Color    = ns.Color
 local Media    = ns.Media
 local EventBus = ns.EventBus
+-- 下面 Fill / Tick 里防机密值要用 Secrets.IsSecret —— 必须在这里声明：`Secrets` 只是 ns.Secrets，
+-- 没有全局同名对象；漏声明不会在加载期报错，只在第一条 toast 弹红字（AGENTS「静态闸门抓不到」那条）。
+local Secrets  = ns.Secrets
 
 local M = { name = "Toast" }
 ns.Toast = M
@@ -64,7 +67,10 @@ local function Fill(entry)
     title:SetText(entry.title or "")
     body:SetText(entry.text or "")
     frame:SetAlpha(0)
-    drain:SetWidth(frame:GetWidth() or WIDTH)
+    -- 先读宽度并检查是否为机密值（防止 SetWidth 里的机密值拦截）
+    local fw = frame:GetWidth() or WIDTH
+    if Secrets.IsSecret(fw) then fw = WIDTH end
+    drain:SetWidth(fw)
     frame:Show()
 
     holdFor = math.max(1, tonumber(M:GetSetting("duration")) or 5)
@@ -97,7 +103,10 @@ function M.Tick(self, elapsed)
             phase, t = "out", 0
             drain:SetWidth(0)
         else
-            drain:SetWidth((frame:GetWidth() or WIDTH) * progress)
+            -- 同样在 Tick 防止机密值 SetWidth 失败
+            local fw = frame:GetWidth() or WIDTH
+            if Secrets.IsSecret(fw) then fw = WIDTH end
+            drain:SetWidth(fw * progress)
         end
     else -- out
         local a = 1 - (t / FADE_OUT)

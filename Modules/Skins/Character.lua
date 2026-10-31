@@ -25,10 +25,10 @@ local SUB_PANEL = { panel = { bgAlpha = 0.96 }, deep = true }
 -- 通过 Skin:Need 点名拿到 portrait 区域，再把纹理拉伸以适应方形框。
 -- 注意：此操作只在窗口美化时执行，不会破坏框体的其它表现。
 local function MakePortraitSquare(frame)
-    local portrait = Skin:Need("CharacterFramePortrait")
+    local portrait = M:Need("CharacterFramePortrait")
     if not portrait then return end
     -- 先记进账本，防止以后改名漏掉
-    Skin:Mark(portrait, "monetPortraitSquared", true)
+    M:Mark(portrait, "monetPortraitSquared", true)
     -- 关闭鼠标穿透（防止和下方按钮冲突）
     if portrait.EnableMouse then portrait:EnableMouse(false) end
     -- 设置纹理贴图模式： clamp 可避免边缘重复
