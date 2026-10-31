@@ -69,6 +69,28 @@ tools.wuxian.snap({region={0,0,400,200}})          # 截图核对视觉
 
 ---
 
+## C2. 视觉语言验收（`docs/DESIGN-LANGUAGE.md`）
+
+改完美化 / 换主题 / 换客户端后，逐条对：
+
+- [ ] **透明度阶梯**只出现这些值（多了 0.955 之类的散点 = 违规）：
+  `0.98` 菜单 · `0.97` 对话框 · `0.965` 阅读型窗口（任务日志/剧情/书信） · `0.96` 常规窗口 ·
+  `0.92` HUD 面板 · `0.9` 控件底 · `0.85` 小地图/条底 · `0.7` 小按钮 · `0.55` 托盘 · `0.25` 槽位 · `0` 纯色
+- [ ] **颜色槽纪律**：`highlight`（职业色）只出现在 hover 边框 / 选中边 / 焦点 / 玩家自身血条；
+  通用静态文字、普通按钮字、NPC 名字兜底 = `neutral`；大号按钮大字 = `bright`。
+  自查：`Widget:Font(..., "highlight")` / `ColorText(..., "highlight")` 只允许在 hover 回调里。
+- [ ] **字号只有四档** 10 / 12 / 15 / 24；间距只走 2 的倍数，位置全过 `Media:SnapUnit`。
+- [ ] **颜色键只有一张表** `Widget:PaletteColor`；新增一档只改那里（`Skin:ColorText` 用 `Color:Get`
+  会静默回退 edge，见 AGENTS「客户端行为细则」）。
+- [ ] **主菜单**：11 个按钮无暴雪红石头（`128-RedButton-*` 全 alpha 0）、文字 `bright`；
+- [ ] **标题线**：`TimeManagerFrame` + `StopwatchFrame` 已开（`rule = true, ruleTop = 26`）；
+  其余窗口逐个截图确认后再 `rule = true`，标题矩形比字形小的配 `ruleTop`。
+- [ ] **血量颜色面板**：两组各一行组名 + `血条` / `空槽（损失部分）` 两个下拉 + 12×12 色块；
+  色块颜色 == 条上颜色（`UnitFrames:PreviewColor`）。
+- [ ] **背包**：登录不默认打开；战斗里 `/reload` 后脱战自动补齐图标；暴雪背包 `alpha=0` 不与我们同屏。
+
+---
+
 ## D. 常用探针（粘进游戏或 `tools.wuxian.run`）
 
 > 铁律：**任何可能机密的值，先 `issecretvalue` 再 `tostring`**；否则 `table.concat` 会抛

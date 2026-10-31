@@ -21,10 +21,13 @@
 - [x] 血量颜色设置重排：组名成行 + 12×12 实色块（`UnitFrames:PreviewColor` 与实机同一套函数）
 
 **下一批（按性价比）**
-- [ ] 其余 Blizzard 窗口的标题线：按 `TimeManager` 的流程逐个截图确认后 `rule = true`（标题矩形小的配 `ruleTop`）
-- [ ] 背包窗口 / 每个背包小标题的标题线（我们自己的框，`ruleTop` 好用）
-- [ ] 把 `docs/DESIGN-LANGUAGE.md` 的阶梯表补进 `docs/CHECKS.md` 的验收清单
-- [ ] `Skin:Button` 的 hover 边框仍用 `highlight`（决策 a 允许），确认观感是否要改成 `edge`
+- [ ] 其余 Blizzard 窗口的标题线：按 `TimeManager` 的流程逐个截图确认后 `rule = true`（标题矩形小的配 `ruleTop`）。
+      候选 = 全部 `window = true` 的面板（约 50 处，见 `Modules/Skins/*.lua` 的 `M:Dress`），
+      先挑标题是标准 `TitleContainer.TitleText` 的一批（角色/银行/拍卖/邮件/任务日志…），实机逐个开。
+- [x] 背包窗口标题线：已经用 `Widget:Rule`（手绘笔触下划线）覆盖，**不需要再加发丝线**（双线反而乱）。
+- [x] 阶梯表进 `docs/CHECKS.md`：已加「C2 视觉语言验收」一节（2026-10-31）。
+- [x] `Skin:Button` hover 边框用 `highlight`：**保持**——决策 a 明确"highlight 只给 hover/选中/焦点"，
+      hover 边框正是合规用法，不改 edge。
 
 ## 🎨 2026-10-31 视觉语言收口（docs/DESIGN-LANGUAGE.md）
 
