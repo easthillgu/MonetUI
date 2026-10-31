@@ -895,8 +895,10 @@ function Widget:LostBarBG(bar, r, g, b, subLevel)
 end
 
 -- The bar ground (Assets/Textures/monet_stripe_weave.tga, drawn by tools/regen-textures.js):
--- 64x64, one-direction 45° hairlines on a 4px period.  The number is the texture's, not a
--- taste call -- the texcoord window below is measured in it.
+-- 64x64, one-direction 45° hairlines on an 8px period (profile 128,255,255,128,0,0,0,0 --
+-- 2026-10-31: the period went 4 → 8 because the cloth read as fog at 50% duty; the reference
+-- progress bars measure 27% and the stroke thickness was already the same.  See AGENTS.md).
+-- The number is the texture's, not a taste call -- the texcoord window below is measured in it.
 local WEAVE_SIZE = 64
 
 --- The Monet ground for a bar: a fine 45° hairline cloth (monet_stripe_weave), laid over the
@@ -906,9 +908,12 @@ local WEAVE_SIZE = 64
 --- ORDER MATTERS: call this AFTER the bar's other background textures, so the cloth draws
 --- over them (same draw layer, creation order) while the fill still covers it.
 --- The texture is TILED, not stretched: one texel per physical pixel on both axes, so the 45°
---- angle stays 45° at any bar width and a 4px health bar still shows fine lines instead of a
---- smeared grid.  The window always starts on the same row of the tile, so a 1px power bar and
---- a 4px health bar show the same phase.
+--- angle stays 45° at any bar width.  The window always starts on the same row of the tile, so
+--- a 1px power bar and a 4px health bar show the same phase.
+--- Cost of the 8px period, stated plainly: a bar thinner than the period can only show part of
+--- one stripe, so a 4px health bar reads as dashes (lit 4 / gap 4) rather than cloth.  That is
+--- the one thing to look at in-game; if it bothers, use Widget:BarWeaveDensity to thin the
+--- cloth there -- do not take the period back to 4, the fog came from that.
 ---   opts.height  bar height in UI units (default: the bar's own height)
 ---   opts.alpha   opacity of the cloth (default 0.85: high enough to read against the black /
 ---                red "lost" colour that sits under it)
