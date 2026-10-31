@@ -478,61 +478,81 @@ function roleIcon(ctx, cx, cy, size, pathFn, opts) {
   }
 }
 
-function drawRoleTank(ctx, cx, cy, size) {
-  // **盾牌**（中间暗、边缘亮）+ 轻微倾斜（不对称）。2026-10-29。
-  const s = size / 2, w = s * 0.80, top = -s * 0.80, bot = s * 0.86;
-  const tilt = 0.10;
-  roleIcon(ctx, cx, cy, size, (c, x, y) => {
-    c.save(); c.translate(x, y); c.rotate(tilt);
-    c.moveTo(-w, top);
-    c.lineTo(w, top);
-    c.quadraticCurveTo(w, s * 0.10, 0, bot);
-    c.quadraticCurveTo(-w, s * 0.10, -w, top);
-    c.restore();
-  }, { invert: true });
+// 十字的 12 个角点（a = 臂半宽，p = 臂长）。圆角版与直角版共用。
+const PLUS_PTS = (s, a, p) => [
+  [-a, -p], [a, -p], [a, -a], [p, -a], [p, a], [a, a],
+  [a, p], [-a, p], [-a, a], [-p, a], [-p, -a], [-a, -a],
+];
+
+// 多边形圆角化：每个角用二次曲线切掉，半径不超过最短边的 45%（否则相邻圆角互相吃掉）。
+function roundedPoly(c, x, y, pts, r) {
+  const n = pts.length;
+  const len = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+  let minEdge = Infinity;
+  for (let i = 0; i < n; i++) minEdge = Math.min(minEdge, len(pts[i], pts[(i + 1) % n]));
+  const rr = Math.min(r, minEdge * 0.45);
+  for (let i = 0; i < n; i++) {
+    const prev = pts[(i - 1 + n) % n], cur = pts[i], next = pts[(i + 1) % n];
+    const l1 = len(prev, cur) || 1, l2 = len(cur, next) || 1;
+    const p1 = [cur[0] - (cur[0] - prev[0]) / l1 * rr, cur[1] - (cur[1] - prev[1]) / l1 * rr];
+    const p2 = [cur[0] + (next[0] - cur[0]) / l2 * rr, cur[1] + (next[1] - cur[1]) / l2 * rr];
+    if (i === 0) c.moveTo(x + p1[0], y + p1[1]); else c.lineTo(x + p1[0], y + p1[1]);
+    c.quadraticCurveTo(x + cur[0], y + cur[1], x + p2[0], y + p2[1]);
+  }
+  c.closePath();
 }
 
-function drawRoleHeal(ctx, cx, cy, size) {
-  // **药瓶**：圆瓶身（下大）+ 瓶颈 + 瓶塞。2026-10-29。
-  const s = size / 2;
+// 单把匕首（原点 = 护手中心，刃朝上）：叶状刃 + 小护手 + 短柄 + 圆柄头。
+// 与剑的差别是刃短而宽、护手小 —— 交叉或并排时靠这个差别和"剑"分开。
+function daggerPath(c, s, o) {
+  const bw = s * (o.bw || 0.30);          // 刃半宽
+  const tip = -s * (o.tip || 0.86);
+  const gw = s * (o.gw || 0.44), gh = s * 0.16;
+  const gripW = s * (o.gripW || 0.13), gripEnd = s * 0.52, pomR = s * 0.15;
+  c.moveTo(0, tip);
+  c.lineTo(bw, tip + bw * 1.3);
+  c.lineTo(bw * 0.78, 0);
+  c.lineTo(-bw * 0.78, 0);
+  c.lineTo(-bw, tip + bw * 1.3);
+  c.closePath();
+  c.rect(-gw, 0, gw * 2, gh);
+  c.rect(-gripW, gh, gripW * 2, gripEnd - gh);
+  c.moveTo(pomR, gripEnd);
+  c.arc(0, gripEnd, pomR, 0, Math.PI * 2);
+}
+
+// 2026-10-31 A/B 定案（验收页 monetui-role-ab）：三枚全部按 8px 剪影重选。
+// 旧三枚在 8px 的满墨格只有 24/12/3，dps 那把斜剑基本等于看不见。
+function drawRoleTank(ctx, cx, cy, size) {
+  // **宽盾**：撑到整格（w 0.90 / 高 1.80s），8px 满墨 28 格是全场最高的一档。
+  // 用常规渐变（芯亮边暗）—— 反转渐变在 8px 会把芯读成一个黑洞。
+  const s = size / 2, w = s * 0.90, top = -s * 0.88, bot = s * 0.92;
   roleIcon(ctx, cx, cy, size, (c, x, y) => {
-    // 瓶身：下圆肚、上收到瓶颈
-    c.moveTo(x - s * 0.48, y + s * 0.28);
-    c.quadraticCurveTo(x - s * 0.48, y + s * 0.84, x, y + s * 0.84);
-    c.quadraticCurveTo(x + s * 0.48, y + s * 0.84, x + s * 0.48, y + s * 0.28);
-    c.lineTo(x + s * 0.22, y + s * 0.06);
-    c.lineTo(x + s * 0.22, y - s * 0.42);
-    c.lineTo(x - s * 0.22, y - s * 0.42);
-    c.lineTo(x - s * 0.22, y + s * 0.06);
+    c.moveTo(x - w, y + top);
+    c.lineTo(x + w, y + top);
+    c.quadraticCurveTo(x + w, y + s * 0.14, x, y + bot);
+    c.quadraticCurveTo(x - w, y + s * 0.14, x - w, y + top);
     c.closePath();
-    // 瓶塞
-    c.rect(x - s * 0.30, y - s * 0.62, s * 0.60, s * 0.18);
   });
 }
 
-function drawRoleDps(ctx, cx, cy, size) {
-  // **单把斜剑**（对角 ~35°）—— 清楚、不对称。2026-10-29。
+function drawRoleHeal(ctx, cx, cy, size) {
+  // **圆角十字**：臂半宽 0.24s、臂长 0.86s、圆角 0.20s。8px 满墨 20 / 半墨 9，
+  // 与盾、双匕首的最小区分度 69.6（十字和盾 69.6、和双匕首 101.6）。
   const s = size / 2;
-  const tilt = 0.62;
-  const gw = Math.max(2, Math.round(size * 0.06));
-  const pommelR = Math.max(1.5, s * 0.085);
-  roleIcon(ctx, cx, cy, size, (c, x, y, hs) => {
-    c.save(); c.translate(x, y); c.rotate(tilt);
-    // 刃（上尖、下收）
-    c.moveTo(0, -hs * 0.95);
-    c.lineTo(hs * 0.17, -hs * 0.55);
-    c.lineTo(hs * 0.14, hs * 0.10);
-    c.lineTo(-hs * 0.14, hs * 0.10);
-    c.lineTo(-hs * 0.17, -hs * 0.55);
-    c.closePath();
-    // 护手
-    c.rect(-hs * 0.32, hs * 0.10, hs * 0.64, gw);
-    // 柄
-    c.rect(-gw / 2, hs * 0.10 + gw, gw, hs * 0.42);
-    // 柄头
-    c.moveTo(pommelR, hs * 0.58);
-    c.arc(0, hs * 0.58, pommelR, 0, Math.PI * 2);
-    c.restore();
+  roleIcon(ctx, cx, cy, size, (c, x, y) => roundedPoly(c, x, y, PLUS_PTS(s, s * 0.24, s * 0.86), s * 0.20));
+}
+
+function drawRoleDps(ctx, cx, cy, size) {
+  // **并列双匕首**：两把竖直、不旋转（字身对齐像素栅格）。
+  // 间距是硬约束：两把内缘离中心 ≥0.25s，8px 下中缝才有 2 格 —— 收近就并成一坨
+  // （第一版 dx 0.44 / 护手 0.34 实测半墨 22 格，"两把"读不出来）。
+  // 交叉 / V 形两版在 8px 都并成斜灰，且与十字的互差只有 55，已否决。
+  const s = size / 2;
+  roleIcon(ctx, cx, cy, size, (c, x, y) => {
+    for (const dx of [-s * 0.50, s * 0.50]) {
+      c.save(); c.translate(x + dx, y); daggerPath(c, s, { bw: 0.24, gw: 0.28 }); c.restore();
+    }
   });
 }
 
