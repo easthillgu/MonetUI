@@ -1,7 +1,7 @@
 -- Modules/ActionBars/DragDrop.lua
 -- 拖放接住器（P5' 拆分，2026-10-26）：每条条一只"只在手里拿着东西时才开鼠标"的透明接住器，
 -- 按光标坐标算出目标格再 PlaceAction（普通 Frame 收不到 OnReceiveDrag，见下方长注释）。
--- move-only：逻辑原样搬自 ActionBars.lua；接口面：
+-- 接口面：
 --   * 输入：M.SlotOf（格子 → 动作槽位）；
 --   * 输出：M.dragdrop.EnsureDropCatcher(bar)。
 

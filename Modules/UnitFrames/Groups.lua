@@ -165,7 +165,7 @@ local function SetSelected(button, selected)
     button.selected = selected and true or false
 end
 
---- 血条 + 治疗预估 / 吸收盾（P4 拆分：原 StyleButton 内 179-219 行原样搬出）。
+--- 血条 + 治疗预估 / 吸收盾。
 local function StyleHealthBars(button, inner, healthHeight)
     if not button.health then
         button.health = Widget:Bar(button, inner, healthHeight)
@@ -287,8 +287,7 @@ local function StyleRoleIcon(button, small)
 end
 
 --- 建（或重贴）一个单位按钮的外观。可重复调用：只改尺寸和锚点，不重建 region。
---- P4 拆分：本函数只做"顺序 + 组合"，各段实现在上面五个 helper 里；语义逐条保留
----（无早退、各段条件与顺序都与拆分前一致）。
+--- 本函数只做"顺序 + 组合"，各段实现在上面五个 helper 里。
 local function StyleButton(button, cfg, small)
     local width, height = cfg.width, FrameHeight(cfg)
     button:SetSize(width, height)

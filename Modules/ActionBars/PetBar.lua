@@ -7,7 +7,7 @@
 -- UpdateShownButtons 会对这 10 个搬过家的受保护按钮 SetShown，每次重载刷 10 条 BLOCKED，
 -- 只进日志、不弹窗、功能正常。
 --
--- move-only：逻辑原样搬自 ActionBars.lua；接口面：
+-- 接口面：
 --   * 输入：M.ButtonSize / Spacing / PositionBar / SkinAdoptedButton /
 --           ResolveContainer / bars / adopted / PET_DEF（主文件在文件尾导出，同名别名接走）；
 --   * 输出：M.petbar.BuildPetBar(bar, frame, def)（CreateBar 里宠物条那一支）、
@@ -69,7 +69,7 @@ local function EnsurePetCooldownDriver()
     end)
 end
 
--- 宠物条本体。抽自 CreateBar（P4 拆分，逐条保留语义）。
+-- 宠物条本体。
 local function BuildPetBar(bar, frame, def)
     local size, spacing = ButtonSize(), Spacing()
     -- 高度 = 宽度 × 0.75（吸附到像素格）。宽度不动，所以每格是"扁的"，条整体矮一档。

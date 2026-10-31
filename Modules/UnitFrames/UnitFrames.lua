@@ -71,7 +71,7 @@ local TEXT_GAP   = Widget.TEXT_GAP   -- gap between the frame's top edge and the
 local NAME_SIZE  = 10
 local SMALL_SIZE = 10
 
--- 暴雪单位框的压制/归还已拆到 Modules/UnitFrames/Blizzard.lua（P5，move-only）：
+-- 暴雪单位框的压制/归还已拆到 Modules/UnitFrames/Blizzard.lua（P5）：
 -- 对外仍是 M:SuppressBlizzard(enable) / M:HideBlizzardCastBars(enable)，调用点不变。
 
 local function Shared(key)
@@ -427,7 +427,7 @@ local function UpdatePowerColor(frame)
     frame.power:SetStatusBarColor(cr, cg, cb)
 end
 
--- 职业资源小格已拆到 Modules/UnitFrames/ClassPower.lua（P5，move-only）：M.classpower.*
+-- 职业资源小格已拆到 Modules/UnitFrames/ClassPower.lua（P5）：M.classpower.*
 
 --- The interpolation to hand to the client: nil means "snap straight to it" (a saved preference).
 local function Smoothing()
@@ -592,9 +592,9 @@ local function UpdatePower(frame)
     frame.power:SetShown(maximum == nil or maximum > 0)
 end
 
--- 施法条已拆到 Modules/UnitFrames/CastBar.lua（P5，move-only）：M.castbar.*
+-- 施法条已拆到 Modules/UnitFrames/CastBar.lua（P5）：M.castbar.*
 
--- 光环子系统已拆到 Modules/UnitFrames/Auras.lua（P5 试水，move-only）。
+-- 光环子系统已拆到 Modules/UnitFrames/Auras.lua（P5）。
 -- 对外接口：M.auras.EnsureTargetAuras / M.auras.RebuildTargetAuras（内部样式经
 -- ns.AuraButtonStyle / ns.PrepareAuraStyle 供 BuffFrame 复用）。
 
@@ -725,7 +725,7 @@ local function RegisterDynamicBorders()
     end
 end
 
--- 血条 / 缺失段 / 织纹 / 分隔线 / 能量条。抽自 CreateUnitFrame（P4 拆分，逐条保留语义）。
+-- 血条 / 缺失段 / 织纹 / 分隔线 / 能量条。
 local function BuildUnitBars(frame, border, width, healthHeight, powerHeight, showPower)
     local health = Widget:Bar(frame, width - border * 2, healthHeight)
     health:SetPoint("TOPLEFT", frame, "TOPLEFT", border, -border)
@@ -772,7 +772,6 @@ local function BuildUnitBars(frame, border, width, healthHeight, powerHeight, sh
 end
 
 -- 名字 / 等级 / 血量百分比三处文本（位置与有无由 TEXT_LAYOUT 决定）。
--- 抽自 CreateUnitFrame（P4 拆分，逐条保留语义）。
 local function BuildUnitTexts(frame, unit)
     local layout = TEXT_LAYOUT[unit] or {}
     frame.nameCap = layout.cap
@@ -814,7 +813,6 @@ local function BuildUnitTexts(frame, unit)
 end
 
 -- 收尾：主题 / 单位提示 / 悬停边框 / 拖动登记 / 位置记忆。
--- 抽自 CreateUnitFrame（P4 拆分，逐条保留语义）。
 local function FinishUnitFrame(frame, unit, position, border)
     Widget:Theme(frame, { thickness = border, bgAlpha = 0.9 })
     Widget:UnitTooltip(frame, unit)
@@ -1037,14 +1035,6 @@ function M:RegisterEvents()
         -- UNIT_THREAT_SITUATION_CHANGED would fail registration.
         EventBus:RegisterUnit("UNIT_THREAT_SITUATION_UPDATE", unit, MakeThreatHandler())
     end
-
---    -- Re-stack the borrowed aura list; positioning only (SetPoint), safe while restricted.
---    EventBus:RegisterUnit("UNIT_AURA", "target", function()
---        local frame = frames.target
---        if frame and frame:IsShown() and frame.blizzardAuras then
---            StackTargetAuras(frame)
---        end
---    end)
 
     EventBus:Register("PLAYER_TARGET_CHANGED", function()
         RefreshUnit("target")

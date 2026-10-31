@@ -4,7 +4,7 @@
 --   * KeepParked + ParkWatch：0.5 秒的独立驱动，暴雪把条 Show 回来就再压一次；
 --   * Restore：原样放回去（模块停用、或玩家改回用暴雪动作条时）；
 --   * M:ParkBlizzard / M:RestoreBlizzard：按清单批处理，Apply / SetEnabled 调它。
--- move-only：逻辑原样搬自 ActionBars.lua；接口面：
+-- 接口面：
 --   * 输入：ns:Mark / ns:Marked（旁表标记，不往暴雪框体上写字段）；
 --   * 输出：M.blizzard.Park / M.blizzard.ParkBag / M.blizzard.Restore（Apply 里背包条那两处调用），
 --           以及仍然挂在模块上的 M:ParkBlizzard / M:RestoreBlizzard。

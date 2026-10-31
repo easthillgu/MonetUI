@@ -1,7 +1,7 @@
 -- Modules/ActionBars/Secure.lua
 -- 安全片段的生成与注入（P5' 拆分，2026-10-28）：状态驱动的条件串与 _onstate 片段、
 -- 按钮的 _childupdate 子片段（page / kind / keydown），以及把它们装上 / 下发的函数。
--- move-only：逻辑原样搬自 ActionBars.lua；接口面：
+-- 接口面：
 --   * 输入：无（Mark/Marked 在本文件重新包一层 ns:Mark，与主文件同款两行包装）；
 --   * 输出：M.secure.ON_STATE_PAGE / VISIBILITY_MAIN / VISIBILITY_OTHER / FULL_PAGE /
 --     EXIT_SNIPPET / InstallPageChild / InstallSecureInit / PushSecureInit /

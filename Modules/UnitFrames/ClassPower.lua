@@ -1,7 +1,7 @@
 -- Modules/UnitFrames/ClassPower.lua
 -- 单位框的职业资源小格（P5 拆分，2026-10-26）：一格一点的细条，仅玩家框、只服务于有"点数"资源的职业
 -- （盗贼/德鲁伊连击点；DK 符文是冷却驱动、不是点数，故不在表里）。
--- move-only：逻辑原样搬自 UnitFrames.lua；接口面：
+-- 接口面：
 --   * 输入：M.Setting（单位设置）/ M.Shared（共享设置）/ M.POWER_COLOR（资源色 token 表）；
 --   * 输出：M.classpower.{CreateClassPower, ClassPowerIn, UpdateClassPower}。
 

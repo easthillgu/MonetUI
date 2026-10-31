@@ -214,12 +214,11 @@ for _, def in ipairs(ADOPTED_DEFS) do
 end
 
 -- 暴雪条压制 / 归还（Park / ParkBag / Restore / 0.5s 压 alpha 的驱动）已拆到
--- Modules/ActionBars/Blizzard.lua（P5'，move-only）：M.blizzard.Park / ParkBag / Restore，
+-- Modules/ActionBars/Blizzard.lua（P5'）：M.blizzard.Park / ParkBag / Restore，
 -- M:ParkBlizzard / M:RestoreBlizzard 也定义在那个文件里。
 
 -- 状态驱动的条件串与 _onstate 片段（ON_STATE_PAGE / VISIBILITY_MAIN / VISIBILITY_OTHER /
--- FULL_PAGE / EXIT_SNIPPET）已拆到 Modules/ActionBars/Secure.lua（P5'，move-only）：
--- M.secure.*；CreateBar / CreateLeaveVehicle 的调用点已改名走那里。
+-- FULL_PAGE / EXIT_SNIPPET）已拆到 Modules/ActionBars/Secure.lua（P5'）：M.secure.*。
 
 -- 留出降落伞：模板缺失时用来创建框体 / 退回暴雪动作条。
 -- 顺序有讲究：零售 12.x 上把 SecureHandlerStateTemplate 和 BackdropTemplate 写在**同一条**模板串
@@ -347,7 +346,7 @@ local function SlotFor(bar, index)
 end
 
 -- 翻页 / 槽位契约与翻页子片段（PAGE_CHILD / PageChildSnippet / InstallPageChild）已拆到
--- Modules/ActionBars/Secure.lua（P5'，move-only）：M.secure.*；契约的长注释（槽位为什么
+-- Modules/ActionBars/Secure.lua（P5'）：M.secure.*；契约的长注释（槽位为什么
 -- 只能由片段写、实机对照数据）也搬过去了，要看去那边。
 
 -- ---------------------------------------------------------------------------
@@ -355,7 +354,7 @@ end
 --
 -- 片段本体（KIND_CHILD / KEYDOWN_CHILD / KIND_SNIPPET / KEYDOWN_SNIPPET）与装上 / 下发
 -- 函数（InstallSecureInit / PushSecureInit / PushPageToChildren）已拆到
--- Modules/ActionBars/Secure.lua（P5'，move-only）：M.secure.*；调用点已改名走那里。
+-- Modules/ActionBars/Secure.lua（P5'）：M.secure.*。
 -- 为什么必须走片段（Lua 写属性 = 脏值 → 连锁 ADDON_ACTION_BLOCKED）的长注释在 Secure.lua。
 
 --- 这一格现在对应哪个槽位：优先用片段写的 "action" 属性（和客户端点击时算的完全一致）。
@@ -403,7 +402,7 @@ local function PaintCooldown(button, slot)
     end
 end
 
--- 拖放接住器已拆到 Modules/ActionBars/DragDrop.lua（P5'，move-only）：M.dragdrop.EnsureDropCatcher。
+-- 拖放接住器已拆到 Modules/ActionBars/DragDrop.lua（P5'）：M.dragdrop.EnsureDropCatcher。
 -- 子文件要用本文件的局部函数 SlotOf（格子 → 槽位），这里显式挂到 M 上。
 M.SlotOf = SlotOf
 
@@ -439,7 +438,7 @@ local function SetHotkey(button)
     end
 end
 
--- 图标件：底色描边（ring/well）、图标本体、织纹。抽自 SkinButton（P4 拆分，逐条保留语义）。
+-- 图标件：底色描边（ring/well）、图标本体、织纹。
 local function BuildButtonIcon(button)
     -- 图标往后缩 1 像素，露出来的底色就是描边；空槽时 well 顶上（见 RefreshRing）。
     local ring = button:CreateTexture(nil, "BACKGROUND", nil, 0)
@@ -469,7 +468,7 @@ local function BuildButtonIcon(button)
     Widget:ButtonMaterial(button, { alpha = 0, weaveAlpha = 0.25, layer = "BACKGROUND", sublevel = 3 })
 end
 
--- 热键 / 堆叠数 / 宏名三个文本。抽自 SkinButton（P4 拆分，逐条保留语义）。
+-- 热键 / 堆叠数 / 宏名三个文本。
 -- 字体与颜色（2026-10-30 玩家定）：三个都用 Super Effective + **主题色**（edge 槽）。
 -- 以前热键与堆叠数是白色，理由是"主题色在技能图标上看不清"；玩家明确要求统一成主题色，
 -- 对比度由 OUTLINE 描边兜底（12px 走 fontFlags）。
@@ -491,7 +490,6 @@ local function BuildButtonFonts(button)
 end
 
 -- 冷却框：**自己建自己的框**，但计时由我们自己从 duration 对象灌进去（见 PaintCooldown）。
--- 抽自 SkinButton（P4 拆分，逐条保留语义）。
 local function BuildButtonCooldown(button)
     -- 绝不能用 C_ActionBar.RegisterActionUIButton：客户端回写我们的冷却框时参数是机密值，
     -- 受限环境（副本/战斗）里必报 "Secret values are only allowed during untainted execution"。
@@ -505,7 +503,7 @@ local function BuildButtonCooldown(button)
     button.cooldown = cooldown
 end
 
--- 按下 / 悬停反馈贴图（默认必须是隐藏的）。抽自 SkinButton（P4 拆分，逐条保留语义）。
+-- 按下 / 悬停反馈贴图（默认必须是隐藏的）。
 local function BuildButtonFeedback(button)
     -- 按下 / 悬停：默认**必须是隐藏的**，由按钮自己的事件来显隐。
     -- 以前这两张贴图建出来就一直 shown（全仓没有一处切 visible），45% 黑 + 15% 白常年压在
@@ -643,7 +641,7 @@ local function InstallDrag(bar, button, index)
     end)
 end
 
--- 按钮要实现的最小一份 SpellFlyout（弹出托盘）接口。抽自 BuildButton（P4 拆分，逐条保留语义）。
+-- 按钮要实现的最小一份 SpellFlyout（弹出托盘）接口。
 -- 暴雪的 SpellFlyout（多阶法术 / 宠物技能那种"弹出托盘"）要求按钮实现
 -- FlyoutButtonMixin 的最小一份（Blizzard_Flyout/Flyout.lua:72-116）：
 --   GetPopupDirection()  托盘朝哪边展开（SpellFlyout.lua:260 要用）
@@ -1148,8 +1146,6 @@ local function SkinAdoptedButton(btn)
     -- 冷却**交给暴雪自己**：我们那套渲染会给它的冷却框 SetHideCountdownNumbers(true) 再自己画字，
     -- 而暴雪冷却框在本客户端受限（SetCooldown 参数可能是机密值、调用被拒），
     -- 结果两层都没显示 —— 实机表现就是"冷却看不到"。收养来的按钮直接用原生冷却。
-    -- local cd = btn.cooldown or btn.Cooldown
-    -- if cd then pcall(StyleCooldownFrame, cd) end
 end
 
 --- 宠物条 / 姿态条"悬停高亮"的静默透明度。**用 alpha 而不是 Hide**：alpha 不为 0 的帧在客户端

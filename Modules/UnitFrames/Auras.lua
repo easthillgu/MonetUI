@@ -1,6 +1,5 @@
 -- Modules/UnitFrames/Auras.lua
--- UnitFrames 的光环子系统（P5 试水拆分，2026-10-25）。原样搬自 UnitFrames.lua，**move-only**：
--- 没有改任何逻辑；只有三处接口面：
+-- UnitFrames 的光环子系统（2026-10-25 从 UnitFrames.lua 拆出）。接口面：
 --   * 输入：M.frames（单位框表）/ M.Shared（共享设置读取），由主文件挂到 M 上；
 --   * 输出：M.auras.{EnsureTargetAuras, RebuildTargetAuras, StyleAuraButton}；
 --   * 兼容：ns.AuraButtonStyle / ns.PrepareAuraStyle（BuffFrame 的战斗光环复用同一套样式）。
@@ -230,9 +229,6 @@ local function AddDispelBorder(button, pad, expand)
     return made > 0
 end
 
---- initializeFrame：一个引擎按钮只进来一次。碰按钮的事必须在这里做完。
---- spec（可选）：{ width, height, crop } —— BuffFrame 的战斗兜底复用这套样式，但玩家 buff 行是
---- 方形图标、且不裁边（目标框的 18x14 槽才需要 3:4 裁切）。不传 spec 就等于原来的目标框样子。
 -- 边框：debuff 优先用引擎的解魔法类型色边框（就是"原始那种带色边框"）；buff 用主题边框。
 -- 引擎那条建不出来（枚举/方法缺失）时退回主题边框，不会出现完全没边框的图标。
 local function EnsureAuraBorder(button, kind, spec, pad, buttonLevel)

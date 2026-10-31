@@ -89,8 +89,6 @@ local function SetNumbers(cd, hidden)
     selfWrite = false
 end
 
---- FormattedTimer colours: seconds red (<10s) or yellow, minutes
---- blue, hours green, days grey, with the unit suffix dimmed.
 local function ColorCountdown(value, suffix, bucket)
     if not value or value == "" then return "" end
     local color

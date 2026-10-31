@@ -1,6 +1,6 @@
 -- Modules/UnitFrames/CastBar.lua
 -- 单位框的施法条（P5 拆分，2026-10-25）：一条 2px 的红色三角火花，从右向左扫；可断/不可断用颜色区分。
--- move-only：逻辑原样搬自 UnitFrames.lua；接口面：
+-- 接口面：
 --   * 输入：M.Setting（单位设置读取）；
 --   * 输出：M.castbar.{CreateCastBar, UpdateCast, HideCast}。
 
