@@ -2075,6 +2075,181 @@ Computer Use 这边另有两个坑：窗口客户区尺寸会在 1355×767 / 136
 **还开着的**：观感确认（玩家 / 宠物 / 目标的目标血条 + 队伍格空槽 + 配置面板四个新下拉能不能真改色）
 归作者；其它还在自己乘 ambient/neutral 的调用点同 8.14.6 未动；两个仓库的 push 都等指示。
 
+## 8.15 2026-10-31 把 Aurora（12.1.5.2）当"1.60 事实库"读了一遍，落地两个控件原语
+
+**为什么读它**：Aurora 是唯一一个把 `Aurora.toc` 同时挂上 `16001` + `[AllowLoadGameType camelot]`
+的成熟美化插件（393 个 Lua / 49.5k 行 / **233 个 Forever 皮肤文件 / 142 个暴雪插件**），
+它的清单是拿本客户端自己的 TOC 生成的 —— 等于一份免费的 1.60 暴雪 UI 目录。
+
+**产出 1：`docs/AURORA-COVERAGE.md`**（对照表，不是代码）
+142 个插件逐条对到我们的 45 个面板，标 ✅/◐/✗/–，末尾给 P1 的 12 个优先项与 §3 的
+**Camelot 覆盖 11 文件**清单。三条口径写在开头：文件在 ≠ 能打开（GameRule）、状态是推断（要过
+`/mui skins diagnose`）、Aurora 另有 144 个插件一个皮肤都没写（当"1.60 存在哪些暴雪插件"的底表用）。
+
+**产出 2：两个控件原语**（`Utils/Widget.lua`）
+
+- `Widget:Shape(tex, kind, opts)` —— **顶点偏移画形状**，不引材质文件。不新开区域、不改尺寸、
+  不改锚点（对"自己按文字高度排版"的框是硬要求）。`up/down/left/right/diamond`，先涂纯白再上
+  顶点色（换主题只重设颜色）。尺寸读不出来（含机密）就挂轮询等它出现，画好即注销。
+  首个消费者：任务追踪头部的折叠三角（原来是 `+` / `–` 文字）。
+- `Widget:StatusBar(bar, opts)` —— 接管**暴雪自建**的条：换我们的剖面 + 语义色表
+  （`assets = { [原 atlas/路径] = 颜色 }`），并每 0.2 秒**复检**填充有没有被暴雪换回去。
+  首个消费者：新面板 `mirrortimer`（呼吸 / 疲劳 / 溺水条，颜色保留暴雪自己的）。
+
+**两条偏离 Aurora 的决定（重要，别回头改）**
+
+1. **它们是双钩（`hooksecurefunc(bar,"SetStatusBarTexture"/"SetStatusBarColor")`），我们是轮询。**
+   第一版按 Aurora 写了钩子，`node tools/audit-taint.js` 直接判两条 `[HOOK-PROTECTED]` HIGH ——
+   往暴雪框的方法槽写函数等于"写过这个框"，正是 AGENTS.md taint 模型禁止的那类。改成
+   `Widget:PollWatch` 复检，代价是最长 0.2 秒会看到暴雪自己的填充，换回来的是零污染。
+2. **比对填充时用"引擎回报的写法"**（第一次 `SetStatusBarTexture` 之后 `GetTexture()` 读回来记进
+   `rec.texPath`，之后只跟它比）。拿传进去的字符串比，斜杠 / 扩展名一不同就永远不等 ——
+   那就是每隔一拍重建一次贴图对象。
+
+**顺带确认的 1.60 事实**（都已用 `node tools/api-lookup.js` 对过本地快照）：
+`SetVertexOffset` / `SetHorizTile` / `SetTexelSnappingBias` / `canaccesssecrets` 都在；
+`IsForbidden` 与 `GetNumMaskTextures` 是 `[SecretReturnsForAspect]`（Aurora 在这两处没守卫，
+我们不要学）；`Blizzard_SharedXML\Camelot\ProgressBars\ColoredProgressBar.lua` 里那个
+`ColoredProgressBarTemplate` 在 1.60 是 **Frame 不是 StatusBar**（`Widget:StatusBar` 已按此收口）。
+
+**验证**：`node tools/api-audit.js` 0 HARD；`audit-taint` 0/0/0；`audit-locals` 全通过；
+`check-frame-list` 名单一致；三个改动文件过 luaparse（5.1）语法。
+
+**实机走了一遍（12.1.5.70688，2026-10-31）**，四条结果：
+
+1. `Widget:Shape` 画的三角**实机成立**（截图确认是 ▲，不是麻花）：顶点偏移在 9×9 上也干净。
+   隔离测试（64×64 三方块：灰方块 / 三角 / 菱形）确认三组数字都对，菱形那组 Aurora 的偏移可用。
+2. **`Widget:Icon` 只给尺寸、不给锚点** —— 我第一版直接 `Widget:Icon(btn, 9)` 就用，
+   贴图 `GetLeft()` 全 nil、屏幕上一个像素都没有，而 `GetVertexColor` 照样读得到（"看着设好了"）。
+   以后凡是 `Widget:Icon` 出来要显示的，都自己补 `SetPoint`。
+3. **`Texture:GetTexture()` 在本客户端返回 fileDataID（数字），不是路径串**：
+   `Interface\Buttons\WHITE8X8` → `130871`，我们的 `monet_barfill_gradient` → **`-473`**（fine 档是 `-474`），
+   暴雪的 `Interface\TargetingFrame\UI-StatusBar` → `137012`。所以"填充是不是我们的"必须按**引擎回报的值**
+   比，而且数字也得认（`BarAsset` 已改成 string|number 都收）。
+   实机功能测试：把填充换成 Blizzard 的 137012 → 计时框显示后一拍内变回 `-473`（复检生效）。
+4. 重载时日志里那两条 `ADDON_ACTION_BLOCKED MonetUI UNKNOWN()` **不是这一轮引入的**：
+   `tools.wuxian.errors` 的累计签名里这条已经有 **4017 次**（另有 759 条 forbidden-IsVisible），
+   属于长期开着的那个问题；`/mui blocks` 账本为空（不是 `Secrets.Bool` 路径）。
+
+**还开着的**：`tools.wuxian.check` 的实跑（这次游戏在线跑过了：0 error，20 条 warning 全是既有的
+`MouseIsOver`/`GetMouseFocus`/`PetActionBar_UpdateCooldowns` 之类"本客户端没有的名字"）。
+呼吸条要在水里才会真的显示，**颜色是不是暴雪那套（蓝/紫/橙）只有下水才验得到**，留给作者。
+
+
+## 8.16 2026-10-31 现代菜单（右键菜单 / 上下文菜单 / 下拉本体）接管
+
+面板 `menus` 从 opt-in 改成**默认开**，改名为「菜单 / 右键菜单」（`Modules/Skins/System.lua` 的
+`SkinMenus` 里新增 `WatchModernMenus`）。覆盖的不只是右键菜单：`MenuUtil.CreateContextMenu` 出来的
+一切都走这条路，UnitPopup 只是它的一个调用者。
+
+**机制**：菜单没有名字、也没有"打开"事件，所以照本仓规矩 **轮询 + 旁表** ——
+每 0.1 秒 `Menu.GetManager():GetOpenMenu()`，把没涂过的补一遍。
+**没有** hook `MenuManager.OpenMenu` / `CompositorMixin.AttachTexture`（ElvUI 那套）：
+`tools/audit-taint.js` 会把 hooksecurefunc 判成 `HOOK-PROTECTED` HIGH。
+
+**实机硬约束（12.1.5，2026-10-31 验证，这条最要紧）**：12.x 的菜单对象是 `assertsafe` 包起来的 ——
+- `menu:CreateTexture()` / `menu:CreateFontString()` **返回 nil**，同时把
+  `Use of function 'CreateTexture' is disallowed` **打到屏幕上**（玩家看得见，不是静默失败）；
+- 菜单里 FontString 的 `SetFont` 同样被拒（字体不变）。
+所以第一版"给菜单加 4 条 1px 边 + 换字体"直接变成一屏报错，截图里整块都是错误框。
+**能做的只有两件**：改**已有 region 的颜色**（`SetColorTexture/SetVertexColor/SetAlpha` 都放行），
+和挂一个**我们自己的子框体**（`CreateFrame` 是全局，不在 assertsafe 名单里）。
+
+**层级（实测）**：menu 501、元素按钮 521 → 子框体取 `menu:GetFrameLevel()` 就画在按钮**下面**、
+在暴雪底衬**上面**，所以底板+边框挂子框体、按钮照常在上面。建完把暴雪那块
+`common-dropdown-bg` 的 alpha 置 0（**必须等底板建起来再置 0**，否则菜单整体看不见）。
+这条还有一个好处：底板是不透明的，它本来就盖住了暴雪底衬，所以"藏底衬"晚一拍（≤0.1 秒）也**看不见**，
+只是干净；第一次开新菜单帧时底板还没建，那一拍才是暴雪原样。
+
+**字体不用换**：菜单 FontString 挂 `GameFontHighlight` 一类 font object，早被"统一字体"面板换过了
+（实机读到 `LXGWWenKai-Regular.ttf` 15px）。所以这里只补 `SetTextColor`。
+
+**12.1.5 的结构备忘**（写皮肤时直接照这个）：
+`menu` 自身只有 1 个 region = `common-dropdown-bg`（ARTWORK，alpha 0.93）；
+子级 = 0x0 内容锚 + MinimalScrollBar（`minimal-scrollbar-*` atlas）+ 标题 Frame + 元素 Button（521）；
+元素 Button = 一块**白色** BACKGROUND 贴图（染顶点色即可）+ 一个 FontString。
+
+**验证**：`UnitPopup_OpenMenu("SELF")`（注意：`GetOpenMenu()` 只在**同一拍**读得到，分两次 `try` 会拿到 nil）
+→ 9 个按钮，`plate=true`、`bodyAlpha=0`，截图确认是"我们的面板 + 1px 边 + 金色分组标题"；
+池化复用也验了（关掉再开一个 88×63 的两项菜单，同样带上底板）；0 Lua 错误、0 blocked。
+探测期间曾把 `scriptErrors` CVar 置 0 看英文报错，**已恢复为 1**。
+
+## 8.17 2026-10-31 修：血条"损失部分 = 高亮红"看着没生效（织纹盖住了空槽色）
+
+**玩家报的**："损失血量设置成高亮红，是无效的"。
+
+**先证明设置链路本身是通的**（否则会去改错地方）：直接写库 + `/mui theme`（= UpdateAll → UpdateBarLook），
+逐帧读 `healthLost:GetVertexColor()`：
+
+```
+set danger → Player 0.90/0.20/0.20 | Target 0.90/0.20/0.20 | Targettarget 0.90/0.20/0.20 | Focus 0.90/0.20/0.20
+```
+
+四个单位都变了，说明 `Setting → LostColor → SetVertexColor` 没问题。**变的是纹理色，屏幕上却没变红。**
+
+**真因**：逐层读血条自己的 region（实机）：
+
+```
+r1 填充   ARTWORK    tex=-474 (monet_barfill_thin)
+r2 空槽色 BACKGROUND tex=nil   ← healthLost（SetColorTexture）
+r4 织纹   BACKGROUND tex=-501  alpha=0.85   ← Widget:BarWeave，创建在 lost 之后
+```
+
+`Widget:BarWeave` 的 45° 布纹是 **BACKGROUND、建在空槽色之后**，所以它**盖在空槽上面**，
+alpha 0.85 的灰布纹把高亮红压成"灰褐布纹"——小红线只在 4px 周期的缝里露一点，8px 高的条上基本看不出来，
+玩家看到的就是"没生效"。默认的"暗织纹"样式本来就是靠这层布纹做质感，所以这个问题只在**选实色**时暴露。
+
+**修法**（`Modules/UnitFrames/UnitFrames.lua` + `Utils/Widget.lua`）：
+
+1. `Widget:BarWeaveDensity(bar, alpha)`：织纹浓度记在 `Mark(bar, "weaveDensity")` 上，
+   `BarWeave` 每次重涂时读它（主题刷新 / SyncBarFill 都会反复调 BarWeave，靠参数传会被顶回默认值）。
+2. `UpdateHealthColor` 与 `UpdateDesaturation` **两个入口都要调** `ApplyWeaveDensity(frame)`——
+   建框那一次读到的可能是默认值（库还没合并完），之后真正反复跑的是 `UpdateDesaturation`
+   （血量事件 / Apply / 主题刷新都过它）。只挂建框那一次，玩家改完设置会一直停在 0.85。
+3. 样式：`lostColor == "weave"` 保持 0.85，实色样式（danger / light / black / theme25）压到 **0.15**。
+
+**真正的坑（比上面两条更值钱，记牢）**：本客户端 **`GetAlpha()` 和顶点色的 alpha 是同一个存储** ——
+实机实测 `SetAlpha(0.25)` 之后 `GetVertexColor()` 的 a 也变成 0.25；反过来
+`SetVertexColor(r,g,b,0.9)` 之后 `GetAlpha()` 也变成 0.9。所以"调淡织纹"**不能用 SetAlpha**：
+下一次 `Widget:BarWeave` 的 `SetVertexColor(...,0.85)` 会把区域 alpha 一起顶回去。
+第一版就是踩这个：`Mark` 记下 0.15、屏幕上还是 0.85，两头都对不上（`/mui lost` 打出 `织纹 0.85 → 0.85　mark=0.15`）。
+以后凡是"既有 SetAlpha 又有 SetVertexColor"的贴图，都要按同一个旋钮想。
+
+**怎么验**：`/mui lost`（新命令）逐单位打「样式 / 空槽色 / 织纹 alpha（前后）/ mark / frame.unit」。
+实测：暗织纹 → 0.85，高亮红 → 0.15，来回切换都跟着走。
+
+**顺带记两条**：玩家自身的 `health:GetValue()` 在本客户端是 **secret**（`/run` 里读出来是 `<secret>`），
+所以别想用 `SetValue` 造"掉血"来看空槽；`MonetUITargetFrame` 用 `inspect` 探会抛
+`'for' limit must be a number`（受保护框上的机密计数），要读坐标就手算
+（UIParent 1200 ui 高、屏幕 1440 → ×1.2，y 从底往上）。
+
+## 8.18 2026-10-31 视觉语言收口（docs/DESIGN-LANGUAGE.md + 三处小改）
+
+**思路先落地成文档**：`docs/DESIGN-LANGUAGE.md`。核心是把"凭手感"变成可检查的四条：
+1. **三层结构**：底（`Skin:Panel`）/ 内容（`DRESSERS`）/ 点缀（四种线 + `Widget:Shape`），多一层就算错；
+2. **透明度阶梯**：0.98 菜单 / 0.97 对话框 / 0.96 常规窗口 / 0.92 HUD 面板 / 0.9 控件底 / 0.85 小地图 /
+   0.7 小按钮 / 0.55 托盘 / 0.25 槽位 / 0 —— 新代码只能取表里的值，不许再发明 0.955；
+3. **颜色槽纪律**：`edge` 结构线、`ambient` 底、`highlight` **只给 hover/选中/焦点/自身血条**、
+   `neutral` 文字、`health/resource/danger` 语义专用；表面只认 `panel/lost/weave/fill` 四级，不许再乘系数；
+4. **字号四档** 10/12/15/24，间距只走 2 的倍数，全部经 `Media:SnapUnit`。
+
+**三处代码改动**
+- 任务/剧情/地图窗口 `bgAlpha 0.95 → 0.96`（5 处），"常规窗口"只剩一个值。
+- 任务追踪头部两个小按钮：平时 alpha 0.55、悬停 1（`QuietButton`）——头上那两个 chrome 不再抢任务文字。
+- `Widget:HeaderRule`（标题下 1px 发丝线）+ `Widget:BarWeaveDensity`（织纹浓度，8.17 用）。
+
+**两个新踩的坑（写给以后）**
+1. **`SweepDeep` 会把不认识的 region 当暴雪美术 SetAlpha(0)**。标题线第一版线宽/位置全对
+   （实机 `204x1`），但顶点 alpha 读出来 0 —— 因为 `window + deep` 的面板之后还会深扫一遍。
+   给自绘 region 打 `Mark(tex, "art", true)`，`Skin:Fade` 见到它就跳过。
+2. **按"标题底边"锚线，可能穿字**。标题的 FontString 矩形常常比字形小（时钟窗口的 `TitleText` 就是），
+   底边正好落在"时钟"两字中间。所以 `HeaderRule` 保留两种锚法：默认按标题底边（坐标无关、最省事），
+   需要时给 `ruleTop = 26` 走固定偏移（一定在标题下面，但要逐窗口调）。
+   **因此 `opts.rule` 默认关**，逐窗口实机确认过再开 —— 一次全开等于赌 30 个窗口的标题矩形。
+
+**没验完的**：游戏菜单 `GameMenuFrame` 实机看有 3 个按钮仍是暴雪红底（`Strip`/`FadeButtonArt` 没吃干净），
+已记进 `TODO.md` 下一批；标题线在三类窗口上的观感待作者拍板（DESIGN-LANGUAGE §7-b）。
+
 ## 9. 建议的下一步（按价值排序）
 
 1. **实机回归 P0/P1 的改动面**（`docs/HANDOFF.md` 8.6.2 + `TODO.md` 的 9 条清单）：

@@ -217,6 +217,208 @@ local function TintPanel(frame)
     TintBackdrop(frame)
 end
 
+--- 现代 UIMenu：右键菜单（UnitPopup）/ 各种 CreateContextMenu / 下拉菜单本体。
+---
+--- 这套菜单**没有具名框体，也没有"打开"事件**：MenuUtil 现场拼一个 Menu 帧，关掉进池子复用。
+--- 本仓不碰 MenuManager 的方法槽（hooksecurefunc 会被 tools/audit-taint.js 判成 HOOK-PROTECTED），
+--- 所以照老规矩"轮询 + 旁表"：每 0.1 秒问一次当前打开的菜单，把没涂过的补一遍。
+---
+--- **12.x 的菜单是 assertsafe 包起来的（实机验证，2026-10-31）**：
+---   `menu:CreateTexture()` / `menu:CreateFontString()` 直接被拒（**返回 nil**，同时把
+---   "Use of function 'CreateTexture' is disallowed" 打到屏幕上）；菜单里 FontString 的
+---   `SetFont` 同样被拒。所以**不能**给菜单加自己的 region、也**不用**换字体 ——
+---   菜单文字挂的是 GameFontHighlight 这类 font object，早被"统一字体"面板换过了
+---   （实机读到的是 LXGWWenKai 15px）。
+--- 能做的只有两件事：改**已有 region 的颜色**，以及挂一个**我们自己的子框体**当底板。
+---
+--- 12.1.5 实机结构：
+---   menu 自身只有一个 region = 底衬贴图（atlas `common-dropdown-bg`，ARTWORK，alpha 0.93）
+---   子级：0x0 的内容锚、MinimalScrollBar（`minimal-scrollbar-*` 系列 atlas）、标题 Frame、元素 Button
+---   元素 Button：一块 BACKGROUND 贴图（白）+ 一个 FontString（GameFontHighlight）
+---   层级：menu 501，元素按钮 521 —— 子框体取 menu 的等级时**画在按钮下面**（实测）。
+local MENU_POLL = 0.1
+local menuThemeGen = 0
+Skin:OnTheme(function() menuThemeGen = menuThemeGen + 1 end)
+
+--- 当前打开的菜单；没有（或这套客户端的 Menu 结构不一样）就是 nil。
+local function OpenMenu()
+    local manager = _G.Menu and _G.Menu.GetManager and _G.Menu.GetManager()
+    if not manager or type(manager.GetOpenMenu) ~= "function" then return nil end
+    local ok, menu = pcall(manager.GetOpenMenu, manager)
+    if ok then return menu end
+end
+
+local function RegionsOf(obj)
+    if type(obj.GetRegions) ~= "function" then return nil end
+    local ok, list = pcall(function() return { obj:GetRegions() } end)
+    if ok then return list end
+end
+
+local function RegionKind(rgn)
+    local ok, kind = pcall(rgn.GetObjectType, rgn)
+    if ok then return kind end
+end
+
+--- 我们自己的底板：CreateFrame 是全局函数（不在 assertsafe 名单里），子框体可以建；
+--- 等级取 menu 自己的，于是它画在暴雪的底衬之上、元素按钮（521）之下 —— 实机截图验过。
+--- 建过一次就记住，池化复用同一帧时跟着 SetAllPoints 自己变大变小。
+local function MenuPlate(menu, s)
+    if s.plate then return s.plate end
+    local plate = CreateFrame("Frame", nil, menu, "BackdropTemplate")
+    plate:SetAllPoints(menu)
+    plate:SetFrameLevel(menu:GetFrameLevel())
+    pcall(plate.EnableMouse, plate, false)
+    ns.Widget:Theme(plate, { thickness = 1, bgAlpha = 0.97 })
+    s.plate = plate
+    return plate
+end
+
+--- 暴雪底衬是圆角 atlas 图：藏掉它（SetAlpha 允许），让我们的方角底板露出来。
+--- 它每次打开会重贴一次 atlas，所以每拍比一次 alpha（一次读，平时零成本）。
+--- **只在底板真的建起来之后才藏**，否则菜单会整体透明（看不见任何东西）。
+local function HideMenuBody(s)
+    local tex = s.body
+    if not tex or not s.plate then return end
+    local okA, alpha = pcall(tex.GetAlpha, tex)
+    if okA and alpha == 0 then return end
+    pcall(tex.SetAlpha, tex, 0)
+end
+
+local function MenuButtonTint(btn, hovered)
+    local s = Marked(btn, "menuButton")
+    if not s or not s.bg then return end
+    local r, g, b
+    if hovered then
+        r, g, b = ns.Color:GetHighlight()
+    else
+        r, g, b = ns.Color:GetSurface("fill")
+    end
+    pcall(s.bg.SetVertexColor, s.bg, r, g, b, hovered and 0.9 or 0.45)
+end
+
+--- 一个菜单元素按钮：底衬贴图（本来就是白的）染我们的按钮色。
+--- 悬停走 Widget:HoverWatch（**绝不挂 OnEnter**：那是往暴雪框的脚本槽写我们的函数）。
+local function StyleMenuButton(btn, force)
+    local s = Marked(btn, "menuButton")
+    if s and not force then return s end
+    if not s then
+        s = {}
+        Mark(btn, "menuButton", s)
+        local list = RegionsOf(btn) or {}
+        for i = 1, #list do
+            local rgn = list[i]
+            local kind = RegionKind(rgn)
+            if kind == "Texture" then
+                local okL, layer = pcall(rgn.GetDrawLayer, rgn)
+                if okL and layer == "BACKGROUND" and not s.bg then
+                    -- 白色模具 + 顶点色：暴雪之后自己改色也能被我们的轮询顶回来。
+                    s.bg = rgn
+                    pcall(rgn.SetColorTexture, rgn, 1, 1, 1, 1)
+                end
+            elseif kind == "FontString" then
+                s.text = rgn
+            end
+        end
+        ns.Widget:HoverWatch(btn, function(self) MenuButtonTint(self, true) end,
+                                 function(self) MenuButtonTint(self, false) end)
+    end
+    MenuButtonTint(btn, false)
+    if s.text then
+        -- 字体不能换（assertsafe 拒 SetFont），只改颜色。
+        local r, g, b = ns.Color:Get("neutral")
+        pcall(s.text.SetTextColor, s.text, r, g, b, 1)
+    end
+    return s
+end
+
+--- 标题 / 分隔线这类非按钮子控件：字体已经被"统一字体"换过，这里只补颜色。
+local function StyleMenuTexts(node)
+    local list = RegionsOf(node) or {}
+    for i = 1, #list do
+        local rgn = list[i]
+        if RegionKind(rgn) == "FontString" then
+            local r, g, b = ns.Color:Get("neutral")
+            pcall(rgn.SetTextColor, rgn, r, g, b, 1)
+        end
+    end
+end
+
+--- 菜单滚动条（MinimalScrollBar）：轨道与箭头都是 atlas，染主题色即可，不换图。
+local function TintMenuScroll(node, depth)
+    local list = RegionsOf(node) or {}
+    for i = 1, #list do
+        local rgn = list[i]
+        if RegionKind(rgn) == "Texture" then
+            local okA, atlas = pcall(rgn.GetAtlas, rgn)
+            if okA and type(atlas) == "string" and atlas:find("scrollbar") then
+                local r, g, b = ns.Color:GetBorder()
+                pcall(rgn.SetVertexColor, rgn, r, g, b, 0.55)
+            end
+        end
+    end
+    if (depth or 0) >= 2 then return end
+    local ok, kids = pcall(function() return { node:GetChildren() } end)
+    for i = 1, #(ok and kids or {}) do
+        TintMenuScroll(kids[i], (depth or 0) + 1)
+    end
+end
+
+local function DressMenu(menu)
+    local s = Marked(menu, "menuSkin")
+    if not s then
+        s = { gen = -1 }
+        Mark(menu, "menuSkin", s)
+        local list = RegionsOf(menu) or {}
+        for i = 1, #list do
+            if RegionKind(list[i]) == "Texture" then
+                s.body = list[i]
+                break
+            end
+        end
+    end
+
+    HideMenuBody(s)
+    if s.gen ~= menuThemeGen then
+        s.gen = menuThemeGen
+        MenuPlate(menu, s)     -- 建一次；换主题时回来重上色
+        if s.plate then
+            ns.Widget:Refresh(s.plate)
+            HideMenuBody(s)    -- 底板有了才敢把暴雪的圆角底衬藏掉
+        end
+    end
+
+    -- 菜单是池化复用的：同一帧重新打开会换一批元素（数量/高度都变）。
+    -- 拿"子控件数 + 高度"当签名，变了才整轮重刷 —— 平时每拍只多一次比较。
+    local ok, kids = pcall(function() return { menu:GetChildren() } end)
+    if not ok then return end
+    local height = 0
+    local okH, h = pcall(menu.GetHeight, menu)
+    if okH and type(h) == "number" then height = math.floor(h + 0.5) end
+    local sig = #kids .. "x" .. height
+    if s.sig == sig then return end
+    s.sig = sig
+
+    for i = 1, #kids do
+        local child = kids[i]
+        local kind = RegionKind(child)
+        if kind == "Button" then
+            StyleMenuButton(child, true)
+        elseif kind == "Frame" then
+            StyleMenuTexts(child)
+            TintMenuScroll(child, 0)
+        end
+    end
+end
+
+--- 把现代菜单接上：一个 UIParent 上的轮询，覆盖右键菜单 / 上下文菜单 / 下拉菜单本体。
+local function WatchModernMenus(anchor)
+    if not _G.Menu or not _G.Menu.GetManager then return end
+    ns.Widget:PollWatch(anchor, function()
+        local menu = OpenMenu()
+        if menu then DressMenu(menu) end
+    end, MENU_POLL)
+end
+
 local function SkinMenus()
     local up = Skin:Need("UIParent")
     if not up or Marked(up, "menuPoll") then return end
@@ -233,6 +435,7 @@ local function SkinMenus()
             end
         end
     end)
+    WatchModernMenus(up)
 end
 
 --- 提示框的九宫格颜色每次隐藏都会被 GameTooltip_ClearStyle 刷回暴雪默认值
@@ -378,9 +581,10 @@ M:Panel("addonlist", { label = "插件列表", group = "系统", apply = SkinAdd
         "AddonListFilterButton", "AddonList.FilterButton",
     } })
 
-M:Panel("menus", { label = "下拉菜单", group = "系统", apply = SkinMenus, default = false,
-    -- DropDownList1..8 / DropDownListNMenu1..8 全在轮询回调里由 level、menu 两个循环变量拼出来，
-    -- 静态列不出来；能确认的只有承载轮询的 UIParent。
+M:Panel("menus", { label = "菜单 / 右键菜单", group = "系统", apply = SkinMenus, default = true,
+    -- 老式下拉：DropDownList1..8 / DropDownListNMenu1..8 全在轮询回调里由 level、menu 两个循环变量
+    -- 拼出来；现代 UIMenu（右键菜单 / 上下文菜单）没有名字，从 Menu.GetManager():GetOpenMenu() 拿。
+    -- 静态列得出来的只有承载轮询的 UIParent。
     frames = { "UIParent" } })
 
 M:Panel("tooltip", { label = "鼠标提示边框", group = "系统", apply = SkinTooltip, default = true,
@@ -429,8 +633,10 @@ M:Panel("macros", { label = "宏编辑器", group = "系统", apply = SkinMacros
 -- 秒表是独立小窗（StopwatchFrame）。两者的关闭按钮都挂在帧自己身上（成员，不是全局名），
 -- M:Dress 的 window 档会依次试 frame.CloseButton → BorderFrame.CloseButton → name.."CloseButton"。
 local function SkinTimeManager()
+    -- 标题线：这个窗口的 TitleText 矩形比字形小（按底边锚会穿过"时钟"两个字），所以用固定偏移。
+    -- 2026-10-31 实机确认：ruleTop = 26 时线正好落在标题下方。
     M:Dress({ "TimeManagerFrame", "StopwatchFrame" },
-        { window = true, panel = { bgAlpha = 0.96 }, deep = true })
+        { window = true, panel = { bgAlpha = 0.96 }, deep = true, rule = true, ruleTop = 26 })
     -- 全局名不带 Frame 后缀，M:SkinWindow 的 name.."CloseButton" 推导够不到，显式接一次。
     Skin:CloseButton(Skin:Need("TimeManagerCloseButton"))
 end
@@ -464,3 +670,32 @@ end
 M:Panel("colorpicker", { label = "拾色器", group = "系统", apply = SkinColorPicker,
     frames = { "ColorPickerFrame", "ColorPickerFrameOkay", "ColorPickerFrameCancel",
         "ColorPickerFrame.Footer.OkayButton", "ColorPickerFrame.Footer.CancelButton" } })
+
+-- 呼吸 / 疲劳 / 溺水条：暴雪自建的三条（MirrorTimerContainer.mirrorTimers[1..3]），
+-- 每条的结构是 .StatusBar（真 StatusBar）+ .Border（美术边框）+ .Text —— 字段名按本客户端
+-- 校准（Aurora 的 Blizzard_MirrorTimer 皮肤走的就是 `.StatusBar`，它是 isRetail 分支）。
+-- 只换填充和边框，尺寸 / 位置一概不动（它在编辑模式里有自己的位置）。
+-- 颜色**保留暴雪自己的**（呼吸=蓝、疲劳=紫、火=橙）：那是语义，不是装饰。
+-- 复检是必须的：每次计时启动暴雪都会重设填充，静态换肤会被顶掉（Widget:StatusBar 内置轮询）。
+local function SkinMirrorTimer()
+    local container = Skin:Need("MirrorTimerContainer")
+    local timers = container and container.mirrorTimers
+    if not timers then return end
+    for index = 1, 3 do
+        local timer = timers[index]
+        if timer then
+            Skin:Fade(timer.Border)
+            if timer.StatusBar then
+                ns.Widget:StatusBar(timer.StatusBar)
+                -- 计时框平时是隐藏的，而轮询对隐藏框不跑：暴雪在启动计时时会把填充换回去，
+                -- 那一刻没人看得见，等它显示出来又是一条暴雪的填充。用"显示"这个跳变补一次。
+                ns.Widget:ShowWatch(timer, function()
+                    ns.Widget:ReapplyBar(timer.StatusBar)
+                end)
+            end
+        end
+    end
+end
+
+M:Panel("mirrortimer", { label = "呼吸 / 疲劳条", group = "系统", apply = SkinMirrorTimer,
+    frames = { "MirrorTimerContainer" } })

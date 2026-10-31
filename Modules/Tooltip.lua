@@ -348,7 +348,10 @@ local function CollectLines(tip)
             local ok, name = pcall(UnitName, target)
             name = ok and Plain(name) or nil
             if name and name ~= "" then
-                local r, g, b = Color:GetHighlight()
+                -- 静态文字一律 neutral（DESIGN-LANGUAGE §3/§7-a）：目标的目标本来只想要"能读"，
+                -- 职业色是**身份**信息、只在该单位是玩家时用；NPC 的兜底色从 highlight（职业色）
+                -- 改成 neutral，免得战士看谁都是红的。
+                local r, g, b = Color:GetNeutral()
                 if Secrets.Bool(UnitIsPlayer(target), false) then
                     local okc, classFile = pcall(UnitClassBase, target)
                     classFile = okc and Plain(classFile) or nil

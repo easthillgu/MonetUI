@@ -1042,6 +1042,7 @@ local function PrintHelp()
     ns:Print("  |cffffd100/mui blocks|r     机密布尔被拦的调用栈账本（`UNKNOWN()` 归因，加 full 看完整栈）")
     ns:Print("  |cffffd100/mui restrict|r   六类受限窗口自查（战斗只是其中一类）+ 可读性前置是否可用")
     ns:Print("  |cffffd100/mui colors|r     配色四级亮度阶梯（面板/空槽/织纹/填充）+ 逐组对比度，账本 MonetUIDB.colorReport")
+    ns:Print("  |cffffd100/mui lost|r       血条「损失部分」配色自查：样式有没有落地、织纹有没有把颜色盖住")
     ns:Print("  |cffffd100/mui compat|r     客户端能力自查：换客户端第一趟跑它（bad 只看与假设不符的，tmpl 连模板一起探，find <片段> 扫暴雪帧真名）")
     ns:Print("  |cffffd100/mui enable|r     启用本体")
     ns:Print("  |cffffd100/mui disable|r    禁用本体（需 /reload）")
@@ -1244,6 +1245,15 @@ local function HandleSlash(message)
 
     elseif command == "colors" then
         PrintColorLadder()
+
+    elseif command == "lost" then
+        -- 血条"损失部分"配色自查：样式有没有落地、织纹有没有把颜色盖住（见 HANDOFF 8.17）。
+        local unitFrames = ns:GetModule("UnitFrames")
+        if unitFrames and type(unitFrames.DebugLost) == "function" then
+            unitFrames:DebugLost()
+        else
+            ns:Print("单位框模块没加载，读不到血条配色。")
+        end
 
     elseif command == "compat" then
         local Compat = ns.Compat

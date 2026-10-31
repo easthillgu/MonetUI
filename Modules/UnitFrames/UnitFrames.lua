@@ -246,6 +246,24 @@ local function LostColor(unit)
     return 0, 0, 0, 1
 end
 
+--- 织纹浓度跟着"空槽样式"走（2026-10-31 玩家实机反馈："损失血量设置成高亮红，是无效的"）。
+--- 这层 45° 布纹（Widget:BarWeave 的 monet_stripe_weave）画在 BACKGROUND、创建在空槽色之后，
+--- 所以它是**盖在空槽上面**的，alpha 0.85：实机逐层读出来是
+---   填充 ARTWORK(-474) / 空槽色 BACKGROUND(nil) / 织纹 BACKGROUND(-501, alpha 0.85)。
+--- 空槽选实色（高亮红 / 浅灰 / 黑 / 主题 25%）时，红被这层灰布纹压成灰褐，看着就像"没生效"。
+--- 所以只有"暗织纹"样式保留 0.85，实色样式压到 0.15 —— 留一点布面质感，但颜色读得出来。
+---
+--- **必须两个入口都调**：建框那一次（UpdateHealthColor）读到的可能是默认值（库还没合并完），
+--- 之后真正每次都跑的是 UpdateDesaturation（血量事件 + Apply + 主题刷新都过它）。
+--- 只挂在建框那一次上，玩家改完设置会一直是 0.85（实机就是这么复现的）。
+local function ApplyWeaveDensity(frame)
+    if not frame.health then return end
+    local alpha = Setting(frame.unit, "lostColor") == "weave" and 0.85 or 0.15
+    if Marked(frame, "weaveAlpha") == alpha then return end
+    Mark(frame, "weaveAlpha", alpha)
+    ns.Widget:BarWeaveDensity(frame.health, alpha)
+end
+
 local function UpdateHealthColor(frame)
     frame.health:SetStatusBarColor(FillColor(frame.unit))
 
@@ -254,6 +272,8 @@ local function UpdateHealthColor(frame)
         local r, g, b, a = LostColor(frame.unit)
         lost:SetVertexColor(r, g, b, a or 1)
     end
+
+    ApplyWeaveDensity(frame)
 
     -- Separator: pure black is invisible against the near-black frame background
     -- (and against the player's black lost-health area).  Tint it with the theme's
@@ -298,6 +318,9 @@ local function UpdateDesaturation(frame)
             lost:SetVertexColor(LostColor(frame.unit))
         end
     end
+
+    -- 这里每次都跑（血量事件 / Apply / 主题刷新），所以织纹浓度必须在这里定，见 ApplyWeaveDensity。
+    ApplyWeaveDensity(frame)
 end
 
 --- Everything about a bar that does not depend on its current value.
@@ -927,6 +950,30 @@ function M:Apply()
     -- 宠物框的"悬停 / 选中才显示"也在这里落地：配置面板改勾立刻生效，不用 /reload。
     ApplyPetHover(frames.pet, Shared("petHover") ~= false)
     self:UpdateAll()
+end
+
+--- 血条配色自查（`/mui lost`）：
+--- "我把损失部分设成高亮红，没反应" 这类反馈，先跑它，一眼看出是**样式没落地**（style 还是 weave /
+--- DB 没存上）还是**落地了但被盖住**（lost 已是红、weaveAlpha 仍是 0.85）。
+function M:DebugLost()
+    for _, unit in ipairs(UNITS) do
+        local frame = frames[unit]
+        local style = Setting(unit, "lostColor")
+        local r, g, b = LostColor(unit)
+        local weave = frame and frame.health and Marked(frame.health, "weave")
+        local function alphaOf()
+            if not weave then return "nil" end
+            local ok, value = pcall(weave.GetAlpha, weave)
+            if ok and value then return ("%.2f"):format(value) end
+            return "?"
+        end
+        local before = alphaOf()
+        -- 幂等：现场再算一次。跑完 alpha 变了 = 平时的刷新路径没走到 ApplyWeaveDensity。
+        if frame then ApplyWeaveDensity(frame) end
+        ns:Print(("%s：样式 %s　空槽色 %.2f/%.2f/%.2f　织纹 %s → %s　mark=%s　frame.unit=%s")
+            :format(unit, tostring(style), r or -1, g or -1, b or -1, before, alphaOf(),
+                tostring(frame and Marked(frame, "weaveAlpha")), tostring(frame and frame.unit)))
+    end
 end
 
 local UNIT_EVENTS = {

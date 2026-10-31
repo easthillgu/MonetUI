@@ -1,5 +1,24 @@
 # 待办
 
+## 🎨 2026-10-31 视觉语言收口（docs/DESIGN-LANGUAGE.md）
+
+**已落地**
+- [x] `docs/DESIGN-LANGUAGE.md`：透明度阶梯 / 颜色槽纪律 / 字号四档 / 点缀四语法 / 与 Aurora 的取舍
+- [x] 任务/剧情窗口 `bgAlpha 0.95 → 0.96`（统一到"常规窗口"一档，5 处）
+- [x] 任务追踪头部两个小按钮"安静化"（平时 0.55、悬停 1）
+- [x] `Widget:BarWeaveDensity` + `Widget:HeaderRule`（标题线，默认关，见下）
+
+**待裁决（需要作者拍板，见 DESIGN-LANGUAGE §7）**
+- [ ] a. 通用按钮/静态文字：`neutral`（推荐，任何职业同一副样子）还是让 `highlight`（职业色）渗透？
+- [ ] b. 标题线要不要逐窗口开：`M:Dress("X", { window = true, rule = true })`，标题矩形比字形小的窗口要配 `ruleTop`
+- [ ] c. 阅读型窗口（任务日志/剧情/书信）要不要单独一档 0.965~0.97
+
+**下一批（按性价比）**
+- [ ] 游戏菜单 `GameMenuFrame` 的按钮：实机看有 3 个仍是暴雪红底（Strip/FadeButtonArt 没吃干净）—— 先查 `Skin:GetText` 是否命中它的 text region
+- [ ] 背包窗口标题 / 每个背包小标题加"标题线"（我们自己的框，`ruleTop` 好用）
+- [ ] `Skin:Button` 的 hover 边框用 `highlight`：确认这是有意的（§7-a），否则改 `edge`
+- [ ] 把 `docs/DESIGN-LANGUAGE.md` 的阶梯表补进 `docs/CHECKS.md` 的验收清单
+
 ## 🔧 2026-10-30 按 review 计划执行（docs/PLAN-refactor-2026-10-29.md）
 
 > 基线提交 `32ac509`（上一轮未提交的皮肤层 + BossFrames 初稿 + BLP 直角版）。

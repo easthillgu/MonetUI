@@ -14,7 +14,7 @@ local Skin = ns.Skin
 local MAP_BUTTONS = { "WorldMapFrameHomeButton", "WorldMapFrameOverflowButton" }
 
 local function SkinQuestMap()
-    M:Dress("QuestMapFrame", { panel = { bgAlpha = 0.95 } })
+    M:Dress("QuestMapFrame", { panel = { bgAlpha = 0.96 } })
 
     -- 详情面板里全是按钮（奖励、难度、坐标…），要整层扫；任务列表只有滚动条 ——
     -- 列表行本身也是按钮，深扫会把它们全成底板，所以那一步留在调用点上明写。

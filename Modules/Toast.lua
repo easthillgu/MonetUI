@@ -138,7 +138,7 @@ local function Build()
     accent:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
     accent:SetWidth(ACCENT)
 
-    title = Widget:Font(frame, 12, "pingfang", "highlight", "LEFT", nil, Media.outlineFlags)
+    title = Widget:Font(frame, 12, "pingfang", "edge", "LEFT", nil, Media.outlineFlags)
     title:SetWordWrap(false)
     title:SetPoint("TOPLEFT", frame, "TOPLEFT", ACCENT + PAD, -8)
     title:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -PAD, -8)

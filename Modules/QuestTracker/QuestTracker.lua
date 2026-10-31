@@ -395,21 +395,45 @@ function M:Skin()
     toggleBtn:SetSize(13, 13)
     Widget:Theme(toggleBtn, { thickness = 1, bgAlpha = 0.7 })
     toggleBtn:SetPoint("TOPRIGHT", tracker, "TOPRIGHT", -PAD, -3)
+    -- 两个小按钮"安静"一点：平时半透明、移上去才亮 —— 头上那两个 chrome 不该抢过任务文字。
+    local function QuietButton(btn)
+        btn:SetAlpha(0.55)
+        Widget:HoverWatch(btn, function(self) self:SetAlpha(1) end,
+                               function(self) self:SetAlpha(0.55) end)
+    end
+    QuietButton(toggleBtn)
     local toggleGlyph = Widget:Font(toggleBtn, 12, "pingfang", "edge", "CENTER", nil, Media.outlineFlags)
     toggleGlyph:SetPoint("CENTER", toggleBtn, "CENTER", 0, 0)
     Widget:Highlight(toggleBtn, 0.9)
+
+    -- 折叠 / 展开的三角是**画出来的**（顶点偏移，不需要材质文件）：不占新区域、不改锚点。
+    -- 折叠时朝下（点它往下展开），展开时朝上。客户端没有 SetVertexOffset 时才退回文字
+    -- （1.60 有，见 docs/api）。
+    local toggleArrow = Widget:Icon(toggleBtn, 9, "ARTWORK")
+    toggleArrow:SetPoint("CENTER", toggleBtn, "CENTER", 0, 0)
+    local canDraw = type(toggleArrow.SetVertexOffset) == "function"
+    local function PaintToggle()
+        if canDraw then
+            Widget:Shape(toggleArrow, minimized and "down" or "up", { color = "edge", span = 0.9 })
+            toggleGlyph:SetText("")
+        else
+            toggleGlyph:SetText(minimized and "+" or "-")
+        end
+    end
+    EventBus:Register("MONETUI_THEME_CHANGED", PaintToggle)   -- 换主题重画（顶点色吃的是主题色）
+
     toggleBtn:SetScript("OnClick", function()
         local sv = ns:DB(); sv.questTracker = sv.questTracker or {}
         local db = sv.questTracker
         minimized = not minimized
         db.minimized = minimized or nil
-        toggleGlyph:SetText(minimized and "+" or "–")
+        PaintToggle()
         QueueRender()
     end)
     -- 从 DB 恢复 minimized 状态
     local qtDB = ns:DB().questTracker or {}
     minimized = not not qtDB.minimized
-    toggleGlyph:SetText(minimized and "+" or "–")
+    PaintToggle()
 
     -- Lock glyph: clicking toggles movable / locked.  Locked = SetMovable(false), handle 不响应拖动。
     -- 和 toggleBtn 同高度左对齐。
@@ -420,6 +444,7 @@ function M:Skin()
     local lockGlyph = Widget:Font(lockBtn, 12, "pingfang", "edge", "CENTER", nil, Media.outlineFlags)
     lockGlyph:SetPoint("CENTER", lockBtn, "CENTER", 0, 0)
     Widget:Highlight(lockBtn, 0.9)
+    QuietButton(lockBtn)
 
     -- The header row doubles as the drag handle.  End anchor is lockBtn.LEFT so handle
     -- never covers the two glyph buttons on the right.

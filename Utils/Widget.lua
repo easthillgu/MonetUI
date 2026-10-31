@@ -12,6 +12,7 @@ local Marked = function(o, k) return ns:Marked(o, k) end
 local Color = ns.Color
 local Media = ns.Media
 local EventBus = ns.EventBus
+local Secrets = ns.Secrets      -- Secrets.lua 在本文件之前加载（见 Utils.xml）
 
 -- ---------------------------------------------------------------------------
 -- 轮询式 hover / 显隐观察（见 AGENTS.md 的「界面美化原则」）
@@ -550,6 +551,236 @@ function Widget:TopLight(tex)
     tex:SetGradient("VERTICAL", surfLit, surfSunk)
 end
 
+-- ---------------------------------------------------------------------------
+-- 顶点偏移画形状（不需要材质文件）
+--
+-- 一块纯白方图 + SetVertexOffset 就能画三角 / 菱形：**不新开区域、不改尺寸、不改锚点**。
+-- 这一点对"自己按文字高度排版"的框（任务追踪、各类提示条）是硬要求 —— 新增区域会挤动
+-- 布局，改建既有贴图不会。做法取自 Aurora（Skin\texture.lua 与它的任务追踪皮肤），
+-- 1.60 有 SetVertexOffset（node tools/api-lookup.js SetVertexOffset）。
+--
+-- 顶点序是引擎固定的：1 左上、2 左下、3 右上、4 右下；偏移是 UI 单位（像素），相对贴图
+-- 当前尺寸。贴图先涂纯白再用顶点色上色：白和任何主题色相乘都不偏色，换主题只要重设颜色、
+-- 不必重画几何 —— 与材质规范里"染色模具必须无色相"是同一条。
+local SHAPES = {
+    -- 每个函数返回按顶点序 1..4 的 { dx, dy }。s = 字形占整块贴图的比例。
+    up = function(w, h, s)
+        local dx, dy = w * (1 - s) / 2, h * (1 - s) / 2
+        return { w / 2, -dy }, { dx, 0 }, { -w / 2, -dy }, { -dx, 0 }
+    end,
+    down = function(w, h, s)
+        local dx, dy = w * (1 - s) / 2, h * (1 - s) / 2
+        return { dx, 0 }, { w / 2, dy }, { -dx, 0 }, { -w / 2, dy }
+    end,
+    left = function(w, h, s)
+        local dy = h * (1 - s) / 2
+        return { 0, -h / 2 }, { 0, h / 2 }, { 0, -dy }, { 0, dy }
+    end,
+    right = function(w, h, s)
+        local dy = h * (1 - s) / 2
+        return { 0, -dy }, { 0, dy }, { 0, -h / 2 }, { 0, h / 2 }
+    end,
+    -- 菱形沿用 Aurora 那组偏移（引擎按 1-2-4 / 1-4-3 三角化，实测成立）。
+    diamond = function(w, h)
+        return { 0, -h / 2 }, { w / 2, 0 }, { -w / 2, 0 }, { 0, h / 2 }
+    end,
+}
+
+--- 颜色参数：Color 键（"edge" / "highlight" …）或 { r, g, b[, a] } / { r = , g = , b = }。
+local function ResolveColor(c, alpha)
+    if type(c) == "string" then
+        local r, g, b, a = Color:Get(c)
+        return r, g, b, alpha or a or 1
+    end
+    if type(c) == "table" then
+        local r, g, b = c.r or c[1], c.g or c[2], c.b or c[3]
+        if type(r) == "number" and type(g) == "number" and type(b) == "number" then
+            return r, g, b, alpha or c.a or c[4] or 1
+        end
+    end
+    local r, g, b, a = Color:Get("edge")
+    return r, g, b, alpha or a or 1
+end
+
+--- 把一块**已有**的贴图画成形状（会覆盖它当前的材质）。
+--- @param tex Texture
+--- @param kind "up" | "down" | "left" | "right" | "diamond"
+--- @param opts { color = Color 键 | { r, g, b, a }, span = 0..1 字形占比, alpha = number }
+--- @return true 已画好；false 这块贴图现在还没有尺寸（父框隐藏 / 还没布局），已排队等它出现再画
+function Widget:Shape(tex, kind, opts)
+    if not tex or type(tex.SetVertexOffset) ~= "function" then return false end
+    local draw = SHAPES[kind or "diamond"]
+    if not draw then return false end
+    opts = opts or {}
+
+    local done = false
+    local function Paint()
+        if done then return end
+        -- 尺寸可能是机密值（"锚到机密框"时 GetWidth/GetHeight 会返回机密）：读不出来就等下一拍。
+        local okW, w = pcall(tex.GetWidth, tex)
+        local okH, h = pcall(tex.GetHeight, tex)
+        if not (okW and okH) or type(w) ~= "number" or type(h) ~= "number"
+            or not Secrets.CanRead(w) or not Secrets.CanRead(h) or w <= 0 or h <= 0 then
+            -- 没尺寸：挂轮询等它可见（隐藏的框轮询会自己跳过，不空转）。
+            Widget:PollWatch(tex, Paint, 0.2)
+            return
+        end
+
+        local span = opts.span or 1
+        if span <= 0 or span > 1 then span = 1 end
+        local quad = { draw(w, h, span) }
+        tex:SetColorTexture(1, 1, 1, 1)
+        for i = 1, 4 do
+            local point = quad[i]
+            tex:SetVertexOffset(i, point[1], point[2])
+        end
+        local r, g, b, a = ResolveColor(opts.color, opts.alpha)
+        tex:SetVertexColor(r, g, b, a)
+
+        done = true
+        -- 画好就摘掉轮询（本文件规范：一次性的补扫必须注销）。放到新执行上下文里摘，
+        -- 免得在驱动循环内部改它正在遍历的表。
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0, function() Widget:Unwatch(tex, Paint) end)
+        end
+    end
+
+    Paint()
+    return done
+end
+
+-- ---------------------------------------------------------------------------
+-- 状态栏：接管**暴雪自己建的**条
+--
+-- 与 Widget:Bar 的分工：Widget:Bar 是我们自己画的条（单位框 / 姓名板 / 冷却 / 经验条），
+-- 本函数接管暴雪建的条（呼吸/疲劳条、伤害统计行、场景进度条…）：把填充换成我们的剖面，
+-- 并在暴雪把填充换回去之后的下一个轮询拍重新接管。
+--
+-- 为什么要**复检**：暴雪的条在初始化、以及每次状态变化都会调 SetStatusBarTexture /
+-- SetStatusBarColor（12.x 还把 atlas 的应用挪进了 ButtonStateBehavior.OnButtonStateChanged），
+-- 只皮肤一次会在第一次状态更新时被顶掉（Aurora 的 B35 就是这条）。
+--
+-- **为什么是轮询而不是双钩**：Aurora 用 hooksecurefunc 挂这两个方法，但我们这边的规则更严 ——
+-- 往暴雪框的方法槽写函数等于"写过这个框"，之后它自己的调用链都算 MonetUI 的执行环境
+-- （AGENTS.md 的 taint 模型；tools/audit-taint.js 的 HOOK-PROTECTED 就是这条规则的闸门）。
+-- 所以这里用 Widget:PollWatch 复检：读一眼填充是不是我们的，不是就换回来。代价是最长
+-- 一个轮询间隔（默认 0.2 秒）会看到暴雪自己的填充，换来的是零污染。
+--
+-- 三条纪律：
+--   * 只对**非安全框**里的暴雪条用。单位框 / 姓名板 / 动作条里的条一律自绘 Widget:Bar。
+--   * 轮询回调里**不读**条的颜色：生命条的颜色可能是机密值，读出来再算就是拦截。
+--     我们只写自己那份颜色；没给颜色时原样保留暴雪刚设的那个。
+--   * 颜色优先级：opts.color > opts.assets[原材质] > 暴雪自己的颜色。
+
+--- 这条现在填充的"身份"：atlas 名、贴图路径，或 **fileDataID（数字）**。
+--- 12.x 的 `GetTexture()` 对 addon 贴图也常返回数字（实机：`WHITE8X8` → `130871`），
+--- 所以两种都得认：数字同样是稳定的身份，只是不能和字符串比。
+--- 读不出来（机密 / 无 Get）就是 nil。
+local function BarAsset(bar)
+    local ok, tex = pcall(bar.GetStatusBarTexture, bar)
+    if not ok or not tex then return nil end
+    local okA, atlas = pcall(tex.GetAtlas, tex)
+    if okA and type(atlas) == "string" and not Secrets.IsSecret(atlas) then return atlas end
+    local okT, path = pcall(tex.GetTexture, tex)
+    if okT and (type(path) == "string" or type(path) == "number") and not Secrets.IsSecret(path) then
+        return path
+    end
+    return nil
+end
+
+-- 「设过了，但引擎读不回来」的哨兵：读不回来的框不该变成每拍重建一次贴图对象。
+local UNREADABLE = {}
+
+local function ApplyBar(bar, rec)
+    if Marked(bar, "sbBusy") then return end
+    Mark(bar, "sbBusy", true)
+
+    local key = rec.textureKey
+    if not key then
+        -- 条高决定用哪张剖面（粗条 / 细条）。高度读不出来就按粗条，别为了选剖面去碰机密值。
+        local h = 0
+        local okH, vh = pcall(bar.GetHeight, bar)
+        if okH and type(vh) == "number" and Secrets.CanRead(vh) then h = vh end
+        key = Widget:BarFillTexture(h)
+    end
+    if rec.fillKey ~= key then
+        rec.fillKey = key
+        rec.texPath = nil                 -- 换了剖面，重新记一次引擎回报的写法
+    end
+
+    -- 比对用**引擎自己回报的写法**：SetTexture 传进去的字符串和 GetTexture 回来的可能不同
+    -- （斜杠 / 扩展名），拿传进去的比会永远不等 —— 那就是每隔一拍重建一次贴图对象。
+    -- 第一次设完把回报值记进 rec.texPath，之后只跟它比；暴雪换过填充就重设并重记。
+    local current = BarAsset(bar)
+    local ours = (rec.texPath == UNREADABLE) or (rec.texPath ~= nil and current == rec.texPath)
+    if not ours then
+        pcall(bar.SetStatusBarTexture, bar, Media:Texture(key))
+        rec.texPath = BarAsset(bar) or UNREADABLE
+    end
+
+    if rec.color then
+        local r, g, b = ResolveColor(rec.color)
+        pcall(bar.SetStatusBarColor, bar, r, g, b)
+    end
+
+    Mark(bar, "sbBusy", nil)
+end
+
+--- 接管一条暴雪状态条（可重复调用：第二次起只更新参数，不会重复登记轮询）。
+--- @param opts {
+---   textureKey = 材质键（省略则按条高自动选 monet_barfill_* 剖面）,
+---   color      = Color 键 | { r, g, b, a }（省略则看 assets，都没有就保留暴雪自己的颜色）,
+---   assets     = { [原 atlas 名或贴图路径] = Color 键 | { r, g, b } }  语义色表,
+---   watch      = 复检间隔秒数（默认 0.2；给 false 关掉复检，只做一次静态换肤）,
+--- }
+--- @return true 接管成功；false = 它不是 StatusBar（1.60 的 ColoredProgressBarTemplate 就是 Frame）
+function Widget:StatusBar(bar, opts)
+    if not bar then return false end
+    -- 1.60 的 ColoredProgressBarTemplate 是 Frame 不是 StatusBar（见 docs/AURORA-COVERAGE.md §3）：
+    -- 对它调 SetStatusBarTexture 会直接抛，把调用方整个皮肤函数带走。
+    if type(bar.SetStatusBarTexture) ~= "function" or type(bar.SetStatusBarColor) ~= "function" then
+        return false
+    end
+    if not Widget:Readable(bar) then return false end
+
+    opts = opts or {}
+    local rec = Marked(bar, "statusbar")
+    if not rec then
+        rec = {}
+        Mark(bar, "statusbar", rec)
+    end
+    rec.textureKey = opts.textureKey or rec.textureKey
+    rec.color      = opts.color or rec.color
+
+    -- 语义色表在**替换填充之前**查一次：换掉之后原来的 atlas / 路径就认不出来了。
+    if not rec.color and opts.assets then
+        local asset = BarAsset(bar)
+        if asset then rec.color = opts.assets[asset] end
+    end
+
+    -- 回调必须是**稳定引用**：皮肤包会随设置变化重复 Apply，闭包一次性的话每次都是一条新轮询
+    -- （PollWatch 按函数身份去重，去不掉就叠成 N 条）。
+    if not rec.watchFn then
+        rec.watchFn = function(self) ApplyBar(self, rec) end
+    end
+    if opts.watch ~= false then
+        Widget:PollWatch(bar, rec.watchFn, opts.watch or 0.2)
+    end
+
+    ApplyBar(bar, rec)
+    return true
+end
+
+--- 立刻按登记过的参数重涂一次。
+--- 给"暴雪刚改了填充、而轮询因为框还隐藏没跑"的时机用：把 `Widget:ShowWatch` 的显示跳变
+--- 接过来（呼吸条每次计时启动都是这条路径）。
+function Widget:ReapplyBar(bar)
+    local rec = bar and Marked(bar, "statusbar")
+    if not rec then return false end
+    ApplyBar(bar, rec)
+    return true
+end
+
 --- The border colour for a widget: its own override if it set one, otherwise the user's global slot (see Color:GetBorderKey).
 -- Only the hue comes from the key: the opacity stays the edge slot's, so switching to the (translucent) ambient tint can never make a border invisible.
 local function BorderColor(opts)
@@ -717,7 +948,9 @@ function Widget:BarWeave(bar, opts)
     weave:SetTexCoord(0, cols, v0, v1)
 
     local r, g, b = Color:GetSurface("weave")
-    local alpha = opts.alpha or 0.85
+    -- 浓度可以被调用方钉住（Widget:BarWeaveDensity）。留一个 mark 而不是每次传参：
+    -- 主题刷新 / SyncBarFill 会反复调本函数，靠参数传会互相覆盖回默认值。
+    local alpha = Marked(bar, "weaveDensity") or opts.alpha or 0.85
     weave:SetVertexColor(r, g, b, alpha)
 
     -- The ground follows the theme like the flat background does.
@@ -727,6 +960,73 @@ function Widget:BarWeave(bar, opts)
         entry.weaveAlpha = alpha
     end
     return weave
+end
+
+--- 标题下面的一条 1px 细线（monet_hairline）。
+---
+--- 这是"清爽简洁"最省的一条杠杆：Aurora 的观感本质就是「平板 + 一条细线」，靠一条发丝线把
+--- 标题和内容分开，不加任何材质、不动暴雪美术。窗口标题（SkinWindow）和小节标题都可以用。
+--- 线宽走 `Media:SnapUnit(1)`（1 物理像素），横向撑满 parent 减去 pad。
+--- @param parent 承载细线的框（通常是窗口本身）
+--- @param title 以它的底边为基准（FontString 或区域）
+--- @param opts { pad = 8, gap = 4, alpha = 0.45, key = 去重键 }
+function Widget:HeaderRule(parent, title, opts)
+    if not parent or not title then return nil end
+    opts = opts or {}
+    local key = "headerRule:" .. tostring(opts.key or title)
+    local existing = Marked(parent, key)
+    if existing then return existing end
+
+    local tex = parent:CreateTexture(nil, "ARTWORK")
+    tex:SetTexture(Media.texture["monet_hairline"])
+    tex:SetHeight(Media:SnapUnit(1))
+    if tex.SetSnapToPixelGrid then pcall(tex.SetSnapToPixelGrid, tex, true) end
+    if tex.SetTexelSnappingBias then pcall(tex.SetTexelSnappingBias, tex, 0) end
+    -- **必须标成"我们的美术"**：window + deep 的面板之后还会跑 M:SweepDeep，
+    -- 它把认不出来的 region 当暴雪美术 SetAlpha(0)。实机症状：线宽位置都对（204x1），
+    -- 但顶点 alpha 读出来是 0 —— 因为本客户端 SetAlpha 和顶点 alpha 是同一个存储（HANDOFF 8.17）。
+    -- Skin:Fade 看到 "art" 标记就跳过，所以这一行是线能不能看见的关键。
+    Mark(tex, "art", true)
+    local r, g, b = Color:GetEdge()
+    tex:SetVertexColor(r, g, b, opts.alpha or 0.45)
+    Mark(parent, key, tex)
+
+    local pad = (opts.pad or 0) * Media:Mult()
+    local gap = (opts.gap or 2) * Media:Mult()
+
+    -- 两种锚法，**默认走第一种（按标题底边）**：
+    --  1) 挂在标题自己的底边上 —— 坐标无关，但对"矩形比字形小"的标题会落在字中间
+    --     （实机：时钟窗口的 TitleText 底部正好穿过"时钟"两个字，所以那条线看着像画在字上）；
+    --  2) `opts.ruleTop = 26` 这类**固定距窗口顶边**的偏移 —— 一定在标题下面，代价是逐窗口调。
+    -- 采用哪个由调用方决定，见 docs/DESIGN-LANGUAGE.md §5.2（先在实机确认再开）。
+    tex:ClearAllPoints()
+    if opts.ruleTop then
+        tex:SetPoint("TOPLEFT", parent, "TOPLEFT", (opts.rulePad or 8) * Media:Mult(), -opts.ruleTop * Media:Mult())
+        tex:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -(opts.rulePad or 8) * Media:Mult(), -opts.ruleTop * Media:Mult())
+    else
+        tex:SetPoint("TOPLEFT", title, "BOTTOMLEFT", -pad, -gap)
+        tex:SetPoint("TOPRIGHT", title, "BOTTOMRIGHT", pad, -gap)
+    end
+    return tex
+end
+
+--- 钉住一条条的织纹浓度（默认 0.85）。
+---
+--- **本客户端 GetAlpha 和顶点色的 alpha 是同一个存储**：实机验过 ——
+---   SetAlpha(0.25) → GetVertexColor 的 a 也是 0.25；SetVertexColor(r,g,b,0.9) → GetAlpha 也变 0.9。
+--- 所以"调淡织纹"不能用 SetAlpha：下一次 Widget:BarWeave（主题刷新 / SyncBarFill 都会调）
+--- 会用 SetVertexColor(...,0.85) 把区域 alpha 一起顶回去。浓度只能走这一个旋钮，
+--- 而且要记在 bar 上，让之后的 BarWeave 照它来。
+--- 用途：血条"损失部分"选实色（高亮红 / 浅灰 / 黑）时，那层 45° 布纹会盖在空槽色上面
+--- （BACKGROUND、建在空槽之后），0.85 的灰布纹把红压成灰褐 → 玩家以为设置没生效（HANDOFF 8.17）。
+function Widget:BarWeaveDensity(bar, alpha)
+    if not bar then return end
+    Mark(bar, "weaveDensity", alpha)
+    local weave = Marked(bar, "weave")
+    if weave then
+        local r, g, b = Color:GetSurface("weave")
+        pcall(weave.SetVertexColor, weave, r, g, b, alpha)
+    end
 end
 
 function Widget:Icon(parent, size, layer, sublevel)

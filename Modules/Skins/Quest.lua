@@ -144,14 +144,20 @@ local QUESTLOG_SCROLLS = {
     "QuestLogListScrollFrame", "QuestLogDetailScrollFrame", "QuestLogObjectiveScrollFrame",
 }
 
+-- 阅读型窗口一档 0.965（DESIGN-LANGUAGE §2 的独立一档）：任务日志 / 任务详情 / 剧情 / 书信。
+-- 为什么不是 0.97：那一档是**对话框**（挡操作、要压住世界）；阅读窗口是"长时间对着看"，
+-- 0.965 比常规窗口(0.96)更实、又不像弹窗那样闷。为什么不取 0.965~0.97 之间别的数：
+-- 阶梯一个值一个语义，多出来的小数点只会让下一个人猜。
+local READ_ALPHA = 0.965
+
 local function SkinQuestLog()
-    M:Dress("QuestLogFrame", { window = true, panel = { bgAlpha = 0.95 } })
+    M:Dress("QuestLogFrame", { window = true, panel = { bgAlpha = READ_ALPHA } })
     M:Dress(QUESTLOG_BUTTONS, { as = "button" })
     M:Dress(QUESTLOG_TABS, { as = "tab" })
     M:Dress(QUESTLOG_SCROLLS, { as = "scroll" })
 
-    M:Dress("QuestLogDetailFrame", { window = true, noTitle = true, panel = { bgAlpha = 0.95 } })
-    M:Dress("QuestLogPopupDetailFrame", { window = true, noTitle = true, panel = { bgAlpha = 0.96 } })
+    M:Dress("QuestLogDetailFrame", { window = true, noTitle = true, panel = { bgAlpha = READ_ALPHA } })
+    M:Dress("QuestLogPopupDetailFrame", { window = true, noTitle = true, panel = { bgAlpha = READ_ALPHA } })
 end
 
 local QUESTFRAME_BUTTONS = {
@@ -164,7 +170,7 @@ local QUESTFRAME_SCROLLS = {
 }
 
 local function SkinQuestFrame()
-    M:Dress("QuestFrame", { window = true, panel = { bgAlpha = 0.95 } })
+    M:Dress("QuestFrame", { window = true, panel = { bgAlpha = READ_ALPHA } })
     M:Dress(QUESTFRAME_BUTTONS, { as = "button" })
     M:Dress(QUESTFRAME_SCROLLS, { as = "scroll" })
 
@@ -176,7 +182,7 @@ local function SkinQuestFrame()
     -- Show 后再亮一次（暴雪 quest 数据是 Show 后才塞的）
     HookQuestBrighten(Skin:Need("QuestFrame"))
 
-    M:Dress("GossipFrame", { window = true, panel = { bgAlpha = 0.95 } })
+    M:Dress("GossipFrame", { window = true, panel = { bgAlpha = READ_ALPHA } })
     M:Dress(QUESTFRAME_SCROLLS, { as = "scroll" })
     M:Dress("GossipFrameGreetingGoodbyeButton", { as = "button" })
 
@@ -261,7 +267,7 @@ end)
 local function SkinItemText()
     M:Dress("ItemTextFrame", {
         window = true,
-        panel = { bgAlpha = 0.96 },
+        panel = { bgAlpha = READ_ALPHA },
         buttons = { "ItemTextNextPageButton", "ItemTextPrevPageButton" },
         scrolls = { "ItemTextScrollFrame" },
     })
