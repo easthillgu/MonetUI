@@ -113,7 +113,8 @@ end
 -- 返回 { panel/lost/weave/fill = {r,g,b}, steps, levels = {L*}, cr = {两两对比度} }；
 -- levels / cr 在没有工具函数时为 nil，正好给 /mui colors 当"这层有没有生效"的证据。
 local function computeSurface(t)
-    local s = { keys = SURFACE_KEYS, steps = SURFACE_STEPS, levels = {}, cr = {} }
+    local s = { keys = { SURFACE_KEYS[1], SURFACE_KEYS[2], SURFACE_KEYS[3], SURFACE_KEYS[4] },
+                steps = SURFACE_STEPS, levels = {}, cr = {} }
 
     for i = 1, #SURFACE_KEYS do
         local key = SURFACE_KEYS[i]

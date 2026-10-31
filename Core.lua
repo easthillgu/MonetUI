@@ -923,37 +923,12 @@ local COLOR_CR_PAIRS = {
     { key = "panelFill", label = "面板↔填充" },
 }
 
-local function PrintColorLadder()
-    local Color = ns.Color
-    if type(Color) ~= "table" or type(Color.Surface) ~= "function" then
-        ns:Print("Color.Surface 不可用：阶梯层没进去（Utils/Color.lua 是旧的）。")
-        return
-    end
-
-    local su = Color:Surface()
-    local keys = su.keys or { "panel", "lost", "weave", "fill" }
-
-    -- 每档写成"用这个颜色本身显示的文字"：一眼看出四档的明暗次序，数字是那档的 CIE L*。
-    -- 一行只放得下这么多：文字压到"档名 + 一位小数"，颜色靠颜色码自己表观（Compat 的教训是
-    -- 一折行，颜色码就会被转义成字面量）。
-    local hexes = {}
-    for i = 1, #keys do
-        local key = keys[i]
-        local c = su[key]
-        if c then
-            local hex = ns.Math:RGBToHex(c.r, c.g, c.b)
-            local l = su.levels and su.levels[key]
-            hexes[#hexes + 1] = string.format("|cff%s%s %s|r", hex, key,
-                type(l) == "number" and string.format("%.1f", l) or "?")
-        end
-    end
-
-    local source, profile = Color:GetSource()
-    local mapID, zoneName, envSource = Color:GetZoneInfo()
-    ns:Print(string.format("配色阶梯 %s | %s | %s",
-        table.concat(hexes, " "),
-        source == "monet" and ("monet/" .. tostring(profile)) or "fallback",
-        mapID and (tostring(zoneName or "?") .. " " .. tostring(mapID) .. " " .. tostring(envSource or "?")) or "区域未知"))
+--- 组一份亮度阶梯账本（`/mui colors` 的数据相）：四档色卡、逐组 CR 判定、区域与来源。
+--- 只读 Color，不碰 DB、不 print —— 实机第一次跑就是"4/4 过线 + 账本没落成"，
+--- 只报"读不到"查不下去，所以组数据和落盘分开，落盘的失败原因要能单独归因。
+local function BuildColorReport(su)
+    local source, profile = ns.Color:GetSource()
+    local mapID, zoneName, envSource = ns.Color:GetZoneInfo()
 
     -- CR 逐个判定；工具函数缺失时四个数都是 nil，那就直说"退回固定乘数"，不要印 0。
     local checked, passed, rows = 0, 0, {}
@@ -966,61 +941,94 @@ local function PrintColorLadder()
             if ok then passed = passed + 1 end
         end
         rows[#rows + 1] = { label = pair.label, cr = cr, ok = ok and true or false }
-        if type(cr) == "number" then
-            ns:Print(string.format("  %s %s%.2f（阈值 %.1f）|r", pair.label,
-                ok and "|cff88ff88" or "|cffff6b6b", cr, COLOR_CR_MIN))
-        end
     end
 
+    -- 副本而非 su 本身：账本要进 SavedVariables，不许和运行期阶梯表共用引用。
     local colors = {}
-    for i = 1, #keys do
-        local c = su[keys[i]]
-        if c then colors[keys[i]] = { r = c.r, g = c.g, b = c.b } end
+    for i = 1, #su.keys do
+        local c = su[su.keys[i]]
+        if c then colors[su.keys[i]] = { r = c.r, g = c.g, b = c.b } end
     end
 
-    -- 账本无条件写：判不过的那一趟恰恰最需要留在 WTF 里看（聊天框那时已经全是红字）。
-    -- 为什么要把原因印出来：实机第一次跑就是"4/4 过线 + 账本没落成"，只报"读不到"查不下去。
-    local saved, why = false, "?"
+    return {
+        client = ns:ClientIdentity(),
+        when = (_G.date and _G.date("%Y-%m-%d %H:%M:%S")) or nil,
+        source = source,
+        profile = profile,
+        mapID = mapID,
+        zone = zoneName,
+        envSource = envSource,
+        keys = { su.keys[1], su.keys[2], su.keys[3], su.keys[4] },
+        steps = su.steps,
+        levels = su.levels,
+        colors = colors,
+        cr = su.cr,
+        rows = rows,
+        min = COLOR_CR_MIN,
+        passed = passed,
+        checked = checked,
+    }
+end
+
+--- 账本无条件写：判不过的那一趟恰恰最需要留在 WTF 里看（聊天框那时已经全是红字）。
+-- @return saved, why —— why 只在失败时有意义，供 print 归因。
+local function SaveColorReport(report)
     local ok, db = pcall(function() return ns:DB() end)
-    if not ok then
-        why = "DB() 抛错：" .. tostring(db)
-    elseif type(db) ~= "table" then
-        why = "DB() 返回 " .. type(db)
-    else
-        local okSet, errSet = pcall(function()
-            db.colorReport = {
-                client = ns:ClientIdentity(),
-                when = (_G.date and _G.date("%Y-%m-%d %H:%M:%S")) or nil,
-                source = source,
-                profile = profile,
-                mapID = mapID,
-                zone = zoneName,
-                envSource = envSource,
-                steps = su.steps,
-                levels = su.levels,
-                colors = colors,
-                cr = su.cr,
-                rows = rows,
-                min = COLOR_CR_MIN,
-                passed = passed,
-                checked = checked,
-            }
-        end)
-        if okSet then
-            saved = true
-        else
-            why = "写入抛错：" .. tostring(errSet)
+    if not ok then return false, "DB() 抛错：" .. tostring(db) end
+    if type(db) ~= "table" then return false, "DB() 返回 " .. type(db) end
+    local okSet, errSet = pcall(function() db.colorReport = report end)
+    if okSet then return true end
+    return false, "写入抛错：" .. tostring(errSet)
+end
+
+local function PrintColorLadder()
+    local Color = ns.Color
+    if type(Color) ~= "table" or type(Color.Surface) ~= "function" then
+        ns:Print("Color.Surface 不可用：阶梯层没进去（Utils/Color.lua 是旧的）。")
+        return
+    end
+
+    local su = Color:Surface()
+
+    -- 每档写成"用这个颜色本身显示的文字"：一眼看出四档的明暗次序，数字是那档的 CIE L*。
+    -- 一行只放得下这么多：文字压到"档名 + 一位小数"，颜色靠颜色码自己表观（Compat 的教训是
+    -- 一折行，颜色码就会被转义成字面量）。
+    local hexes = {}
+    for i = 1, #su.keys do
+        local key = su.keys[i]
+        local c = su[key]
+        if c then
+            local hex = ns.Math:RGBToHex(c.r, c.g, c.b)
+            local l = su.levels and su.levels[key]
+            hexes[#hexes + 1] = string.format("|cff%s%s %s|r", hex, key,
+                type(l) == "number" and string.format("%.1f", l) or "?")
         end
     end
 
-    if checked == 0 then
+    local report = BuildColorReport(su)
+    ns:Print(string.format("配色阶梯 %s | %s | %s",
+        table.concat(hexes, " "),
+        report.source == "monet" and ("monet/" .. tostring(report.profile)) or "fallback",
+        report.mapID and (tostring(report.zone or "?") .. " " .. tostring(report.mapID) .. " " .. tostring(report.envSource or "?")) or "区域未知"))
+
+    for i = 1, #report.rows do
+        local row = report.rows[i]
+        if type(row.cr) == "number" then
+            ns:Print(string.format("  %s %s%.2f（阈值 %.1f）|r", row.label,
+                row.ok and "|cff88ff88" or "|cffff6b6b", row.cr, COLOR_CR_MIN))
+        end
+    end
+
+    local saved, why = SaveColorReport(report)
+
+    if report.checked == 0 then
         ns:Print("|cffff6b6b没有 ContrastRatio / AtLightness|r：vendored LibMonetColor 早于 1.2.0，阶梯退回旧的固定乘数（观感和升级前一致）。")
         ns:Print("  修法：把 monetcolors 仓库的 LibMonetColor-1.0.lua 同步进 Libs/ 后 /reload。")
         return
     end
 
     ns:Print(string.format("|cffffd100配色阶梯|r：%d/%d 组过线（阈值 %.1f）%s",
-        passed, checked, COLOR_CR_MIN,
+        report.passed, report.checked, COLOR_CR_MIN,
         saved and "；全量已存 MonetUIDB.colorReport（WTF 里可直接读）"
             or ("；|cffff6b6b账本没落成 —— " .. tostring(why) .. "|r")))
 end
