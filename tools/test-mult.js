@@ -128,65 +128,6 @@ for (const s of ['1.000000', '0.710000', '0.640000']) {
               `2px 边框 = ${t2.toFixed(4)} UI 单位 = ${uiToPhysical(t2, scale, PHYS_1080).toFixed(4)} 物理px`);
 }
 
-console.log('\n=== 圆角边框选环（Utils/Widget.lua PickRoundEdge）===');
-console.log('  贴图里环宽只能是整数纹素（=整数 UI 单位），想要的却是 thickness/uiScale，所以取最近的一个。');
-
-// 镜像 Utils/Widget.lua 的 ROUND_EDGES（ring = 环宽纹素，slice = 外弧半径 = 9-slice 切片）
-const ROUND_EDGES = [
-  { key: 'monet_round_edge_thin', ring: 1, slice: 2 },
-  { key: 'monet_round_edge', ring: 2, slice: 3 },
-  { key: 'monet_round_edge_thick', ring: 3, slice: 4 },
-];
-function pickRoundEdge(thickness, mult) {
-  const want = thickness * mult;
-  let best = ROUND_EDGES[0], bestErr;
-  for (const e of ROUND_EDGES) {
-    const err = Math.abs(e.ring - want);
-    if (bestErr === undefined || err < bestErr) { best = e; bestErr = err; }
-  }
-  return best;
-}
-
-// 源码断言：Widget.lua 的环参数必须与生成器一致，否则边框会漂或被切掉
-const widgetLua = fs.readFileSync(path.join(__dirname, '..', 'Utils', 'Widget.lua'), 'utf8');
-for (const [ring, slice, suffix] of [[1, 2, '_thin'], [2, 3, ''], [3, 4, '_thick']]) {
-  const re = new RegExp('"monet_round_edge' + suffix + '"\\s*,\\s*ring\\s*=\\s*' + ring + '\\s*,\\s*slice\\s*=\\s*' + slice);
-  const ok = re.test(widgetLua);
-  if (!ok) bad++;
-  console.log(`  ${ok ? '[OK]  ' : '[FAIL]'} Widget.lua: monet_round_edge${suffix || '(base)'} = ring ${ring} / slice ${slice}`);
-}
-
-console.log('\nuiScale    thickness  选中环                 物理宽   误差    平边框  差');
-console.log('-'.repeat(78));
-// 判据：选中的必须是**最近的**环 —— 误差不超过半个纹素（换回物理像素就是半纹素）。
-// 注意这不是「和平边框等宽」：平边框的 edgeSize 是 thickness*Mult()，可以是小数 UI 单位，
-// 能精确命中 N 物理像素；圆角环烘在贴图里，只能是整数纹素 = 整数 UI 单位。
-// 两者只在 uiScale == 768/physH（客户端默认缩放）时相等，其余缩放下必然差最多半个纹素。
-const SUPPORTED_MAX_THICKNESS = 2;
-for (const s of SCALES) {
-  const scale = parseFloat(s);
-  const mult = readMult(stub(s), PHYS_1080);
-  for (const thickness of [1, 2, 3]) {
-    const e = pickRoundEdge(thickness, mult);
-    const phys = uiToPhysical(e.ring, scale, PHYS_1080);
-    const flat = uiToPhysical(thickness * mult, scale, PHYS_1080);   // 平边框：恒等于 thickness
-    const err = phys - thickness;
-    const halfTexel = uiToPhysical(0.5, scale, PHYS_1080);
-    const supported = thickness <= SUPPORTED_MAX_THICKNESS;
-    const ok = supported ? (Math.abs(err) <= halfTexel + 1e-9) : true;
-    if (!ok) bad++;
-    const note = supported ? (ok ? '[OK]' : '[FAIL]') : '(超出三张环覆盖，仅记录)';
-    console.log(s.padEnd(11) + String(thickness).padEnd(11) + e.key.padEnd(24) +
-      phys.toFixed(3).padEnd(9) + err.toFixed(3).padEnd(8) + flat.toFixed(3).padEnd(8) +
-      (phys - flat).toFixed(3).padEnd(8) + note);
-  }
-}
-
-console.log('\n  ↑「差」= 圆角边框比平边框宽/窄多少物理像素。只有 uiScale == 768/physH 时为 0：');
-const defaultScale = 768 / PHYS_1080;
-console.log(`     1080p 的默认缩放是 ${defaultScale.toFixed(4)}，此时 1 UI 单位 = 1 物理像素，环宽纹素数就是物理像素数。`);
-console.log('     其它缩放下两者必然差最多半个纹素 —— 这是整数纹素贴图的固有上限，不是选择。');
-
 console.log('\n=== 退化输入必须退回 1，而不是崩 ===');
 for (const [v, note] of [[undefined, 'CVar 不存在'], ['', '空串'], ['garbage', '非数字'],
                          ['0', '零'], ['-1', '负数'], ['99', '超出合理性区间']]) {

@@ -2,7 +2,7 @@
 
 > **创建日期**: 2026-10-13
 > **最后更新**: 2026-10-24（污染链收尾：编辑模式 `oldR` / 姓名板机密值 / HUD 重复物 / buff 时间乱码；
-> 详见 `docs/HANDOFF.md`，硬规则见 `AGENTS.md`。上一版 2026-10-18：圆角面板 + `monet_round_edge` 九宫格）
+> 详见 `docs/HANDOFF.md`，硬规则见 `AGENTS.md`。上一版 2026-10-18：圆角面板 + `monet_round_edge` 九宫格 —— 该方案 2026-10-31 已放弃并删除）
 > **当前阶段**: Phase 1/2 — 八个模块已实现并通过 `wuxian check`，待游戏内 `load`/`try` 验证
 > **目标**: 为魔兽世界无限 (WoW Forever) 打造一套莫奈风格整合 UI 插件
 
@@ -59,7 +59,7 @@ MonetUI 是一套**整合 UI 插件**，以**莫奈印象派色彩**为核心设
 | **姓名板驱散色探测（本轮重点）** | **P0** | **唯一目的**：确定这个客户端的 debuff 驱散色是**顶点色**还是**烘在贴图里**，据此决定姓名板 debuff 边框要不要再做逐图标颜色映射。<br>**怎么跑**：`/mui nameplates diagnose`，只看两行 —— `已修饰的 debuff 按钮：N 个` 和 `边框颜色：驱散色 A 个 / 主题色 B 个`。<br>**结果判读**：<br>① **A > 0** → 顶点色读得到，1px 边框已按驱散类型着色。**探测结束，本轮工作完成**，不需要任何后续。<br>② **A = 0 且 B > 0** → 颜色烘在贴图里，现在整排 debuff 边框统一为主题色，**驱散类型信息已丢失**。两条路二选一：(a) 接受 —— 视觉统一，类型靠图标本身识别；(b) 做映射 —— 读 `stock:GetAtlas()` / `GetTexture()` 的返回值，硬编码一张「贴图/驱动 → 离散类型色」的表。**选 (b) 前必须先截图确认观感**，因为映射表会随客户端更新失效。<br>③ **N = 0** → `DebuffListFrame` 这个名字在这个客户端不对，整套没跑。此时改用 `wuxian.inspect`（`mouse=true` 对着一个 debuff 图标）看 `AurasFrame` 的真实子结构，再回来改名字。<br>**注意**：这一条不是「验收」，是**决定后续方向的探测** —— 结果不同，后面的工作量差一个数量级（(a) 零， (b) 一张映射表 + 回归测试） |
 | 本轮四项改动实机验收 | P0 | 全部离线完成，**零运行时验证**：① `Media:Mult()` 补回 `768/physH` → 1080p 下所有边框细 29%，观感偏细就调 `thickness` 默认值，**不要**回退公式；② `UI_SCALE_CHANGED` + 登录后 1s/4s 补两遍 → 拉缩放滑块后已存在与新建的边框宽度是否一致；③ 目标光环 B 方案（原生 `AuraContainer`）→ 目标 buff/debuff 出不出、能否点图标换目标、buff 是否叠在 debuff 之上、失败时聊天框第一条警告说哪一步断；④ 姓名板 debuff reskin → 图标裁边、边框细度、像素字体、冷却扫圈 |
 | 自绘材质接线游戏内验收 | P0 | 关钮三态 / 勾选框 / 状态条已接线；完整重启后 `/verify` + 逐窗口目检。未接线（备用）：窗口最小化/最大化钮、翻页箭头、角饰 |
-| 材质细节打磨（下次继续） | P1 | 生成器已迁移到 `tools/regen-textures.js`；审查工具：`tools/make-review-sheet.js`（contact sheet）+ `tools/tga-dump.js`（单张像素/剖面转储）。**已修**：`round_edge` 环宽/亮度、`corner` 弧尖裁切、透明像素纯黑、`barfill` 下半幅纯黑、`brush_stroke` 双色被压没、两种织纹无孔、role 三图标语义色与形状。**本轮对齐参考插件 EllesmereUI**：barfill 改平色 + 运行期渐变、加发丝线、透明 RGB 改纯白哑光、role 图标改灰度按状态染色。**待办**：① **切 RLE**（已实测：611 KB→60 KB，26/26 逐字节回环一致，零像素变化；唯一要改的是材质规范里"类型 2（未压缩）"那一条，等拍板）；② `Color:RoleTint` 的染色规则是**暂定**的（队长/助理染色、其余单色），且三张 role 图标在代码里**只注册未接线**；③ `Widget:Hairline` 已就位但还没有调用点；④ `win_*` / `arrow_*` / `plus` / `minus` / `chevron_*` / `search` / `radio` 同样只注册未接线；⑤ 参考插件的**参数化圆角家族**（`rounded-0..16` 实心 + 反相共 32 张，半径成为运行时参数）我们还是写死的 `ROUND_SLICE = 3`；⑥ 全部纹理需游戏内实机确认（像素与规范已过，未验证客户端缩放与 `SetGradient` 叠加后的观感） |
+| 材质细节打磨（下次继续） | P1 | 生成器已迁移到 `tools/regen-textures.js`；审查工具：`tools/make-review-sheet.js`（contact sheet）+ `tools/tga-dump.js`（单张像素/剖面转储）。**已修**：`corner` 弧尖裁切、透明像素纯黑、`barfill` 下半幅纯黑、`brush_stroke` 双色被压没、两种织纹无孔、role 三图标语义色与形状。**本轮对齐参考插件 EllesmereUI**：barfill 改平色 + 运行期渐变、加发丝线、透明 RGB 改纯白哑光、role 图标改灰度按状态染色。**待办**：① **切 RLE**（已实测：611 KB→60 KB，26/26 逐字节回环一致，零像素变化；唯一要改的是材质规范里"类型 2（未压缩）"那一条，等拍板）；② `Color:RoleTint` 的染色规则是**暂定**的（队长/助理染色、其余单色），且三张 role 图标在代码里**只注册未接线**；③ `Widget:Hairline` 已就位但还没有调用点；④ `win_*` / `arrow_*` / `plus` / `minus` / `chevron_*` / `search` / `radio` 同样只注册未接线；⑤ 圆角方案已于 2026-10-31 放弃（见 `docs/HANDOFF.md` 8.5.1 收口）；⑥ 全部纹理需游戏内实机确认（像素与规范已过，未验证客户端缩放与 `SetGradient` 叠加后的观感） |
 | wuxian load 热加载验证 | P0 | 需游戏运行（当前离线） |
 | 信息栏游戏内验收 | P0 | 先 `/mui infobar diagnose` 读 PROBED 与耐久签名实测结果，再逐块 snap；验证悬停淡入 / 战斗呼吸 / 宠物对战隐藏 / 模块关掉即时还原 |
 | 游戏内视觉验收 | P0 | 三地图验证 + 暴雪框架接管是否产生 taint |
@@ -537,8 +537,8 @@ container / backdrop / compass 的尺寸设回默认。模块 `hooksecurefunc` �
 把画布裁成一条直上直下的矩形，四角就成了硬切口，圆形小地图的痕迹全丢。半径 4 在 256 宽的地图上
 根本读不出来（看渲染图和看直切口没区别），所以用 6：读得出"圆角"，又不至于把地图啃成椭圆。
 可见带距面板每边 4，面板边框（环宽 2）永远露在带外，这个半径只决定地图自己的角，不会碰面板的弧。
-面板本体走 `Widget:Theme(panel, { thickness = 2, round = true })`：边框换成九宫格边纹 `monet_round_edge`
-（外弧半径 3 UI 单位、环宽 2），圆角因此是**画出来的边框**而不是裁内容，与面板尺寸无关。
+面板本体走 `Widget:Theme(panel, { thickness = 2 })`：直角 `SetBackdrop` 边框（圆角 9-slice 方案 2026-10-31 已删除）
+，环宽 2 UI 单位。边框与地图四角都是方的，两者对齐。
 面板对齐可见区下沿再往下 4：可见区是画布中间那条，不是画布本身。
 
 **任务 / 考古 blob 的圆环要收掉**：暴雪给任务区域、考古点画的那圈 "blob ring" 是按圆画的，
@@ -1256,11 +1256,11 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | 格式 | 只装 **TGA 32bit RGBA**：类型 2（未压缩），descriptor `0x08`（8 位 alpha + BOTTOM-LEFT origin）；不产 BLP，也不在 `Assets/` 放 PNG。PNG 副本只写进 gitignore 的 `docs/texture-preview/` 给浏览器预览 |
 | 透明 | 只靠 **Alpha=0**，不做颜色键；透明像素的 RGB 填成**纯白哑光 (255,255,255)**，不留黑也不填平均色 —— 客户端生成 mip / 双线性过滤时会把边缘像素的颜色拖进可见区，纯黑会在每个图标周围描一圈灰边；我们的材质全是 `SetVertexColor` 可染色的近白，染色是乘法，纯白哑光乘任何色调都精确得到该色调本身 |
 | 纯黑 | 没有任何 alpha=255 的纯黑像素；且透明区 RGB 也不为纯黑（逐像素审计实测 0 个） |
-| 命名 | `monet_*` 小写 + **下划线**（如 `monet_round_edge.tga`），文件名、生成器 id、`Utils/Media.lua` 的贴图键三者同名；改名要同时改这三处 |
+| 命名 | `monet_*` 小写 + **下划线**（如 `monet_barfill.tga`），文件名、生成器 id、`Utils/Media.lua` 的贴图键三者同名；改名要同时改这三处 |
 | 明暗 | 条/面的明暗**不烘进纹理**：`monet_barfill` 等仍是平色基材，体积由运行期 `Widget:BarGradient`（沿条轴）/ `Widget:TopLight`（横截面）算出 —— 把渐变烘进固定尺寸纹理等于绑死一个条高（理由见 2026-10-19 决策）。**例外（2026-10-27 起）：插画件例外** —— 进出战斗的剑/盾按"灰阶明暗 = 形体感的载体"烘进贴图（斜面渐变、 fuller/铆钉/盾钉的高光），它们是唯一形体、没有"其它条高"要服务；染色的只是语义层（进/出的金与青蓝）。详见 HANDOFF 3.25/3.26 |
 | 像素对齐 | 轴对齐几何一律走 `pxRect` / `pxHLine` / `pxVLine` / `pxStrokeRect`，**边吸附到整数像素边界**，抗锯齿只留给曲线。验收用 `tools/audit-pixels.js`：`STRICT` 表（纯矩形纹理）半覆盖像素必须为 0、`NO_SOFT_EDGE` 表（含直边的纹理）软边直边必须为 0、所有纹理孤立像素（描边断点）必须为 0；另有 `STENCIL` 染色模具名单 + 全局白衬底检查。当前实测 **37/37 通过**（含剑/盾等烘了灰阶明暗的插画件） |
 | SVG | **产** SVG 材质（2026-10-20 起三条路线并存）：结构性的走脚本、要软要洇的走 GIMP、**要自己画/自己改的走 SVG**（Inkscape 手写矢量 → `tools/svg-to-tga.js` 导出）。现役 9 张：`minimap_rect_mask` / `monet_close_{normal,hover,push}` / `monet_map_{tracking,compartment,difficulty}` / `monet_spark_{up,down}`，源码在 `tools/svg/`。**规矩：有 SVG 的以 SVG 为准** —— 生成器（`tools/regen-textures.js`）里不再画同名纹理，否则两套源码互相覆盖 |
-| 线宽 | 由**变体**决定（`tools/regen-textures.js` 的 `VARIANTS[*].lineWidth`），当前采用 **`crisp` 锐利**：`icon = 3px`（勾/X/箭头/V 形/窗口控件/搜索）、`plusMinus = 5px`、`hairline = 1px`。**不是**变体的：`round_edge` 的 2px 环 / 外弧 3（被 `Widget.lua` 的 `ROUND_INSET=2`、`ROUND_SLICE=3` 钉死）、`corner` 的 1px 线。原因见决策记录：对比表带 18px 实显格，3px 在实际显示尺寸下明显比 2px 实，而 2px 在 16–22px 区间偏虚 |
+| 线宽 | 由**变体**决定（`tools/regen-textures.js` 的 `VARIANTS[*].lineWidth`），当前采用 **`crisp` 锐利**：`icon = 3px`（勾/X/箭头/V 形/窗口控件/搜索）、`plusMinus = 5px`、`hairline = 1px`。**不是**变体的：`corner` 的 1px 线。原因见决策记录：对比表带 18px 实显格，3px 在实际显示尺寸下明显比 2px 实，而 2px 在 16–22px 区间偏虚 |
 | 自校验 | 生成后由 `tools/compare-textures.js` 做像素对比，`tools/gen-compare-html.js` 出并排预览页；另查尺寸幂次、BPP、descriptor、文件大小、纯黑透明像素 |
 
 | 资产 | 路径/位置 | 说明 |
@@ -1274,6 +1274,5 @@ MonetUI 的**代码与素材均为独立实现**：没有引入 oUF 等第三方
 | ForeverUI 参考 | `wowaddonsdev\ForeverUI-0.4.24\` | 轻量实现参考 |
 | wuxian MCP | 已连接 | 游戏内调试工具 |
 | PortableGit | `wowaddonsdev\PortableGit\` | 版本管理 |
-| 自绘 UI 材质 | `Assets/Textures/monet_*.tga`（24 组，包内只有 TGA） | `tools/regen-textures.js` 生成并自校验；**`monet_brush_stroke` 例外** —— 笔触改由 GIMP 的画笔引擎画（`tools/gimp-brush-stroke.py`，真实颜料笔刷才有鬃毛痕与洇边），走 PNG → `tools/tga-post.js` 转格式 + 补白衬底；`docs/texture-preview.html` 预览；接线处：`Skin:SwapArt`（关闭钮/勾选框）、`Widget:Bar` 默认 `barfill`、`Widget:Theme` 圆角分支用 `monet_round_edge` |
-| 圆角矩形遮罩 | `Assets/Textures/minimap_rect_mask.tga` | `tools/regen-textures.js` 生成并逐像素自校验；圆角半径 **6** UI 单位（半径 4 在 256 宽的地图上读不出来，等于硬切口）；接线处：`Minimap:SetMaskTexture` |
-| 圆角边纹 | `monet_round_edge{,_thin,_thick}.tga`（各 16×16，环宽 2/1/3 纹素，外弧 3/2/4） | `tools/regen-textures.js` 生成（`drawRoundEdge` + `ROUND_EDGES`）；笔触**纯白**，因为它当 `edgeFile` 被 `SetBackdropBorderColor` 染色，暖色笔触会与 `WHITE8X8` 平边框差 3.5% 蓝；`Widget:Theme(..., round = true)` 用 `PickRoundEdge(thickness)` 按 `thickness × Mult()` 取环宽最接近的一张，并让 `edgeSize = max(外弧, 环宽)` / `insets = 环宽` 跟着走；接线处：小地图面板、任务追踪窗口 |
+| 自绘 UI 材质 | `Assets/Textures/monet_*.tga`（24 组，包内只有 TGA） | `tools/regen-textures.js` 生成并自校验；**`monet_brush_stroke` 例外** —— 笔触改由 GIMP 的画笔引擎画（`tools/gimp-brush-stroke.py`，真实颜料笔刷才有鬃毛痕与洇边），走 PNG → `tools/tga-post.js` 转格式 + 补白衬底；`docs/texture-preview.html` 预览；接线处：`Skin:SwapArt`（关闭钮/勾选框）、`Widget:Bar` 默认 `barfill` |
+| 矩形小地图遮罩 | `Assets/Textures/minimap_rect_mask.tga` | 源码 `tools/svg/minimap_rect_mask.svg`（`node tools/svg-to-tga.js` 导出）；直角 `rx=0` —— 曾试过 rx=6 的圆角版，随圆角方案一起撤回；接线处：`Minimap:SetMaskTexture` |

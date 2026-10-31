@@ -20,7 +20,7 @@ const TARGETS = [
   'monet_plus', 'monet_minus',
   'monet_win_maximize', 'monet_win_minimize', 'monet_win_restore',
   'monet_arrow_left', 'monet_arrow_right',
-  'monet_round_edge', 'monet_corner', 'monet_hairline',
+  'monet_corner', 'monet_hairline',
   'monet_role_dps', 'monet_barfill',
 ];
 

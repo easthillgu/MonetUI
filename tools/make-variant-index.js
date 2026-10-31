@@ -25,7 +25,7 @@ const html = [
   '<div class="meta">',
   '三套只在「视觉重量」一个维度上分档：线宽 / 图标占画布比例 / 织纹密度 / role 灰度对比 / 关闭钮三态色。<br>',
   '每行<b>上半</b>是放大看清造型，<b>下半</b>是按真实显示尺寸（18px）缩一次再最近邻放大 5 倍 —— 小图标能不能认出来是在这个尺寸上决定的，只看放大图看不出来。<br>',
-  '色板底色、圆角几何（round_edge 的 2px 环 / 外弧 3）、描边宽度<b>不是</b>自由变量：前两者被 <code>Widget.lua</code> 的 ROUND_INSET=2、ROUND_SLICE=3 钉死，改了 9-slice 会整体错位。',
+  '色板底色、描边宽度<b>不是</b>自由变量：都由 <code>Widget.lua</code> 按物理像素换算钉住（thickness * Media:Mult()），边框一律直角。',
   '</div>',
   ...pages.map(p => `<img src="${p}">`),
   '</body></html>',

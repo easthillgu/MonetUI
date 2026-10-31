@@ -114,7 +114,7 @@ function tintedTexture(name, rgb, suffix) {
 // ------------------------------------------------------------------ texture
 
 const TEXTURES = [
-  'monet_canvas_weave', 'monet_round_edge', 'monet_barfill', 'monet_diagonal_weave',
+  'monet_canvas_weave', 'monet_barfill', 'monet_diagonal_weave',
   'monet_map_tracking', 'monet_map_compartment', 'monet_map_difficulty',
   'monet_role_tank', 'monet_role_heal', 'monet_role_dps',
 ];

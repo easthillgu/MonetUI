@@ -141,7 +141,6 @@ console.log('  button-minus/plus (16x16): 14px 粗线');
 console.log('  ui-checkbox-tick (32x32): 勾线 ~2px');
 console.log('\nMonetUI 对应调整建议:');
 const suggestions = {
-  'monet_round_edge': '应对齐 Andromeda button-circle-border 的 ~2px 线宽',
   'monet_barfill': '渐变条，无边框，保持一致',
   'monet_minus': '应对齐 Andromeda button-minus 的 14px 粗线（16x16基准）',
   'monet_plus': '应对齐 Andromeda button-plus 的 14px 粗线（16x16基准）',

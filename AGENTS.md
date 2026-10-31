@@ -290,12 +290,9 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   Media 键一律**不带扩展名**（引擎自行解析）；唯一显式引用是 `MonetUI.toc` 的 `IconTexture: ...monet_addon_icon.blp`。
   注意：`SetBackdrop` 的 `edgeFile` 不可用这些贴图（本引擎连 RAW3 BLP 也渲染成碎线），edgeFile 的唯一客户
   照旧走 `blank`/直角（见 `Utils/Media.lua` 头部注释与 `Widget:ApplyBackdrop`）。
-- **圆角边框是自绘 9-slice，不是 `edgeFile`**（2026-10-28 实装）：本引擎把 `edgeFile` 渲染成碎线，
-  所以四角/四边由 `Widget:RoundBorder` 自己摆贴图 —— 4 块角（原尺寸，1 纹素 = 1 UI 单位）+ 4 条边（拉伸）
-  + 4 块 `monet_round_fill` 圆角填充压在下层（补住 `SetBackdrop` 方底戳出圆角的那一小块）。
-  贴图 32×32、外弧 8、**曲率线性渐变**（欧拉螺线，G2 连续）而不是圆弧 —— 圆弧在切点处曲率从 0 突跳到 1/r，
-  那就是肉眼看到的"折一下"；同外弧下螺线的曲率峰值低三成。`slice = 8`（与 `Widget.lua` 的 `ROUND_EDGES` 同源）。
-  现役使用点：小地图面板、任务追踪、配置面板、微型菜单。
+- **圆角边框方案已放弃（2026-10-31 收口）**：`Widget:RoundBorder` 那套自绘 9-slice（`monet_round_edge{,_thin,_thick}`
+  + `monet_round_fill`）连同四张材质一起删除，面板一律直角 `SetBackdrop`。要再提圆角，先回答"引擎 `edgeFile`
+  渲染碎线这个问题解决了没有" —— 没解决就还是得自绘，而自绘那套已经试过并放弃了。
 - **BLP 必须带完整 mip 链**（`tga-to-blp.js` 默认就生成）。`mipmaps:false` 属交付缺陷：贴图被缩小显示时，
   没有 mip 就只能实时缩采样，1px 线条会丢、会闪。四条细则：
   ① 滤波用 `triangle` —— 唯一不过冲的选项，`catmullRom`/`lanczos3` 会在发丝线与 alpha 硬边两侧振铃出 halo；
@@ -335,7 +332,7 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
 - **role 图标是"实心剪影 + 径向渐变 + 内沿压暗 + 极淡外发光"**，不是细线描边
   （参考 `role-tank/healer/damager` 有 68–83% 半覆盖、上百个灰度层次）。三条纪律不变：
   全图只允许 R==G==B（染色模具色相必须为 0）、alpha=0 处纯白、`SetVertexColor` 决定最终颜色。
-- 上面两条由 `tools/audit-pixels.js` 强制（`STENCIL` 名单 28 张 + 全局白衬底检查），改生成器后必须重跑；`Assets/Textures.bak` 是现成的反例库，拿它跑一遍能验证规则没失效。
+- 上面两条由 `tools/audit-pixels.js` 强制（`STENCIL` 名单 21 张 + 全局白衬底检查），改生成器后必须重跑；`Assets/Textures.bak` 是现成的反例库，拿它跑一遍能验证规则没失效。
 - **要"手绘感"的材质交给 GIMP**。dev 机（Windows）：`C:\Users\EastHillGu\Documents\GreenAPPS\GIMPPortable`，GIMP 3.2；
   本机（Linux/Debian 13）：apt 的 `gimp` 3.0.4（同样是 `Gimp.*` 新 API），但 `tools/gimp-render.ps1` 盯文件壳不可用，
   要改用 `gimp -i -b '<scheme>' -b '(gimp-quit 0)'` 批处理。GIMP 3 自带 Oils / Bristles / Acrylic / Charcoal 等真实颜料笔刷。脚本逐像素画不出鬃毛痕与颜料洇边。现役：`monet_brush_stroke` = `tools/gimp-brush-stroke.py`（画布 256×16，五个 Monet 色做五遍颜料，笔触点自己盖章）。流程：GIMP 出 PNG → `node tools/tga-post.js <png> <tga>`（转成项目格式的未压缩 32bit TGA + 补纯白衬底；GIMP 的 TGA 导出默认是 RLE，格式对不上）→ `node tools/audit-pixels.js` 验收。注意 GIMP 3 的 API：`Gimp.*` 命名空间（没有旧版 `gimpfu.pdb`）；颜色分量必须 **0..1 浮点**（传 0..255 会被夹成纯白），**而且是线性分量**（画笔上下文吃线性的，喂 sRGB 会整体提亮：`#214447` → `rgb(100,139,142)`；浅色几乎不变、越暗越明显，所以 `monet_brush_stroke` 曾经把"干笔暗边"整个洗没了，要先 `srgb_to_linear()`）；画笔"硬度"是 0..1、"间距/不透明度"是 0..100；`edit_stroke_item()` 在这个版本只画路径首尾两点，所以要自己逐点盖章。

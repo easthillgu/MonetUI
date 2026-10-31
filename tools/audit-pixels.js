@@ -111,7 +111,6 @@ const STRICT = new Set([
 const NO_SOFT_EDGE = new Set([
   ...STRICT,
   'minimap_rect_mask', 'monet_corner',
-  'monet_round_edge', 'monet_round_edge_thin', 'monet_round_edge_thick', 'monet_round_fill',
   'monet_arrow_left', 'monet_arrow_right',
   'monet_check', 'monet_chevron_up', 'monet_chevron_down',
   'monet_close_normal', 'monet_close_hover', 'monet_close_push',
@@ -134,7 +133,6 @@ const NO_SOFT_EDGE = new Set([
 //   minimap_rect_mask   —— 遮罩，根本不上色。
 const STENCIL = new Set([
   'monet_barfill', 'monet_hairline',
-  'monet_round_edge', 'monet_round_edge_thin', 'monet_round_edge_thick',
   'monet_close_normal', 'monet_close_push',
   'monet_win_minimize',   // WorldMap 的还原/minimize 按钮：中性白，跟主题染色
   'monet_check', 'monet_radio',

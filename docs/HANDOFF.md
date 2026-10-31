@@ -1226,6 +1226,14 @@ BLP 都是 `enc=3 alphaDepth=8 **alphaType=8**`；我们 32 张全是 `alphaType
   该实现留在 `main@6e233ed`（含遮罩 `rx=6`、填充生成器改有符号距离），**未交付**，仅留档；
   要重试圆角从那个提交起。
 
+> **2026-10-31 收口：圆角方案放弃，遗留全部删除。** `Widget:RoundBorder` / `PickRoundEdge` /
+> `LayoutRoundBorder`、`ApplyBackdrop` 的 `opts.round` 分支、`Refresh` 的圆角上色块 —— 10-29 去掉
+> `round = true` 之后这套就再没有调用点，这次连代码一起清掉。四张材质（`monet_round_edge{,_thin,_thick}`
+> + `monet_round_fill`，源 TGA 与交付 BLP）连同 Media 键、生成器（`regen-textures.js` 的 `ROUND_EDGES`
+> / `drawRoundEdge` / `drawRoundFill`）、`audit-pixels.js` 的 STENCIL / NO_SOFT_EDGE 名单、
+> `test-mult.js` 的选环自测一并删除。面板从此只有直角 `SetBackdrop` 一条路径；
+> 上面"要重试从 `6e233ed` 起"仍然有效，但那算**重新立项**，不是恢复。
+
 #### 交付：直角版 BLP
 
 - 分支 `square-blp`，`44a4334`（基线 `6288692`）：四处 `Widget:Theme` 去掉 `round = true`，
@@ -2000,7 +2008,7 @@ atlas 统计（`1.60`）：**区域图 50 张 + 首都 6 座**，数据表只写
 
 | 档 | 目标 L\* | 色相来源 | 用在哪 |
 |---|---|---|---|
-| `panel` | 10 | `ambient` | 窗口底衬 + 圆角填充块 |
+| `panel` | 10 | `ambient` | 窗口底衬 |
 | `lost` | 28 | `neutral` | 掉血空槽、条底（`bar.bg`） |
 | `weave` | 40 | `neutral` | `BarWeave` 发丝织纹 |
 | `fill` | 46 | `edge` 的 RGB 反相 | 玩家/宠物/目标的目标/队伍格的血条填充 |
@@ -2325,6 +2333,51 @@ alpha 1，面板本身已经换皮了 —— 只有按钮没动。
 不是战斗就 `Hide()` 掉（停车已经让它们不可见，这一步是为了让**状态**也回到"关"），
 然后把守卫基线 `bagsVisualOpen` 设成"关"，这样第一次按 B 才是真正的 0→1 边沿。
 战斗里关不掉（父框里有受保护子按钮）时基线设成"开"，避免一登录就弹窗。
+
+## 8.22 2026-10-31 清理日志：删除圆角 9-slice 遗留 + 注释瘦身
+
+两件事都是**零行为改动**的清理，闸门全绿。
+
+### 8.22.1 圆角 9-slice 方案放弃，遗留全部删除
+
+方案本身在 2026-10-29（分支 `square-blp`，`44a4334`）就已经把最后一个 `round = true` 调用点
+拿掉了 —— 此后 `Widget:RoundBorder` 一整套是**死代码**，只是没人删。这一轮把它连同材质一起收口
+（详见 8.5.1 末尾的补充说明）。
+
+| 位置 | 删了什么 |
+|---|---|
+| `Utils/Widget.lua` | `ROUND_EDGES` / `ROUND_TEX` / `ROUND_SLICE`、`PickRoundEdge`、`LayoutRoundBorder`、`Widget:RoundBorder`；`ApplyBackdrop` 里的 `if opts.round then … else` 双路径收成单一直角路径；`Refresh` 里给圆角件上色的那一块（2065 → 1890 行） |
+| `Utils/Media.lua` | 4 个键 `monet_round_{fill,edge,edge_thin,edge_thick}` + 23 行说明；顺手修好三处悬空指针（minimap 遮罩改成指向 SVG 源 `tools/svg/minimap_rect_mask.svg` 与 `rx=0`） |
+| `Assets-src/Textures`、`Assets/Textures` | 4 张 TGA + 4 张 BLP（其中 3 张 BLP 在这之前已经不在工作树里了） |
+| `tools/regen-textures.js` | `ROUND_EDGES`、`ringPolyline`、`distToSegments`、`drawRoundFill`、`drawRoundEdge` 及各自的 draw/size 映射（1085 → 907 行） |
+| `tools/audit-pixels.js` | `NO_SOFT_EDGE` 里的 4 个圆角名、`STENCIL` 里的 3 个（现 STENCIL 21 张；`AGENTS.md` 原来写的 28 是更早的陈数，已改成 21） |
+| `tools/test-mult.js` | 整个「圆角边框选环」测试段（262 → 203 行） |
+| `tools/gen-minimap-mask-ab.js` | A/B 对比图里的 9-slice 边框换成两行 `strokeRect`（近似 `Color.edge`），只影响这张对比图 |
+| `tools/make-scenario-assets.js`、`make-pixel-grid-sheet.js`、`make-full-preview.js`、`analyze-monet-linewidth.js`、`make-variant-index.js`、`docs/texture-preview-data.js` | 圆角相关的条目/说明 |
+| `AGENTS.md`、`MonetUI.md`、`docs/HANDOFF.md` | 「圆角边框是自绘 9-slice」那条约定改成"方案已放弃"，资源表里的圆角行删除。**带日期的决策记录（`MonetUI.md` 1202/1208/1220、`tools/deprecated/`）保留**——那是历史，不是现状 |
+
+**下次有人再提圆角**：先回答"引擎 `edgeFile` 渲染碎线这个问题解决了没有"。没解决就还得自绘，
+而自绘那一套已经试过、实测放弃了。
+
+### 8.22.2 注释瘦身（12 个文件）
+
+`Modules/ActionBars/{ActionBars,Blizzard,DragDrop,PetBar,Secure}.lua`、
+`Modules/Cooldown/Cooldown.lua`、`Modules/UnitFrames/{Auras,CastBar,ClassPower,Groups,UnitFrames}.lua`、
+`Utils/Widget.lua`。只删"复述代码在做什么"和"记录本次任务改了什么"的注释；
+**判例、客户端行为口径、机密值/污染纪律一律留下** —— 那些是踩坑换来的，不在代码里。
+
+### 8.22.3 闸门结果（全部离线，本车道不进游戏）
+
+| 闸门 | 结果 |
+|---|---|
+| `luac -p`（12 个被改的 Lua 文件） | OK |
+| `node tools/api-audit.js` | `result: no hard finding.`，退出码 0 |
+| `node tools/audit-pixels.js` | 未通过 0 / 32；非纯白衬底 0 |
+| `node tools/test-mult.js` | 全部通过 |
+| `node tools/gen-minimap-mask-ab.js` | 正常出图 |
+
+**遗留未修（本轮范围外）**：`Modules/UnitFrames/BossFrames.lua:120` 用 `media:Texture("monet_role_healer")`，
+而 `Utils/Media.lua:295` 注册的键是 `monet_role_heal` —— 键名对不上，首领框的治疗图标会拿不到贴图。
 
 ## 9. 建议的下一步（按价值排序）
 

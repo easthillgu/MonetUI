@@ -42,9 +42,7 @@ const PALETTE = {
 // 变体（visual variant）
 // ============================================================
 // 三套只在"视觉重量"这一个维度上分档：线宽 + 图标留白 + 织纹密度 + role 灰度对比 +
-// 关闭钮三态色。色板底色、圆角几何、描边宽度这些**不是**自由变量：
-//   * round_edge 的 2px 环 / 外弧 3 被 Widget.lua 的 ROUND_INSET=2、ROUND_SLICE=3 钉死，
-//     改了 9-slice 就对不上，边框会整个错位；
+// 关闭钮三态色。色板底色、描边宽度这些**不是**自由变量：
 //   * monet_barfill 是平色，明暗在运行期由 Widget:BarGradient 算，与变体无关；
 //   * barfill / brush_stroke / 发丝线 / 遮罩的形状也不随变体走。
 let LINE_WIDTH = null;   // 由 applyVariant 填
@@ -694,178 +692,10 @@ function drawBarStripe(ctx, size) {
   ctx.putImageData(img, 0, 0);
 }
 
-// 圆角边框的三档环宽。数值与 Utils/Widget.lua 的 ROUND_EDGES 一一对应：
-//   ringW  = 环宽（纹素，9-slice 里 1 纹素 = 1 UI 单位）
-//   outerR = 外弧半径（同时是 9-slice 的 slice 尺寸）
-// 2026-10-28：外弧统一提到 8（画布 32×32），三档只差环宽。
-// 理由：外弧 3 时 90° 转弯整个只有 4–5 个像素，任何抗锯齿都只能把台阶磨圆一点；
-// 8 才够让连续曲率真正表现出来。slice 因此三档都是 8（见 Utils/Widget.lua 的 ROUND_EDGES）。
-const ROUND_EDGES = {
-  'monet_round_edge':       { ringW: 2, outerR: 8 },
-  'monet_round_edge_thin':  { ringW: 1, outerR: 8 },
-  'monet_round_edge_thick': { ringW: 3, outerR: 8 },
-};
-
-// ---------------------------------------------------------------------------
-// 连续曲率圆角（2026-10-28 由用户提供的 smoothRoundedRectPath 思路改写）
-// ---------------------------------------------------------------------------
-// 圆弧角的毛病不在像素、在**曲率**：直边段曲率 0，一进圆弧立刻变成 1/r，那个突变就是肉眼
-// 看到的"折一下"。连续曲率角（超椭圆 |x|^n + |y|^n = r^n，n=4 ≈ squircle）在切点处曲率为 0，
-// 向 45° 平滑增长，接口处没有折点 —— 实测曲率序列：
-//     圆弧    0.50 0.50 0.50 0.50（阶跃）
-//     超椭圆  0.07 0.42 0.82 1.17 1.24 0.95 0.55 0.19（连续）
-//
-// 为什么不直接用那段 SVG path 函数：① 它的控制点在采样循环里每次重算，不是真正的三次贝塞尔，
-// 切线连续性保不住；② 它输出填充路径，而我们要的是"环"（有宽度、要能算到中心线的距离）。
-// 所以这里把角部采样成折线，再用**到折线的距离**做覆盖率光栅化 —— 效果等价，且能和直边的
-// 精确 1px 对齐共存。
-/**
- * 角部：**曲率渐变**（欧拉螺线 / clothoid 类，2026-10-28 换成这个）
- *   沿弧长 s 让曲率从 0 线性升到 κmax 再线性降回 0，积分两次得到形状。
- *   曲率线性 ⇒ 曲率连续（G2），直边与角部的接口处没有"折一下"的观感。
- *   同外弧下曲率峰值比超椭圆低三成（0.24 vs 0.36），转弯摊得更开、看起来更软。
- * 局部坐标：(rad,0) 出发、初速朝 +y、逆时针转 90° 收在 (0,rad) —— 与四个角的镜像规则对齐。
- */
-const CORNER_MODE = 'clothoid';   // 'clothoid'（曲率渐变）| 'squircle'（超椭圆，保留对比）
-const CORNER_N = 4;               // squircle 模式的指数
-const CORNER_STEPS = 40;          // 每角采样段数（32px 纹理足够）
-
-function cornerClothoid(rad, steps) {
-  const L = rad * Math.PI / 2;                       // 角部弧长（按 90° 圆估算，量级正确即可）
-  const kmax = Math.PI / L;                          // 曲率线性升降：∫κ ds = π/2
-  const dθds = (s) => kmax * (1 - Math.abs(2 * s / L - 1));
-  let x = rad, y = 0, th = Math.PI / 2;
-  const out = [[x, y]];
-  const sub = 8;                                     // 每段再细分，积分更准
-  const ds = L / (steps * sub);
-  for (let i = 0; i < steps * sub; i++) {
-    th += dθds((i + 0.5) * ds) * ds;
-    x += Math.cos(th) * ds;
-    y += Math.sin(th) * ds;
-    if ((i + 1) % sub === 0) out.push([x, y]);
-  }
-  // 端点吸附到 (0,rad)：数值积分的残差收掉，9-slice 顶点才不会错位
-  const last = out[out.length - 1];
-  const ex = 0 - last[0], ey = rad - last[1];
-  out.forEach((p, i) => { const t = i / (out.length - 1); p[0] += ex * t; p[1] += ey * t; });
-  return out;
-}
-
-function cornerSquircle(rad, steps) {
-  const out = [];
-  for (let i = 0; i <= steps; i++) {
-    const th = (i / steps) * Math.PI / 2;
-    out.push([rad * Math.pow(Math.abs(Math.cos(th)), 2 / CORNER_N),
-              rad * Math.pow(Math.abs(Math.sin(th)), 2 / CORNER_N)]);
-  }
-  return out;
-}
-
-/** 环中心线的闭合折线：4 条直边 + 4 个连续曲率角（顺时针）。 */
-function ringPolyline(size, ringW, outerR) {
-  const half = size / 2;
-  const a = half - ringW / 2;                   // 中心线矩形半宽：外沿正好压在画布边界
-  const rad = Math.max(0, outerR - ringW / 2);  // 中心线圆角半径：外弧 = rad + ringW/2 = outerR
-  const base = CORNER_MODE === 'clothoid' ? cornerClothoid(rad, CORNER_STEPS) : cornerSquircle(rad, CORNER_STEPS);
-  // 把局部角点搬到角心；reverse 用于保持顺时针遍历
-  const corner = (cx, cy, sx, sy, reverse) => {
-    const seq = reverse ? [...base].reverse() : base;
-    return seq.map(([x, y]) => [cx + sx * x, cy + sy * y]);
-  };
-  const pts = [];
-  pts.push([-a + rad, -a], [a - rad, -a]);
-  pts.push(...corner(a - rad, -a + rad, 1, -1, true));    // 右上：顶边点 → 右边点
-  pts.push([a, a - rad]);
-  pts.push(...corner(a - rad, a - rad, 1, 1, false));     // 右下
-  pts.push([-a + rad, a]);
-  pts.push(...corner(-a + rad, a - rad, -1, 1, true));    // 左下
-  pts.push([-a, -a + rad]);
-  pts.push(...corner(-a + rad, -a + rad, -1, -1, false)); // 左上
-  return pts;
-}
-
-function distToSegments(px, py, pts) {
-  let best = Infinity;
-  for (let i = 0; i < pts.length; i++) {
-    const a = pts[i], b = pts[(i + 1) % pts.length];
-    const dx = b[0] - a[0], dy = b[1] - a[1];
-    const len2 = dx * dx + dy * dy;
-    let t = len2 ? ((px - a[0]) * dx + (py - a[1]) * dy) / len2 : 0;
-    t = t < 0 ? 0 : (t > 1 ? 1 : t);
-    const d = Math.hypot(a[0] + t * dx - px, a[1] + t * dy - py);
-    if (d < best) best = d;
-  }
-  return best;
-}
-
-function drawRoundFill(ctx, size, outerR) {
-  // 圆角**填充**（背景板用）。形状与 ring 的外沿完全重合：同一套环折线，只是把"带子"换成实心。
-  // 用途：圆角面板的背景 —— 4 块角 + 4 条边 + inset 过的方底拼成**真正的圆角矩形**。
-  //
-  // 旧写法（clamp 0.5 - 到边界的距离）算出来的是沿边界 1px 的一条描边，不是实心：它想做
-  // "压在方底上的补块盖住方底戳出来的角"，但几何上做不到 —— 方角落在弧**外**，任何填充
-  // 都只画在弧内，补齐的应该是"背景本身要圆角"（见 Utils/Widget.lua 的 ApplyBackdrop /
-  // RoundBorder）。所以这里必须按**有符号**距离算覆盖率：内部满 alpha，弧边 1px 过渡。
-  const pts = ringPolyline(size, 0, outerR);     // ringW=0 → 中心线就是外边界
-  const half = size / 2;
-  const inside = (px, py) => {
-    let c = false;
-    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-      const xi = pts[i][0], yi = pts[i][1], xj = pts[j][0], yj = pts[j][1];
-      if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) c = !c;
-    }
-    return c;
-  };
-  const img = ctx.createImageData(size, size);
-  const d = img.data;
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const px = x + 0.5 - half, py = y + 0.5 - half;
-      const dist = distToSegments(px, py, pts);
-      let cov = 0.5 - (inside(px, py) ? -dist : dist);
-      cov = cov <= 0 ? 0 : (cov >= 1 ? 1 : cov);
-      const i = (y * size + x) * 4;
-      d[i] = 255; d[i + 1] = 255; d[i + 2] = 255;
-      d[i + 3] = Math.round(cov * 255);
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-}
-
-function drawRoundEdge(ctx, size, ringW, outerR) {
-  // 圆角边框（9-slice 的环，只画最外圈，中间镂空）。
-  //   ringW  = 环宽（纹素，同时是运行时的 UI 单位数）
-  //   outerR = 外弧半径（纹素，同时是 9-slice 的 slice 尺寸）
-  //
-  // 光栅化 = **按覆盖率**：alpha = clamp(环宽/2 + 0.5 - 到中心线的距离)。
-  // 像素是个 1×1 方块，被 1px 宽的带子盖住多少就取多少 alpha。于是：
-  //   · 直边：中心线压在半像素网格上（内缩 ringW/2），覆盖恒为 1 → **精确的 1px 满 alpha**；
-  //   · 弧线：每个像素按真实覆盖比例给 0..255 的过渡 → 没有台阶，缩到实机尺寸/过 mip 更干净。
-  // 旧做法是 canvas 单笔描边，AA 在半径为 2–3px 的角上只能在"有/没有"之间挑，画出来是锯齿。
-  //
-  // 笔触必须是**纯白**：这张图被 SetVertexColor / 边框色相乘上色，带一点暖色都会让同一屏里
-  // 两根同色边框不是一个色（详见 Media.lua 的染色模具规矩）。alpha=0 处同样写纯白。
-  const pts = ringPolyline(size, ringW, outerR);
-  const half = size / 2;
-  const img = ctx.createImageData(size, size);
-  const d = img.data;
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const dist = distToSegments(x + 0.5 - half, y + 0.5 - half, pts);
-      let cov = ringW / 2 + 0.5 - dist;
-      cov = cov <= 0 ? 0 : (cov >= 1 ? 1 : cov);
-      const i = (y * size + x) * 4;
-      d[i] = 255; d[i + 1] = 255; d[i + 2] = 255;
-      d[i + 3] = Math.round(cov * 255);
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-}
-
 // ============================================================
 // 覆盖率描边的 glyph（2026-10-29，作者要「斜纹底布那种画法」）
 // ============================================================
-// 与 monet_stripe_weave / monet_round_edge 同一套光栅化：每个像素按到折线的距离算覆盖率
+// 与 monet_stripe_weave 同一套光栅化：每个像素按到折线的距离算覆盖率
 // （half + 0.5 - dist，半像素过渡），所以 1px 线在 1:1 下是精确的 255 / 过渡 / 0，
 // 缩到实机尺寸也不会碎成点。几何与关闭按钮同口径：字形 44%、笔画 3px、圆头端帽
 // （端点是"到点的距离"，覆盖率自然成圆角）。这是**替代 canvas 描边**的那条路：
@@ -983,10 +813,6 @@ const generators = {
   'monet_role_dps':      (ctx, w, h) => drawRoleDps(ctx, w/2, h/2, Math.min(w,h)),
   'monet_role_heal':     (ctx, w, h) => drawRoleHeal(ctx, w/2, h/2, Math.min(w,h)),
   'monet_role_tank':     (ctx, w, h) => drawRoleTank(ctx, w/2, h/2, Math.min(w,h)),
-  'monet_round_fill':    (ctx, w, h) => drawRoundFill(ctx, w, ROUND_EDGES['monet_round_edge'].outerR),
-  'monet_round_edge':    (ctx, w, h) => { const s = ROUND_EDGES['monet_round_edge'];        drawRoundEdge(ctx, w, s.ringW, s.outerR); },
-  'monet_round_edge_thin':  (ctx, w, h) => { const s = ROUND_EDGES['monet_round_edge_thin'];   drawRoundEdge(ctx, w, s.ringW, s.outerR); },
-  'monet_round_edge_thick': (ctx, w, h) => { const s = ROUND_EDGES['monet_round_edge_thick'];  drawRoundEdge(ctx, w, s.ringW, s.outerR); },
   'monet_scrollbar_track': (ctx, w, h) => glyphScrollTrack(ctx, w, h),
   'monet_scrollbar_thumb': (ctx, w, h) => glyphScrollThumb(ctx, w, h),
 };
@@ -1002,10 +828,6 @@ const SIZES = {
   'monet_brush_stroke':  { w: 256, h: 16 },   // GIMP 画的，不在本生成器里出
   'monet_stripe_weave':  { w: 64, h: 64 },
   'monet_corner':        { w: 16, h: 16 },
-  'monet_round_fill':    { w: 32, h: 32 },
-  'monet_round_edge':    { w: 32, h: 32 },
-  'monet_round_edge_thin':  { w: 32, h: 32 },
-  'monet_round_edge_thick': { w: 32, h: 32 },
   'monet_hairline':      { w: 256, h: 1 },
   'monet_scrollbar_track': { w: 8, h: 64 },
   'monet_scrollbar_thumb': { w: 8, h: 64 },

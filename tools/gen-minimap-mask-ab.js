@@ -7,8 +7,8 @@
  *
  * 几何取自主代码真实常量（Modules/Minimap/Minimap.lua）：
  *   MAP_HEIGHT=190、MASK_CANVAS=256、MASK_CROP=33、面板 = 地图 + 每边 4。
- * 边框不是手画的弧线：把 monet_round_edge.tga（16×16，ring=2，slice=3）
- * 按客户端 Backdrop 的九宫格切法贴上去，再用 Color.edge 染色。
+ * 边框是 2px 直角描边（客户端 SetBackdrop 那一套：blank 白模 × 边框色）——
+ * 圆角 9-slice 方案已放弃，这里不再模拟。
  *
  * 用法：
  *   node tools/gen-minimap-mask-ab.js              # 出 docs/minimap-mask-ab.png
@@ -134,44 +134,18 @@ async function mapCanvas(shot, rounded, Z) {
     return c;
 }
 
-/* ── 九宫格画客户端那套圆角边框 ─────────────────────────────────────── */
-function tinted(art, r, g, b, a) {
-    const c = createCanvas(art.width, art.height);
-    const ctx = c.getContext('2d');
-    ctx.drawImage(art, 0, 0);
-    ctx.globalCompositeOperation = 'source-in';
-    ctx.fillStyle = `rgba(${r * 255},${g * 255},${b * 255},${a})`;
-    ctx.fillRect(0, 0, c.width, c.height);
-    return c;
+/* ── 边框：客户端那套直角 SetBackdrop 描边（blank 白模 × 边框色）─────── */
+const EDGE_RGBA = 'rgba(217,168,92,0.95)';   // Color.edge 的近似值，只用于这张对比图
+function drawBorder(ctx, W, H, Z) {
+    ctx.strokeStyle = EDGE_RGBA;
+    ctx.lineWidth = 2 * Z;
+    ctx.strokeRect(Z, Z, W * Z - 2 * Z, H * Z - 2 * Z);
 }
 
-function drawBorder(ctx, art, W, H, Z) {
-    const S = 3;                      // slice（= edgeSize）；ring 在美术里是 2
-    const T = art.width;
-    const k = Z;
-    const corner = (sx, sy, dx, dy) =>
-        ctx.drawImage(art, sx, sy, S, S, dx * k, dy * k, S * k, S * k);
-    const hStrip = (sx, dx, w, dy) =>
-        ctx.drawImage(art, sx, 0, T - 2 * S, S, dx * k, dy * k, w * k, S * k);
-    const vStrip = (sy, dx, h, dy) =>
-        ctx.drawImage(art, 0, sy, S, T - 2 * S, dx * k, dy * k, S * k, h * k);
-
-    const w = W - 2 * S, h = H - 2 * S;
-    corner(0, 0, 0, 0);                                  // TL
-    corner(T - S, 0, W - S, 0);                          // TR
-    corner(0, T - S, 0, H - S);                          // BL
-    corner(T - S, T - S, W - S, H - S);                  // BR
-    hStrip(S, S, w, 0);                                  // top
-    hStrip(S, S, w, H - S);                              // bottom
-    vStrip(S, 0, h, S);                                  // left
-    vStrip(S, W - S, h, S);                              // right
-}
 
 /* ── 一整块面板 ─────────────────────────────────────────────────────── */
 async function renderPanel(rounded, Z) {
     const map = await mapCanvas(null, rounded, Z);
-    const edge = readTGA(path.join(TEX, 'monet_round_edge.tga'));
-    const border = tinted(edge, 0.85, 0.66, 0.36, 0.95);   // Color.edge
 
     const c = createCanvas(PANEL_W * Z, PANEL_H * Z);
     const ctx = c.getContext('2d');
@@ -190,7 +164,7 @@ async function renderPanel(rounded, Z) {
     ctx.drawImage(map, INSET * Z, (INSET - CROP) * Z, CANVAS * Z, CANVAS * Z);
 
     // 边框
-    drawBorder(ctx, border, PANEL_W, PANEL_H, Z);
+    drawBorder(ctx, PANEL_W, PANEL_H, Z);
     return c;
 }
 
@@ -267,7 +241,7 @@ function maskAlphaTile(rounded, Z, size) {
     ctx.fillRect(0, 0, W, H);
 
     label(ctx, '小地图矩形遮罩 A/B：只换四角', M, 52, 26, '#f2ede2');
-    label(ctx, '同一块面板（264×198）· 同一张地图内容 · 边框用 monet_round_edge.tga 九宫格实贴', M, 80, 14, '#8b93a4');
+    label(ctx, '同一块面板（264×198）· 同一张地图内容 · 边框是 2px 直角描边（客户端 SetBackdrop 那一套）', M, 80, 14, '#8b93a4');
 
     /* ── 整图 2× ── */
     const y0 = 116;
@@ -309,7 +283,7 @@ function maskAlphaTile(rounded, Z, size) {
         ['', null,
             `中间值 r=3：对角缝约 ${gapFor(3)}px，仍是圆角、但更贴边框。`],
         ['', null,
-            '面板 264×198；地图 256×190 居中（每边 4）；边框 monet_round_edge（ring 2、slice 3）。'],
+            '面板 264×198；地图 256×190 居中（每边 4）；边框 2px 直角描边。'],
     ];
     let ty = y + 6;
     for (const [head, hc, body] of blocks) {
