@@ -407,10 +407,13 @@ local function UpdateRole(button)
 
     local ok, role = pcall(UnitGroupRolesAssigned, unit)
     local key = "monet_role_dps"
-    if ok and role == "TANK" then
-        key = "monet_role_tank"
-    elseif ok and role == "HEALER" then
-        key = "monet_role_heal"
+    -- 受限时这个 API 会返回**机密串**（`type()` 照样是 "string"），先 CanRead 再比较。
+    if ok and Secrets.CanRead(role) then
+        if role == "TANK" then
+            key = "monet_role_tank"
+        elseif role == "HEALER" then
+            key = "monet_role_heal"
+        end
     end
     button.role:SetTexture(Media:Texture(key))
 

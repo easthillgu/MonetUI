@@ -294,7 +294,11 @@ function Color:ClassColor(classFile)
     return nil
 end
 
-local ROLE_MARKS = { "IsGroupLeader", "IsRaidLeader", "IsGroupAssistant" }
+-- 名字必须带 Unit 前缀（1.60 快照实测：只有 UnitIsGroupLeader / UnitIsGroupAssistant /
+-- UnitIsRaidOfficer，没有 IsRaidLeader，也没有 UnitIsRaidLeader）。这三个都是
+-- SecretWhenUnitIdentityRestricted —— 所以下面走 Secrets.Bool，不直接真值测试。
+-- 写成 `_G[...]` 动态查的名字 api-audit 抓不到：错名的症状不是报错，是"永不命中、静默返回默认色"。
+local ROLE_MARKS = { "UnitIsGroupLeader", "UnitIsGroupAssistant", "UnitIsRaidOfficer" }
 
 --- Vertex colour for role art (Assets/Textures/monet_role_*).  The three icons are deliberately
 -- GREYSCALE (every pixel R==G==B, see the generator), so this is the only place their hue is decided:
@@ -302,8 +306,7 @@ local ROLE_MARKS = { "IsGroupLeader", "IsRaidLeader", "IsGroupAssistant" }
 -- the ROLE ASSIGNMENT, not the class -- a tank who is not leading reads exactly like any other tank.
 -- Every query goes through pcall: on a Forever client the unit token can be secret, and a throw here would
 -- take the whole styling pass down with it.
--- TENTATIVE: no call site consumes this yet (the role icons are registered but not yet placed); the rule
--- is expected to be adjusted once there is something to look at.
+-- Call sites: Groups.UpdateRole (party/raid) and BossFrames.UpdateState.
 function Color:RoleTint(unit)
     local marked = false
     if unit then
@@ -317,6 +320,12 @@ function Color:RoleTint(unit)
             end
         end
     end
-    if marked then return self:GetHighlight() end
+    -- RGB only：GetHighlight 是四个返回值（带 a），直接透传会让调用点的
+    -- SetVertexColor(r, g, b, a) 顺手把图标 alpha 改成主题高亮的 a —— 顶点色 alpha 和
+    -- GetAlpha 是同一个存储（AGENTS「客户端行为细则」），所以这里截成三个。
+    if marked then
+        local r, g, b = self:GetHighlight()
+        return r, g, b
+    end
     return 1, 1, 1
 end

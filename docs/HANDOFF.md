@@ -2376,8 +2376,58 @@ alpha 1，面板本身已经换皮了 —— 只有按钮没动。
 | `node tools/test-mult.js` | 全部通过 |
 | `node tools/gen-minimap-mask-ab.js` | 正常出图 |
 
-**遗留未修（本轮范围外）**：`Modules/UnitFrames/BossFrames.lua:120` 用 `media:Texture("monet_role_healer")`，
-而 `Utils/Media.lua:295` 注册的键是 `monet_role_heal` —— 键名对不上，首领框的治疗图标会拿不到贴图。
+**清日志时顺手抓到的键名缺陷（已修）**：`Modules/UnitFrames/BossFrames.lua:120` 原来写
+`media:Texture("monet_role_healer")`，而 `Utils/Media.lua:295` 注册的键是 `monet_role_heal`。
+**它不报错、只是图标空白** —— `Media:Texture` 对未知键静默回退 `blank`（`Utils/Media.lua:352`），
+和皮肤层当年 `Color:Get` 回退 `edge` 是同一类"静默兜底掩盖键名错"。
+已扫过全仓：所有字面量 `Media:Texture("…")` 的键现在都在注册表里；动态键（键来自变量）只剩 7 处 ——
+`Minimap/Buttons.lua:170`、`Groups.lua:418`、`Skin.lua:886/1136`、`Widget.lua:717/853/865`。
+
+**同源的另一处**（首领框职责图标没染色）已在 8.23 一并补齐，顺带挖出 `Color:RoleTint` 从未生效过。
+
+## 8.23 2026-10-31 role 图标补齐：RoleTint 三个 API 名全错，染色从未生效
+
+**症状（推断，未实机）**：小队 / 团队框里的队长、助理，职责图标颜色和普通成员一样 —— 灰阶模具的
+原色，没有走高亮槽。
+
+**真因**（`Utils/Color.lua:301` 原来那一行）：
+
+```lua
+local ROLE_MARKS = { "IsGroupLeader", "IsRaidLeader", "IsGroupAssistant" }
+```
+
+**这三个名字本客户端一个都没有。** 1.60 快照里实际存在的是
+`UnitIsGroupLeader(unit, partyCategory?)` / `UnitIsGroupAssistant(unit)` / `UnitIsRaidOfficer(unit?)`
+（`node tools/api-lookup.js <名字>`；`IsRaidLeader` / `UnitIsRaidLeader` 都不存在，
+"助理/军官"这一档在本客户端叫 **RaidOfficer**）。而 `Color:RoleTint` 的取法是
+`local api = _G[ROLE_MARKS[i]]; if type(api) == "function" then …` —— 错名让 `_G[...]` 恒为 nil，
+循环一次都不进，`marked` 恒 false，函数**恒返回 1,1,1**。
+
+**为什么所有闸门都是绿的**：`api-audit` 扫的是代码里写出来的名字（`_G.X` / `C_X.Y(...)` /
+`Enum.X.Y`），**查不到"存在字符串表里、运行期才 `_G[...]` 取"的名字**；`wuxian check` 同理。
+错名的后果又不是报错，而是"静默走默认分支" —— 和 `Media:Texture` 未知键回退 `blank`（8.22.3）、
+皮肤层 `Color:Get` 未知键回退 `edge`（AGENTS「颜色键只有一张表」条）是**同一类**：
+静默兜底把拼写错误变成"看起来正常但没有效果"。
+
+**修法**：
+
+| 位置 | 改动 |
+|---|---|
+| `Utils/Color.lua:301` | `ROLE_MARKS` 换成 `{ "UnitIsGroupLeader", "UnitIsGroupAssistant", "UnitIsRaidOfficer" }`，并把"名字必须带 Unit 前缀 / 本客户端没有 RaidLeader / 这三个都是 SecretWhenUnitIdentityRestricted"写成注释；删掉那句已经过期的 `TENTATIVE: no call site consumes this yet`（现在有两个消费点） |
+| `Utils/Color.lua:323` | **返回值个数也是坑**：原来 `if marked then return self:GetHighlight() end` —— `unpackColor` 是**四个**返回值（带 a），于是"队长/助理"这条路返回 4 个、"普通成员"返回 3 个。调用点若写 `SetVertexColor(RoleTint(unit))`，第 4 个返回值就成了 alpha，而**顶点色 alpha 与 `GetAlpha()` 是同一个存储**（AGENTS「客户端行为细则」）—— 图标会跟着主题高亮的 a 变淡。改成截断到 RGB（与 `GetSurface` 同一口径：不透明度归调用点决定） |
+| `Modules/UnitFrames/BossFrames.lua:112-133` | 职责图标那段重写成"先选键、再 `SetTexture` + `SetVertexColor(color:RoleTint(unit))`"，和 Groups 同一口径；顺手把手写的 `not secrets.IsSecret(role)` 换成 `secrets.CanRead(role)`（AGENTS：新代码不要再自己手写 issecretvalue 分支）。**首领没有职责时仍然整块 Hide**，不跟 Groups 那样退回 dps 图标 —— 首领框上画一个"输出"图标是编造信息 |
+| `Modules/UnitFrames/Groups.lua:404-422` | `UpdateRole` 原来直接 `role == "TANK"` 比较：受限时 `UnitGroupRolesAssigned` 返回**机密串**（`type()` 照样是 `"string"`），比较会抛 —— 正是 AGENTS 2026-10-26 那条判例。加 `Secrets.CanRead(role)` 前置，机密时保持 dps 默认键 |
+
+**验证**：`luac -p` 三个文件全过；`node tools/api-audit.js` → no hard finding，退出码 0；
+三个新名字逐个用 `api-lookup` 对过快照（签名 + 机密标记都在）。
+**染色本身要实机才看得出来**（要一个队长 + 一个助理在场），本车道不进游戏 —— 归集成道的 `/verify`。
+
+**教训（可复用）**：
+① 凡是"名字存在表里、运行期 `_G[name]` 取"的写法，加名字时必须逐个
+`node tools/api-lookup.js` 核一遍；闸门扫不到这类名字，错名的表现是**静默失效**而不是报错。
+② 一个函数的**返回值个数**要恒定：分支里一个 `return 4 个`、另一个 `return 3 个`，
+在 `f(g(...))` 这种直接透传的调用点上就会把多出来的那个塞进不该塞的参数位（这里是 alpha）。
+Color 的口径是"RGB 三件套，不透明度归调用点"，`unpackColor` 的第四个返回值只在该显式取用时才传下去。
 
 ## 9. 建议的下一步（按价值排序）
 

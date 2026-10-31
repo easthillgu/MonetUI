@@ -109,18 +109,22 @@ local function UpdateState(button)
         end
     end
 
-    -- 职责图标
+    -- 职责图标：形状说明职责，颜色说明队长 / 助理（Color:RoleTint，和 Groups 同一口径）。
+    -- 首领没有职责时整块藏掉（Groups 那边是退回 dps 图标，这里宁可什么都不画）。
     if button.role and _G.UnitGroupRolesAssigned then
         local ok, role = pcall(UnitGroupRolesAssigned, unit)
-        if ok and not secrets.IsSecret(role) then
+        if ok and secrets.CanRead(role) then
+            local key
             if role == "TANK" then
-                button.role:SetTexture(media:Texture("monet_role_tank"))
-                button.role:Show()
+                key = "monet_role_tank"
             elseif role == "HEALER" then
-                button.role:SetTexture(media:Texture("monet_role_healer"))
-                button.role:Show()
+                key = "monet_role_heal"
             elseif role == "DAMAGER" then
-                button.role:SetTexture(media:Texture("monet_role_dps"))
+                key = "monet_role_dps"
+            end
+            if key then
+                button.role:SetTexture(media:Texture(key))
+                button.role:SetVertexColor(color:RoleTint(unit))
                 button.role:Show()
             else
                 button.role:Hide()
