@@ -19,7 +19,7 @@ local LOOT_ARROWS = { "LootFramePrevPageButton", "LootFrameNextPageButton" }
 local GROUP_LOOT_FRAMES = { "GroupLootFrame1", "GroupLootFrame2", "GroupLootFrame3", "GroupLootFrame4" }
 
 local function SkinLoot()
-    M:Dress("LootFrame", { window = true, panel = { bgAlpha = 0.96 }, buttons = LOOT_ARROWS })
+    M:Dress("LootFrame", { window = true, panel = { bgAlpha = 0.96 }, rule = true, buttons = LOOT_ARROWS })
     -- The close button is handled by SkinWindow; the pager arrows above get the plate, then their glyphs.
     Skin:PageArrow(Skin:Need("LootFramePrevPageButton"), "left")
     Skin:PageArrow(Skin:Need("LootFrameNextPageButton"), "right")
@@ -674,7 +674,7 @@ M:Panel("timemanager", { label = "时钟 / 秒表", group = "系统", apply = Sk
 
 -- 帮助 / 客服：Blizzard_HelpFrame 是 AllowLoad: Game。
 local function SkinHelp()
-    M:Dress("HelpFrame", { window = true, panel = { bgAlpha = 0.96 }, deep = true })
+    M:Dress("HelpFrame", { window = true, panel = { bgAlpha = 0.96 }, deep = true, rule = true })
 end
 
 M:Panel("help", { label = "帮助", group = "系统", apply = SkinHelp,

@@ -26,6 +26,7 @@ local function SkinFriends()
         window = true,
         panel = { bgAlpha = 0.96 },
         deep = true,
+        rule = true,
         tabs = FRIENDS_TABS,
         buttons = FRIENDS_BUTTONS,
         scrolls = { "FriendsFrameListScrollFrame" },

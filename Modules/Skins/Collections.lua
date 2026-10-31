@@ -30,7 +30,7 @@ local COLLECTIONS_FILTERS = {
 }
 
 local function SkinCollections()
-    M:Dress("CollectionsJournal", { window = true, panel = { bgAlpha = 0.96 }, tabs = COLLECTIONS_TABS })
+    M:Dress("CollectionsJournal", { window = true, panel = { bgAlpha = 0.96 }, rule = true, tabs = COLLECTIONS_TABS })
     -- 子面板：剥原美术 + 挂底衬 + 深扫（收藏格子是带图标的按钮，LooksLikeItemButton 会跳过）。
     -- 面板里的行是切页时才建的，deep 的可见期补扫负责之后每次翻页。
     M:Dress(COLLECTIONS_PANELS, { panel = { bgAlpha = 0.96 }, deep = true })
@@ -87,7 +87,7 @@ local ENCOUNTER_PANELS = {
 }
 
 local function SkinEncounterJournal()
-    M:Dress("EncounterJournal", { window = true, panel = { bgAlpha = 0.96 }, tabs = ENCOUNTER_TABS })
+    M:Dress("EncounterJournal", { window = true, panel = { bgAlpha = 0.96 }, rule = true, tabs = ENCOUNTER_TABS })
     M:Dress(ENCOUNTER_PANELS, { noPanel = true, deep = true })
 end
 
@@ -153,6 +153,7 @@ local function SkinDressUp()
     M:Dress("DressUpFrame", {
         window = true,
         panel = { bgAlpha = 0.96 },
+        rule = true,
         buttons = {
             "DressUpFrameResetButton", "DressUpFrameCancelButton",
             "DressUpFrame.LinkButton", "DressUpFrame.ToggleOutfitDetailsButton",
