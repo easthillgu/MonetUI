@@ -21,13 +21,13 @@
 - [x] 血量颜色设置重排：组名成行 + 12×12 实色块（`UnitFrames:PreviewColor` 与实机同一套函数）
 
 **下一批（按性价比）**
-- [ ] 其余 Blizzard 窗口的标题线：按 `TimeManager` 的流程逐个截图确认后 `rule = true`（标题矩形小的配 `ruleTop`）。
-      候选 = 全部 `window = true` 的面板（约 50 处，见 `Modules/Skins/*.lua` 的 `M:Dress`），
-      先挑标题是标准 `TitleContainer.TitleText` 的一批（角色/银行/拍卖/邮件/任务日志…），实机逐个开。
-- [x] 背包窗口标题线：已经用 `Widget:Rule`（手绘笔触下划线）覆盖，**不需要再加发丝线**（双线反而乱）。
-- [x] 阶梯表进 `docs/CHECKS.md`：已加「C2 视觉语言验收」一节（2026-10-31）。
-- [x] `Skin:Button` hover 边框用 `highlight`：**保持**——决策 a 明确"highlight 只给 hover/选中/焦点"，
-      hover 边框正是合规用法，不改 edge。
+- [x] 标题线逐窗口开（第一批 6 个，实机确认）：好友 / 帮助 / 拾取 / 收藏 / 冒险指南 / 试衣间
+      （`b0c1868`；FriendsFrame 实机截图确认线压在标题下方、edge 色 @0.45、1px）。
+- [ ] 标题线第二批（窗口要 NPC 或特定入口才能开，留待）：交易 / 邮件 / 拍卖 / 银行 / 任务日志 / 幻化；
+      跳过的（标题是空的 1px 区域）：角色 / 检查 / 宏 —— 这几个别硬开，线会落错。
+- [x] 背包窗口标题线：已用 `Widget:Rule`（手绘笔触下划线）覆盖，不需要再加发丝线。
+- [x] 阶梯表进 `docs/CHECKS.md`：已加「C2 视觉语言验收」一节。
+- [x] `Skin:Button` hover 边框用 `highlight`：保持（决策 a 明确合规）。
 
 ## 🎨 2026-10-31 视觉语言收口（docs/DESIGN-LANGUAGE.md）
 
