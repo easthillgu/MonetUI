@@ -38,7 +38,9 @@ node_modules/
 !README.md
 !Libs/NOTICE.md
 !Assets/Fonts/NOTICE.md
-# 例外：交接类文档进库（其余 docs/ 内容——api 快照、texture-preview 产物、评审表——只留本地）。
+# Qoder CN 的项目规则（多车道约束，随 worktree 走，必须入库）
+!.qoder/rules/*.md
+# 例外：交接/流程类文档进库（其余 docs/ 内容——api 快照、texture-preview 产物、评审表——只留本地）。
 # 注意：不能写成整目录 `docs/`——那会让下面的 ! 全部失效（git 不会进入被排除的目录）。
 docs/*
 !docs/CHECKS.md
@@ -47,6 +49,7 @@ docs/*
 !docs/PLAN-refactor.md
 !docs/REVIEW-2026-10-29.md
 !docs/PLAN-refactor-2026-10-29.md
+!docs/MULTI-HARNESS.md
 
 # ---- 过程产物 / 中间文件 ----
 *.tmp
