@@ -1,4 +1,4 @@
-<#
+﻿<#
 make-lane.ps1 —— 多 harness 车道创建器（工作流详见 docs/MULTI-HARNESS.md）
 
 用法（在仓库任意位置）：
@@ -39,9 +39,9 @@ foreach ($f in 'AGENTS.md', 'TODO.md', 'MonetUI.md') {
 
 # ---- junction：只读共享件，不复制、三家车道事实一致 ----
 $junctions = @(
-  'docs\api',             # API 快照（api-lookup/api-audit 的数据源，事实必须一致）
-  'tools\node_modules',   # npm 依赖（@napi-rs/canvas / wow-blp-web）
-  'Assets\Textures.bak'   # audit-pixels.js 的反例库
+  'docs\api',            # API 快照（api-lookup/api-audit 的数据源，事实必须一致）
+  'node_modules',        # npm 依赖（@napi-rs/canvas / wow-blp-web），在仓库根
+  'Assets\Textures.bak'  # audit-pixels.js 的反例库（存在才链）
 )
 foreach ($k in $junctions) {
   $target = Join-Path $root $k

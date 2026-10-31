@@ -29,7 +29,7 @@ powershell -File tools\make-lane.ps1 -Name wb    -Task <任务slug>
 
 脚本做三件事（细节在脚本头注释）：`git worktree add` → 拷贝未跟踪的记忆文件
 （`AGENTS.md` / `TODO.md` / `MonetUI.md`，.gitignore 把它们排除，worktree 里天然没有）→
-junction 只读共享件（`docs\api`、`tools\node_modules`、`Assets\Textures.bak`）。
+junction 只读共享件（`docs\api`、`node_modules`、`Assets\Textures.bak`（存在才链））。
 
 ## 3. 各家配置要点
 
