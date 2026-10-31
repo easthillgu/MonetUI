@@ -14,9 +14,10 @@
 - [ ] c. 阅读型窗口（任务日志/剧情/书信）要不要单独一档 0.965~0.97
 
 **下一批（按性价比）**
-- [ ] 游戏菜单 `GameMenuFrame` 的按钮：实机看有 3 个仍是暴雪红底（Strip/FadeButtonArt 没吃干净）—— 先查 `Skin:GetText` 是否命中它的 text region
+- [x] 游戏菜单 `GameMenuFrame` 的 11 个按钮：12.x 是匿名 + 按需创建的，名单一个都不命中 → 改按子控件遍历
+      + `M:HookShow` 补扫（HANDOFF 8.19，实机 44 个红 atlas 区域全部 alpha 0）
 - [ ] 背包窗口标题 / 每个背包小标题加"标题线"（我们自己的框，`ruleTop` 好用）
-- [ ] `Skin:Button` 的 hover 边框用 `highlight`：确认这是有意的（§7-a），否则改 `edge`
+- [ ] 其余 Blizzard 窗口的标题线：按 `TimeManager` 的流程逐个截图确认后开 `rule = true`
 - [ ] 把 `docs/DESIGN-LANGUAGE.md` 的阶梯表补进 `docs/CHECKS.md` 的验收清单
 
 ## 🔧 2026-10-30 按 review 计划执行（docs/PLAN-refactor-2026-10-29.md）

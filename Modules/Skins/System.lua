@@ -66,14 +66,38 @@ local function SkinPopups()
     M:Dress(NOTICE_FRAMES, { panel = { bgAlpha = 0.97 } })
 end
 
+-- 老版本客户端（12.1.5 之前）的主菜单按钮还带这些全局名；本客户端已改成匿名按钮。
+-- 名单留着只是为了旧客户端 / 方便对照，本客户端靠下面的子控件遍历命中。
 local GAMEMENU_BUTTONS = {
     "GameMenuButtonContinue", "GameMenuButtonSettings", "GameMenuButtonMacros",
     "GameMenuButtonAddons", "GameMenuButtonLogout", "GameMenuButtonQuit",
     "GameMenuButtonExit", "GameMenuButtonStore",
 }
 
+-- 12.x 的主菜单按钮是**匿名 + 按需创建**的（`GameMenuButtonSettings` 这类全局名已经没有了）：
+-- 名单式 `buttons` 一个都命中不了，而且这些按钮要等菜单打开时才建出来。所以：
+--   1) 按子控件遍历（幂等，重复 Apply 只是一次查表）；
+--   2) 再挂一个"每次显示补一遍"（M:HookShow 走轮询，不写暴雪脚本槽）。
+-- 实机对照：改之前 11 个按钮全是 `128-RedButton-*` 三件套 atlas、alpha 1；改之后是
+-- 我们的 1px 底板 + neutral 文字。
+local function DressMenuButtons(frame)
+    local ok, kids = pcall(function() return { frame:GetChildren() } end)
+    if not ok then return end
+    for i = 1, #kids do
+        local child = kids[i]
+        local okT, kind = pcall(child.GetObjectType, child)
+        if okT and kind == "Button" then
+            M:Dress(child, { as = "button" })
+        end
+    end
+end
+
 local function SkinGameMenu()
-    M:Dress("GameMenuFrame", { panel = { bgAlpha = 0.97 }, buttons = GAMEMENU_BUTTONS })
+    local frame = Skin:Need("GameMenuFrame")
+    if not frame then return end
+    M:Dress(frame, { panel = { bgAlpha = 0.97 } })
+    DressMenuButtons(frame)
+    M:HookShow(frame, function() DressMenuButtons(frame) end)
 end
 
 local function SkinSettings()

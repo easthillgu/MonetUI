@@ -2247,8 +2247,24 @@ alpha 0.85 的灰布纹把高亮红压成"灰褐布纹"——小红线只在 4px
    需要时给 `ruleTop = 26` 走固定偏移（一定在标题下面，但要逐窗口调）。
    **因此 `opts.rule` 默认关**，逐窗口实机确认过再开 —— 一次全开等于赌 30 个窗口的标题矩形。
 
-**没验完的**：游戏菜单 `GameMenuFrame` 实机看有 3 个按钮仍是暴雪红底（`Strip`/`FadeButtonArt` 没吃干净），
-已记进 `TODO.md` 下一批；标题线在三类窗口上的观感待作者拍板（DESIGN-LANGUAGE §7-b）。
+**没验完的**：游戏菜单 `GameMenuFrame` 的按钮（见 8.19，已修）。
+
+## 8.19 2026-10-31 游戏菜单 11 个按钮的暴雪红石头（不是 3 个，是全部）
+
+**实机截图**：主菜单 11 个按钮全是 `128-RedButton-Left/Right/Center + Highlight` 三件套 atlas，
+alpha 1，面板本身已经换皮了 —— 只有按钮没动。
+
+**真因**：12.x 的主菜单按钮是**匿名 + 按需创建**的（`GameMenuButtonSettings` 这类全局名已经没有了），
+所以 `M:Dress("GameMenuFrame", { buttons = GAMEMENU_BUTTONS })` 那份名单**一个都命中不了**；
+而且这些按钮要等菜单第一次打开时才建出来，登录时那趟 Apply 也抓不到。
+
+**修法**（`Modules/Skins/System.lua`）：`DressMenuButtons(frame)` 按 `GetChildren()` 遍历（幂等，
+`Skin:Button`/`ControlBg` 都有旁表标记），并在 `M:HookShow` 里再补一遍（走 `Widget:ShowWatch` 轮询，
+不写暴雪脚本槽）。代价：菜单打开后最多 0.2 秒还是暴雪原样（第一次）；之后同一批按钮对象已换好。
+
+**逐按钮验证**（实机 12.1.5）：11 个按钮 × 4 个 RedButton 区域 = 44 个，`stillVisible = 0`
+（全部 alpha 0.00），文字 `0.51/0.49/0.49`（= 主题 neutral）、按钮底板是我们 1px 边。
+截图确认：无红、无双层边、无残留 atlas。
 
 ## 9. 建议的下一步（按价值排序）
 
