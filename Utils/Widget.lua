@@ -1132,6 +1132,14 @@ function Widget:ColorText(fs, colorKey)
         r, g, b, a = Color:GetDanger()
     elseif colorKey == "resource" then
         r, g, b, a = Color:GetResource()
+    elseif colorKey == "bright" then
+        -- 大字 / 大按钮用的高对比文字色：从 neutral 往白推，**不带任何彩相**。
+        -- 为什么需要新键：neutral 是给正文的（0.51/0.49/0.49 @0.85），摆在主菜单那种
+        -- 200×36 的深色大按钮上会读成"禁用"；而 highlight 是职业色，按
+        -- docs/DESIGN-LANGUAGE.md §7-a 不许进通用静态文字。所以只加这一档中性的亮字。
+        local nr, ng, nb = Color:GetNeutral()
+        local k = 0.62
+        r, g, b, a = nr + (1 - nr) * k, ng + (1 - ng) * k, nb + (1 - nb) * k, 1
     else
         r, g, b, a = Color:GetNeutral()
     end

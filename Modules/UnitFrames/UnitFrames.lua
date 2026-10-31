@@ -191,8 +191,7 @@ end
 ---   其余（含 "highlight"）= Monet 奶油压暗 20%。
 --- 2026-10-25 那版是在函数开头给 player / targettarget 硬顶一份反相，把用户设置整个盖掉
 --- （HANDOFF 8.14.4③）；现在它只是一种可选样式 + 默认值，玩家改过就一直生效。
-local function FillColor(unit)
-    local style = Setting(unit, "fillColor")
+local function FillColorFor(style, unit)
     if style == "inverse" then
         -- edge 由 LibMonetColor 从环境色推出（HSL 反相 + 亮度镜像）；这里再取一次 RGB 反相
         -- 得到"edge 的反色"。GetEdge 无机密值（纯主题色），不用守卫；亮度不自己算，交给阶梯。
@@ -225,11 +224,15 @@ local function FillColor(unit)
     return r * 0.8, g * 0.8, b * 0.8, 1
 end
 
+--- 取"这个单位当前该用的填充色"（= FillColorFor 读库版）。
+local function FillColor(unit)
+    return FillColorFor(Setting(unit, "fillColor"), unit)
+end
+
 --- The *missing* part of a health bar: pure background, needs no unit value.
 --- "weave" = 暗色织纹底（阶梯的 lost 档，BarWeave 的发丝线叠在其上）——玩家 / 目标的目标的默认，
 --- 队伍格同款；"danger" / "light" / "theme25" / 其余（黑）照旧。
-local function LostColor(unit)
-    local style = Setting(unit, "lostColor")
+local function LostColorFor(style)
     if style == "weave" then
         local r, g, b = Color:GetSurface("lost")
         return r, g, b, 1
@@ -244,6 +247,19 @@ local function LostColor(unit)
         return r * 0.25, g * 0.25, b * 0.25, 1
     end
     return 0, 0, 0, 1
+end
+
+local function LostColor(unit)
+    return LostColorFor(Setting(unit, "lostColor"))
+end
+
+--- 配置面板的小色块用：**和真正上色走同一套函数**，所以面板上看到的颜色就是条上的颜色。
+--- kind = "fill" | "lost"；unit 只影响"职业色"那一支（预览用 player 作参考）。
+function M:PreviewColor(kind, value, unit)
+    if kind == "lost" then
+        return LostColorFor(value)
+    end
+    return FillColorFor(value, unit or "player")
 end
 
 --- 织纹浓度跟着"空槽样式"走（2026-10-31 玩家实机反馈："损失血量设置成高亮红，是无效的"）。

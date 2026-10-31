@@ -103,7 +103,10 @@ end
 
 --- A settings row: caption on the left, the current choice on the right, and a floating list of the alternatives under it.
 -- @param items { { value = <stored value>, text = <shown label> }, ... }
-local function MakeDropdown(parent, y, caption, items, getter, setter)
+--- 一个下拉行。swatch 可选：传一个 `(当前值) -> r, g, b` 的函数就在标签和下拉之间画一块
+--- 12×12 的实色小方块 —— 配色类下拉光看文字名（"暗织纹" / "高亮红"）根本分不出差别，
+--- 看见颜色才知道自己选的是哪个（2026-10-31 玩家反馈"血量颜色设置界面有点混乱"）。
+local function MakeDropdown(parent, y, caption, items, getter, setter, swatch)
     local label = Widget:Font(parent, 12, "pixel", "neutral", "LEFT")
     label:SetPoint("TOPLEFT", parent, "TOPLEFT", 24, y - 4)
     -- 同 1)：描述限宽到控件左侧，超出的部分切掉而不是钻到下拉框下面
@@ -117,6 +120,16 @@ local function MakeDropdown(parent, y, caption, items, getter, setter)
     Widget:ButtonMaterial(button, { alpha = 0, weaveAlpha = 0.25 })
     button:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -24, y)
     button:EnableMouse(true)
+
+    local chip, chipFill
+    if swatch then
+        chip = Widget:CreateFrame(nil, parent, 12, 12)
+        Widget:Theme(chip, { thickness = 1, bgAlpha = 1 })
+        chip:SetPoint("RIGHT", button, "LEFT", -8, 0)
+        pcall(chip.EnableMouse, chip, false)
+        chipFill = chip:CreateTexture(nil, "ARTWORK")
+        chipFill:SetAllPoints()
+    end
 
     local value = Widget:Font(button, 12, "pixel", "edge", "LEFT")
     value:SetPoint("LEFT", button, "LEFT", 7, 0)
@@ -149,6 +162,12 @@ local function MakeDropdown(parent, y, caption, items, getter, setter)
     local function Refresh()
         local item = Selected()
         value:SetText(item and item.text or "?")
+        if chipFill then
+            local ok, r, g, b = pcall(swatch, item and item.value)
+            if ok and type(r) == "number" then
+                chipFill:SetColorTexture(r, g, b or 0, 1)
+            end
+        end
     end
 
     for index, item in ipairs(items) do
@@ -704,8 +723,15 @@ function SimpleConfig:Build()
 
     -- 分成两组的理由是 2026-10-25 的配色案：玩家 / 宠物 / 目标的目标是一套"反相 + 暗织纹"
     -- （和小队/团队格同款，见 Groups.lua），目标 / 焦点保持职业色 + 红色空槽。
-    -- 一组两个下拉（血条 + 损失部分），组内默认必须一致 —— 否则 UnitSetting 显示的是
+    -- 一组两个下拉（血条 + 空槽），组内默认必须一致 —— 否则 UnitSetting 显示的是
     -- 组里第一个单位的值，玩家一改就整组跟着变。
+    --
+    -- 2026-10-31 重排（玩家反馈"血量颜色设置界面有点混乱"）：
+    --   原来四行的标签是「玩家 / 宠物 / 目标的目标 血条」这种长句，120px 的标签列装不下、
+    --   被切掉，四行前缀又几乎一样 —— 看不出哪个属于哪一组。现在：
+    --     组名单独一行（edge + 细线）→ 组内两行只写「血条」「空槽」；
+    --     每个下拉右边加一块 12×12 实色块，颜色直接取自**真正上色用的函数**
+    --     （UnitFrames:PreviewColor），所以面板上看到的色 = 条上的色。
     local COLOR_GROUPS = {
         { label = "玩家 / 宠物 / 目标的目标", units = { "player", "pet", "targettarget" },
           fill = "inverse", lost = "weave" },
@@ -732,24 +758,64 @@ function SimpleConfig:Build()
         { value = "theme", text = "统一主题色" },
     }
 
-    for _, group in ipairs(COLOR_GROUPS) do
-        MakeDropdown(content, row(28), group.label .. " 血条",
-            FILL_ITEMS, UnitSetting(group.units, "fillColor", group.fill))
-        MakeDropdown(content, row(28), group.label .. " 损失部分",
-            LOST_ITEMS, UnitSetting(group.units, "lostColor", group.lost))
+    -- 预览色：走模块里的同一套函数（面板上看到的色就是条上的色）。
+    local unitFrames = ns:GetModule("UnitFrames")
+    local function Preview(kind, unit)
+        return function(value)
+            if unitFrames and type(unitFrames.PreviewColor) == "function" then
+                return unitFrames:PreviewColor(kind, value, unit)
+            end
+        end
     end
-    MakeDropdown(content, row(28), "能量条颜色", POWER_ITEMS,
+
+    -- 组名一行（edge 色 + 下面一条发丝线），把"哪个下拉属于哪一组"从标签里拆出来。
+    local function GroupHeader(caption, y)
+        local fs = Widget:Font(content, 12, "pixel", "edge", "LEFT")
+        fs:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y - 4)
+        fs:SetText(caption)
+        local line = content:CreateTexture(nil, "ARTWORK")
+        line:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y - 20)
+        line:SetPoint("TOPRIGHT", content, "TOPRIGHT", -24, y - 20)
+        line:SetHeight(1)
+        local nr, ng, nb = Color:GetNeutral()
+        line:SetColorTexture(nr, ng, nb, 0.25)
+    end
+
+    for _, group in ipairs(COLOR_GROUPS) do
+        GroupHeader(group.label, row(30))
+        local unit = group.units[1]
+        -- UnitSetting 返回 (get, set) **两个值**：直接塞在参数表里时，只有出现在最后一位才会
+        -- 展开；放中间会被截成 1 个值，后面的参数就整体错位（第一版就是这样把 swatch 挤进了
+        -- setter 位、下拉选择变成静默不保存）。所以这里显式接住再说。
+        local getFill, setFill = UnitSetting(group.units, "fillColor", group.fill)
+        local getLost, setLost = UnitSetting(group.units, "lostColor", group.lost)
+        MakeDropdown(content, row(26), "血条", FILL_ITEMS, getFill, setFill, Preview("fill", unit))
+        MakeDropdown(content, row(26), "空槽（损失部分）", LOST_ITEMS, getLost, setLost, Preview("lost", unit))
+    end
+
+    GroupHeader("能量条", row(30))
+    MakeDropdown(content, row(26), "颜色", POWER_ITEMS,
         function() return ns:DB().unitFrames.powerColor end,
         function(value)
             ns:DB().unitFrames.powerColor = value
             RefreshUnitFrames()
+        end,
+        function(value)
+            if value == "theme" then return Color:GetResource() end
+            -- "按能量类型"：用玩家当前的资源类型作参考（预览而已）
+            local _, token = UnitPowerType("player")
+            local map = { MANA = { 0.20, 0.50, 0.90 }, RAGE = { 0.85, 0.20, 0.20 },
+                          ENERGY = { 0.90, 0.85, 0.25 }, FOCUS = { 0.85, 0.45, 0.15 } }
+            local c = map[token or ""]
+            if c then return c[1], c[2], c[3] end
+            return Color:GetResource()
         end)
 
     local fillHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-    fillHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(44))
+    fillHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(46))
     fillHint:SetWidth(328)
     fillHint:SetJustifyH("LEFT")
-    fillHint:SetText("默认：玩家 / 宠物 / 目标的目标用「反相 + 暗织纹」，目标 / 焦点用职业或敌我色 + 红空槽。职业辨认主要看能量条——选中玩家时能量条直接用它的职业色。")
+    fillHint:SetText("血条 = 有血的那段；空槽 = 掉掉的那段（选实色时那层布纹会自动压淡）。右边小方块就是实际颜色。")
 
     -- One row for two settings: 0 means "off", anything else is the pip height.
     local CLASS_ITEMS = {

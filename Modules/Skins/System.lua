@@ -87,7 +87,9 @@ local function DressMenuButtons(frame)
         local child = kids[i]
         local okT, kind = pcall(child.GetObjectType, child)
         if okT and kind == "Button" then
-            M:Dress(child, { as = "button" })
+            -- 主菜单按钮是大号（200×36）深底：文字用 "bright"（neutral 往白推的**中性**亮色），
+            -- 默认的 neutral 在这一档尺寸上会读成"禁用"（实机：一眼看不出能不能点）。
+            M:Dress(child, { as = "button", control = { textKey = "bright" } })
         end
     end
 end
