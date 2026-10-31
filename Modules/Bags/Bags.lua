@@ -849,6 +849,22 @@ function M:Initialize()
 
     -- 只要模块开着，暴雪的背包框一律常驻停车（alpha 0 + 全子树禁鼠标，见上文的模型注释）。
     ParkBlizzardBags(true)
+
+    -- **分类背包不要默认打开**（玩家 2026-10-31 报：每次进游戏都是开着的）。
+    -- 原因：客户端会把"上次退出时开着的"暴雪背包在登录后恢复成 shown，守卫的边沿检测就把它
+    -- 当成"玩家按了 B"，直接把我们的窗口弹出来。这里登录时先把它们关掉（停车让它们本来也
+    -- 不可见，这一步是为了让**状态**也回到关），再把守卫基线设成"关" —— 这样第一次按 B
+    -- 才是真正的"从关到开"的边沿。
+    -- 战斗中不动暴雪背包（父框里是受保护子按钮）：robust 见 bagsVisualOpen 那行。
+    local restoredOpen = false
+    for _, frame in ipairs(BlizzardBagFrames()) do
+        if frame and frame.IsShown and frame:IsShown() then
+            restoredOpen = true
+            if not InCombat() then pcall(frame.Hide, frame) end
+        end
+    end
+    -- 关掉了 → 基线"关"（第一次 B 是边沿）；战斗里关不掉 → 基线"开"，避免一登录就弹我们的窗。
+    bagsVisualOpen = restoredOpen and InCombat() or false
     StartBlizzardGuard()
 
     -- BAG_UPDATE fires often and for every bag: the handler only marks a rebuild, coalesced to one frame by the flag.
