@@ -1049,6 +1049,7 @@ local function PrintHelp()
     ns:Print("  |cffffd100/mui <模块> on|off|r  单独开关模块")
     ns:Print("  |cffffd100/mui skins diagnose|r 对象名可达性账本（全仓一本账：skins / nameplates / infobar / minimap）")
     ns:Print("  |cffffd100/mui skins diagnose bad|r 只看\"命中但不是框体\"那一类（全量几百行，聊天框装不下）")
+    ns:Print("  |cffffd100/mui skins layers <窗口名> [片段]|r 这个窗口的底有几层、每层谁能碰（region / 字段可剥 / 要点名；全量存 MonetUIDB.layerReport）")
     ns:Print("  |cffffd100/mui reset|r      恢复默认设置（需 /reload）")
 end
 

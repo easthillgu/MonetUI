@@ -491,7 +491,7 @@ local function NewBackdropFrame(parent, levelOffset)
 end
 
 --- A themed backplate behind a Blizzard frame.  Built once, cached on the frame.
--- @param opts { thickness=, bgAlpha=, borderAlpha=, borderKey=, inset= }
+-- @param opts { thickness=, bgAlpha=, borderAlpha=, borderKey=, inset=, bgSurface= }
 function Skin:Panel(frame, opts)
     if not frame or not self:IsScriptObject(frame) then return nil end
     opts = opts or {}
@@ -508,6 +508,7 @@ function Skin:Panel(frame, opts)
             bgAlpha     = opts.bgAlpha or 0.85,
             borderAlpha = opts.borderAlpha,
             borderKey   = opts.borderKey,
+            bgSurface   = opts.bgSurface,
         })
         Mark(frame, "skinBg", bg)
         self:Track(bg)
@@ -1270,4 +1271,206 @@ function Skin:Divider(parent)
         line:SetVertexColor(nr, ng, nb, 0.3)
     end)
     return line
+end
+
+-- ==================== 诊断：一个窗口的"底"有几层（`/mui skins layers <窗口名>`） ====================
+-- 背景件在 FrameXML 里有三种身份，而 `Skin:Strip` 只认前两种：
+--   region   父框自己的贴图（`<Texture name="$parentBG">`）—— GetRegions 看得见，剥得到
+--   字段     子框的名字是"父名 + BACKDROP_PIECES 里那 18 个词之一"—— 剥得到
+--   要点名   有父框，但既不是父框的 region、字段名也不在名单里 —— Strip 一个都碰不到，
+--            只能在面板 `frames` 名单里把它本人点出来
+-- 分不清这三类就表现为"剥了一层还剩一层纸"：实机在任务对话框里三种各占一个
+-- （QuestFrameBG / QuestFrameInset 底下的 BG / QuestFrameDetailPanelBG），而我们的名单只点到面板本人。
+local MAX_PROBE_NODES, MAX_PROBE_DEPTH, MAX_PROBE_PRINT, MAX_PROBE_REGIONS = 600, 6, 20, 24
+
+local BACKDROP_SET = {}
+for i = 1, #BACKDROP_PIECES do BACKDROP_SET[BACKDROP_PIECES[i]] = true end
+
+local function probeLabel(obj)
+    local ok, name = pcall(obj.GetName, obj)
+    if ok and type(name) == "string" and name ~= "" then return name end
+    return "无名"
+end
+
+local function probeSize(obj)
+    local okW, w = pcall(obj.GetWidth, obj)
+    local okH, h = pcall(obj.GetHeight, obj)
+    if okW and okH and w and h then
+        return ("%dx%d"):format(math.floor(w + 0.5), math.floor(h + 0.5))
+    end
+    return "?"
+end
+
+-- 斜纹/织纹那层的 alpha 就是从这儿读的（AGENTS：GetAlpha 和顶点色 alpha 同一个存储）。
+local function probeAlpha(obj)
+    local ok, a = pcall(obj.GetAlpha, obj)
+    if ok and type(a) == "number" then return ("α%.2f"):format(a), a end
+    return "α?", nil
+end
+
+-- "这是谁画的"：这版客户端的窗口美术基本走 atlas（SetAtlas），GetTexture 只在少数几件上给得出
+-- 路径、其余返回文件 id 或 nil —— 三样都印出来，否则一屏全是"无名"，等于没探。
+local function probeArt(obj)
+    local okA, atlas = pcall(obj.GetAtlas, obj)
+    if okA and type(atlas) == "string" and atlas ~= "" then return atlas end
+    local okT, tex = pcall(obj.GetTexture, obj)
+    if okT then
+        if type(tex) == "string" and tex ~= "" then return (tex:gsub("[^\\/]*[\\/]", "")) end
+        if type(tex) == "number" then return "id:" .. tex end
+    end
+    return "-"
+end
+
+-- 状态分三档，第二档必须**随父继承**：一个 α0 的父框，底下二十件 α1.00 的贴图是看不见的，
+-- 按件数算"暴雪原样"会得出 147 件这种没有意义的数（实机第一版就是这样报的）。
+-- 我们自己的件（背板 / 织纹）都是匿名 CreateFrame，只能靠"挂在父框上的旁表指向谁"认出来。
+local function probeState(obj, owner, fadedParent)
+    if owner then
+        if Marked(owner, "skinBg") == obj then return "我们的背板", false end
+        if Marked(owner, "questWeave") == obj then return "我们的织纹", false end
+        if Marked(owner, "controlBg") == obj then return "我们的控件底", false end
+    end
+    if Marked(obj, "skinBg") then return "已挂我们的背板", false end
+    if Marked(obj, "questWeave") then return "已挂我们的织纹", false end
+    if Marked(obj, "art") then return "我们的美术件", false end
+    if Marked(obj, "hidden") then return "已剥掉", true end
+    local _, alpha = probeAlpha(obj)
+    if alpha and alpha <= 0.001 then return fadedParent and "随父已剥" or "α0", true end
+    if fadedParent then return "随父已剥", true end
+    return "暴雪原样", false
+end
+
+-- 子框能不能被 Strip 顺着字段名剥到：把父名前缀去掉，剩下的正好在名单里才算。
+local function probeTag(name, parentName)
+    if type(name) == "string" and type(parentName) == "string"
+        and #name > #parentName and name:sub(1, #parentName) == parentName then
+        if BACKDROP_SET[name:sub(#parentName + 1)] then return "字段可剥" end
+    end
+    return "要点名"
+end
+
+--- 一个窗口的"底"有几层、每层谁能碰。`filter` 只影响打印，不影响账本。
+function Skin:ProbeLayers(path, filter)
+    local root = self:Need(path)
+    if not root then
+        ns:Print(("「%s」不在美化对象账本里，或这版客户端没有它 —— /mui skins diagnose 读那本账。"):format(tostring(path)))
+        return 0
+    end
+
+    local rows, nodes = {}, 0
+    local counts = { plain = 0, faded = 0, ours = 0 }
+
+    local function placeOfFrame(obj)
+        local okS, strata = pcall(obj.GetFrameStrata, obj)
+        local okL, level = pcall(obj.GetFrameLevel, obj)
+        return ("%s/lv%s"):format(okS and tostring(strata) or "?", okL and tostring(level) or "?")
+    end
+
+    -- 贴图没有 frame level，只有 layer/sublayer；`GetDrawInfo` 在这版客户端不存在（快照里查不到），
+    -- 用它会整列打成 "?"。
+    local function placeOfTex(obj)
+        local ok, layer, sub = pcall(obj.GetDrawLayer, obj)
+        if ok and layer then return ("%s/%s"):format(tostring(layer), tostring(sub or 0)) end
+        return "?"
+    end
+
+    local function push(indent, tag, obj, place, owner, fadedParent)
+        local label = probeLabel(obj)
+        local art = probeArt(obj)
+        local alphaText = probeAlpha(obj)
+        local state, invisible = probeState(obj, owner, fadedParent)
+        if state == "暴雪原样" then counts.plain = counts.plain + 1
+        elseif state == "已剥掉" or state == "随父已剥" or state == "α0" then counts.faded = counts.faded + 1
+        else counts.ours = counts.ours + 1 end
+        rows[#rows + 1] = {
+            text = ("%s%s %s %s %s %s %s %s"):format(
+                string.rep("  ", indent), tag, label, place, art,
+                probeSize(obj), alphaText, state),
+            key = string.lower(label .. " " .. art .. " " .. state),
+        }
+        return invisible
+    end
+
+    local function walkRegions(frame, depth, fadedParent)
+        if type(frame.GetRegions) ~= "function" then return end
+        local ok, regions = pcall(function() return { frame:GetRegions() } end)
+        if not ok or type(regions) ~= "table" then return end
+        local shown = 0
+        for i = 1, #regions do
+            local region = regions[i]
+            if IsTexture(region) then
+                if nodes >= MAX_PROBE_NODES then return end
+                if shown < MAX_PROBE_REGIONS then
+                    nodes = nodes + 1
+                    shown = shown + 1
+                    -- region 是父框本人的贴图，Strip 的 regions 这一层直接够得到
+                    push(depth + 1, "region", region, placeOfTex(region), frame, fadedParent)
+                end
+            end
+        end
+        if #regions > MAX_PROBE_REGIONS then
+            rows[#rows + 1] = {
+                text = ("%s（region 还有 %d 个没列）"):format(string.rep("  ", depth + 2), #regions - MAX_PROBE_REGIONS),
+                key = "",
+            }
+        end
+    end
+
+    local function walk(frame, parentName, depth, fadedParent)
+        if nodes >= MAX_PROBE_NODES or depth > MAX_PROBE_DEPTH then return end
+        nodes = nodes + 1
+        if not Widget:Readable(frame) then
+            rows[#rows + 1] = {
+                text = ("%s读不出（forbidden） %s"):format(string.rep("  ", depth), probeLabel(frame)),
+                key = "forbidden",
+            }
+            return
+        end
+        local invisible = push(depth, depth == 0 and "根框" or probeTag(probeLabel(frame), parentName),
+            frame, placeOfFrame(frame), nil, fadedParent)
+        walkRegions(frame, depth, invisible or fadedParent)
+        local ok, kids = pcall(function() return { frame:GetChildren() } end)
+        if ok and type(kids) == "table" then
+            local myName = probeLabel(frame)
+            for i = 1, #kids do
+                if nodes >= MAX_PROBE_NODES then return end
+                walk(kids[i], myName, depth + 1, invisible or fadedParent)
+            end
+        end
+    end
+
+    walk(root, nil, 0, false)
+
+    -- 全量进 SavedVariables：聊天框只留最后十几行，几十行一定被顶掉（读法同 compatReport，
+    -- 落盘比 /reload 晚 1–2 分钟）。
+    local needle = (type(filter) == "string" and filter ~= "") and string.lower(filter) or nil
+    local texts = {}
+    for i = 1, #rows do texts[i] = rows[i].text end
+    local okDb, db = pcall(function() return ns.DB and ns:DB() end)
+    if okDb and type(db) == "table" then
+        db.layerReport = {
+            when = (_G.date and _G.date("%Y-%m-%d %H:%M:%S")) or nil,
+            root = tostring(path), filter = needle, total = #rows,
+            plain = counts.plain, faded = counts.faded, ours = counts.ours, rows = texts,
+        }
+    end
+
+    local printed, matched = 0, 0
+    for i = 1, #rows do
+        if not needle or string.find(rows[i].key, needle, 1, true) then
+            matched = matched + 1
+            if printed < MAX_PROBE_PRINT then
+                printed = printed + 1
+                ns:Print(rows[i].text)
+            end
+        end
+    end
+    if matched > printed then
+        ns:Print(("  （还有 %d 行没打，全量在 MonetUIDB.layerReport）"):format(matched - printed))
+    end
+    ns:Print(("|cffffd100%s 的底层|r：%d 件 —— 还看得见的暴雪美术 %d / 已剥或看不见 %d / 我们自己的 %d%s%s"):format(
+        tostring(path), #rows, counts.plain, counts.faded, counts.ours,
+        needle and ("；其中含 %q 的 %d 件"):format(needle, matched) or "",
+        nodes >= MAX_PROBE_NODES and "，到上限截断" or ""))
+    return #rows
 end

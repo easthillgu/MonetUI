@@ -747,13 +747,25 @@ end
 
 --- `/mui Skins <sub>`.  Returns false when the sub-command is unknown, so the slash handler can fall back to printing the usage line.
 function M:HandleCommand(rest)
-    local sub = string.lower(rest or "")
+    local raw = rest or ""
+    local sub = string.lower(raw)
     if sub == "diagnose bad" or sub == "diag bad" or sub == "probe bad" then
         self:Diagnose(true)
         return true
     end
     if sub == "diagnose" or sub == "diag" or sub == "probe" then
         self:Diagnose()
+        return true
+    end
+    -- 窗口"底"有几层：参数是窗口名（可再跟一个名字片段做过滤），**帧名大小写敏感**，
+    -- 所以从原始参数里取、不能过 string.lower
+    if string.find(sub, "^layers") then
+        local name, filter = string.match(raw, "^%s*layers%s+(%S+)%s*(%S*)%s*$")
+        if not name then
+            ns:Print("用法：/mui skins layers <窗口名> [名字片段]，例如 /mui skins layers QuestFrame Bg")
+        else
+            Skin:ProbeLayers(name, filter)
+        end
         return true
     end
     return false

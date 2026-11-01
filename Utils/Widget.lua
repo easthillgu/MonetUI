@@ -1269,7 +1269,9 @@ function Widget:Refresh(frame, opts)
     elseif opts.kind == "text" then
         Widget:ColorText(frame, opts.colorKey)
     elseif frame.SetBackdropColor then
-        local pr, pg, pb = Color:GetSurface("panel")
+        -- 底色的阶梯档：默认 panel（最暗那档 = 常规窗口/框底）；正文凹槽这类要"比窗口亮一档"的
+        -- 传 bgSurface = "lost"。键只多这一个可选值，其余调用点不传就是原行为。
+        local pr, pg, pb = Color:GetSurface(opts.bgSurface or "panel")
         frame:SetBackdropColor(pr, pg, pb, opts.bgAlpha or 0.85)
 
         local state = opts.borderState

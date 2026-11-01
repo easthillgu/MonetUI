@@ -8,23 +8,52 @@ local M = ns.Skins
 local Media = ns.Media
 local Widget = ns.Widget
 local Skin = ns.Skin
+local Color = ns.Color
 
--- 任务对话框斜纹底板：暗色半透明衬底 + monet_stripe_weave + 亮色文字。
--- 替代原来的 Strip + Panel（纯深色底），解决暴雪 FontString 在深底上看不清的问题。
+-- 阅读型窗口一档 0.965（DESIGN-LANGUAGE §2 的独立一档）：任务日志 / 任务详情 / 剧情 / 书信。
+-- 为什么不是 0.97：那一档是**对话框**（挡操作、要压住世界）；阅读窗口是"长时间对着看"，
+-- 0.965 比常规窗口(0.96)更实、又不像弹窗那样闷。为什么不取 0.965~0.97 之间别的数：
+-- 阶梯一个值一个语义，多出来的小数点只会让下一个人猜。
+-- 声明摆在文件最前面：Show 回调也要用它，而 Lua 的 local 必须先声明后引用 —— 摆在下面不会报错，
+-- 只会让引用它的那一行拿到全局 nil（AGENTS 记过这条静默失败）。
+local READ_ALPHA = 0.965
+
+-- 任务对话框分两档底色（2026-11-01 B 档）：**窗口那一层（frame.bg）**用皮肤背板（Skin:Panel，
+-- 走阶梯 panel 档 #1c1c1c + 主题边框），**正文凹槽那一层（insetFrame.bg）**用 surface `lost`
+-- (#444141) —— 比窗口亮一档，读成"窗口托着一块正文"。以前织纹锚在整窗、两档共用同一块 panel
+-- 平底，层次分不出来；现在织纹和 lost 凹槽底都锚到正文凹槽矩形（QuestFrameInset），只铺正文、
+-- 不再盖窗口边。实机量过（`/mui skins layers QuestFrame`）：窗口 338x496、QuestFrameInset 328x410
+-- 都在窗口内；四块面板 384x512 超尺寸（背板会把主题边框画到窗口外），所以凹槽底和织纹都**不跟面板尺寸走**。
 local WEAVE_SIZE = 64
+-- ADD 混合会把下面那层提亮：0.30 时窗口那道主题边框读不出来，0.20 留得住（实机定的档）。
+local WEAVE_ALPHA = 0.20
+local WEAVE_COLOR = { 0.55, 0.53, 0.50 }
+-- 正文凹槽底与窗口同一 solidity（0.965），差别只在色阶（panel vs lost）。
+local INSET_ALPHA = READ_ALPHA
+
 local Mark = function(o, k, v) return ns:Mark(o, k, v) end
 local Marked = function(o, k) return ns:Marked(o, k) end
 
--- 按当前尺寸重算斜纹 texcoord（两轴同一密度 → 45° 不变形）
-local function UpdateWeave(panel)
-    local weave = Marked(panel, "questWeave")
+-- 按织纹覆盖的矩形重算 texcoord（两轴同一密度 → 45° 不变形）。
+-- box = 织纹锚的那个框（窗口），不是面板：面板比窗口大；而且刚 SetPoint 完那一拍 region 自己的
+-- 尺寸可能还没结算，读框的宽高才稳。box 读不出来时退回织纹自己的尺寸。
+local function UpdateWeave(weave, box)
     if not weave then return end
     local tex = Media.texture["monet_stripe_weave"]
     if not tex then return end
     weave:SetTexture(tex, "REPEAT", "REPEAT")
     local mult = Media:Mult()
-    local w = panel:GetWidth() or 0
-    local h = panel:GetHeight() or 0
+    local w, h = 0, 0
+    if box then
+        local okW, bw = pcall(box.GetWidth, box)
+        local okH, bh = pcall(box.GetHeight, box)
+        if okW and okH then w, h = bw or 0, bh or 0 end
+    end
+    if w <= 0 or h <= 0 then
+        local okW, ww = pcall(weave.GetWidth, weave)
+        local okH, wh = pcall(weave.GetHeight, weave)
+        if okW and okH then w, h = ww or 0, wh or 0 end
+    end
     if w > 0 and h > 0 and mult > 0 then
         local cols = w / (mult * WEAVE_SIZE)
         local v0 = 1 / WEAVE_SIZE
@@ -53,32 +82,64 @@ local function BrightenTree(f)
     end
 end
 
-local function WeavePanel(panel, opts)
-    if not panel then return end
-    opts = opts or {}
-    local baseAlpha = opts.baseAlpha or 0.70
-    local weaveAlpha = opts.weaveAlpha or 0.30
-    local weaveColor = opts.weaveColor or { 0.55, 0.53, 0.50 }
+-- 正文凹槽矩形：优先窗口自带的 Inset（QuestFrame 的直接字段，secure 读，**不挂 Need 账本** ——
+-- 这块 inset 只在正文面板出现时才落地，记进账本会被 `/mui skins diagnose` 报成"缺帧"）。
+-- 没有 inset 或读不到时退回窗口本身；连窗口都读不到才返回 nil（调用方再退回面板）。
+local function InsetRect(win)
+    if not win then return nil end
+    local ok, inset = pcall(function() return win.Inset end)
+    if ok and inset and Widget:Readable(inset) then return inset end
+    if Widget:Readable(win) then return win end
+    return nil
+end
 
-    -- 去掉暴雪原始贴图和边框
+-- 织纹要覆盖的那个框 = 正文凹槽（不是整窗，也不是超尺寸的面板：面板比窗口大，锚面板会画到窗口外）。
+-- 返回它交给 UpdateWeave 按矩形重算 texcoord。
+local function ContentHost(panel)
+    local ok, win = pcall(panel.GetParent, panel)
+    if ok then return InsetRect(win) or panel end
+    return panel
+end
+
+local function AnchorWeave(weave, panel)
+    local host = ContentHost(panel)
+    weave:ClearAllPoints()
+    weave:SetPoint("TOPLEFT", host, "TOPLEFT")
+    weave:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT")
+    return host
+end
+
+-- 正文凹槽那一档（insetFrame.bg）：把暴雪 inset 自己的美术件剥掉，再挂**我们自己的**背板 ——
+-- 底色走 surface `lost`（比窗口那档 panel 亮一档），边框走我们和其它窗口同一套的主题边框
+-- （Skin:Panel 的 BackdropTemplate edgeFile=blank 那条，不是暴雪原生 #4B493C 边框）。
+-- Skin:Panel 只在 host 上建我们自己的子背板框、用 ns:Mark 记一笔（旁表，不写暴雪对象的字段 = 不污染），
+-- 底色和边框都进 Widget 的 themed 表，换主题自动重涂，这里不用自己挂 OnTheme。
+local function InsetWell(window)
+    local host = InsetRect(window)
+    if not host then return end
+
+    -- 先剥原生 inset 的美术件（它自带一圈浅底 + 原生边框，就是"正文里漏出浅框"的来源），再叠我们的。
+    ns.Skin:Strip(host)
+
+    Skin:Panel(host, { bgSurface = "lost", bgAlpha = INSET_ALPHA, thickness = 1 })
+end
+
+local function WeavePanel(panel)
+    if not panel then return end
+
+    -- 去掉暴雪原始贴图和边框（四块 parchment 底 + Material 角件都是面板自己的 region，Strip 够得到）
     ns.Skin:Strip(panel)
 
-    -- 衬底层 + 边框：用 Skin:Panel（BackdropTemplate + Widget:Theme）造带边框的暗背板。
-    -- 手搓 SetColorTexture 底只给"纯深色底"：不画边框。任务对话框靠它换底后，原版边框 art
-    -- （Strip 顺手带走了）没了，整窗就变成"一整片斜纹底、没有边框与内容的区分"。
-    -- 边框必须走主题（SetBackdrop + SetBackdropBorderColor），不能只在底上再叠一层贴图。
-    Skin:Panel(panel, { bgAlpha = baseAlpha, borderAlpha = opts.borderAlpha, borderKey = opts.borderKey })
-
-    -- 斜纹层：monet_stripe_weave 铺满，ADD 混合做柔光
+    -- 斜纹层：monet_stripe_weave，ADD 混合做柔光。它锚到正文凹槽矩形（见 AnchorWeave），
+    -- 底色归 InsetWell 那一层的 lost 板，织纹只落在凹槽里、不盖窗口边。
     local weave = Marked(panel, "questWeave")
     if not weave then
         weave = panel:CreateTexture(nil, "BACKGROUND", nil, -1)
-        weave:SetAllPoints(panel)
         weave:SetBlendMode("ADD")
         Mark(panel, "questWeave", weave)
     end
-    weave:SetVertexColor(weaveColor[1], weaveColor[2], weaveColor[3], weaveAlpha)
-    UpdateWeave(panel)
+    UpdateWeave(weave, AnchorWeave(weave, panel))
+    weave:SetVertexColor(WEAVE_COLOR[1], WEAVE_COLOR[2], WEAVE_COLOR[3], WEAVE_ALPHA)
 
     BrightenTree(panel)
 end
@@ -100,14 +161,14 @@ local QUEST_FONTS = {
 -- 模块级函数 = 稳定引用：SkinQuestFrame 会被 QUEST_LOG_UPDATE 反复触发，
 -- 在 Apply 里现造闭包的话每次触发都多挂一条回调（M:HookShow 按引用去重）。
 local function BrightenQuestPanels()
-    M:Controls(QUEST_PANELS, function(panel)
-        -- Show 路径也过一遍 Skin:Panel：任务面板是 Blizzard 按任务内容懒建/换的，Apply 时可能
-        -- 还没到、Show 时才落地——只刷织纹就永远补不上背板（实机实证：任务子面板缺背板）。
-        -- Skin:Panel 内部用 Marked 缓存幂等：已存在就只 Show + 刷主题，不会叠第二层背板。
-        Skin:Panel(panel, { bgAlpha = 0.70 })
-        UpdateWeave(panel)
-        BrightenTree(panel)
-    end)
+    -- 窗口那一层背板（frame.bg，panel 档 + 主题边框）：不是面板的（面板超尺寸，见 WEAVE_SIZE 上方那段）。
+    local window = Skin.With("questframe", function() return Skin:Need("QuestFrame") end)
+    Skin:Panel(window, { bgAlpha = READ_ALPHA })
+    -- 正文凹槽那一层（insetFrame.bg，lost 档 + 我们的凹槽边框）：与窗口档拉开色差 = 本次要解决的层次问题。
+    InsetWell(window)
+    -- 四块面板是暴雪按任务内容懒建/换的，Apply 时可能还没落地，所以 WeavePanel 整段重跑：
+    -- 它是幂等的（Strip 靠 Marked "hidden" 去重，织纹靠 Marked "questWeave" 去重）。
+    M:Controls(QUEST_PANELS, WeavePanel)
     -- 正文是挂在窗口外的全局 FontString，也要一起提亮
     M:Controls(QUEST_FONTS, function(fs)
         local ok, r, g, b = pcall(fs.GetTextColor, fs)
@@ -145,12 +206,6 @@ local QUESTLOG_SCROLLS = {
     "QuestLogListScrollFrame", "QuestLogDetailScrollFrame", "QuestLogObjectiveScrollFrame",
 }
 
--- 阅读型窗口一档 0.965（DESIGN-LANGUAGE §2 的独立一档）：任务日志 / 任务详情 / 剧情 / 书信。
--- 为什么不是 0.97：那一档是**对话框**（挡操作、要压住世界）；阅读窗口是"长时间对着看"，
--- 0.965 比常规窗口(0.96)更实、又不像弹窗那样闷。为什么不取 0.965~0.97 之间别的数：
--- 阶梯一个值一个语义，多出来的小数点只会让下一个人猜。
-local READ_ALPHA = 0.965
-
 local function SkinQuestLog()
     M:Dress("QuestLogFrame", { window = true, panel = { bgAlpha = READ_ALPHA } })
     M:Dress(QUESTLOG_BUTTONS, { as = "button" })
@@ -175,12 +230,10 @@ local function SkinQuestFrame()
     M:Dress(QUESTFRAME_BUTTONS, { as = "button" })
     M:Dress(QUESTFRAME_SCROLLS, { as = "scroll" })
 
-    -- 斜纹底板：暗色衬底 + monet_stripe_weave，解决暴雪正文在深底上看不清的问题
-    M:Controls(QUEST_PANELS, function(panel)
-        WeavePanel(panel, { baseAlpha = 0.70, weaveAlpha = 0.30 })
-    end)
+    -- 正文四块面板：剥原美术 + 锚在窗口矩形上的织纹 + 提亮文字
+    BrightenQuestPanels()
 
-    -- Show 后再亮一次（暴雪 quest 数据是 Show 后才塞的）
+    -- Show 后再跑一次（暴雪 quest 数据是 Show 后才塞的，面板也可能是那时候才建出来）
     HookQuestBrighten(Skin:Need("QuestFrame"))
 
     M:Dress("GossipFrame", { window = true, panel = { bgAlpha = READ_ALPHA } })
