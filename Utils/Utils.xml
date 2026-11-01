@@ -13,5 +13,8 @@
     <Script file="Layout.lua"/>
     <Script file="Mover.lua"/>
     <Script file="Skin.lua"/>
+    <!-- 模板层：按结构认控件（MoneyFrame / EditBox / ColoredProgressBar），
+         必须在 Skin.lua 之后（它往 Skin 上挂方法）。 -->
+    <Script file="SkinTemplates.lua"/>
     <Script file="Compat.lua"/>
 </Ui>

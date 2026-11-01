@@ -288,6 +288,31 @@ function M:SweepDeep(frame, controlOpts)
     if Marked(frame, "deepSweep") then return end
     Mark(frame, "deepSweep", true)
     Widget:PollWatch(frame, sweep)
+
+    M:SweepTemplates(frame, controlOpts)
+end
+
+--- 模板层补扫：只处理**静态**控件（金币 / 输入框 / 1.60 的 ColoredProgressBar），
+--- 不碰按钮 —— 所以可以安全地加到每一个面板上，而不用把 `deep`（会重铺每个按钮）也打开。
+---
+--- 2 秒一次而不是 0.2 秒：这几类控件不会每帧变，没必要占热路径。
+--- 回调必须是稳定引用（AGENTS：在 Apply 里现造闭包会每触发一次多挂一条轮询）。
+function M:SweepTemplates(frame, controlOpts)
+    if not frame or type(frame.GetChildren) ~= "function" then return end
+    if Marked(frame, "extrasSweep") then return end
+    if not Widget:Readable(frame) then return end
+    Mark(frame, "extrasSweep", true)
+
+    local extras = function()
+        if not M.active then return end
+        local ok, err = pcall(Skin.ExtrasIn, Skin, frame, controlOpts)
+        if not ok then
+            Skin:WarnOnce("extras:" .. Widget:FrameLabel(frame),
+                ("模板补扫 %s 失败: %s"):format(Widget:FrameLabel(frame), tostring(err)))
+        end
+    end
+    extras()
+    Widget:PollWatch(frame, extras, 2)
 end
 
 --- 本仓唯一的"美化一个对象"入口：确认对象 → 剥暴雪原美术 → 挂我们的底衬 →
@@ -298,6 +323,7 @@ end
 -- @param spec  对象、对象名（可点路径，每个都过 `Skin:Need` 记账）、或它们的列表
 -- @param opts  { window=true 走窗口装饰, panel={底衬参数}, strip={剥的参数}, noStrip,
 --               deep=true 扫直接子控件并在可见期间补扫, lazy=false 关掉补扫,
+--               templates=false 关掉模板层补扫（金币/输入框/ColoredProgressBar，默认开）,
 --               control={传给单个控件的参数}, as="tab|button|scroll|slider|dropdown|editbox|fade",
 --               tabs / buttons / scrolls = { 点名的控件 } }
 --               （window 档还吃 titleSize / noTitle / noClose；noPanel 只剥原美术、不挂底衬）
@@ -349,6 +375,11 @@ function M:Dress(spec, opts)
                         M:SkinScrollsIn(frame)
                         M:SkinSlidersIn(frame)
                     end
+                elseif opts.templates ~= false then
+                    -- 模板层默认开（`templates = false` 可关）：只铺金币 / 输入框 /
+                    -- ColoredProgressBar 这几类静态控件，**不碰按钮** —— 所以对每个面板
+                    -- 都安全，不必像 `deep` 那样逐个确认。deep 里已经包含它，别重复登记。
+                    M:SweepTemplates(frame, opts.control)
                 end
             end)
         end
@@ -403,10 +434,9 @@ function M:Scrolls(list)
 end
 
 --- Item buttons (the ones carrying an icon -- reward / slot icons we must not fade) are skipped.
-local function LooksLikeItemButton(button)
-    return button.icon or button.Icon or button.iconTexture or button.IconTexture
-        or button.itemButton or button.ItemButton
-end
+--- 实现已下沉到 `Utils/SkinTemplates.lua`（模板层也要用同一份判断）；这里保留同名局部，
+--- 调用点一个字都不用改。
+local LooksLikeItemButton = function(button) return Skin:LooksLikeItemButton(button) end
 
 --- Restyle every direct child Button of a frame, skipping item buttons.
 function M:SkinButtonsIn(frame, opts)
