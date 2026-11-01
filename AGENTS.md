@@ -103,13 +103,23 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   **规矩：凡是"从游戏拿到、之后要进 concat / format / 比较"的值（unit 令牌、name、guid、link），
   判完类型必须再过一次 `issecretvalue`**，宁可少显示一行。
 - **读一个值之前问 `Secrets.CanRead(v)`**（2026-10-30）：客户端的正规前置是 `canaccessvalue`（"我这个调用上下文能不能读/运算这个值"），比 `issecretvalue`（"它是不是机密"）更准 —— 非机密但当前读不了的值它也说 false。构建没有 `canaccessvalue` 时自动退回 `not issecretvalue`，所以调用点只管用它；`Secrets.Bool` / `Secrets.Number` 已经走这条，新代码不要再自己手写 `issecretvalue` 分支。
-- **执法强度随上下文变，脱战测出来的结论不能外推**（2026-11-01 判例，12.1.5 / 70688 实测）：
-  同一个机密串，**脱战**下 `==` / `~=` / `if v` / `tostring` 全部放行（A/B 各 30 次、0 拦截），
-  **战斗**下 `t ~= ""` 直接抛 `attempt to compare local 't' (a secret string value, while
-  execution tainted by ...)`。所以"我试过，比较没事"只在脱战成立 —— **守卫一律按战斗口径写**。
-  两个方向都放行的只有一类：`"x" .. secret` / `secret` 当表键 / `#secret` 在任何上下文都抛
-  `invalid value (secret)`。历史那 4063 条 `ADDON_ACTION_BLOCKED UNKNOWN()` 全部来自 **70575**，
-  70688 上没再出现过。
+- **执法强度不均匀，且变量还没分离干净**（2026-11-01 实测，12.1.5 / 70688）：
+  逐项测下来，**机密数字**和**机密字符串**在同一个操作上会给出相反结果：
+
+  | 操作 | 机密数字（脱战） | 机密字符串（脱战） | 机密字符串（战斗） |
+  |---|---|---|---|
+  | `v == nil` / `v ~= nil` | OK | OK | 未测 |
+  | `if v then`（真值） | OK | OK | 未测 |
+  | `tostring(v)` | OK | OK | 未测 |
+  | `v == <非 nil 字面量>` | **抛** | OK | **抛**（`t ~= ""`） |
+  | `"x" .. v` | **OK** | **抛** | 未测 |
+  | `t[v] = 1`（表键） | **抛** | **抛** | 未测 |
+
+  **结论口径**：只有 `== nil` / 真值 / `tostring` 三样是稳定的；其余一律按"会抛"写守卫。
+  **不要把"我试过没事"当依据** —— 上面同一操作在数字和字符串上结论相反，说明变量没分离干净
+  （候选：值类型、调用上下文、`ForceTaint_Strong` 污染标记）。要下新结论，必须在**目标场景**
+  （战斗 / 副本）里、用**同类值**复测，并把客户端版本一起记上。
+  另：历史那 4063 条 `ADDON_ACTION_BLOCKED UNKNOWN()` 全部来自 **70575**，70688 上没再出现过。
 - **`Secrets.CanMeasureHealth` / 各种 `ShouldXxxBeSecret` 不能当门**（2026-11-01 判例）：
   它问的是 `C_Secrets` 的**答案**，那个答案会和真实返回值对不上 —— 实测副本内
   `CanMeasureHealth("player") = true` 而 `UnitHealth("player")` 是机密、`CanMeasureHealth("target")`
