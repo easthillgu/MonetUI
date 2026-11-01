@@ -103,6 +103,20 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   **规矩：凡是"从游戏拿到、之后要进 concat / format / 比较"的值（unit 令牌、name、guid、link），
   判完类型必须再过一次 `issecretvalue`**，宁可少显示一行。
 - **读一个值之前问 `Secrets.CanRead(v)`**（2026-10-30）：客户端的正规前置是 `canaccessvalue`（"我这个调用上下文能不能读/运算这个值"），比 `issecretvalue`（"它是不是机密"）更准 —— 非机密但当前读不了的值它也说 false。构建没有 `canaccessvalue` 时自动退回 `not issecretvalue`，所以调用点只管用它；`Secrets.Bool` / `Secrets.Number` 已经走这条，新代码不要再自己手写 `issecretvalue` 分支。
+- **执法强度随上下文变，脱战测出来的结论不能外推**（2026-11-01 判例，12.1.5 / 70688 实测）：
+  同一个机密串，**脱战**下 `==` / `~=` / `if v` / `tostring` 全部放行（A/B 各 30 次、0 拦截），
+  **战斗**下 `t ~= ""` 直接抛 `attempt to compare local 't' (a secret string value, while
+  execution tainted by ...)`。所以"我试过，比较没事"只在脱战成立 —— **守卫一律按战斗口径写**。
+  两个方向都放行的只有一类：`"x" .. secret` / `secret` 当表键 / `#secret` 在任何上下文都抛
+  `invalid value (secret)`。历史那 4063 条 `ADDON_ACTION_BLOCKED UNKNOWN()` 全部来自 **70575**，
+  70688 上没再出现过。
+- **`Secrets.CanMeasureHealth` / 各种 `ShouldXxxBeSecret` 不能当门**（2026-11-01 判例）：
+  它问的是 `C_Secrets` 的**答案**，那个答案会和真实返回值对不上 —— 实测副本内
+  `CanMeasureHealth("player") = true` 而 `UnitHealth("player")` 是机密、`CanMeasureHealth("target")`
+  又是 false。拿它当门的结果是玩家框 / 目标框 / 26 块姓名板的血量文字**整段空白、不报错**。
+  正解是"先试 `Secrets.Number`，拿不到再交给客户端"：`Secrets.FormatHealthPercent(fs, unit,
+  current, maximum)` 就是这条（`UnitHealthPercent` 返回的机密数字 `SetFormattedText` 吃得下）。
+  同一条也适用于其它"查询式"门：**不要相信查询，相信值本身**。
 
 ## 污染（taint）模型 —— 本客户端最贵的一课
 
