@@ -312,7 +312,8 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   **原因**：`tools/deploy-retail.ps1` 用 `robocopy /MIR` 镜像整个 `Assets/`，
   放进 `Assets/Fonts/` 就等于打进玩家手上的包（一轮试字体就攒出 21 MB 未接线的）。
   每个字体都必须在 `Assets/Fonts/NOTICE.md` 有一行出处 + 授权，新增不补即视为不得分发；
-  **无授权声明的字体（点阵苹方、roadway）转公开前必须处理**。
+  **授权状态以 `Assets/Fonts/NOTICE.md` 为准**（2026-11-01 起：点阵苹方已取得作者授权，
+  允许随公开 Release 分发；`roadway.ttf` 仍未接线且无授权声明，但它只在 `Assets-src/` 不进包）。
 - **交付格式：BLP2 优先（2026-10-28 拍板）**。目录分工：
   `Assets-src/Textures/*.tga` = **源**（进 git、不进游戏，`audit-pixels.js` 审这个）；
   `Assets/Textures/*.blp` = **交付**（进游戏，由源同步生成：`node tools/tga-to-blp.js <tga> <blp>`）。

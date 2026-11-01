@@ -10,7 +10,7 @@
 | 文件 | 字体 | 版权 / 作者 | 授权 | 用在何处 |
 |---|---|---|---|---|
 | `LXGWWenKai-Regular.ttf` | LXGW WenKai（霞鹜文楷）v1.530 | © 2021-2026 LXGW（https://github.com/lxgw/LxgwWenKai） | **SIL OFL 1.1**，全文见 `OFL-LXGWWenKai.txt` | **`M.font.wenkai`**（2026-11-01 起：键与字体一一对应，`pixel` 已改指点阵苹方，`pingfang` 键删除）。当前无调用点，但旧存档值会走它，所以保留。CJK 覆盖远超游戏数据所需；OFL 允许随插件分发 |
-| `Pingfangpixel.ttf` | 点阵苹方 | © 2015 DynaComware；PingFang 为 Apple Inc. 商标 | **无授权声明**（文件内无 license 字段） | **`M.font.pixel`（正文默认）+ 小字轨**（<12px 一律走它）。2026-11-01 起 `pixel` 键改指本文件（原先名不副实指向文楷），任务追踪 / Toast / 战斗文字 / 信息栏 / 单位框正文 / 名牌小字 / 光环时长都走它。**无授权字体不得随公开发行包分发，转公开前必须处理** |
+| `Pingfangpixel.ttf` | 点阵苹方 | © 2015 DynaComware；PingFang 为 Apple Inc. 商标 | **字人自用许可**（作者授权，2026-11-01 取得；条款见下方「点阵苹方授权」一节）——**允许随公开 Release 分发** | **`M.font.pixel`（正文默认）+ 小字轨**（<12px 一律走它）。2026-11-01 起 `pixel` 键改指本文件（原先名不副实指向文楷），任务追踪 / Toast / 战斗文字 / 信息栏 / 单位框正文 / 名牌小字 / 光环时长都走它 |
 | `super-effective.ttf` | Super Effective v1.0 | © The Ender 2012（FontStruct） | **CC BY-SA 3.0**（http://creativecommons.org/licenses/by-sa/3.0/）—— 使用需署名，字体文件本身须以同协议分发 | 倒计时数字 `M.font.cooldown`（任何字号都用它自己） |
 
 ### 已移出分发目录（在 `Assets-src/Fonts/`，进 git 不进包）
@@ -32,14 +32,30 @@
   `cooldown` 任何字号都用它自己；其它键 **<12px** 一律落到 `Pingfangpixel.ttf`
   （硬边 `OUTLINE, MONOCHROME`——文楷小字号 + AA 实机发虚），**≥12px** 才按key解析。
   所以"双轨"现在只对 `wenkai` 有意义；正文走 `pixel`，12px 上下都是点阵苹方。
-- **授权状态（风险已升级，读这条要留意）**：点阵苹方**从"只作小字轨"变成了正文默认字体**
-  （任务追踪 / Toast / 战斗文字 / 信息栏 / 单位框正文 / 名牌小字 / 光环时长都走它），
-  而它**至今无授权声明**。私有包可用，但**转公开 / 发 Release 前必须替换**，
-  候选是 `Assets-src/Fonts/` 里的两个 OFL 像素字（`ark-pixel-12` / `fusion-pixel-12`）；
-  替换成本比只做小字轨时高得多——正文里有大量中文，需先确认 CJK 覆盖率，
-  否则生僻字会掉 □。
+- **授权状态（2026-11-01 更新）**：点阵苹方**已取得作者授权**（字人自用许可），
+  **允许随公开 Release 分发**，转公开前不再需要替换。授权条款记在下面「点阵苹方授权」一节，
+  不另放授权文件（文件内嵌 name 表没有 license 字段，与原厂授权文本分离）。
+  ⚠️ 仍需注意：`roadway.ttf`（57 KB，未接线）至今无授权声明 —— 它只作回滚参考、
+  不进包（在 `Assets-src/Fonts/`），转公开前若要留在分发目录里需先补授权。
+  另：`Assets-src/Fonts/OFL-ArkPixel.txt` 的内容是 Fusion 那份的复制（头部写
+  "Fusion Pixel Font"），**不是 Ark Pixel 的原文** —— 接线前要换成 ark 仓库的授权。
 - 渲染口径：`pixel` / 小字轨 = `OUTLINE, MONOCHROME`（硬边）；`wenkai` ≥12px = `OUTLINE`
   （抗锯齿）。实机验收：12px 以上看文楷 AA 是否舒展，12px 以下看点阵是否清晰。
+
+## 点阵苹方授权（2026-11-01 取得）
+
+- **字体**：Pingfangpixel.ttf（点阵苹方，PingFang Pixel Semibold，Version 6.66-2018.09.18）
+- **版权**：© 2015 DynaComware；PingFang 为 Apple Inc. 的商标（字体文件内嵌 name 表的
+  `copyright` / `trademark` 字段实测即为此）
+- **授权类型**：**字人自用许可**（作者授权，自定义条款）
+- **取得日期**：2026-11-01（作者提供给 MonetUI 项目）
+- **允许范围**：可用于 MonetUI 插件，**允许随公开 Release 分发**。
+- **条款存放**：按授权方要求，**不单独放授权文件**，条款记录在本节（文件内嵌 name 表
+  没有 `license` / `licenseURL` 字段，与原厂文本分离）。
+
+> 备注：DynaComware 的原厂授权文本未随字体分发；本条目依据的是 2026-11-01 取得的
+> 授权。若日后要转公开或重新分发，建议把授权方提供的书面凭据一并留档
+> （不必进 `Assets/Fonts/`，放项目外即可）。
 
 ## 参考
 
