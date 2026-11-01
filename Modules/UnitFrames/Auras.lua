@@ -318,6 +318,10 @@ local function EnsureAuraTexts(button, cd, spec)
 
     -- 时长文本：先给冷却自带的那行数字留条后路（换成像素字体、压进图标下沿），
     -- 万一 RegisterDurationText 不被客户端接受，就继续用它们。
+    -- 字体键可由调用方指定（`spec.fontKey`）：左上角 buff/debuff 要 Super Effective，
+    -- 目标框光环（字号只有 4-8px）继续用 PingFangPixel —— 那个尺寸下像素字体认不出来。
+    local fontKey  = (type(spec) == "table" and spec.fontKey) or "pingfang"
+    local stackKey = (type(spec) == "table" and spec.fontKey) or "pixel"
     local inset = math.max(2, math.floor(textSize * 0.55 + 0.5))
     local okRegions, regions = pcall(function() return { cd:GetRegions() } end)
     if okRegions then
@@ -325,7 +329,7 @@ local function EnsureAuraTexts(button, cd, spec)
             local region = regions[i]
             if type(region) == "table" and type(region.GetObjectType) == "function"
                 and region:GetObjectType() == "FontString" then
-                Widget:SetFont(region, textSize, "pingfang", Media.outlineFlags, true)
+                Widget:SetFont(region, textSize, fontKey, Media.outlineFlags, true)
                 pcall(region.ClearAllPoints, region)
                 pcall(region.SetPoint, region, "BOTTOM", button, "BOTTOM", 0, inset)
                 pcall(region.SetJustifyH, region, "CENTER")
@@ -335,16 +339,16 @@ local function EnsureAuraTexts(button, cd, spec)
 
     local okDur, duration = pcall(cd.CreateFontString, cd, nil, "OVERLAY")
     if not okDur or not duration then return nil end
-    -- 时长数字用 PingFangPixel + 硬描边：这套字号是跟着图标尺寸算的（目标框光环 14-20px，
-    -- 算出来 4-8px），像素字体在这个尺寸下认不出来。
-    Widget:SetFont(duration, textSize, "pingfang", Media.outlineFlags, true)
+    -- 时长数字：默认 PingFangPixel + 硬描边（这套字号跟着图标尺寸算，目标框光环 14-20px
+    -- 算出来 4-8px，像素字体在那个尺寸下认不出来）；`spec.fontKey` 可覆盖。
+    Widget:SetFont(duration, textSize, fontKey, Media.outlineFlags, true)
     duration:SetPoint("BOTTOM", button, "BOTTOM", 0, inset)
     duration:SetJustifyH("CENTER")
 
     -- 层数：锚在右上角，和左下角的时长错开。
     local okStack, stack = pcall(cd.CreateFontString, cd, nil, "OVERLAY")
     if not okStack or not stack then return nil end -- 与原函数同语义：任一文本串建不出就整批罢手
-    Widget:SetFont(stack, textSize, "pixel", nil, true)
+    Widget:SetFont(stack, textSize, stackKey, nil, true)
     stack:SetPoint("TOPRIGHT", button, "TOPRIGHT", -1, -1)
     stack:SetJustifyH("RIGHT")
     return duration, stack
