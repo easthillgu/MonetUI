@@ -396,21 +396,24 @@ end
 -- Safe to call repeatedly (theme refresh, size change): it only re-styles and asks for an immediate re-render.
 -- compact = true：不用 mm:ss 那种宽格式（"1:05"），退回紧凑的 "59m"/"23h"/"3d"。
 -- 小格子（buff 图标 28px）放不下 5 个字符，颜色 / 放大 / 缩放逻辑完全一样。
---- @param font "cooldown"（像素，动作条）| "pingfang"（矢量 + 硬描边，光环时长，小字号也看得清）
+
+--- 矢量字体（要抗锯齿 + OUTLINE 描边）vs 点阵字体（要 MONOCHROME 硬边）。
+local function OutlineFont(key) return key == "wenkai" end
+
+--- @param font Media.font 的键（"cooldown" 倒计时数字 / "pixel" 点阵 / "wenkai" 文楷）
 function M:Attach(cd, size, compact, font)
     if not cd then return nil end
     size = tonumber(size) or BASE_SIZE
     compact = compact and true or false
-    -- 允许的矢量键：pingfang（文楷）/ thin（NanoDyongChyangSong 细体，光环时长用）。
-    -- 其余一律归到 "cooldown"（Super Effective，像素网格）。
-    font = (font == "pingfang" or font == "thin") and font or "cooldown"
+    -- 认 Media.font 里**任何**键；未知键归到 "cooldown"（Super Effective，像素网格）。
+    font = (type(font) == "string" and Media.font[font]) and font or "cooldown"
 
     local state = attached[cd]
     if state then
         state.size = size
         state.compact = compact
         state.font = font
-        state.flags = (font == "pingfang" or font == "thin") and Media.outlineFlags or Media.fontFlags
+        state.flags = OutlineFont(font) and Media.outlineFlags or Media.fontFlags
         UpdateScale(cd, state)        -- the bar may have been resized
         state.look = nil              -- force the font/colour to be re-applied
         state.next = 0                -- render on the next frame
@@ -421,7 +424,7 @@ function M:Attach(cd, size, compact, font)
         size         = size,
         compact      = compact,
         font         = font,
-        flags        = (font == "pingfang" or font == "thin") and Media.outlineFlags or Media.fontFlags,
+        flags        = OutlineFont(font) and Media.outlineFlags or Media.fontFlags,
         own          = false,
         next         = 0,
         accum        = 0,

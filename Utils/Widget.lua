@@ -1052,7 +1052,7 @@ function Widget:Icon(parent, size, layer, sublevel)
 end
 
 --- A FontString using the addon fonts.
--- @param key font key in Media.font ("pixel", "cooldown", "pingfang"); @param colorKey "edge" | "neutral" | "highlight" | "border" | "health" | "danger" | {r,g,b}
+-- @param key font key in Media.font ("pixel" / "wenkai" / "cooldown"); @param colorKey "edge" | "neutral" | "highlight" | "border" | "health" | "danger" | {r,g,b}
 -- @param flags optional render flags；传 Media.fontFlags / Media.outlineFlags（"默认口径"的
 --        两种拼写）或不传时，按字号换挡（Media:EffectiveFlags：<12px 点阵苹方硬边、
 --        ≥12px 文楷抗锯齿）；自定义 flags 尊重调用方。

@@ -158,7 +158,7 @@ local function Acquire()
         fs:Show()
         return fs
     end
-    fs = Widget:Font(container, 12, "pingfang", "danger", "CENTER", nil, Media.outlineFlags)
+    fs = Widget:Font(container, 12, "pixel", "danger", "CENTER", nil, Media.outlineFlags)
     fs:SetWordWrap(false)
     return fs
 end
@@ -195,7 +195,7 @@ local function Emit(text, r, g, b)
 
     local fs = Acquire()
     -- 字号固定 12：原来的 `big and 16 or 12` 是死分支（SnapSize 把 16 也吸到 12），已删。
-    Widget:SetFont(fs, 12, "pingfang", Media.outlineFlags)
+    Widget:SetFont(fs, 12, "pixel", Media.outlineFlags)
     fs:SetText(text)
     fs:SetTextColor(r, g, b, 1)
     fs:SetAlpha(1)
@@ -340,7 +340,7 @@ local function EnsureAlert()
     aShield:SetSize(SHIELD_SIZE, SHIELD_SIZE)
     aShield:SetPoint("CENTER", alert, "CENTER", 0, 0)
 
-    aText = Widget:Font(alert, 24, "pingfang", "danger", "CENTER", "OVERLAY", Media.outlineFlags)
+    aText = Widget:Font(alert, 24, "pixel", "danger", "CENTER", "OVERLAY", Media.outlineFlags)
     aText:SetPoint("TOP", alert, "BOTTOM", 0, TEXT_BASE)
     aText:SetWordWrap(false)
 end

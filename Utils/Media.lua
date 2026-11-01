@@ -22,22 +22,14 @@ Media.texturesDir  = ASSET .. "Textures\\"
 --           发虚（2026-10-28 判例：12 以下整体糊），点阵苹方就是为小尺寸设计的。
 --           **无授权声明**，只许私有包携带（NOTICE.md 记档），转公开前必须处理。
 --   cooldown 键例外：Super Effective 只给倒计时数字，任何字号都用它自己。
---   supereff 键同样任何字号都用 Super Effective（动作条的热键/堆叠数/宏名，2026-10-30 定）。
--- 键名保留 `pixel` / `pingfang`（15+ 调用点引用的是键不是文件；未知键回落到 pixel）。
+-- 键与字体**一一对应**（2026-11-01 玩家定）：pixel = 点阵苹方、wenkai = 文楷。
+-- 未知键回落到 pixel。
 Media.font = {
-    pixel    = ASSET .. "Fonts\\LXGWWenKai-Regular.ttf",
-    cooldown = ASSET .. "Fonts\\super-effective.ttf",
-    supereff = ASSET .. "Fonts\\super-effective.ttf",
+    -- 正文默认字体：点阵苹方（12px 网格，12 号字最清晰）。
+    -- 2026-11-01 玩家定：键名与字体必须一一对应，不要"叫 pixel 其实是文楷"这种。
+    pixel    = ASSET .. "Fonts\\Pingfangpixel.ttf",
     wenkai   = ASSET .. "Fonts\\LXGWWenKai-Regular.ttf",
-    -- 历史别名：15+ 调用点还写着 "pingfang"。**指向 PingFangPixel 点阵字体**（12px 网格，
-    -- 12 号字最清晰）。2026-11-01 玩家确认：这个键就该是点阵苹方，不是文楷。
-    -- 影响面：任务追踪 / Toast / 战斗文字 / 信息栏 / 光环时长 共 12 处调用点。
-    pingfang = ASSET .. "Fonts\\Pingfangpixel.ttf",
-    -- 细体（2026-11-01 加）：NanoDyongChyangSong，按 16px 设计、只用于**数字与字母**的小字号
-    -- （光环时长 / 层数）。9px 以下渲染不出来，10px 起清晰。
-    -- 为什么需要它：buff 图标只有 28px，Super Effective 在 9px 已经破像素网格（实测放大截图
-    -- 笔画不均匀），而同样宽度下这个细体是矢量、任意字号都干净。
-    thin     = ASSET .. "Fonts\\nfdcsCN16.ttf",
+    cooldown = ASSET .. "Fonts\\super-effective.ttf",
 }
 
 -- 小字轨（<12px）专用文件与标志；大字轨不引用它。
@@ -328,12 +320,11 @@ function Media:Font(key)
 end
 
 --- 双轨漏斗①：按字号解析字体路径（≥12px 走 Media.font 的键，<12px 一律点阵苹方；
---- cooldown / supereff 两个键例外，任何字号都是 Super Effective）。所有 SetFont 调用点都该走这个，
+--- cooldown 键例外，任何字号都用它自己）。所有 SetFont 调用点都该走这个，
 --- 不要直接 Media:Font —— 字号与字体必须同源，否则楷体会被塞进小字号发虚。
 function Media:FontFor(key, size)
     size = tonumber(size) or 12
     if key == "cooldown" then return self.font.cooldown end
-    if key == "supereff" then return self.font.supereff end
     if size < self.smallSizeCutoff then return self.smallFont end
     return self:Font(key)
 end
