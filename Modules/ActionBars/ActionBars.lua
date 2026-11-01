@@ -469,22 +469,51 @@ local function BuildButtonIcon(button)
 end
 
 -- 热键 / 堆叠数 / 宏名三个文本。
--- 字体与颜色（2026-10-30 玩家定）：三个都用 Super Effective + **主题色**（edge 槽）。
--- 以前热键与堆叠数是白色，理由是"主题色在技能图标上看不清"；玩家明确要求统一成主题色，
--- 对比度由 OUTLINE 描边兜底（12px 走 fontFlags）。
+-- 字体与颜色（2026-10-30 → 2026-11-01 玩家定迭代）：
+--   * 2026-10-30：三个都用 Super Effective + **主题色**（edge 槽），对比度由 OUTLINE 兜底。
+--   * 2026-11-01：字体政策改为"字号说了算"——这些是 ≤14px 的偏小文字，走 `Media:FontFor`
+--     "key 不再决定字体"的新口径（热键/堆叠/宏名 → `pixel`，冷却时间 → `cooldown` 例外）。
+--   * 2026-11-01：颜色不再写死 `"edge"`，跟随「边框颜色」设置（`Color:GetBorder()`），
+--     再提亮一档（`TEXT_BRIGHTEN`）压在暗底上看得清。
+--- 动作条文字色（热键 / 堆叠数 / 宏名）：**跟随边框槽，再提亮一档**。
+---
+--- 不写死 `edge`：边框色由「边框颜色」设置（`Color:GetBorder()`）决定，写死的话
+--- 玩家把设置切到 ambient / highlight 时文字和边框就分家了（2026-11-01 玩家要求「跟随」）。
+--- 提亮是为了小字压在暗底上看得清；`TEXT_BRIGHTEN` 是向白混合的量（0 = 原色，1 = 纯白）。
+local TEXT_BRIGHTEN = 0.35
+
+local function ButtonTextColor()
+    local r, g, b = Color:GetBorder()
+    if not r then return { r = 1, g = 1, b = 1, a = 1 } end
+    return {
+        r = r + (1 - r) * TEXT_BRIGHTEN,
+        g = g + (1 - g) * TEXT_BRIGHTEN,
+        b = b + (1 - b) * TEXT_BRIGHTEN,
+        a = 1,
+    }
+end
+
+--- 把 ButtonTextColor() 上到字体串。主题换了要重染：Widget:Font 只在创建时
+--- 上一次色，没有主题重染链路，所以主题事件里走 M:UpdateHotkeys 重新上一遍。
+local function TintButtonLabel(fs)
+    if not fs or not fs.SetTextColor then return end
+    local c = ButtonTextColor()
+    pcall(fs.SetTextColor, fs, c.r, c.g, c.b, c.a)
+end
+
 local function BuildButtonFonts(button)
     -- 热键
-    local hotkey = Widget:Font(button, HOTKEY_SIZE, "pixel", "edge", "LEFT")
+    local hotkey = Widget:Font(button, HOTKEY_SIZE, "pixel", ButtonTextColor(), "LEFT")
     hotkey:SetPoint("TOPLEFT", button, "TOPLEFT", 2, -1)
     button.hotkey = hotkey
 
     -- 堆叠数量
-    local count = Widget:Font(button, COUNT_SIZE, "pixel", "edge", "RIGHT")
+    local count = Widget:Font(button, COUNT_SIZE, "pixel", ButtonTextColor(), "RIGHT")
     count:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -2, 1)
     button.count = count
 
     -- 宏名
-    local macro = Widget:Font(button, MACRO_SIZE, "pixel", "edge", "CENTER")
+    local macro = Widget:Font(button, MACRO_SIZE, "pixel", ButtonTextColor(), "CENTER")
     macro:SetPoint("BOTTOM", button, "BOTTOM", 0, 1)
     button.macro = macro
 end
@@ -1133,14 +1162,14 @@ local function SkinAdoptedButton(btn)
 
     -- 收养按钮（宠物/姿态）的热键与堆叠数：和自绘按钮同一套 —— Super Effective + 主题色
     -- （2026-10-30 玩家要求）。暴雪自己的 FontString，只调字体与颜色，不写字段。
-    local er, eg, eb = Color:GetEdge()
+    local tcol = ButtonTextColor()
     if btn.HotKey then
         pcall(Widget.SetFont, Widget, btn.HotKey, HOTKEY_SIZE, "pixel")
-        if btn.HotKey.SetTextColor then pcall(btn.HotKey.SetTextColor, btn.HotKey, er, eg, eb) end
+        if btn.HotKey.SetTextColor then pcall(btn.HotKey.SetTextColor, btn.HotKey, tcol.r, tcol.g, tcol.b, tcol.a) end
     end
     if btn.Count then
         pcall(Widget.SetFont, Widget, btn.Count, COUNT_SIZE, "pixel")
-        if btn.Count.SetTextColor then pcall(btn.Count.SetTextColor, btn.Count, er, eg, eb) end
+        if btn.Count.SetTextColor then pcall(btn.Count.SetTextColor, btn.Count, tcol.r, tcol.g, tcol.b, tcol.a) end
     end
 
     -- 冷却**交给暴雪自己**：我们那套渲染会给它的冷却框 SetHideCountdownNumbers(true) 再自己画字，
@@ -1707,13 +1736,13 @@ function M:UpdateHotkeys()
         else
             -- 收养按钮的字体/颜色是我们在 SkinAdoptedButton 里直接写的（不在 themed 表里），
             -- 换主题不会自动重染，这里补一刀。
-            local er, eg, eb = Color:GetEdge()
+            local tcol = ButtonTextColor()
             for _, btn in ipairs(bar.buttons) do
                 if btn.HotKey and btn.HotKey.SetTextColor then
-                    pcall(btn.HotKey.SetTextColor, btn.HotKey, er, eg, eb)
+                    pcall(btn.HotKey.SetTextColor, btn.HotKey, tcol.r, tcol.g, tcol.b, tcol.a)
                 end
                 if btn.Count and btn.Count.SetTextColor then
-                    pcall(btn.Count.SetTextColor, btn.Count, er, eg, eb)
+                    pcall(btn.Count.SetTextColor, btn.Count, tcol.r, tcol.g, tcol.b, tcol.a)
                 end
             end
         end
