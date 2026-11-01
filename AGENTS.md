@@ -306,6 +306,13 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
 ## 材质制作规范
 
 - 尺寸必须为 2 的幂次方（32/64/128/256），非正方形需补白到最近幂次。
+- **字体目录分工（2026-11-01 定，和贴图同一套逻辑）**：`Assets/Fonts/` = **随包分发**，
+  里面**只允许**放 `Media.font` 有键指向、且换挡规则真会用到的字体（现为 `pixel` / `wenkai` /
+  `cooldown` 三个）；候选与未接线的放 `Assets-src/Fonts/`（进 git、不进包）。
+  **原因**：`tools/deploy-retail.ps1` 用 `robocopy /MIR` 镜像整个 `Assets/`，
+  放进 `Assets/Fonts/` 就等于打进玩家手上的包（一轮试字体就攒出 21 MB 未接线的）。
+  每个字体都必须在 `Assets/Fonts/NOTICE.md` 有一行出处 + 授权，新增不补即视为不得分发；
+  **无授权声明的字体（点阵苹方、roadway）转公开前必须处理**。
 - **交付格式：BLP2 优先（2026-10-28 拍板）**。目录分工：
   `Assets-src/Textures/*.tga` = **源**（进 git、不进游戏，`audit-pixels.js` 审这个）；
   `Assets/Textures/*.blp` = **交付**（进游戏，由源同步生成：`node tools/tga-to-blp.js <tga> <blp>`）。
