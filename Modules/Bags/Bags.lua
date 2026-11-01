@@ -184,14 +184,17 @@ table.sort(ORDERED, function(a, b) return a.order < b.order end)
 --- 装备位三段判定（照 RealUI:Slots.lua:138-151）：容器 / 箭袋 = 容器；
 --- NonEquip = 其它；**其余全是装备** —— 职业工具 / 可装备法术 / 圣物都在这条路上。
 --- 旧版用 `classID == Armor or Weapon`，把职业工具和圣物归到了"其他"。
---- equipLoc 是 `C_Item.GetItemInfo` 第 10 项的 INVTYPE_* 串，本客户端实测就是大写；
---- 受限环境下它可能返回**机密串**，判不出来就当 "other"（宁可少归一类，不要抛）。
-local function EquipKind(equipLoc)
-    if type(equipLoc) ~= "string" or Secrets.IsSecret(equipLoc) or equipLoc == "" then
-        return "other"
+---
+--- **用数字枚举，不要赌 `itemEquipLoc` 的字符串名**（实机 2026-11-01）：
+--- 这台客户端不可装备物品返回的是 `INVTYPE_NON_EQUIP_IGNORE`，不是 `INVTYPE_NON_EQUIP`，
+--- 字符串精确匹配会把炉石 / 配方 / 材料全判成装备（当时装备窗 183 高、"其他"空着）。
+--- 数字侧是 `Enum.InventoryType`，RealUI 也正是这么判的。
+local function EquipKind(invType)
+    if type(invType) ~= "number" or Secrets.IsSecret(invType) then return "other" end
+    if invType == Enum.InventoryType.IndexNonEquipType then return "other" end
+    if invType == Enum.InventoryType.IndexBagType or invType == Enum.InventoryType.IndexQuiverType then
+        return "container"
     end
-    if equipLoc == "INVTYPE_NON_EQUIP" then return "other" end
-    if equipLoc == "INVTYPE_BAG" or equipLoc == "INVTYPE_QUIVER" then return "container" end
     return "equipment"
 end
 
@@ -245,10 +248,16 @@ local function BuildItem(bag, slot, info)
         if ok then it.isNew = isNew and true or false end
     end
 
-    -- 装备位三段判定（照 RealUI:Slots.lua:138-151）：容器/箭袋 = 容器；
-    -- NonEquip = 其它；**其余全是装备** —— 职业工具 / 可装备法术 / 圣物都在这条路上，
-    -- 旧版用 `classID == Armor or Weapon` 会把这几类归到"其他"。
-    local kind = EquipKind(it.equipLoc)
+    -- 装备位三段判定：**用数字枚举**（`C_Item.GetItemInventoryTypeByID`），
+    -- 不要用 `it.equipLoc` 的字符串名 —— 本客户端不可装备物品返回的是
+    -- `INVTYPE_NON_EQUIP_IGNORE`，字符串精确匹配会把炉石/配方/材料全判成装备
+    -- （实机 2026-11-01：装备窗 183 高、"其他"空着）。拿不到就退回 "other"。
+    local invType
+    if C_Item and C_Item.GetItemInventoryTypeByID and it.itemID then
+        local okInv, t = pcall(C_Item.GetItemInventoryTypeByID, it.itemID)
+        if okInv then invType = t end
+    end
+    local kind = EquipKind(invType)
     it.equipKind     = kind
     it.isEquippable  = (kind == "equipment")
     it.isContainer   = (kind == "container")
