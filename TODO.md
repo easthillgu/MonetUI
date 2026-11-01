@@ -1,5 +1,42 @@
 # 待办
 
+## 🐞 2026-11-01 审查发现：三处 `GetChildren` 把多返回值当表用
+
+`Frame:GetChildren()` 返回的是**多返回值**，不是表。`local ok, kids = pcall(f.GetChildren, f)`
+只会拿到**第一个**子框，而框体表没有数组部分 → `#kids == 0` / `ipairs(kids)` 空转。
+全仓其余十处都写成 `{ f:GetChildren() }`（`Skin.lua:868` 的注释专门记过同一课），这三处漏了：
+
+- ✅ **已修**（`c2b6b2b`）：`Modules/UnitFrames/BossFrames.lua` `StarveBoss`
+  —— 子框事件没被饿掉，停车的首领框子件仍在更新。改法照全仓口径
+  `pcall(function() return { frame:GetChildren() } end)`，同时补了战斗守卫和脱战补压 ticker。
+- ⬜ **未修**（需 40 人团实机验证后再动）：`Modules/UnitFrames/Groups.lua`
+  `AlphaTree` / `MuteTree`（约 :890 / :900）
+  —— 注释写着"必须逐件归零""成员按钮在第三层"，**实际只处理了根框**。
+  后果：暴雪团队框里设了 `SetIgnoreParentAlpha(true)` 的子件可能仍露出来（空心描边），
+  子按钮的鼠标可能没被关掉。
+
+**为什么这两处不能一起改**：修好递归 = 真的去碰一堆**受保护的**暴雪框，而
+`StartMuteTicker` 是**每秒在战斗里**跑 `AlphaTree` / `MuteTree` 的。`MuteOne` 有战斗守卫，
+`AlphaTree` **没有** —— 递归一修，战斗中每秒对每个受保护子件 `SetAlpha`，就是当年那串
+`ADDON_ACTION_BLOCKED`（×984）重演。所以必须**同时**做三件事，并且只能实机验收：
+
+1. `AlphaTree` 加战斗守卫（战斗中只压根框，或整段跳过）；
+2. 修递归写法（`pcall(function() return { f:GetChildren() } end)`）；
+3. `StartMuteTicker` 加门控：名册/包加载没变就不重扫（修完递归后它才真的变贵）。
+
+验收：40 人团 + 战斗中进出若干次，读 `Logs/taint.log` 与 `ADDON_ACTION_BLOCKED` 计数；
+确认暴雪团队框没有描边残留、点它那块屏幕不会误选/误拖。
+
+## 📉 2026-11-01 审查里"算过账、不做"的两条
+
+- **小队/团队框的单位事件过滤**（`Groups.lua:1237` 的 10 个 `UNIT_*` 走全局 `Register`）：
+  想换成 `RegisterUnit` 的话，`party1-4 + raid1-40` 是 45 个单位，`RegisterUnitEvent` 的单位个数
+  上限在本客户端没验证过（`EventBus:RegisterUnit` 失败会静默退回普通注册，等于白改）。
+  按事件频率估，现在每条外部 `UNIT_HEALTH` 的成本 ≈ 一次表分配 + 一次 pcall，量级 0.1 ms/秒，
+  **不值得动共享派发路径**。真要动先开游戏量 `RegisterUnitEvent` 的上限。
+- **`EventBus:Dispatch` 的每事件快照表**（`EventBus.lua:194/204`）：同理，量级可忽略；
+  改成"派发中注销才复制"会碰全仓最敏感的共享路径，收益不匹配风险。
+
 ## 🐞 2026-10-31 战斗/登录相关的背包问题（已修，剩登录复验）
 
 - [x] 战斗里 `/reload` → 背包只有标题、弹「界面行为失效」：`InCombatLockdown()` 登录当拍假 false +
