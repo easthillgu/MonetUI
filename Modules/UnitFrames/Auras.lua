@@ -322,14 +322,8 @@ local function EnsureAuraTexts(button, cd, spec)
     -- 万一 RegisterDurationText 不被客户端接受，就继续用它们。
     -- 字体键可由调用方指定（`spec.fontKey`）：左上角 buff/debuff 要 Super Effective，
     -- 目标框光环（字号只有 4-8px）继续用 PingFangPixel —— 那个尺寸下像素字体认不出来。
-    local fontKey  = (type(spec) == "table" and spec.fontKey) or "pingfang"
+    local fontKey  = (type(spec) == "table" and spec.fontKey) or "pixel"
     local stackKey = (type(spec) == "table" and spec.fontKey) or "pixel"
-
-    -- **nfd（thin）在 9px 以下渲染不出任何字形**（实测 9px 宽度 0.0，它是按 16px 设计的），
-    -- 而目标框光环是 24x18 的小格、算出来只有 7px —— 直接换过去时间会完全消失。
-    -- 所以给这个字体一个 10px 下限；其它字体仍是 6px。
-    local minPx = (fontKey == "thin") and 10 or 6
-    if textSize < minPx then textSize = minPx end
 
     -- **按图标宽度自适应字号**（玩家 2026-11-01 报"左上角 buff 时间显示不完整"）。
     -- 用参考串估算，不依赖真实文本：受限状态下 `GetStringWidth` 对真实文本返回机密值，
@@ -390,7 +384,7 @@ local refSizes = {}          -- [fontKey .. basePx .. limit] = 估算字号（�
 
 function ReferenceSize(fontKey, basePx, limit)
     if type(basePx) ~= "number" or basePx <= 0 then return 12 end
-    local floorPx = (fontKey == "thin") and 10 or 6   -- nfd 在 10px 以下渲染不出字形
+    local floorPx = 6
     local key = tostring(fontKey) .. "|" .. tostring(basePx) .. "|" .. tostring(limit)
     local cached = refSizes[key]
     if cached then return cached end
@@ -428,7 +422,7 @@ local function FitAuraText(fs, maxWidth, fontKey, basePx, outline)
     local size = ReferenceSize(fontKey, basePx, limit)
 
     -- 量得到真实宽度就在估算基础上继续收（机密状态下这里拿不到值，保持估算结果）
-    local floorPx = (fontKey == "thin") and 10 or 6
+    local floorPx = 6
     local ok, width = pcall(fs.GetStringWidth, fs)
     local w = ok and Secrets.Number(width) or nil
     if w then
@@ -521,6 +515,27 @@ local function StyleAuraCooldownTexts(button, fontKey, basePx, outline, depth)
     end
 end
 
+--- 需要补扫字号/字体的光环按钮。弱键：按钮被引擎回收就自动掉出去。
+local fitTargets = setmetatable({}, { __mode = "k" })
+local fitTicker
+
+local function RunAuraFit()
+    for btn, want in pairs(fitTargets) do
+        -- **不能拿 `Widget:Readable` 当门**：这些引擎按钮只是读不到**可见性**（IsVisible 会抛），
+        -- 但遍历子件 / 给字体串 SetFont 都是成功的（实机 2026-11-01：60 个字体串就是这么改掉的）。
+        -- 用它当门等于把补扫整个关掉。真正的噪声来自 PollWatch 每拍问可见性 —— 所以这里
+        -- 用自己的 pcall 遍历，不碰可见性，也就不会告警。
+        pcall(StyleAuraCooldownTexts, btn, want.fontKey, want.basePx, Media.outlineFlags)
+    end
+end
+
+--- 一个中央 ticker 代替"每个按钮一条 PollWatch"（理由见 RunAuraFit）。
+local function EnsureAuraFitTicker()
+    if fitTicker then return end
+    if type(C_Timer) ~= "table" or type(C_Timer.NewTicker) ~= "function" then return end
+    fitTicker = C_Timer.NewTicker(1, RunAuraFit)
+end
+
 -- initializeFrame：一个引擎按钮只进来一次。碰按钮的事必须在这里做完。
 -- spec（可选）：{ width, height, crop } —— BuffFrame 的战斗兜底复用这套样式，但玩家 buff 行是
 -- 方形图标、且不裁边（目标框的 18x14 槽才需要 3:4 裁切）。不传 spec 就等于原来的目标框样子。
@@ -590,20 +605,18 @@ local function StyleAuraButton(button, kind, spec)
     -- **不要用 `(duration or stack)` 门控**：`EnsureAuraTexts` 建不出字体串时，
     -- 屏幕上显示的其实是**引擎自带的那几个** FontString —— 门一关它们就永远没人管
     -- （实机 2026-11-01：目标框 8 个 buff 的时长一直是 ARKai_T@17 默认字体）。
-    if not Marked(button, "fitWatch") then
-        Mark(button, "fitWatch", true)
-        local fitFontKey = (type(spec) == "table" and spec.fontKey) or "pingfang"
-        -- **`textSize` 必须来自 EnsureAuraTexts 的返回值**：它是那个函数的局部变量，
-        -- 在这里直接写 `textSize` 取到的是全局 nil（AGENTS 里"引用了还没声明的 local"那条）。
-        local fitBase = textSize
-        if type(fitBase) ~= "number" then fitBase = (fitFontKey == "thin") and 10 or 8 end
-
-        -- 先立刻做一遍，再每秒补（引擎会自己重写文本/字体，补扫兜住）
-        pcall(StyleAuraCooldownTexts, button, fitFontKey, fitBase, Media.outlineFlags)
-        Widget:PollWatch(button, function()
-            pcall(StyleAuraCooldownTexts, button, fitFontKey, fitBase, Media.outlineFlags)
-        end, 1)
-    end
+    --
+    -- **也不能给每个按钮挂 PollWatch**：引擎光环按钮只是读不到**可见性**（`IsVisible` 会抛），
+    -- 驱动每拍问一次就告警一次 → 实测一次刷出 40 多条
+    -- 「轮询读不到可见性：Button（无名）（forbidden 对象）」。AGENTS 的口径就是
+    -- "根本读不出来的框不要挂进轮询"。改成登记进下面这张中央表，由一个 ticker 统一扫，
+    -- 扫描时不碰可见性（`StyleAuraCooldownTexts` 内部全是 pcall），所以不会告警。
+    local fitBase = textSize
+    if type(fitBase) ~= "number" then fitBase = 8 end
+    local fitFontKey = (type(spec) == "table" and spec.fontKey) or "pixel"
+    EnsureAuraFitTicker()
+    fitTargets[button] = { fontKey = fitFontKey, basePx = fitBase }
+    pcall(StyleAuraCooldownTexts, button, fitFontKey, fitBase, Media.outlineFlags)
 end
 
 --- 导出给 BuffFrame：战斗里客户端不给插件读光环，玩家 buff 行改由引擎 AuraContainer 显示，
