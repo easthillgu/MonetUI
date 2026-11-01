@@ -315,6 +315,10 @@ local function StyleButton(button, cfg, small)
     SizeSelectBorder(button)
     SetSelected(button, button.selected == true)
 
+    -- 血条 / 能量 / 覆盖层可能是这次重建出来的（新对象 alpha=1）：作废"上次写过的距离档位"，
+    -- 否则 SetContentAlpha 会以为已经是 0.45 而跳过，远处的人就永远不淡。
+    ns:Mark(button, "contentAlpha", nil)
+
     -- Clique / 点击施法类插件认这张表；没装也没有副作用。
     -- 走 _G 拿：这个全局在本客户端根本没有，直接写全局名会被静态检查当成"用了一个不存在的全局"。
     local clickcast = _G.ClickCastFrames
@@ -324,7 +328,14 @@ local function StyleButton(button, cfg, small)
 end
 
 --- 内容整体变淡（距离太远）。受保护的按钮不能 SetAlpha，改它里面的 region。
+---
+--- **档位没变就不写**：距离扫描每 0.25 秒跑一次，40 人团每拍要给每个可见按钮的 3 个 region
+--- 各写一次，而绝大多数时候档位完全一样（≈480 次/秒值相同的 `SetAlpha`）。上次写进去的档位
+--- 记在旁表上（AGENTS：不往框体写字段）。`StyleButton` 会清掉它 —— 条可能被重建成新对象，
+--- 新对象 alpha 是 1，旁表还留着 0.45 就会让远处的人永远不淡。
 local function SetContentAlpha(button, alpha)
+    if ns:Marked(button, "contentAlpha") == alpha then return end
+    ns:Mark(button, "contentAlpha", alpha)
     if button.health then button.health:SetAlpha(alpha) end
     if button.power then button.power:SetAlpha(alpha) end
     -- 文字与职责图标都收在覆盖层里，淡一次全淡；预估 / 吸收盾是血条的子框，随血条淡
