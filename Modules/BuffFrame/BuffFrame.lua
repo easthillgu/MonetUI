@@ -103,7 +103,8 @@ local function CreateAuraButton(parent, size)
         -- compact = true：28px 的图标放不下 "31:50"，用 "31m" 这种短格式；
         -- 颜色（分钟蓝 / 秒红）、临近到期放大等逻辑和动作条冷却是同一套。
         -- 字体用点阵苹方（`pixel` 键）：和正文同一套，12px 网格下字形最清晰。
-        -- 2026-11-01 依次试过 Super Effective 和细体 nfd（nfdcsCN16），实机都不满意。
+        -- 2026-11-01 试过 Super Effective（12px 图标上 "2M" 就吃掉近 80%）和一款 16px 点阵宋
+        -- （小字号还要额外维护 10px 下限，不值），实机都不满意，字体文件已删。
         cooldowns:StyleCooldown(button.cooldown, 12, true, "pixel")
     end
 
