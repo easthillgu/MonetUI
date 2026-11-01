@@ -464,6 +464,8 @@ local function SkinMenus()
     WatchModernMenus(up)
 end
 
+local PaintTooltipPlate      -- 前向声明：下面的轮询要用它（定义在本文件后面）
+
 --- 提示框的九宫格颜色每次隐藏都会被 GameTooltip_ClearStyle 刷回暴雪默认值
 --- （GameTooltipDataMixin:OnHide → SharedTooltip_SetBackdropStyle(self, nil)），只在登录时染一次等于没染。
 --- 挂到那个函数上补一刀：只补「默认样式」；暴雪自己的特殊样式（符文锻造金、腐化紫、Azerite）保留原样。
@@ -473,7 +475,7 @@ local function WatchTooltipStyle()
     tooltipStyleWatched = true
 
     -- 不再 hooksecurefunc("SharedTooltip_SetBackdropStyle")（全局函数钩子 = 污染）：
-    -- 改成轮询——提示框显示期间每 0.5 秒补一次九宫格染色。暴雪自己换特殊样式
+    -- 改成轮询——提示框显示期间每 0.2 秒补一次九宫格染色。暴雪自己换特殊样式
     -- （符文锻造金 / 腐化紫 / Azerite）时，Mark 里的 nineTint 仍在，但颜色会被它覆盖，
     -- 所以这里只在"还是我们标记过的那个框"时补色。
     local tip = Skin:Need("GameTooltip")
@@ -481,6 +483,10 @@ local function WatchTooltipStyle()
         ns.Widget:PollWatch(tip, function(self)
             if not self:IsShown() then return end
             if Marked(self, "nineTint") then TintNineSlice(self) end
+            -- **背板也要补**：那个"刷回默认"是遍历 regions 染顶点色的，我们自己画的底和
+            -- 四条边一起被刷成纯白（实机 2026-11-01 探针：our.bg = 1,1,1,1，而九宫格是透明的），
+            -- 于是光环提示的边框看起来完全是暴雪样式。
+            if Marked(self, "tooltipPlate") then PaintTooltipPlate(self, true) end
         end)
     end
 end
@@ -489,7 +495,13 @@ end
 --- 不走 SetBackdrop 的 edgeFile —— 这台客户端的 edgeFile 只吃 BLP，TGA/WHITE8X8 那条路
 --- 在子框上有时整条不显示（实机就发生过"边框还是没有"）。画成提示框自己的 region 最稳：
 --- BACKGROUND(-8) 的底 + BORDER 层的四条线，都在文字下面，也不吃鼠标。
-local function PaintTooltipPlate(tip)
+--- 这里是给上面 `local PaintTooltipPlate` 那条**前向声明**赋值（`function Name(...)`
+--- 等价于 `Name = function(...)`，Name 是作用域里的 local）—— 上面的 WatchTooltipStyle
+--- 已经引用了它，顺序不能反：写成全局同名会让那个 local 永远是 nil，轮询里每拍抛错、
+--- 被 pcall 吞掉，表面现象就是"背板不补色"。
+--- @param colorsOnly 只重染颜色、不动锚点（轮询路径用：每 0.2 秒 ClearAllPoints+SetPoint 没必要，
+---                    还可能和暴雪自己的排版抢一帧）。
+function PaintTooltipPlate(tip, colorsOnly)
     local s = Marked(tip, "tooltipEdges")
     if not s then return end
 
@@ -500,22 +512,24 @@ local function PaintTooltipPlate(tip)
     s.bg:SetColorTexture(ar * 0.35, ag * 0.35, ab * 0.35, 0.95)
 
     local top, bottom, left, right = s.top, s.bottom, s.left, s.right
-    top:ClearAllPoints()
-    top:SetPoint("TOPLEFT", tip, "TOPLEFT", 0, 0)
-    top:SetPoint("TOPRIGHT", tip, "TOPRIGHT", 0, 0)
-    top:SetHeight(px)
-    bottom:ClearAllPoints()
-    bottom:SetPoint("BOTTOMLEFT", tip, "BOTTOMLEFT", 0, 0)
-    bottom:SetPoint("BOTTOMRIGHT", tip, "BOTTOMRIGHT", 0, 0)
-    bottom:SetHeight(px)
-    left:ClearAllPoints()
-    left:SetPoint("TOPLEFT", tip, "TOPLEFT", 0, 0)
-    left:SetPoint("BOTTOMLEFT", tip, "BOTTOMLEFT", 0, 0)
-    left:SetWidth(px)
-    right:ClearAllPoints()
-    right:SetPoint("TOPRIGHT", tip, "TOPRIGHT", 0, 0)
-    right:SetPoint("BOTTOMRIGHT", tip, "BOTTOMRIGHT", 0, 0)
-    right:SetWidth(px)
+    if not colorsOnly then
+        top:ClearAllPoints()
+        top:SetPoint("TOPLEFT", tip, "TOPLEFT", 0, 0)
+        top:SetPoint("TOPRIGHT", tip, "TOPRIGHT", 0, 0)
+        top:SetHeight(px)
+        bottom:ClearAllPoints()
+        bottom:SetPoint("BOTTOMLEFT", tip, "BOTTOMLEFT", 0, 0)
+        bottom:SetPoint("BOTTOMRIGHT", tip, "BOTTOMRIGHT", 0, 0)
+        bottom:SetHeight(px)
+        left:ClearAllPoints()
+        left:SetPoint("TOPLEFT", tip, "TOPLEFT", 0, 0)
+        left:SetPoint("BOTTOMLEFT", tip, "BOTTOMLEFT", 0, 0)
+        left:SetWidth(px)
+        right:ClearAllPoints()
+        right:SetPoint("TOPRIGHT", tip, "TOPRIGHT", 0, 0)
+        right:SetPoint("BOTTOMRIGHT", tip, "BOTTOMRIGHT", 0, 0)
+        right:SetWidth(px)
+    end
 
     top:SetColorTexture(r, g, b, 1)
     bottom:SetColorTexture(r, g, b, 1)
