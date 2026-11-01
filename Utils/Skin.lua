@@ -1100,6 +1100,17 @@ function Skin:Dropdown(button, opts)
     return self:Button(button, opts or { size = 12 })
 end
 
+--- 输入框里哪些贴图**不是** chrome：搜索框的放大镜（`common-search-magnifyingglass`）
+--- 和边框用的是同一批 region，以前一律 Strip，放大镜也变 alpha 0。
+--- 实机 1.60 探针（2026-11-01）：19 个输入框全部 `common-search-magnifyingglass@0.00`，
+--- 搜索框只剩一个空框。现在只淡"边框 / 无名底图"，其余 atlas 保留。
+local function KeepEditBoxArt(region)
+    local ok, atlas = pcall(function() return region.GetAtlas and region:GetAtlas() end)
+    if not ok or not atlas then return false end   -- 无名贴图 = 底 / 边框那一类，照旧淡掉
+    if atlas:find("border") then return false end
+    return true
+end
+
 --- Restyle an edit box.
 function Skin:EditBox(editBox)
     if not editBox then return editBox end
@@ -1107,7 +1118,7 @@ function Skin:EditBox(editBox)
     self:Fade(editBox.Left)
     self:Fade(editBox.Middle)
     self:Fade(editBox.Right)
-    self:Strip(editBox, { regions = true })
+    self:Strip(editBox, { regions = true, keep = KeepEditBoxArt })
     self:ControlBg(editBox, { bgAlpha = 0.9 })
     return editBox
 end
