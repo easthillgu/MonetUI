@@ -1068,11 +1068,21 @@ function Widget:SetFont(fs, size, key, flags, exact)
     return fs
 end
 
+--- FitText 的换档动作。**提到函数外面**：以前它是 FitText 里的一个局部闭包，每次调用
+--- 现造一个，而名字 / 血量文字在战斗里刷新很频繁（每次刷新一次闭包分配）。
+local function ApplyFontSize(fs, size, flags)
+    if fs.SetFont then
+        fs:SetFont(Media:FontFor("pixel", size), size, Media:EffectiveFlags(flags, size))
+    end
+end
+
 --- 把文本塞进 `maxWidth`：超宽就**逐档缩小字号**（1px 步进），绝不裁字。
 -- 用途（玩家 2026-10-27 定的规则）：名字最多占姓名条 70%，超了就缩字号 ——
 -- 姓名板 / 单位框 / 小队框全部走这一个入口，旧的按字数截断（Shorten/AbbrName）停用。
 -- 机密文本、或宽度读回来是机密（FontString 锚在机密几何上时 GetStringWidth 会变机密）→
 -- 不测不缩，原样按 baseSize 显示（宁可溢出也不瞎猜，见 AGENTS 秘密值规矩）。
+-- 字体按**当档字号**换挡：FitText 会逐档缩字号、跨过 12 的边界时要从小字轨（点阵苹方
+-- 硬边）切到大字轨（文楷 AA）或切回去，所以不能在外面定死一个 fontPath。
 -- @param fs FontString；text 要显示的文本；maxWidth 允许的最大宽度（UI 单位）
 -- @return 最终字号（像素字符串，未吸附网格 —— 缩字需要连续档）
 function Widget:FitText(fs, text, maxWidth, baseSize, flags, minSize, boxWidth)
@@ -1081,15 +1091,7 @@ function Widget:FitText(fs, text, maxWidth, baseSize, flags, minSize, boxWidth)
     minSize  = tonumber(minSize) or 6
     local Secrets = ns.Secrets
 
-    -- 字体按**当档字号**换挡：FitText 会逐档缩字号、跨过 12 的边界时要从小字轨（点阵苹方
-    -- 硬边）切到大字轨（文楷 AA）或切回去，所以不能在外面定死一个 fontPath。
-    local function apply(size)
-        if fs.SetFont then
-            fs:SetFont(Media:FontFor("pixel", size), size, Media:EffectiveFlags(flags, size))
-        end
-    end
-
-    apply(baseSize)
+    ApplyFontSize(fs, baseSize, flags)
     fs:SetText(text or "")
 
     if Secrets and Secrets.IsSecret(text) then return baseSize end
@@ -1110,7 +1112,7 @@ function Widget:FitText(fs, text, maxWidth, baseSize, flags, minSize, boxWidth)
     local size = baseSize
     while width > maxWidth and size > minSize do
         size = size - 1
-        apply(size)
+        ApplyFontSize(fs, size, flags)
         width = fs:GetStringWidth()
         if type(width) ~= "number" or (Secrets and Secrets.IsSecret(width)) then return size end
     end
