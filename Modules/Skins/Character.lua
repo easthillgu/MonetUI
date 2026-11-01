@@ -4,6 +4,7 @@
 local ADDON_NAME, ns = ...
 
 local M = ns.Skins
+local Skin = ns.Skin
 
 local CHARACTER_TABS = {
     "CharacterFrameTab1", "CharacterFrameTab2", "CharacterFrameTab3",
@@ -24,11 +25,16 @@ local SUB_PANEL = { panel = { bgAlpha = 0.96 }, deep = true }
 -- 左上角角色肖像圆形 → 方形，与窗口背景保持一致
 -- 通过 Skin:Need 点名拿到 portrait 区域，再把纹理拉伸以适应方形框。
 -- 注意：此操作只在窗口美化时执行，不会破坏框体的其它表现。
-local function MakePortraitSquare(frame)
-    local portrait = M:Need("CharacterFramePortrait")
+--
+-- **漏斗在 `ns.Skin` 上，不在本模块 `M` 上**：`M:Need` / `M:Mark` 都是 nil
+-- （`ns.Skins` 只导出 Panel/Dress/HookShow 那一套）。写成 M: 的话这一句就抛
+-- "attempt to call a nil value"，`SkinCharacter` 整条中断 —— 角色窗口从 `535f89e`
+-- 收口之后就一直没被美化过，每次登录在聊天框留一条「界面美化「character」应用失败」。
+local function MakePortraitSquare()
+    local portrait = Skin:Need("CharacterFramePortrait")
     if not portrait then return end
     -- 先记进账本，防止以后改名漏掉
-    M:Mark(portrait, "monetPortraitSquared", true)
+    ns:Mark(portrait, "monetPortraitSquared", true)
     -- 关闭鼠标穿透（防止和下方按钮冲突）
     if portrait.EnableMouse then portrait:EnableMouse(false) end
     -- 设置纹理贴图模式： clamp 可避免边缘重复
@@ -42,7 +48,7 @@ end
 local function SkinCharacter()
     M:Dress("CharacterFrame", { window = true, panel = { bgAlpha = 0.96 } })
     -- 美化后把肖像压成方形，与方形背景协调
-    MakePortraitSquare(CharacterFrame)
+    MakePortraitSquare()
     M:Dress(CHARACTER_TABS, { as = "tab" })
     M:Dress(CHARACTER_PANELS, SUB_PANEL)
 end
