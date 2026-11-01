@@ -63,14 +63,11 @@ local function WeavePanel(panel, opts)
     -- 去掉暴雪原始贴图和边框
     ns.Skin:Strip(panel)
 
-    -- 衬底层：半透明深色，控制底板的整体明度
-    local bg = Marked(panel, "questBg")
-    if not bg then
-        bg = panel:CreateTexture(nil, "BACKGROUND", nil, -2)
-        bg:SetAllPoints(panel)
-        Mark(panel, "questBg", bg)
-    end
-    bg:SetColorTexture(0.12, 0.12, 0.14, baseAlpha)
+    -- 衬底层 + 边框：用 Skin:Panel（BackdropTemplate + Widget:Theme）造带边框的暗背板。
+    -- 手搓 SetColorTexture 底只给"纯深色底"：不画边框。任务对话框靠它换底后，原版边框 art
+    -- （Strip 顺手带走了）没了，整窗就变成"一整片斜纹底、没有边框与内容的区分"。
+    -- 边框必须走主题（SetBackdrop + SetBackdropBorderColor），不能只在底上再叠一层贴图。
+    Skin:Panel(panel, { bgAlpha = baseAlpha, borderAlpha = opts.borderAlpha, borderKey = opts.borderKey })
 
     -- 斜纹层：monet_stripe_weave 铺满，ADD 混合做柔光
     local weave = Marked(panel, "questWeave")
