@@ -101,6 +101,10 @@ local QUEST_FONTS = {
 -- 在 Apply 里现造闭包的话每次触发都多挂一条回调（M:HookShow 按引用去重）。
 local function BrightenQuestPanels()
     M:Controls(QUEST_PANELS, function(panel)
+        -- Show 路径也过一遍 Skin:Panel：任务面板是 Blizzard 按任务内容懒建/换的，Apply 时可能
+        -- 还没到、Show 时才落地——只刷织纹就永远补不上背板（实机实证：任务子面板缺背板）。
+        -- Skin:Panel 内部用 Marked 缓存幂等：已存在就只 Show + 刷主题，不会叠第二层背板。
+        Skin:Panel(panel, { bgAlpha = 0.70 })
         UpdateWeave(panel)
         BrightenTree(panel)
     end)
