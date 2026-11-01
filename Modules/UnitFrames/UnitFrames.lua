@@ -460,6 +460,21 @@ local function PercentColor(pct)
     return last.r, last.g, last.b
 end
 
+--- 读一个 FontString 的宽度，**机密时返回 0**。
+---
+--- 为什么要这个：`GetStringWidth()` 在字体串装着**机密文本**时返回机密数字
+--- （`SecretWhenAnchoringSecret`）。血量文字改成"机密百分比"之后就会命中这条路 ——
+--- 实机 2026-11-01 登录即报：
+---   UnitFrames.lua:516: attempt to perform arithmetic on local 'healthW'
+---   (a secret number value, while execution tainted by 'MonetUI')
+--- 读不出来就当 0（名字多占一点），比整块框初始化失败好。
+local function StringWidth(fs)
+    if not fs or type(fs.GetStringWidth) ~= "function" then return 0 end
+    local ok, w = pcall(fs.GetStringWidth, fs)
+    if not ok then return 0 end
+    return Secrets.Number(w) or 0
+end
+
 local function UpdateName(frame)
     local unit = frame.unit
     if not UnitExists(unit) then return end
@@ -511,8 +526,8 @@ local function UpdateName(frame)
     do
         local W = frame:GetWidth() or 160
         local maxW = W * 0.70
-        local levelW  = frame.level      and frame.level:GetStringWidth()      or 0
-        local healthW = frame.healthText and frame.healthText:GetStringWidth() or 0
+        local levelW  = StringWidth(frame.level)
+        local healthW = StringWidth(frame.healthText)
         if levelW + healthW > 0 then
             maxW = math.min(maxW, W - levelW - healthW - 6)
         end
