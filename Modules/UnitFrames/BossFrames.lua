@@ -39,6 +39,9 @@ local function Config()
 end
 
 local function InCombat()
+    -- 优先问 Core 的 `ns:InCombat()`：它按 PLAYER_REGEN_* 自己记状态，登录 / 重载当拍
+    -- `InCombatLockdown()` 会给假的 false（AGENTS 实机判例）。没有它就退回实时标志。
+    if type(ns.InCombat) == "function" then return ns:InCombat() end
     return type(InCombatLockdown) == "function" and InCombatLockdown()
 end
 
@@ -322,6 +325,21 @@ end
 
 local function RestyleBoss(cfg)
     if not bossAnchor then return end
+    -- **战斗中一个尺寸都不能改**：`MonetBossAnchor` 挂着 `SecureUnitButtonTemplate` 子按钮，
+    -- 自己也算受保护框（改它的几何等于挪安全子按钮），`SetSize` 直接被拒。实机 2026-11-01：
+    -- 进战斗后主题一刷新就刷 6 条
+    --   ADDON_ACTION_BLOCKED MonetUI MonetBossAnchor:SetSize()
+    --   ADDON_ACTION_BLOCKED MonetUI MonetBossButton1..5:SetSize()
+    -- 主题事件在战斗里照常派发（区域切换 / MonetColor 回调 / 手动 /mui），所以这里必须排队。
+    if InCombat() then
+        if type(ns.AfterCombat) == "function" then
+            ns:AfterCombat("bossframes-restyle", function()
+                local c = Config()
+                if c then RestyleBoss(c) end
+            end)
+        end
+        return
+    end
     bossAnchor:SetSize(cfg.width, MAX_BOSS * FrameHeight(cfg) + (MAX_BOSS - 1) * (cfg.spacing or 2))
     for i = 1, MAX_BOSS do
         local btn = bossButtons[i]
