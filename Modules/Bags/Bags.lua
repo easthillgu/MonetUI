@@ -75,33 +75,125 @@ local function Setting(key)
     return (ns.DEFAULTS.bags or {})[key]
 end
 
--- Ordered: the FIRST category whose match() accepts an item claims it, so the list runs specific -> general and "other" is the fallback.
+-- ============================================================================
+-- 传送类物品（炉石 / 传送卷轴 / 传送器 / 传送披风戒指 / 虫洞…）
+-- ============================================================================
+-- classID 五花八门（消耗品 / 玩具 / 装备），推不出来，只能匹配名单。
+-- 两条路都留：
+--   * `TRAVEL_ITEMS[itemID]` —— 精确命中，人工维护；
+--   * `TRAVEL_NAME_PATTERNS` —— 名字模式兜底（本客户端是中文，模式稳定；
+--     物品 ID 会随资料片变，名字不会）。命中 ID 就不过名字。
+-- ⚠️ 待实机校对：这组模式是按"传送类应该叫什么"写的，没有逐条对着 1.60 物品库核过。
+local TRAVEL_ITEMS = {}                       -- [itemID] = true
+local TRAVEL_NAME_PATTERNS = { "炉石", "传送", "虫洞", "传送门", "回城", "召集" }
 
+local function IsTravelItem(it)
+    if it.itemID and TRAVEL_ITEMS[it.itemID] then return true end
+    -- 名字可能是**机密串**（受限环境的 GetItemInfo 同理）：机密串上
+    -- `== ""` / `:find()` 都会抛，所以先过 Secrets.IsSecret，判不出来就当不匹配。
+    local name = it.name
+    if type(name) ~= "string" or Secrets.IsSecret(name) or name == "" then return false end
+    for i = 1, #TRAVEL_NAME_PATTERNS do
+        if name:find(TRAVEL_NAME_PATTERNS[i], 1, true) then return true end
+    end
+    return false
+end
+
+-- ============================================================================
+-- 分类规则（2026-11-01 重写，判定链口径照 RealUI_Inventory）
+-- ============================================================================
+--
+-- 两个序号，**必须解耦**（RealUI `Filters.lua:95-124` 的教训）：
+--   * `rank`  决定**归属**：一条物品只归 rank 最小的那条。rank 越小越优先。
+--   * `order` 决定**窗口显示顺序**。以后允许玩家拖换窗口顺序时，只动 order，
+--     不动 rank —— 否则"改显示顺序"会连带改分类结果。
+--
+-- 为什么不用"第一条命中即归属"（本文件原来的写法）：那时分类结果**依赖列表顺序**，
+-- 而顺序同时在表达"哪个窗口在上"，两件事被塞进一个序号里。后果是任务用的消耗品
+-- 会被 `use` 抢走（`use` 排在 `quest` 前面），装备方案里的装备也压不过 `gear`。
+--
+-- 判定优先级（rank 由小到大）：
+--   垃圾 0 > 新物品 1 > 任务 3 > 传送 4 > 消耗品 10 > 套装 20 > 战团绑 21 >
+--   装备 22 > 容器 23 > 材料 30 > 收藏 40 > 心能 50 > 其他 99
+--
 local CATEGORIES = {
-    { key = "junk",  label = "垃圾",
+    -- 灰色**且有卖价**（无卖价的灰装不混进可卖垃圾，与 RealUI:Filters.lua:251 同口径）
+    { key = "junk",  label = "垃圾",   rank = 0,  order = 1,
       match = function(it) return it.quality == Q_POOR and (it.sellPrice or 0) > 0 end },
-    { key = "gear",  label = "装备",
-      match = function(it)
-          return (it.classID == IC.Armor or it.classID == IC.Weapon)
-             and it.equipLoc and it.equipLoc ~= "" and it.equipLoc ~= "INVTYPE_NON_EQUIP"
-      end },
-    { key = "use",   label = "消耗品",
-      match = function(it) return it.classID == IC.Consumable or it.classID == IC.ItemEnhancement end },
-    { key = "goods", label = "材料",
-      match = function(it) return it.classID == IC.Tradegoods or it.classID == IC.Reagent end },
-    { key = "quest", label = "任务",
+
+    -- 新物品：C_NewItems 的标记只在背包格子上存在，不能从 itemID 推
+    { key = "new",   label = "新物品", rank = 1,  order = 2,
+      match = function(it) return it.isNew == true end },
+
+    -- 任务优先于消耗品/材料：任务要交的东西多数也是消耗品或材料（旧版的顺序把它分错了）
+    { key = "quest", label = "任务",   rank = 3,  order = 3,
       match = function(it) return it.isQuest or it.classID == IC.Questitem end },
-    { key = "pets",  label = "收藏",
+
+    -- 传送类：炉石 / 传送卷轴 / 传送器 / 传送披风戒指等。这类物品的 classID 五花八门
+    -- （消耗品 / 玩具 / 装备），从 classID 推不出来，只能靠白名单 + 名字模式。
+    { key = "travel", label = "传送",  rank = 4,  order = 4,
+      match = function(it) return IsTravelItem(it) end },
+
+    { key = "use",   label = "消耗品", rank = 10, order = 5,
+      match = function(it) return it.classID == IC.Consumable or it.classID == IC.ItemEnhancement end },
+
+    -- 装备方案里的装备：**这一类暂不做**。RealUI 用
+    -- `C_EquipmentSet.GetItemLocations` 拿位置后交给 `EquipmentManager_GetLocationData`
+    -- 解码成 bag/slot（`FilterData.lua:13-39`，按格子而不是按 itemID 记，同名物品放别处不算）。
+    -- 1.60 快照里**没有** `EquipmentManager_GetLocationData`（api-lookup 实测无匹配），
+    -- 解不开位置就只能按 itemID 匹配 —— 那会把背包里的同名装备误判成套装件。
+    -- 所以等有可靠解码方式再加，宁可少一个窗口。
+    -- 战团绑定（12.x 的"装备前战团绑定"）：能寄给小号、不能卖
+    { key = "warbound", label = "战团绑", rank = 21, order = 7,
+      match = function(it) return it.isWarboundUntilEquip == true end },
+
+    -- 装备：按**装备位**判，不按 classID —— 职业工具 / 可装备法术 / 圣物都在这条路上
+    { key = "gear",  label = "装备",   rank = 22, order = 8,
+      match = function(it) return it.isEquippable == true end },
+
+    -- 空背包 / 箭袋这类"容器"本身
+    { key = "containers", label = "容器", rank = 23, order = 9,
+      match = function(it) return it.isContainer == true end },
+
+    { key = "goods", label = "材料",   rank = 30, order = 10,
+      match = function(it) return it.classID == IC.Tradegoods or it.classID == IC.Reagent end },
+
+    { key = "pets",  label = "收藏",   rank = 40, order = 11,
       match = function(it)
           return it.classID == IC.Battlepet
               or (it.classID == IC.Miscellaneous and (it.subClassID == 2 or it.subClassID == 5))
       end },
-    { key = "other", label = "其他",
+
+    { key = "anima", label = "心能",   rank = 50, order = 12,
+      match = function(it) return it.isAnima == true end },
+
+    { key = "other", label = "其他",   rank = 99, order = 13,
       match = function() return true end },
 }
 
 local CATEGORY_BY_KEY = {}
 for _, cat in ipairs(CATEGORIES) do CATEGORY_BY_KEY[cat.key] = cat end
+
+--- 显示顺序：按 `order` 排，**和分类优先级（rank）无关**。
+--- 排窗口、列标题一律走这张表，不要用 `CATEGORIES` 的数组顺序 ——
+--- 那张是判定表，动它的顺序等于动归属（RealUI 把两件事分开的全部意义就在这）。
+local ORDERED = {}
+for _, cat in ipairs(CATEGORIES) do ORDERED[#ORDERED + 1] = cat end
+table.sort(ORDERED, function(a, b) return a.order < b.order end)
+
+--- 装备位三段判定（照 RealUI:Slots.lua:138-151）：容器 / 箭袋 = 容器；
+--- NonEquip = 其它；**其余全是装备** —— 职业工具 / 可装备法术 / 圣物都在这条路上。
+--- 旧版用 `classID == Armor or Weapon`，把职业工具和圣物归到了"其他"。
+--- equipLoc 是 `C_Item.GetItemInfo` 第 10 项的 INVTYPE_* 串，本客户端实测就是大写；
+--- 受限环境下它可能返回**机密串**，判不出来就当 "other"（宁可少归一类，不要抛）。
+local function EquipKind(equipLoc)
+    if type(equipLoc) ~= "string" or Secrets.IsSecret(equipLoc) or equipLoc == "" then
+        return "other"
+    end
+    if equipLoc == "INVTYPE_NON_EQUIP" then return "other" end
+    if equipLoc == "INVTYPE_BAG" or equipLoc == "INVTYPE_QUIVER" then return "container" end
+    return "equipment"
+end
 
 --- One plain record for a filled (bag, slot).  GetItemInfo may return nil for uncached items, so its fields are optional and container info stays the fallback.
 local function BuildItem(bag, slot, info)
@@ -147,14 +239,76 @@ local function BuildItem(bag, slot, info)
         end
     end
 
+    -- 新物品：只能从格子上读，不能从 itemID 推（RealUI:Bags.lua:1254 同口径）。
+    if C_NewItems and C_NewItems.IsNewItem then
+        local ok, isNew = pcall(C_NewItems.IsNewItem, bag, slot)
+        if ok then it.isNew = isNew and true or false end
+    end
+
+    -- 装备位三段判定（照 RealUI:Slots.lua:138-151）：容器/箭袋 = 容器；
+    -- NonEquip = 其它；**其余全是装备** —— 职业工具 / 可装备法术 / 圣物都在这条路上，
+    -- 旧版用 `classID == Armor or Weapon` 会把这几类归到"其他"。
+    local kind = EquipKind(it.equipLoc)
+    it.equipKind     = kind
+    it.isEquippable  = (kind == "equipment")
+    it.isContainer   = (kind == "container")
+
+    -- 12.x「装备前战团绑定」：能寄给小号、不能卖，值得单独一眼看到
+    if C_Item and C_Item.IsItemBindToAccountUntilEquip and it.link then
+        local ok, w = pcall(C_Item.IsItemBindToAccountUntilEquip, it.link)
+        if ok then it.isWarboundUntilEquip = w and true or false end
+    end
+
+    -- 心能物品（暗影国度遗留，1.60 上是否还有语义未知；有 API 就跟着走，没有就不建这一档）
+    if C_Item and C_Item.IsAnimaItemByID and it.itemID then
+        local ok, a = pcall(C_Item.IsAnimaItemByID, it.itemID)
+        if ok then it.isAnima = a and true or false end
+    end
+
     return it
 end
 
+--- 归属判定：**rank 最小的赢**，不是"列表里第一条命中"。
+--- 好处是两个序号解耦：`rank` 只表达优先级，`order` 只表达窗口显示顺序，
+--- 调显示顺序不会改分类结果（RealUI:Filters.lua:115-124 的口径）。
 local function AssignCategory(it)
-    for _, cat in ipairs(CATEGORIES) do
-        if cat.match(it) then return cat.key end
+    local bestKey, bestRank = "other", math.huge
+    for i = 1, #CATEGORIES do
+        local cat = CATEGORIES[i]
+        if cat.rank < bestRank then
+            local ok, hit = pcall(cat.match, it)
+            if ok and hit then
+                bestKey, bestRank = cat.key, cat.rank
+                if bestRank == 0 then break end   -- 垃圾已是最高优先，不用再比
+            end
+        end
     end
-    return "other"
+    return bestKey
+end
+
+--- 排序用的标量：**机密值一律退回默认值**，绝不拿它去比较（AGENTS：战斗里
+--- 机密串/数字上的 `==`、`<` 会抛 `attempt to compare ... a secret value`）。
+--- 品质 / 物品等级 / 名字都可能在受限环境变成机密（GetItemInfo 的返回值同理）。
+local function Sortable(value, fallback)
+    if value == nil then return fallback end
+    if Secrets.IsSecret(value) then return fallback end
+    return value
+end
+
+--- 袋内排序（照 RealUI:Bags.lua:71-111 的口径，但砍掉装备位那档：我们已经把装备分出去了）：
+--- 品质降序 → 物品等级降序 → 名字升序 → 堆叠数降序。
+local function SortItems(list)
+    table.sort(list, function(a, b)
+        local qa, qb = Sortable(a.quality, 0), Sortable(b.quality, 0)
+        if qa ~= qb then return qa > qb end
+        local ia, ib = Sortable(a.ilvl, 0), Sortable(b.ilvl, 0)
+        if ia ~= ib then return ia > ib end
+        local na, nb = Sortable(a.name, ""), Sortable(b.name, "")
+        if na ~= nb then return na < nb end
+        local ida, idb = Sortable(a.itemID, 0), Sortable(b.itemID, 0)
+        if ida ~= idb then return ida < idb end
+        return (Sortable(a.count, 1)) > (Sortable(b.count, 1))
+    end)
 end
 
 --- Scan a set of bag indexes into { categoryKey = { item, ... } }.
@@ -174,6 +328,11 @@ local function Scan(bagIndexes)
                 end
             end
         end
+    end
+
+    for _, cat in ipairs(CATEGORIES) do
+        local list = groups[cat.key]
+        if #list > 1 then SortItems(list) end
     end
 
     return groups
@@ -525,7 +684,7 @@ local function LayoutWindows()
         local x = anchor.x or -18
         local y = anchor.y or -28
         local rowH = 0
-        for _, cat in ipairs(CATEGORIES) do
+        for _, cat in ipairs(ORDERED) do
             local win = windows[cat.key]
             if win and win:IsShown() and not WindowPosition(cat.key) then
                 local w, h = win:GetWidth(), win:GetHeight()
@@ -543,7 +702,7 @@ local function LayoutWindows()
     local originX = screenW - 300   -- 屏幕右边往里 300px（约 Minimap 列 + 一点）
     local originY  = anchor.y or -28
     local rowH = 0
-    for _, cat in ipairs(CATEGORIES) do
+    for _, cat in ipairs(ORDERED) do
         local win = windows[cat.key]
         if win and win:IsShown() and not WindowPosition(cat.key) then
             local w, h = win:GetWidth(), win:GetHeight()
