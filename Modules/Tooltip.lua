@@ -401,8 +401,46 @@ local function CollectLines(tip)
     return lines
 end
 
+--- 法术 / 光环提示的标题统一成主题中性色。
+---
+--- 暴雪按"法术品质"把标题染成金色（实机 2026-11-01：`飞行模式：驭空术` = 1.00,0.82,0.00），
+--- 而单位提示的标题是白色 —— 两种提示框的标题色不一致，也和 docs/DESIGN-LANGUAGE.md
+--- 的决策 a（通用静态文字用 neutral，highlight 只给 hover/选中/焦点）冲突。
+---
+--- **只动法术类**：物品提示的品质色（橙装 / 紫装）是有信息量的，保留。
+--- 判据：`GameTooltip:GetSpell()` 拿得到 spellID，且没有物品链接。
+--- 受限状态下 spellID 是**机密数字** → 判不出来就不动（宁可留金色，不要瞎猜）。
+local function RecolorSpellTitle(tip)
+    if type(tip.GetSpell) ~= "function" then return end
+    local ok, _, spellID = pcall(tip.GetSpell, tip)
+    if not ok or not Secrets.Number(spellID) then return end
+
+    if type(tip.GetItem) == "function" then
+        local okI, _, link = pcall(tip.GetItem, tip)
+        local l = okI and Plain(link) or nil
+        if type(l) == "string" and l:find("item:") then return end
+    end
+
+    local line = (type(tip.GetLine) == "function" and tip:GetLine(1)) or _G.GameTooltipTextLeft1
+    if not line or type(line.SetTextColor) ~= "function"
+       or type(line.GetTextColor) ~= "function" then return end
+
+    local r, g, b = Color:GetNeutral()
+    if not r then return end
+    local okC, cr, cg, cb = pcall(line.GetTextColor, line)
+    if okC and Secrets.Number(cr) and Secrets.Number(cg) and Secrets.Number(cb) then
+        if math.abs(cr - r) < 0.01 and math.abs(cg - g) < 0.01 and math.abs(cb - b) < 0.01 then
+            return                                  -- 已经是我们的颜色：不重复写
+        end
+    end
+    pcall(line.SetTextColor, line, r, g, b)
+end
+
 --- 补一次内容：算签名，没变就只对齐小框；变了（换目标 / 按 Alt / 换物品）才重写文字。
 local function Enrich(tip)
+    -- 标题配色属于"美化"本身，和「显示 ID」「补全描述」两个开关无关，所以放在早退之前
+    pcall(RecolorSpellTitle, tip)
+
     if not enrich and not idsByAlt then
         UpdateBox(tip, {}, nil)
         return
