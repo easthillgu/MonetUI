@@ -125,7 +125,18 @@ end
 
 local function Visible(frame, src)
     local ok, value = pcall(frame.IsVisible, frame)
-    if ok then return value and true or false, true end
+    if ok then
+        -- 受限环境里 `IsVisible` 会返回**机密布尔**（SecretWhenAnchoringSecret）：对它做真值测试
+        -- 直接抛 "attempt to perform boolean test on local 'value'"。实机 2026-11-01：
+        -- 光环按钮进了 PollWatch 之后一次刷 225 条。
+        --
+        -- 这里按"**显示着**"处理，而不是"读不出来"：
+        --   * 走 pcall 失败那条（forbidden 对象）才是真读不到，暂停逻辑在那里；
+        --   * 机密只说明"现在不让判断"，不等于框藏了。按藏了处理会让 PollWatch 永远跳过这个框
+        --     （它对 shown=false 的框不跑回调），而那正是最需要它工作的时候（战斗中）。
+        if Secrets.IsSecret(value) then return true, true end
+        return value and true or false, true
+    end
 
     forbidWarned = forbidWarned or setmetatable({}, { __mode = "k" })
     if not forbidWarned[frame] then

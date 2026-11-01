@@ -183,8 +183,9 @@ local function ApplyLook(cd, state, tight)
     if not fs then return end
 
     local base = state.fontPx or Media:SnapSize(state.size)
+    local size = base
     if tight then
-        local size = base * ALERT_RATIO
+        size = base * ALERT_RATIO
         local width = cd:GetWidth()
         if width and width > 0 then
             -- Small bars would rather keep the readable size than overflow.
@@ -196,6 +197,50 @@ local function ApplyLook(cd, state, tight)
     else
         pcall(fs.SetFont, fs, Media:FontFor(state.font or "cooldown", base), base, Media:EffectiveFlags(state.flags, base))
         fs:SetTextColor(1, 1, 1, 1)
+    end
+    -- 记下这一档"理想字号"：FitCooldownText 每次都从这里重新回缩，
+    -- 否则上一次为长串缩小的字号会一直留着（文字变短也不会长回来）。
+    state.appliedPx = size
+end
+
+--- 把时长文字缩进冷却框宽度以内 —— **每个 icon 各算各的**。
+---
+--- 为什么要它（玩家 2026-11-01 报"左上角 buff 时间显示不完整"）：字号只按按钮尺寸算
+--- 一个值，而文字长度是会变的（"9S" → "6:56" → "1H37M"）。实测 28px 的 buff 图标上
+--- 12 号字光 "6:56" 就占 25px，两侧只剩 1.5px；再长一点就撑出格子，被相邻图标盖住。
+---
+--- 做法：从 `state.appliedPx`（ApplyLook 那一档）重新设一遍，再按**实际渲染宽度**逐档缩，
+--- 最低 MIN_TEXT_PX。宽度读不出来（机密值）就保持原样 —— 宁可长一点，不要瞎猜。
+--- 只在文字或外观变化时调用（见 Tick），不是每拍都跑。
+local MIN_TEXT_PX = 6
+
+local function FitCooldownText(cd, state)
+    local fs = state.text
+    if not fs or not state.own then return end
+
+    local okW, w = pcall(cd.GetWidth, cd)
+    local maxWidth = okW and Secrets.Number(w) or nil
+    if not maxWidth or maxWidth <= 0 then return end
+    -- 上限取 72%（和光环那边同一口径）：贴满整个宽度在视觉上就已经"要溢出了"。
+    maxWidth = maxWidth * 0.72
+
+    local size = state.appliedPx or state.fontPx
+    if type(size) ~= "number" then return end
+
+    -- 先回到理想字号（上一次可能为长串缩过）
+    pcall(fs.SetFont, fs, Media:FontFor(state.font or "cooldown", size), size,
+        Media:EffectiveFlags(state.flags, size))
+
+    local guard = 0
+    while size > MIN_TEXT_PX and guard < 32 do
+        local okS, width = pcall(fs.GetStringWidth, fs)
+        local plain = okS and Secrets.Number(width) or nil
+        if not plain then return end               -- 机密 / 读不到：不动它
+        if plain <= maxWidth then return end
+        size = size - 1
+        guard = guard + 1
+        pcall(fs.SetFont, fs, Media:FontFor(state.font or "cooldown", size), size,
+            Media:EffectiveFlags(state.flags, size))
     end
 end
 
@@ -283,6 +328,7 @@ local function Tick(cd, elapsed)
 
     local tight = alert and remain < 60
         and math.floor(remain + 0.5) <= alertSeconds
+    local lookChanged = state.look ~= (tight and true or false)
     ApplyLook(cd, state, tight and true or false)
 
     -- Math:Countdown also returns when the text next changes, so we do not wake
@@ -297,9 +343,15 @@ local function Tick(cd, elapsed)
         nextUpdate = FAST_INTERVAL
     end
     local text = ColorCountdown(value, suffix, bucket)
-    if state.shownText ~= text then
+    local textChanged = state.shownText ~= text
+    if textChanged then
         state.text:SetText(text)
         state.shownText = text
+    end
+
+    -- 文字或外观变了才重新量一次宽度（每拍都量等于每帧多两次 GetStringWidth）
+    if textChanged or lookChanged then
+        FitCooldownText(cd, state)
     end
 
     if not nextUpdate or nextUpdate > SLOW_INTERVAL then nextUpdate = SLOW_INTERVAL end

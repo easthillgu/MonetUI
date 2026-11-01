@@ -303,6 +303,8 @@ end
 -- 我们的图标是 4:3 的小格，直接照抄会顶满整格还往外溢。图标尺寸（TARGET_AURA_ICON_W/H
 -- 或以后的配置项）变了，这里算出来的字号就跟着变，不需要改代码。
 -- exact = true 让算出来的值真的生效（Widget:SetFont 默认会把 ≤10 的都夹到 10）。
+local ReferenceSize   -- 定义在下面：时长 / 层数的字号自适应（按图标宽度估算）
+
 local function EnsureAuraTexts(button, cd, spec)
     local okW, iconW = pcall(button.GetWidth, button)
     local okH, iconH = pcall(button.GetHeight, button)
@@ -322,6 +324,13 @@ local function EnsureAuraTexts(button, cd, spec)
     -- 目标框光环（字号只有 4-8px）继续用 PingFangPixel —— 那个尺寸下像素字体认不出来。
     local fontKey  = (type(spec) == "table" and spec.fontKey) or "pingfang"
     local stackKey = (type(spec) == "table" and spec.fontKey) or "pixel"
+
+    -- **按图标宽度自适应字号**（玩家 2026-11-01 报"左上角 buff 时间显示不完整"）。
+    -- 用参考串估算，不依赖真实文本：受限状态下 `GetStringWidth` 对真实文本返回机密值，
+    -- 那条路在副本里是断的。估算放在**样式阶段**做，不靠轮询 —— 更确定，也少一圈驱动。
+    local iconWNum = Secrets.Number(iconW) or TARGET_AURA_ICON_W
+    local fitSize = ReferenceSize(fontKey, textSize, iconWNum * 0.72)
+    if type(fitSize) == "number" and fitSize > 0 then textSize = fitSize end
     local inset = math.max(2, math.floor(textSize * 0.55 + 0.5))
     local okRegions, regions = pcall(function() return { cd:GetRegions() } end)
     if okRegions then
@@ -351,7 +360,83 @@ local function EnsureAuraTexts(button, cd, spec)
     Widget:SetFont(stack, textSize, stackKey, nil, true)
     stack:SetPoint("TOPRIGHT", button, "TOPRIGHT", -1, -1)
     stack:SetJustifyH("RIGHT")
-    return duration, stack
+    -- 第三个返回值是算出来的字号：调用方（自适应那套）要用它当"理想字号"回缩，
+    -- 不能自己再猜一个 —— 这个值本来就跟图标尺寸走。
+    return duration, stack, textSize
+end
+
+--- 把一个光环字体串缩进图标宽度以内（**每个 icon 各算各的**）。
+---
+--- 引擎往时长字体串里写文本时没有任何回调，所以调用方用 1 秒轮询驱动这里；
+--- 只在"需要变"的时候才 `SetFont`，平时只多一次查表。
+---
+--- **为什么不能只靠实测宽度**（2026-11-01 实机）：受限状态（副本 / 战斗）下
+--- `GetStringWidth` 返回**机密值**，`Secrets.Number` 拿到 nil —— 也就是"量不到"。
+--- 而 buff 时间恰恰是在副本里最容易被撑出格子的。所以这里用**参考串**先估一个字号：
+--- 拿同样字体、同样字号的 "000" 量一次宽度（我们自己的串，永远不是机密），
+--- 按图标宽度等比折算出"能放下 3 个字符"的字号。实测放大截图：28px 图标上 12 号字
+--- 光 "2M" 就占掉近 80%，3 个字符必然贴死。
+---
+--- 量得到真实宽度时再在这个基础上继续收（长串 "1H37M" 之类）。
+--- @param maxWidth 图标宽度；@param basePx 理想字号；@return 无
+local REF_TEXT = "000"
+local refSizes = {}          -- [fontKey .. basePx .. limit] = 估算字号（避免每秒重量）
+
+function ReferenceSize(fontKey, basePx, limit)
+    if type(basePx) ~= "number" or basePx <= 0 then return 12 end
+    local key = tostring(fontKey) .. "|" .. tostring(basePx) .. "|" .. tostring(limit)
+    local cached = refSizes[key]
+    if cached then return cached end
+
+    local scratch = UIParent:CreateFontString(nil, "OVERLAY")
+    local size = basePx
+    if scratch then
+        scratch:Hide()
+        scratch:SetText(REF_TEXT)
+        local okFont = pcall(Widget.SetFont, Widget, scratch, basePx, fontKey, nil, true)
+        if okFont then
+            local ok, w = pcall(scratch.GetStringWidth, scratch)
+            local refW = ok and Secrets.Number(w) or nil
+            if refW and refW > limit and refW > 0 then
+                size = math.floor(basePx * limit / refW)
+                if size < 6 then size = 6 end
+                if size > basePx then size = basePx end
+            end
+        end
+    end
+    refSizes[key] = size
+    return size
+end
+
+local function FitAuraText(fs, maxWidth, fontKey, basePx, outline)
+    if not fs or type(maxWidth) ~= "number" or maxWidth <= 0 then return end
+
+    -- 上限取图标宽度的 72%（和项目里"名字最多占框宽 70%"同一口径）：
+    -- 用满整个宽度在视觉上就已经贴边了 —— 放大截图实测：28px 图标上 12 号字的 "2M"
+    -- 只占 2 个字符就吃掉近 80%，边缘已经贴死，3 个字符必然溢出。
+    local limit = maxWidth * 0.72
+    local size = ReferenceSize(fontKey, basePx, limit)
+
+    -- 量得到真实宽度就在估算基础上继续收（机密状态下这里拿不到值，保持估算结果）
+    local ok, width = pcall(fs.GetStringWidth, fs)
+    local w = ok and Secrets.Number(width) or nil
+    if w then
+        local guard = 0
+        while w > limit and size > 6 and guard < 32 do
+            size = size - 1
+            guard = guard + 1
+            Widget:SetFont(fs, size, fontKey, outline, true)
+            local ok2, w2 = pcall(fs.GetStringWidth, fs)
+            local plain = ok2 and Secrets.Number(w2) or nil
+            if not plain then break end
+            w = plain
+        end
+    end
+
+    if size ~= (Marked(fs, "fitPx") or basePx) then
+        Widget:SetFont(fs, size, fontKey, outline, true)
+        Mark(fs, "fitPx", size)
+    end
 end
 
 -- 时长注册：带颜色曲线（textColor.curve + RemainingDuration，引擎按剩余时长求值，
@@ -415,10 +500,10 @@ local function StyleAuraButton(button, kind, spec)
     end
 
     -- 必需件 3/3：层数 + 我们自己的时长文本（建不出来不影响前两件）。
-    local duration, stack
+    local duration, stack, textSize
     if cd then
-        local okTexts, d, s = pcall(EnsureAuraTexts, button, cd, spec)
-        if okTexts then duration, stack = d, s end
+        local okTexts, d, s, px = pcall(EnsureAuraTexts, button, cd, spec)
+        if okTexts then duration, stack, textSize = d, s, px end
     end
     if stack then pcall(button.SetApplicationCount, button, stack, {}) end
 
@@ -445,6 +530,50 @@ local function StyleAuraButton(button, kind, spec)
 
     -- 装饰 3/3：主题染色（同样只碰我们自己的子件）。
     pcall(TintAuraButton, button)
+
+    -- 装饰 4/4：时长 / 层数文字按图标宽度自适应字号。
+    -- 引擎往这两个字体串里写文本时我们收不到任何回调，所以只能轮询（1 秒，只在需要变时 SetFont）。
+    -- 玩家 2026-11-01 报"左上角 buff 时间显示不完整"：28px 图标上 12 号字光 "6:56" 就占 25px，
+    -- 再长一点就撑出格子被相邻图标盖住。
+    if (duration or stack) and not Marked(button, "fitWatch") then
+        Mark(button, "fitWatch", true)
+        local fitFontKey = (type(spec) == "table" and spec.fontKey) or "pingfang"
+        -- **`textSize` 必须来自 EnsureAuraTexts 的返回值**：它是那个函数的局部变量，
+        -- 在这里直接写 `textSize` 取到的是全局 nil（AGENTS 里"引用了还没声明的 local"那条）。
+        -- 实机 2026-11-01：`fitBase = textSize` 拿到 nil，轮询里每拍抛错被 PollWatch 的 pcall 吞掉，
+        -- 字号一直不动 —— 表面现象就是"自适应没生效"。
+        local fitBase = textSize
+        if type(fitBase) ~= "number" then fitBase = 12 end
+        Widget:PollWatch(button, function()
+            local okW, w = pcall(button.GetWidth, button)
+            local width = okW and Secrets.Number(w) or nil
+            if not width or width <= 0 then return end
+
+            -- **每次重新取按钮上的冷却帧，不要用闭包里捕获的那个**：
+            -- `EnsureAuraCooldown` 每次 `StyleAuraButton` 都 `CreateFrame` 一个新的（没有复用），
+            -- 所以捕获的 `cd` 很可能已经不是引擎正在驱动、屏幕上正在显示的那一个 ——
+            -- 实机 2026-11-01：字号一直不动，就是因为一直在给废弃对象 SetFont。
+            -- 另外引擎自己那行时长数字也挂在冷却帧上，一起量才覆盖得到。
+            local okC, kids = pcall(function() return { button:GetChildren() } end)
+            if not okC then return end
+            for i = 1, #kids do
+                local k = kids[i]
+                local okK, kind = pcall(k.GetObjectType, k)
+                if okK and kind == "Cooldown" then
+                    local okR, regs = pcall(function() return { k:GetRegions() } end)
+                    if okR then
+                        for j = 1, #regs do
+                            local rg = regs[j]
+                            local okT, t = pcall(rg.GetObjectType, rg)
+                            if okT and t == "FontString" then
+                                FitAuraText(rg, width, fitFontKey, fitBase, Media.outlineFlags)
+                            end
+                        end
+                    end
+                end
+            end
+        end, 1)
+    end
 end
 
 --- 导出给 BuffFrame：战斗里客户端不给插件读光环，玩家 buff 行改由引擎 AuraContainer 显示，
