@@ -97,6 +97,46 @@ function Secrets.Number(value)
     return nil
 end
 
+--- 把血量百分比写进一个 FontString —— **机密值也画得出来**。
+---
+--- 为什么需要这个入口（2026-11-01 副本内实机）：
+---   `Secrets.CanMeasureHealth()` 不能当门。它问的是 `C_Secrets.ShouldUnitHealthMaxBeSecret`，
+---   而这个答案和真实值会**不一致**：实测 `CanMeasureHealth("player") = true`，可
+---   `UnitHealth("player")` 返回的却是机密值（`Secrets.Number` 拿 nil）；反过来
+---   `CanMeasureHealth("target" / "nameplate1") = false` 又把整条路直接挡掉。
+---   结果就是玩家框、目标框、26 块姓名板的血量文字全是空白（不报错，纯静默失效）。
+---
+---   `UnitHealthPercent()` 返回的是**机密数字**，但 `SetFormattedText` 吃得下（引擎侧格式化）——
+---   小队/团队/首领的百分比一直是这么画出来的，所以那条路是好的。
+---
+--- @param fs      FontString（要有 SetFormattedText）
+--- @param unit    单位令牌，机密百分比要走 `UnitHealthPercent(unit, …)`
+--- @param current 已读到的当前血量（可能机密 / nil）
+--- @param maximum 已读到的最大血量（可能机密 / nil）
+--- @param fmt     printf 模板，默认 "%.0f%%"
+--- @return true = 已经写进去了；false = 这个单位现在拿不到百分比（调用方自己决定留空还是保留上次）
+function Secrets.FormatHealthPercent(fs, unit, current, maximum, fmt)
+    if not fs or type(fs.SetFormattedText) ~= "function" then return false end
+    fmt = fmt or "%.0f%%"
+
+    -- 1) 能算就算：普通值下 c/m 最准，也顺带让调用方还能拿到这个比值去上色
+    local c, m = Secrets.Number(current), Secrets.Number(maximum)
+    if c and m and m > 0 then
+        return pcall(fs.SetFormattedText, fs, fmt, c / m * 100)
+    end
+
+    -- 2) 机密值：交给客户端的百分比曲线。**值级判**（IsSecret 在比较之前），
+    --    因为 `pct ~= nil` 本身在旧构建上就是一次被拦的比较。
+    local constants = _G.CurveConstants
+    if unit and _G.UnitHealthPercent and constants and constants.ScaleTo100 then
+        local ok, pct = pcall(_G.UnitHealthPercent, unit, true, constants.ScaleTo100)
+        if ok and (Secrets.IsSecret(pct) or pct ~= nil) then
+            return pcall(fs.SetFormattedText, fs, fmt, pct)
+        end
+    end
+    return false
+end
+
 local function TestBool(value)
     if value then return true end
     return false

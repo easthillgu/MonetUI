@@ -605,17 +605,13 @@ local function UpdateHealth(plate)
         plate.healthLost:SetVertexColor(0, 0, 0, 1)
     end
 
-    -- Percentage text needs real numbers, so only when the client says health is readable (the
-    -- bar always fills); Secrets.Number hands back a plain number or nil, making it safe.
-    if Setting("showPercent") ~= false and Secrets.CanMeasureHealth(unit) then
-        local current = Secrets.Number(Query(UnitHealth, unit))
-        local maximum = Secrets.Number(Query(UnitHealthMax, unit))
-        if current and maximum and maximum > 0 then
-            local percent = current / maximum * 100
-            plate.percent:SetText(string.format("%d%%", math.floor(percent + 0.5)))
-        else
-            plate.percent:SetText("")
-        end
+    -- 百分比：**不要拿 CanMeasureHealth 当门**（它问的是 C_Secrets 的答案，实测与真实值不一致：
+    -- 2026-11-01 副本内 26 块牌子 `CanMeasureHealth(nameplateN)=false`，于是百分比全空白）。
+    -- 先试普通算术，拿不到就交给客户端的百分比曲线 —— 机密数字 SetFormattedText 吃得下。
+    if Setting("showPercent") ~= false then
+        local written = Secrets.FormatHealthPercent(plate.percent, unit,
+            Query(UnitHealth, unit), Query(UnitHealthMax, unit))
+        if not written then plate.percent:SetText("") end
     else
         plate.percent:SetText("")
     end

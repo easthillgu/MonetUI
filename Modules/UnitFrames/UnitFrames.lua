@@ -553,29 +553,32 @@ local function UpdateHealth(frame)
     local healthText = frame.healthText
     if not healthText then return end -- pet frames carry no text
 
-    if Secrets.CanMeasureHealth(unit) then
-        local current = Secrets.Number(UnitHealth(unit))
-        local maximum = Secrets.Number(UnitHealthMax(unit))
-        if current and maximum and maximum > 0 then
-            -- Target frame shows percentage; others show current/max
-            if unit == "target" then
-                local pct = math.floor(current / maximum * 100 + 0.5)
-                healthText:SetText(pct .. "%")
-            else
-                local style = (ns:DB().numberFormat == "cn") and "cn" or nil
-                healthText:SetText(Math:ShortNumber(current, 1, style) .. " / "
-                    .. Math:ShortNumber(maximum, 1, style))
-            end
-            if Setting(unit, "textColorByPercent") ~= false then
-                healthText:SetTextColor(PercentColor(current / maximum))
-            end
+    -- **不要拿 Secrets.CanMeasureHealth 当门**：它问的是 C_Secrets 的答案，实测会和真实值不一致
+    -- （2026-11-01 副本内：CanMeasureHealth("player")=true 但 UnitHealth 是机密），
+    -- 结果玩家框 / 目标框的血量文字整段空白。改成"先试算，算不出来再交给客户端的百分比曲线"。
+    local current, maximum = UnitHealth(unit), UnitHealthMax(unit)
+    local c, m = Secrets.Number(current), Secrets.Number(maximum)
+
+    local shown
+    if c and m and m > 0 then
+        -- Target frame shows percentage; others show current/max
+        if unit == "target" then
+            local pct = math.floor(c / m * 100 + 0.5)
+            shown = pcall(healthText.SetText, healthText, pct .. "%")
         else
-            healthText:SetText("")
+            local style = (ns:DB().numberFormat == "cn") and "cn" or nil
+            shown = pcall(healthText.SetText, healthText, Math:ShortNumber(c, 1, style) .. " / "
+                .. Math:ShortNumber(m, 1, style))
+        end
+        if Setting(unit, "textColorByPercent") ~= false then
+            healthText:SetTextColor(PercentColor(c / m))
         end
     else
-        -- restricted: keep the bar, hide the numbers
-        healthText:SetText("")
+        -- 机密：具体数字拿不到，百分比还能画（引擎格式化机密值）。
+        shown = Secrets.FormatHealthPercent(healthText, unit, current, maximum)
     end
+
+    if not shown then healthText:SetText("") end
 end
 
 local function UpdatePower(frame)
