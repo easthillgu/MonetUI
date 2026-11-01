@@ -347,8 +347,11 @@ local function RestyleBoss(cfg)
     end
 end
 
+local StopSuppressTicker   -- 前向声明：TeardownBoss 在定义之前，见下面「压制暴雪首领框」
+
 local function TeardownBoss()
     if ticker then ticker:Cancel(); ticker = nil end
+    if StopSuppressTicker then StopSuppressTicker() end
     if bossAnchor then bossAnchor:Hide(); bossAnchor = nil end
     for i = 1, MAX_BOSS do
         local btn = bossButtons[i]
@@ -370,12 +373,16 @@ end
 local function StarveBoss(frame)
     if not frame then return end
     pcall(frame.UnregisterAllEvents, frame)
-    if frame.GetChildren then
-        local ok, kids = pcall(frame.GetChildren, frame)
-        if ok and type(kids) == "table" then
-            for i = 1, #kids do
-                if kids[i] then pcall(kids[i].UnregisterAllEvents, kids[i]) end
-            end
+    if type(frame.GetChildren) ~= "function" then return end
+    -- `GetChildren` 返回的是**多返回值**不是表：直接 `pcall(frame.GetChildren, frame)` 只拿到
+    -- 第一个子框，随后 `#kids` 恒为 0（框体表没有数组部分）—— 子件事件从来没被饿掉过。
+    -- 本仓其余十处都写成 `{ ... }`（见 Utils/Skin.lua 的同款注释）。
+    local ok, kids = pcall(function() return { frame:GetChildren() } end)
+    if not ok or type(kids) ~= "table" then return end
+    for i = 1, #kids do
+        local child = kids[i]
+        if child and type(child.UnregisterAllEvents) == "function" then
+            pcall(child.UnregisterAllEvents, child)
         end
     end
 end
@@ -395,6 +402,11 @@ local function SuppressBlizzardBoss()
     local cfg = Config()
     if cfg and cfg.hideBlizzard == false then return end
 
+    -- **战斗里一次都不做**：`BossTargetFrameContainer` / `BossNTargetFrame` 都是
+    -- `protected=true`（实机探针 2026-11-01），战斗中对受保护框的 SetAlpha / SetPoint /
+    -- ClearAllPoints 全部被拒。压制必须在战斗之外做扎实，战斗中补不了。
+    if InCombat() then return end
+
     local f = _G.BossTargetFrameContainer
     if f then
         StarveBoss(f)
@@ -409,6 +421,28 @@ local function SuppressBlizzardBoss()
     end
 end
 
+--- 补压 ticker（2 秒，只在脱战跑）。
+---
+--- 为什么需要它：以前压制只在 Initialize / PLAYER_ENTERING_WORLD / 换区域各做一次。
+--- 实机 2026-11-01（副本内）：`BossTargetFrameContainer` 的 alpha 是 **1.00** —— 压制从没生效过。
+--- 原因有两层：①进副本那一刻 `Apply()` 在战斗里被推迟（战斗里做不了）；②暴雪的首领框是懒创建
+--- 且会自己重设 alpha，只在登录做一次会漏掉后建的框。脱战每 2 秒补一次，两种都能兜住。
+local suppressTicker
+
+local function StartSuppressTicker()
+    if suppressTicker then return end
+    if type(C_Timer) ~= "table" or type(C_Timer.NewTicker) ~= "function" then return end
+    suppressTicker = C_Timer.NewTicker(2, function()
+        if InCombat() then return end
+        if type(ns.IsModuleEnabled) == "function"
+           and ns:IsModuleEnabled("BossFrames") == false then return end
+        SuppressBlizzardBoss()
+    end)
+end
+
+StopSuppressTicker = function()
+    if suppressTicker then suppressTicker:Cancel(); suppressTicker = nil end
+end
 -- ============================================================================
 -- 模块接口
 -- ============================================================================
@@ -437,6 +471,9 @@ function M:Apply()
 
     if cfg.enabled ~= false then
         BuildBoss(cfg)
+        -- 压制 ticker：暴雪首领框是懒创建且会自己重设 alpha，一次压制盖不住整场。
+        -- 它只在脱战跑（受保护框），战斗中什么都不做。
+        StartSuppressTicker()
         local mov = Mover()
         if mov and type(mov.Register) == "function" and bossAnchor then
             mov:Register(bossAnchor, "bossFrames", {
