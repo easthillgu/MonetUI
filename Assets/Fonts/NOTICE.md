@@ -28,10 +28,13 @@
   `wenkai` = 霞鹜文楷、`cooldown` = Super Effective。已删的键：`pingfang`（与 `pixel` 重复）、
   `supereff`（与 `cooldown` 同文件，当初为省事写的缩写）、`thin`（nfdcsCN16，实机效果不好且
   需要额外维护 10px 下限与 FontFor 特例，字体文件已删除）。
-- **换挡规则**（漏斗 `Media:FontFor` / `Media:FlagsFor` / `Media:EffectiveFlags`）：
-  `cooldown` 任何字号都用它自己；其它键 **<12px** 一律落到 `Pingfangpixel.ttf`
-  （硬边 `OUTLINE, MONOCHROME`——文楷小字号 + AA 实机发虚），**≥12px** 才按key解析。
-  所以"双轨"现在只对 `wenkai` 有意义；正文走 `pixel`，12px 上下都是点阵苹方。
+- **字体政策**（2026-11-01 玩家定，执行点是 `Media:FontFor`，**字号说了算、key 不再决定字体**）：
+  - **冷却时间** —— 唯一例外，任何字号都用 `super-effective.ttf`；
+  - **≤ 14px**（偏小的字体）—— `Pingfangpixel.ttf`，描边 `OUTLINE, MONOCHROME`（**非抗锯齿**硬边）；
+  - **> 14px** —— `LXGWWenKai-Regular.ttf`，描边 `OUTLINE`（**抗锯齿**）。
+  - 动作条的热键 / 堆叠数 / 宏名属"偏小的字体"，走 `pixel`；光环时长同理。
+  - 漏斗三件套：`Media:FontFor`（字体）/ `Media:FlagsFor`（描边）/ `Media:EffectiveFlags`
+    （调用方传的"默认口径"被换成字号对应轨；显式自定义 flags 仍尊重调用方）。
 - **授权状态（2026-11-01 更新）**：点阵苹方**已取得作者授权**（字人自用许可），
   **允许随公开 Release 分发**，转公开前不再需要替换。授权条款记在下面「点阵苹方授权」一节，
   不另放授权文件（文件内嵌 name 表没有 license 字段，与原厂授权文本分离）。

@@ -33,7 +33,7 @@ Media.font = {
 }
 
 -- 小字轨（<12px）专用文件与标志；大字轨不引用它。
-Media.smallFont = ASSET .. "Fonts\\Pingfangpixel.ttf"
+-- 小字轨 = `Media.font.pixel`（同一文件），不再单独存一份路径：两处漂移过一次就别再有第二处。
 
 -- 大字轨（≥12px）渲染标志：OUTLINE = 1px 描边 + 灰度抗锯齿（不写 MONOCHROME）。
 -- 楷体笔画有粗细与笔锋，MONOCHROME 会把曲线边缘打成锯齿。
@@ -47,7 +47,9 @@ Media.smallFlags = "OUTLINE, MONOCHROME"
 Media.outlineFlags = "OUTLINE"
 
 -- 双轨分界：低于此字号走小字轨（SnapSize 地板 10，exact 模式可到 8）。
-Media.smallSizeCutoff = 12
+--- 字体政策阈值（2026-11-01 玩家定）：**≤14px 走点阵苹方（硬边），>14px 走文楷（抗锯齿）**。
+--- 冷却时间是唯一例外，不受阈值约束（见 Media:FontFor）。
+Media.sizeThreshold = 14
 
 --- Snap a font size onto the 12px step (and a sane floor).
 -- 原本是为像素字的 em/12 网格；换成矢量字体（PingFangPixel）后网格不再是硬约束，但字号仍按同一步长
@@ -319,21 +321,26 @@ function Media:Font(key)
     return self.font[key] or self.font.pixel
 end
 
---- 双轨漏斗①：按字号解析字体路径（≥12px 走 Media.font 的键，<12px 一律点阵苹方；
---- cooldown 键例外，任何字号都用它自己）。所有 SetFont 调用点都该走这个，
---- 不要直接 Media:Font —— 字号与字体必须同源，否则楷体会被塞进小字号发虚。
+--- 字体政策（2026-11-01 玩家定，`FontFor` 是唯一执行点）：
+---   * **冷却时间** —— 唯一例外：`Media.font.cooldown`（Super Effective），任何字号都用它自己；
+---   * **≤ 14px**（偏小的字体）—— `Pingfangpixel`（`Media.font.pixel`），描边**非抗锯齿**硬边；
+---   * **> 14px** —— `LXGWWenKai`（`Media.font.wenkai`），描边**抗锯齿**。
+---
+--- 也就是说**字号说了算，key 不再决定字体**（cooldown 除外）：`Media:FontFor("wenkai", 10)`
+--- 照样给点阵苹方，`Media:FontFor("pixel", 24)` 照样给文楷。
+--- 保留 key 参数是为了 cooldown 这个例外，以及以后要给某处"钉死字体"留的口子。
 function Media:FontFor(key, size)
     size = tonumber(size) or 12
     if key == "cooldown" then return self.font.cooldown end
-    if size < self.smallSizeCutoff then return self.smallFont end
-    return self:Font(key)
+    if size > self.sizeThreshold then return self.font.wenkai end
+    return self.font.pixel
 end
 
---- 双轨漏斗②：按字号解析渲染标志（<12px 硬边，≥12px 抗锯齿）。
+--- 双轨漏斗②：按字号解析渲染标志（≤14px 非抗锯齿硬边，>14px 抗锯齿）。
 function Media:FlagsFor(size)
     size = tonumber(size) or 12
-    if size < self.smallSizeCutoff then return self.smallFlags end
-    return self.fontFlags
+    if size > self.sizeThreshold then return self.fontFlags end
+    return self.smallFlags
 end
 
 --- 双轨漏斗③：调用方传"默认口径"（fontFlags / outlineFlags 两种拼写）或不传时，

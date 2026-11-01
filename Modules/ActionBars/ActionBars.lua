@@ -474,17 +474,17 @@ end
 -- 对比度由 OUTLINE 描边兜底（12px 走 fontFlags）。
 local function BuildButtonFonts(button)
     -- 热键
-    local hotkey = Widget:Font(button, HOTKEY_SIZE, "cooldown", "edge", "LEFT")
+    local hotkey = Widget:Font(button, HOTKEY_SIZE, "pixel", "edge", "LEFT")
     hotkey:SetPoint("TOPLEFT", button, "TOPLEFT", 2, -1)
     button.hotkey = hotkey
 
     -- 堆叠数量
-    local count = Widget:Font(button, COUNT_SIZE, "cooldown", "edge", "RIGHT")
+    local count = Widget:Font(button, COUNT_SIZE, "pixel", "edge", "RIGHT")
     count:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -2, 1)
     button.count = count
 
     -- 宏名
-    local macro = Widget:Font(button, MACRO_SIZE, "cooldown", "edge", "CENTER")
+    local macro = Widget:Font(button, MACRO_SIZE, "pixel", "edge", "CENTER")
     macro:SetPoint("BOTTOM", button, "BOTTOM", 0, 1)
     button.macro = macro
 end
@@ -1135,11 +1135,11 @@ local function SkinAdoptedButton(btn)
     -- （2026-10-30 玩家要求）。暴雪自己的 FontString，只调字体与颜色，不写字段。
     local er, eg, eb = Color:GetEdge()
     if btn.HotKey then
-        pcall(Widget.SetFont, Widget, btn.HotKey, HOTKEY_SIZE, "cooldown")
+        pcall(Widget.SetFont, Widget, btn.HotKey, HOTKEY_SIZE, "pixel")
         if btn.HotKey.SetTextColor then pcall(btn.HotKey.SetTextColor, btn.HotKey, er, eg, eb) end
     end
     if btn.Count then
-        pcall(Widget.SetFont, Widget, btn.Count, COUNT_SIZE, "cooldown")
+        pcall(Widget.SetFont, Widget, btn.Count, COUNT_SIZE, "pixel")
         if btn.Count.SetTextColor then pcall(btn.Count.SetTextColor, btn.Count, er, eg, eb) end
     end
 
