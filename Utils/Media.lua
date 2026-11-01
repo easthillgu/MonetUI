@@ -29,8 +29,15 @@ Media.font = {
     cooldown = ASSET .. "Fonts\\super-effective.ttf",
     supereff = ASSET .. "Fonts\\super-effective.ttf",
     wenkai   = ASSET .. "Fonts\\LXGWWenKai-Regular.ttf",
-    -- 历史别名：15+ 调用点还写着 "pingfang"（键是历史名，文件已换文楷），语义与 pixel 相同。
-    pingfang = ASSET .. "Fonts\\LXGWWenKai-Regular.ttf",
+    -- 历史别名：15+ 调用点还写着 "pingfang"。**指向 PingFangPixel 点阵字体**（12px 网格，
+    -- 12 号字最清晰）。2026-11-01 玩家确认：这个键就该是点阵苹方，不是文楷。
+    -- 影响面：任务追踪 / Toast / 战斗文字 / 信息栏 / 光环时长 共 12 处调用点。
+    pingfang = ASSET .. "Fonts\\Pingfangpixel.ttf",
+    -- 细体（2026-11-01 加）：NanoDyongChyangSong，按 16px 设计、只用于**数字与字母**的小字号
+    -- （光环时长 / 层数）。9px 以下渲染不出来，10px 起清晰。
+    -- 为什么需要它：buff 图标只有 28px，Super Effective 在 9px 已经破像素网格（实测放大截图
+    -- 笔画不均匀），而同样宽度下这个细体是矢量、任意字号都干净。
+    thin     = ASSET .. "Fonts\\nfdcsCN16.ttf",
 }
 
 -- 小字轨（<12px）专用文件与标志；大字轨不引用它。

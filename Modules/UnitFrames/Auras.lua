@@ -325,6 +325,12 @@ local function EnsureAuraTexts(button, cd, spec)
     local fontKey  = (type(spec) == "table" and spec.fontKey) or "pingfang"
     local stackKey = (type(spec) == "table" and spec.fontKey) or "pixel"
 
+    -- **nfd（thin）在 9px 以下渲染不出任何字形**（实测 9px 宽度 0.0，它是按 16px 设计的），
+    -- 而目标框光环是 24x18 的小格、算出来只有 7px —— 直接换过去时间会完全消失。
+    -- 所以给这个字体一个 10px 下限；其它字体仍是 6px。
+    local minPx = (fontKey == "thin") and 10 or 6
+    if textSize < minPx then textSize = minPx end
+
     -- **按图标宽度自适应字号**（玩家 2026-11-01 报"左上角 buff 时间显示不完整"）。
     -- 用参考串估算，不依赖真实文本：受限状态下 `GetStringWidth` 对真实文本返回机密值，
     -- 那条路在副本里是断的。估算放在**样式阶段**做，不靠轮询 —— 更确定，也少一圈驱动。
@@ -384,6 +390,7 @@ local refSizes = {}          -- [fontKey .. basePx .. limit] = 估算字号（�
 
 function ReferenceSize(fontKey, basePx, limit)
     if type(basePx) ~= "number" or basePx <= 0 then return 12 end
+    local floorPx = (fontKey == "thin") and 10 or 6   -- nfd 在 10px 以下渲染不出字形
     local key = tostring(fontKey) .. "|" .. tostring(basePx) .. "|" .. tostring(limit)
     local cached = refSizes[key]
     if cached then return cached end
@@ -392,14 +399,17 @@ function ReferenceSize(fontKey, basePx, limit)
     local size = basePx
     if scratch then
         scratch:Hide()
-        scratch:SetText(REF_TEXT)
+        -- **先上字体再 SetText**：新建的 FontString 没有字体，先 SetText 会抛
+        -- "FontString:SetText(): Font not set"，把整趟遍历打断在第一个字体串之前
+        -- （实机 2026-11-01：目标框 20 个字体串一个都没被碰到，就是卡在这）。
         local okFont = pcall(Widget.SetFont, Widget, scratch, basePx, fontKey, nil, true)
+        scratch:SetText(REF_TEXT)
         if okFont then
             local ok, w = pcall(scratch.GetStringWidth, scratch)
             local refW = ok and Secrets.Number(w) or nil
             if refW and refW > limit and refW > 0 then
                 size = math.floor(basePx * limit / refW)
-                if size < 6 then size = 6 end
+                if size < floorPx then size = floorPx end
                 if size > basePx then size = basePx end
             end
         end
@@ -418,11 +428,12 @@ local function FitAuraText(fs, maxWidth, fontKey, basePx, outline)
     local size = ReferenceSize(fontKey, basePx, limit)
 
     -- 量得到真实宽度就在估算基础上继续收（机密状态下这里拿不到值，保持估算结果）
+    local floorPx = (fontKey == "thin") and 10 or 6
     local ok, width = pcall(fs.GetStringWidth, fs)
     local w = ok and Secrets.Number(width) or nil
     if w then
         local guard = 0
-        while w > limit and size > 6 and guard < 32 do
+        while w > limit and size > floorPx and guard < 32 do
             size = size - 1
             guard = guard + 1
             Widget:SetFont(fs, size, fontKey, outline, true)
@@ -433,9 +444,16 @@ local function FitAuraText(fs, maxWidth, fontKey, basePx, outline)
         end
     end
 
-    if size ~= (Marked(fs, "fitPx") or basePx) then
+    -- **第一次必须无条件上字体**：以前只比较字号（`size ~= (Marked or basePx)`），
+    -- 目标框 aura 算出来正好等于基准字号 → 判成"没变" → 连 SetFont 都不调，
+    -- 字体一直是暴雪默认的 ARKai_T@17（实机 2026-11-01，fitWatch 都挂上了却一点变化都没有）。
+    -- 所以尺寸和字体键**任一变化**就重设，且首次（标记为 nil）必定重设。
+    local lastSize = Marked(fs, "fitPx")
+    local lastKey  = Marked(fs, "fitKey")
+    if lastSize ~= size or lastKey ~= fontKey then
         Widget:SetFont(fs, size, fontKey, outline, true)
         Mark(fs, "fitPx", size)
+        Mark(fs, "fitKey", fontKey)
     end
 end
 
@@ -466,6 +484,41 @@ local function RegisterAuraDuration(button, cd, duration)
         end
     end
     return true
+end
+
+--- 把按钮子树里**所有**冷却帧上的字体串都按图标宽度上字体（引擎自带的那些也算）。
+---
+--- 为什么要走整棵子树：引擎给光环按钮配的是**它自己的**冷却帧，我们 `CreateFrame` 的那个
+--- 往往不是屏幕上显示的那个。实机 2026-11-01：目标框 8 个 buff 的冷却帧上，字体串还是
+--- `ARKai_T@17` 默认字体 —— 我们设的字体一个都没落到可见对象上。
+local function StyleAuraCooldownTexts(button, fontKey, basePx, outline, depth)
+    if not button or type(button.GetChildren) ~= "function" then return end
+    depth = depth or 0
+
+    local okW, w = pcall(button.GetWidth, button)
+    local width = okW and Secrets.Number(w) or nil
+    -- 引擎光环按钮在受限状态下 `GetWidth` 会返回**机密值**（实机 2026-11-01：
+    -- 目标框 20 个字体串一个都没被碰过，就是卡在这里）。读不到就用规格宽度，
+    -- 不能因此整段放弃 —— 那等于"战斗/副本里永远不上字体"。
+    if not width or width <= 0 then width = TARGET_AURA_ICON_W end
+
+    for _, child in next, { button:GetChildren() } do
+        local okK, kind = pcall(child.GetObjectType, child)
+        if okK and kind == "Cooldown" then
+            local okR, regs = pcall(function() return { child:GetRegions() } end)
+            if okR then
+                for j = 1, #regs do
+                    local rg = regs[j]
+                    local okT, t = pcall(rg.GetObjectType, rg)
+                    if okT and t == "FontString" then
+                        FitAuraText(rg, width, fontKey, basePx, outline)
+                    end
+                end
+            end
+        elseif okK and depth < 3 then
+            pcall(StyleAuraCooldownTexts, child, fontKey, basePx, outline, depth + 1)
+        end
+    end
 end
 
 -- initializeFrame：一个引擎按钮只进来一次。碰按钮的事必须在这里做完。
@@ -531,47 +584,24 @@ local function StyleAuraButton(button, kind, spec)
     -- 装饰 3/3：主题染色（同样只碰我们自己的子件）。
     pcall(TintAuraButton, button)
 
-    -- 装饰 4/4：时长 / 层数文字按图标宽度自适应字号。
-    -- 引擎往这两个字体串里写文本时我们收不到任何回调，所以只能轮询（1 秒，只在需要变时 SetFont）。
-    -- 玩家 2026-11-01 报"左上角 buff 时间显示不完整"：28px 图标上 12 号字光 "6:56" 就占 25px，
-    -- 再长一点就撑出格子被相邻图标盖住。
-    if (duration or stack) and not Marked(button, "fitWatch") then
+    -- 装饰 4/4：时长 / 层数文字按图标宽度上字体 + 自适应字号。
+    -- 引擎往这些字体串里写文本时我们收不到任何回调，所以只能轮询（1 秒，只在需要变时 SetFont）。
+    --
+    -- **不要用 `(duration or stack)` 门控**：`EnsureAuraTexts` 建不出字体串时，
+    -- 屏幕上显示的其实是**引擎自带的那几个** FontString —— 门一关它们就永远没人管
+    -- （实机 2026-11-01：目标框 8 个 buff 的时长一直是 ARKai_T@17 默认字体）。
+    if not Marked(button, "fitWatch") then
         Mark(button, "fitWatch", true)
         local fitFontKey = (type(spec) == "table" and spec.fontKey) or "pingfang"
         -- **`textSize` 必须来自 EnsureAuraTexts 的返回值**：它是那个函数的局部变量，
         -- 在这里直接写 `textSize` 取到的是全局 nil（AGENTS 里"引用了还没声明的 local"那条）。
-        -- 实机 2026-11-01：`fitBase = textSize` 拿到 nil，轮询里每拍抛错被 PollWatch 的 pcall 吞掉，
-        -- 字号一直不动 —— 表面现象就是"自适应没生效"。
         local fitBase = textSize
-        if type(fitBase) ~= "number" then fitBase = 12 end
-        Widget:PollWatch(button, function()
-            local okW, w = pcall(button.GetWidth, button)
-            local width = okW and Secrets.Number(w) or nil
-            if not width or width <= 0 then return end
+        if type(fitBase) ~= "number" then fitBase = (fitFontKey == "thin") and 10 or 8 end
 
-            -- **每次重新取按钮上的冷却帧，不要用闭包里捕获的那个**：
-            -- `EnsureAuraCooldown` 每次 `StyleAuraButton` 都 `CreateFrame` 一个新的（没有复用），
-            -- 所以捕获的 `cd` 很可能已经不是引擎正在驱动、屏幕上正在显示的那一个 ——
-            -- 实机 2026-11-01：字号一直不动，就是因为一直在给废弃对象 SetFont。
-            -- 另外引擎自己那行时长数字也挂在冷却帧上，一起量才覆盖得到。
-            local okC, kids = pcall(function() return { button:GetChildren() } end)
-            if not okC then return end
-            for i = 1, #kids do
-                local k = kids[i]
-                local okK, kind = pcall(k.GetObjectType, k)
-                if okK and kind == "Cooldown" then
-                    local okR, regs = pcall(function() return { k:GetRegions() } end)
-                    if okR then
-                        for j = 1, #regs do
-                            local rg = regs[j]
-                            local okT, t = pcall(rg.GetObjectType, rg)
-                            if okT and t == "FontString" then
-                                FitAuraText(rg, width, fitFontKey, fitBase, Media.outlineFlags)
-                            end
-                        end
-                    end
-                end
-            end
+        -- 先立刻做一遍，再每秒补（引擎会自己重写文本/字体，补扫兜住）
+        pcall(StyleAuraCooldownTexts, button, fitFontKey, fitBase, Media.outlineFlags)
+        Widget:PollWatch(button, function()
+            pcall(StyleAuraCooldownTexts, button, fitFontKey, fitBase, Media.outlineFlags)
         end, 1)
     end
 end

@@ -401,14 +401,16 @@ function M:Attach(cd, size, compact, font)
     if not cd then return nil end
     size = tonumber(size) or BASE_SIZE
     compact = compact and true or false
-    font = (font == "pingfang") and "pingfang" or "cooldown"
+    -- 允许的矢量键：pingfang（文楷）/ thin（NanoDyongChyangSong 细体，光环时长用）。
+    -- 其余一律归到 "cooldown"（Super Effective，像素网格）。
+    font = (font == "pingfang" or font == "thin") and font or "cooldown"
 
     local state = attached[cd]
     if state then
         state.size = size
         state.compact = compact
         state.font = font
-        state.flags = (font == "pingfang") and Media.outlineFlags or Media.fontFlags
+        state.flags = (font == "pingfang" or font == "thin") and Media.outlineFlags or Media.fontFlags
         UpdateScale(cd, state)        -- the bar may have been resized
         state.look = nil              -- force the font/colour to be re-applied
         state.next = 0                -- render on the next frame
@@ -419,7 +421,7 @@ function M:Attach(cd, size, compact, font)
         size         = size,
         compact      = compact,
         font         = font,
-        flags        = (font == "pingfang") and Media.outlineFlags or Media.fontFlags,
+        flags        = (font == "pingfang" or font == "thin") and Media.outlineFlags or Media.fontFlags,
         own          = false,
         next         = 0,
         accum        = 0,
@@ -428,7 +430,10 @@ function M:Attach(cd, size, compact, font)
     attached[cd] = state
 
     -- Blizzard's own numbers stay styled for the fallback path.
-    Widget:StyleCooldownText(cd, Media:SnapSize(size), "cooldown")
+    -- **这里必须用调用方要的字体键**，不能写死 "cooldown"：受限状态下（冷却时间是机密）
+    -- 我们的文字渲染器会 HandBack，屏幕上真正显示的就是这行暴雪数字 ——
+    -- 写死的话 buff 那边换成细体后看不出任何变化（实机 2026-11-01 就是这么卡住的）。
+    Widget:StyleCooldownText(cd, Media:SnapSize(size), font)
 
     -- Follow a live resize of the action bar (buttonSize setting). 只挂**我们自己的**冷却框：
     -- 挂到暴雪的冷却框上等于插进它的事件链，一样会污染（见文件头"绝不全局钩脚本槽"的说明）。

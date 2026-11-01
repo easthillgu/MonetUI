@@ -102,12 +102,13 @@ local function CreateAuraButton(parent, size)
     if cooldowns and cooldowns.StyleCooldown then
         -- compact = true：28px 的图标放不下 "31:50"，用 "31m" 这种短格式；
         -- 颜色（分钟蓝 / 秒红）、临近到期放大等逻辑和动作条冷却是同一套。
-        -- 字体用 Super Effective（`supereff` 键）：和动作条的热键 / 堆叠数 / 宏名同一套，
-        -- 整块 HUD 的数字字形才一致。以前这里是 PingFangPixel。
-        cooldowns:StyleCooldown(button.cooldown, 12, true, "supereff")
+        -- 字体用细体 `thin`（NanoDyongChyangSong）：28px 图标把字号压到 10px 时，
+        -- 像素字体（Super Effective）已经破网格、笔画不均匀（放大截图实测），
+        -- 而这个矢量细体同样宽度下任意字号都干净。整块 HUD 的数字字形仍与动作条一致。
+        cooldowns:StyleCooldown(button.cooldown, 12, true, "thin")
     end
 
-    button.count = Widget:Font(button, 12, "supereff", { r = 1, g = 1, b = 1 }, "RIGHT")
+    button.count = Widget:Font(button, 12, "thin", { r = 1, g = 1, b = 1 }, "RIGHT")
     button.count:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -1, 1)
 
     Widget:Theme(button, { thickness = 1, bgAlpha = 0.6 })
@@ -374,7 +375,7 @@ local function CreateCombatAura(frameName, key, filter, size, kind)
                         crop = { 0.08, 0.92, 0.08, 0.92 },
                         iconInset = pad,
                         textSize = 12,
-                        fontKey = "supereff",
+                        fontKey = "thin",
                         borderInside = true,
                     })
                 end
