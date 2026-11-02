@@ -608,11 +608,20 @@ function Skin:Well(frame, region, opts)
         local suffix = region
         region = self:FindRegion(frame, suffix)
         if not region then
-            if opts.lazy ~= false and Widget and Widget.ShowWatch then
-                Widget:ShowWatch(frame, function()
-                    local found = self:FindRegion(frame, suffix)
-                    if found then self:Well(frame, found, opts) end
-                end)
+            -- 懒建区有两种：随窗口建的（首次 Show 前后就有）和**翻页/切页时才建**的
+            -- （2026-11-02 实机 AchievementFrameStatsBG 判例：ShowWatch 只在窗口显示时补
+            -- 一次，切页赶不上）。自注销 PollWatch（0.5s，找到即 Unwatch）全覆盖；
+            -- FindRegion 只是两次表查，空转代价可忽略。
+            if opts.lazy ~= false and Widget and Widget.PollWatch and Widget.Unwatch then
+                local fn
+                fn = function(f)
+                    local found = self:FindRegion(f, suffix)
+                    if found then
+                        Widget:Unwatch(f, fn) -- 按值匹配注销（PollWatch 的 entry 不认）
+                        self:Well(f, found, opts)
+                    end
+                end
+                Widget:PollWatch(frame, fn, 0.5)
             end
             return nil
         end
