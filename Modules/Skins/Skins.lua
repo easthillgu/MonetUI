@@ -475,7 +475,9 @@ local LooksLikeItemButton = function(button) return Skin:LooksLikeItemButton(but
 --- Restyle every direct child Button of a frame, skipping item buttons.
 function M:SkinButtonsIn(frame, opts)
     if not frame or type(frame.GetChildren) ~= "function" then return end
-    local children = { frame:GetChildren() }
+    -- GetChildren 本身也可能撞 forbidden object（IconWidgetsIn 同款判例），裹住。
+    local okKids, children = pcall(function() return { frame:GetChildren() } end)
+    if not okKids or type(children) ~= "table" then return end
     for i = 1, #children do
         local child = children[i]
         -- 受保护窗口的子控件在零售服上是 forbidden object：连 GetObjectType 都可能抛
@@ -513,7 +515,10 @@ function M:IconWidgetsIn(frame, depth)
     if not frame or type(frame.GetChildren) ~= "function" then return end
     depth = depth or 0
     if depth > 4 then return end
-    local children = { frame:GetChildren() }
+    -- GetChildren 也会撞 forbidden object（2026-11-02 实机红字判例：无名框枚举子层直接抛
+    -- "bad argument #1 ... self:GetChildren()"）——不裹起来整棵子树连同 body 一起炸。
+    local okKids, children = pcall(function() return { frame:GetChildren() } end)
+    if not okKids or type(children) ~= "table" then return end
     for i = 1, #children do
         local child = children[i]
         -- forbidden 对象上连 GetObjectType 都会抛（见 SkinButtonsIn 同款注释），全程 pcall。
@@ -547,8 +552,10 @@ function M:IconWidgetsIn(frame, depth)
                     end
                     pcall(Skin.ItemQualityBorder, Skin, target)
                     -- 模板计数抬层（Bags 案判例：图标 OVERLAY 7 会盖住模板 count）。
+                    -- 注意 `.count` 不一定是字体串——商人窗实测是**数字**（本格数量），
+                    -- 先验 type(table) 再索引方法，否则 "attempt to index a number" 炸 body。
                     local okCount, count = pcall(function() return target.count end)
-                    if okCount and count and type(count.SetDrawLayer) == "function" then
+                    if okCount and type(count) == "table" and type(count.SetDrawLayer) == "function" then
                         pcall(count.SetDrawLayer, count, "OVERLAY", 8)
                         pcall(count.ClearAllPoints, count)
                         pcall(count.SetPoint, count, "BOTTOMRIGHT", target, "BOTTOMRIGHT", -2, 2)
@@ -566,7 +573,9 @@ end
 function M:SkinScrollsIn(frame, depth)
     if not frame or type(frame.GetChildren) ~= "function" then return end
     depth = depth or 0
-    local children = { frame:GetChildren() }
+    -- GetChildren 本身也可能撞 forbidden object（本函数带递归，IconWidgetsIn 同款判例），裹住。
+    local okKids, children = pcall(function() return { frame:GetChildren() } end)
+    if not okKids or type(children) ~= "table" then return end
     for i = 1, #children do
         local child = children[i]
         -- forbidden object 上连 GetObjectType 都会抛（见 SkinButtonsIn 的注释），一律 pcall。
@@ -591,7 +600,8 @@ end
 --- Restyle every direct child Slider of a frame.
 function M:SkinSlidersIn(frame)
     if not frame or type(frame.GetChildren) ~= "function" then return end
-    local children = { frame:GetChildren() }
+    local okKids, children = pcall(function() return { frame:GetChildren() } end)
+    if not okKids or type(children) ~= "table" then return end
     for i = 1, #children do
         local child = children[i]
         local okKind, kind = pcall(child.GetObjectType, child)
