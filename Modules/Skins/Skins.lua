@@ -537,6 +537,21 @@ function M:IconWidgetsIn(frame, depth)
                             break
                         end
                     end
+                    -- **方形门**：铺平档只认近似方形的按钮——`.icon` 字段不是物品格专属，
+                    -- 训练师的技能列表行（ClassTrainerFrameSkillStepButton 316x40、滚动行
+                    -- 301x47）也带 `.icon`，误铺平会把图标 SetAllPoints 拉满整行（2026-11-02
+                    -- 实机判例：训练师列表全拉花）。物品格语义 = 宽高比在 1.5 以内；读不出
+                    -- 尺寸的按钮保守起见也跳过（不铺平最多留原生圆角，铺错却是拉花）。
+                    local okW, w = pcall(target.GetWidth, target)
+                    local okH, h = pcall(target.GetHeight, target)
+                    local isSlot = false
+                    if okW and okH and type(w) == "number" and type(h) == "number"
+                        and w > 0 and h > 0 then
+                        local ratio = w / h
+                        if ratio < 1 then ratio = 1 / ratio end
+                        isSlot = ratio <= 1.5
+                    end
+                    if isSlot then
                     pcall(Skin.FlattenSlotArt, Skin, target)
                     for _, key in ipairs({ "icon", "Icon", "iconTexture", "IconTexture" }) do
                         local okIcon, tex = pcall(function() return target[key] end)
@@ -560,6 +575,7 @@ function M:IconWidgetsIn(frame, depth)
                         pcall(count.ClearAllPoints, count)
                         pcall(count.SetPoint, count, "BOTTOMRIGHT", target, "BOTTOMRIGHT", -2, 2)
                     end
+                    end -- isSlot
                 end
             elseif kind == "Frame" then
                 M:IconWidgetsIn(child, depth + 1)
