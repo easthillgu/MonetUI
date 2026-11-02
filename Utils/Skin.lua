@@ -491,14 +491,19 @@ local function NewBackdropFrame(parent, levelOffset)
 end
 
 --- A themed backplate behind a Blizzard frame.  Built once, cached on the frame.
--- @param opts { thickness=, bgAlpha=, borderAlpha=, borderKey=, inset=, bgSurface= }
+--- `opts.host`（2026-11-02 MerchantFrame 判例）：把背板挂到**另一个框**（通常是窗口本体），
+--- 锚点仍指 frame。为什么需要：这台客户端（70688 实测）对"嵌在中间层容器里、level 0 的子框"
+--- 不渲染——背板挂在 Inset（lv1）下算出 level 0 就整块隐形；挂在窗口本体直下的 level 0 没问题，
+--- 且与根窗大板同父同级、创建在后 → 按创建顺序稳压大板、稳被 level≥1 的内容压住。
+--- 背板本体带 `skinPlate` 旁表标记，探针靠它认"我们的背板"（不再依赖"父框的 skinBg 指向它"）。
+-- @param opts { thickness=, bgAlpha=, borderAlpha=, borderKey=, inset=, bgSurface=, host=, levelOffset= }
 function Skin:Panel(frame, opts)
     if not frame or not self:IsScriptObject(frame) then return nil end
     opts = opts or {}
 
     local bg = Marked(frame, "skinBg")
     if not bg then
-        bg = NewBackdropFrame(frame, opts.levelOffset or -1)
+        bg = NewBackdropFrame(opts.host or frame, opts.levelOffset or -1)
         if not bg then return nil end
         local inset = opts.inset or 0
         pcall(bg.SetPoint, bg, "TOPLEFT", frame, "TOPLEFT", inset, -inset)
@@ -510,6 +515,7 @@ function Skin:Panel(frame, opts)
             borderKey   = opts.borderKey,
             bgSurface   = opts.bgSurface,
         })
+        Mark(bg, "skinPlate", true)
         Mark(frame, "skinBg", bg)
         self:Track(bg)
     end
@@ -557,7 +563,10 @@ function Skin:InsetWell(frame, opts)
     if okA and a and a <= 0.001 then
         pcall(inset.SetAlpha, inset, 1)
     end
+    -- 背板挂到窗口本体（host = frame）而不是 inset 名下：本客户端（70688）对"中间层容器里
+    -- level 0 的子框"不渲染，挂窗口直下与根窗大板同父同级、创建在后，层次稳（见 Panel 注释）。
     return self:Panel(inset, {
+        host      = frame,
         bgSurface = opts.bgSurface or "lost",
         bgAlpha   = opts.bgAlpha or 0.965,
         borderKey = opts.borderKey,
@@ -1372,6 +1381,7 @@ end
 -- 按件数算"暴雪原样"会得出 147 件这种没有意义的数（实机第一版就是这样报的）。
 -- 我们自己的件（背板 / 织纹）都是匿名 CreateFrame，只能靠"挂在父框上的旁表指向谁"认出来。
 local function probeState(obj, owner, fadedParent)
+    if Marked(obj, "skinPlate") then return "我们的背板", false end
     if owner then
         if Marked(owner, "skinBg") == obj then return "我们的背板", false end
         if Marked(owner, "questWeave") == obj then return "我们的织纹", false end
