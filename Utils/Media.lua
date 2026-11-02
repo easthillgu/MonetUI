@@ -284,7 +284,7 @@ Media.texture = {
     ["monet_addon_icon"]    = ASSET .. "Textures\\monet_addon_icon",
 
     -- 进出战斗提示的剑 / 盾（SVG 手绘，tools/svg/monet_combat_{sword,shield}.svg）：
-    -- 无色相灰阶模具，运行期 SetVertexColor 染主题高光 / 主题色（CombatText.lua 的提示编排）。
+    -- 无色相灰阶模具，运行期 SetVertexColor 染主题色（Toast.lua 的进出战斗横幅）。
     ["monet_combat_sword"]  = ASSET .. "Textures\\monet_combat_sword",
     ["monet_combat_shield"] = ASSET .. "Textures\\monet_combat_shield",
 
