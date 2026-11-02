@@ -226,6 +226,9 @@ function M:SkinWindow(frame, opts)
             local name = frame:GetName()
             if name then close = _G[name .. "CloseButton"] end
         end
+        -- 名字三路全空时按 RedButton-Exit atlas 签名认一次（12.x 一批窗口的关闭按钮是匿名
+        -- Button，LootFrame 实测如此；见 Skin:FindAnonClose）。
+        if not close then close = Skin:FindAnonClose(frame) end
         if close then Skin:CloseButton(close) end
     end
 

@@ -1279,6 +1279,34 @@ function Skin:SwapArt(tex, key)
     return tex
 end
 
+--- Find an *anonymous* close button.  12.x ships a batch of windows (LootFrame, ...) whose
+-- close button is an unnamed Button child -- no `.CloseButton` field, no `<name>CloseButton`
+-- global -- so all three name-based lookups miss it.  But the whole family carries the same
+-- art signature: a RedButton-Exit atlas (RedButton-Exit / -Disabled / -exit-pressed /
+-- -Highlight; the casing is not consistent, hence the lowercased match).  Identify by that,
+-- never by guessed names.  Named buttons are left alone here -- they belong to the name path.
+function Skin:FindAnonClose(frame)
+    if not frame or type(frame.GetChildren) ~= "function" then return nil end
+    local roots = { frame }
+    -- TitleContainer / BorderFrame are two common host layers; absent layers are skipped.
+    if type(frame.TitleContainer) == "table" then roots[#roots + 1] = frame.TitleContainer end
+    if type(frame.BorderFrame) == "table" then roots[#roots + 1] = frame.BorderFrame end
+    for _, root in ipairs(roots) do
+        for _, kid in ipairs({ root:GetChildren() }) do
+            if kid.GetObjectType and kid:GetObjectType() == "Button"
+                and kid.GetName and not kid:GetName() then
+                for _, region in ipairs({ kid:GetRegions() }) do
+                    local atlas = region.GetAtlas and region:GetAtlas()
+                    if type(atlas) == "string" and atlas:lower():find("redbutton%-exit") then
+                        return kid
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
 --- Restyle a standard close button into the theme, with our own art under it: normal = monet_close_normal, pushed = monet_close_push, highlight = monet_close_hover over the top (its blend mode is untouched, so hover only brightens the art).
 -- The highlight is left white -- an additive tint would go invisible on the darker border colours.
 function Skin:CloseButton(button)
