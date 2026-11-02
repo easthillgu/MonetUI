@@ -408,10 +408,10 @@ function M:Dress(spec, opts)
                 end
 
                 -- 物品图标铺平 + 裁切（**默认开**，`icons = false` 才关）：子树里带 .icon 指纹的
-                -- 按钮压掉圆角遮罩 / 原生槽框，图标 8% 裁切 + 1px 主题方边——与背包 / 动作条
-                -- 同一语言。与 deep 互补——deep 的按钮扫**跳过**物品按钮，这条只管它们；
-                -- deep+lazy 的窗口由 SweepDeep 的轮询补扫追新格子，非 lazy 的窗口建格时机
-                -- 覆盖不了的（如运行期才建的列表）单独点名 `icons = true` 再补一遍。
+                -- 按钮压掉圆角遮罩 / 原生槽框，图标 8% 裁切 + 品质色方边（素底兜底）——
+                -- 与背包 / 动作条同一语言。与 deep 互补——deep 的按钮扫**跳过**物品按钮，
+                -- 这条只管它们；deep+lazy 的窗口由 SweepDeep 的轮询补扫追新格子，
+                -- 非 lazy 的窗口建格时机覆盖不了的（如运行期才建的列表）单独点名 `icons = true` 再补一遍。
                 if opts.icons ~= false then
                     M:IconWidgetsIn(frame)
                 end
@@ -499,8 +499,8 @@ end
 --- Flatten + square-crop every item-icon button in a frame's subtree.  This is Dress's
 --- **default pass**（`icons = false` 才关）：物品按钮是按钮扫**故意跳过**的那批
 --- （`Skin:LooksLikeItemButton` 指纹，`.icon` / `.Icon` / ... 字段），这条是它们的补集——
---- 压掉圆角 IconMask 与原生 NormalTexture 槽框、图标 8% 裁切 + 1px 主题方边，
---- 与背包 / 动作条完全同一套语言。
+--- 压掉圆角 IconMask 与原生 NormalTexture 槽框、图标 8% 裁切 + 品质色 1px 方边
+--- （灰/白品质与解析不出品质的按钮保持素边），与背包 / 动作条完全同一套语言。
 --- **认字段不认名字**：12.x 的物品格大量匿名（商人物品格 / 交易双方物品格 / 附魔格都是
 --- 「容器 frame > ItemButton」的形状），按名字的名单永远追不上，按指纹一遍全收。
 --- 裁剪参数进 `Skin:CropIcon` 的轮询账本：商人翻页 / 交易换物品重设贴图后，每 0.5s
@@ -540,9 +540,12 @@ function M:IconWidgetsIn(frame, depth)
                             okTex, texKind = pcall(tex.GetObjectType, tex)
                         end
                         if okTex and texKind == "Texture" then
-                            pcall(Skin.Icon, Skin, tex, true)
+                            -- 只裁切；1px 边由 ItemQualityBorder 接管（品质色 / 素边兜底，
+                            -- 翻页换物品后轮询重读，Bags 同款语言）。
+                            pcall(Skin.Icon, Skin, tex)
                         end
                     end
+                    pcall(Skin.ItemQualityBorder, Skin, target)
                     -- 模板计数抬层（Bags 案判例：图标 OVERLAY 7 会盖住模板 count）。
                     local okCount, count = pcall(function() return target.count end)
                     if okCount and count and type(count.SetDrawLayer) == "function" then

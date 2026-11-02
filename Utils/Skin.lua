@@ -1389,6 +1389,150 @@ function Skin:CropIcon(icon, x0, x1, y0, y1)
     return icon
 end
 
+-- ---------------------------------------------------------------------------
+--  品质色边（Bags 案共享版）：FlattenSlotArt 压掉了原生 IconBorder（品质色圈），
+--  品质色由我们自绘 —— 色表与 Bags 一致；灰/白品质（0/1）不上色，保持素边
+--  （引擎的中性 1px 边兜底）。品质不是静态属性（商人翻页 / 交易换物品都会变），
+--  走 CropIcon 同款驱动帧：每 0.5s 重读一次品质、变了才动边（GetItemInfo 走缓存，
+--  未缓存时先素边、缓存落地后自动上色）。
+-- ---------------------------------------------------------------------------
+
+local QUALITY_COLOR = {
+    [2] = { 0.20, 0.80, 0.20 },   -- Uncommon 绿
+    [3] = { 0.20, 0.55, 1.00 },   -- Rare    蓝
+    [4] = { 0.65, 0.30, 0.95 },   -- Epic    紫
+    [5] = { 1.00, 0.55, 0.00 },   -- Legendary 橙
+    [6] = { 0.90, 0.80, 0.40 },   -- Artifact
+    [7] = { 0.90, 0.80, 0.40 },   -- Heirloom
+}
+
+local qualityBorders = setmetatable({}, { __mode = "k" })   -- btn -> { frame, last }
+local qualityDriver, qualityAcc
+
+--- 品质多路解析（模板不齐，按特征不按名字）：`btn.link` 字段（商人 / 交易窗模板常写）
+--- → `btn.itemID` 字段 → ItemButtonMixin 的 `GetItemID()` / `GetItem()`（ItemLocation）。
+--- 全程 pcall，读不出就 nil（素边），绝不抛。
+local function ResolveQuality(btn)
+    local okLink, link = pcall(function() return btn.link end)
+    if okLink and type(link) == "string" and link ~= "" then
+        local ok, _, _, q = pcall(GetItemInfo, link)
+        if ok and type(q) == "number" then return q end
+    end
+    local okID, itemID = pcall(function() return btn.itemID end)
+    if okID and type(itemID) == "number" and itemID > 0 then
+        local ok, _, _, q = pcall(GetItemInfo, itemID)
+        if ok and type(q) == "number" then return q end
+    end
+    if type(btn.GetItemID) == "function" then
+        local ok, v = pcall(btn.GetItemID, btn)
+        if ok and type(v) == "number" and v > 0 then
+            local ok2, _, _, q = pcall(GetItemInfo, v)
+            if ok2 and type(q) == "number" then return q end
+        end
+    end
+    if type(btn.GetItem) == "function" and C_Item and C_Item.GetItemID then
+        local ok, loc = pcall(btn.GetItem, btn)
+        if ok and type(loc) == "table" then
+            local okV, valid = pcall(function() return loc:IsValidItem() end)
+            if okV and valid then
+                local okI, iid = pcall(C_Item.GetItemID, loc)
+                if okI and type(iid) == "number" and iid > 0 then
+                    local ok2, _, _, q = pcall(GetItemInfo, iid)
+                    if ok2 and type(q) == "number" then return q end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function EnsureQualityDriver()
+    if qualityDriver then return end
+    qualityDriver = CreateFrame("Frame")
+    qualityDriver:SetScript("OnUpdate", function(_, elapsed)
+        qualityAcc = (qualityAcc or 0) + (elapsed or 0)
+        if qualityAcc < 0.5 then return end
+        qualityAcc = 0
+        for btn, entry in pairs(qualityBorders) do
+            local border = entry.frame
+            if border and border.GetAlpha then
+                local q = ResolveQuality(btn)
+                local color = q and QUALITY_COLOR[q] or nil
+                if color ~= entry.last then
+                    entry.last = color
+                    if color then
+                        Widget:SetBorderState(border, color[1], color[2], color[3], 1)
+                    else
+                        Widget:SetBorderState(border, nil)
+                    end
+                end
+            end
+        end
+    end)
+end
+
+--- Draw a quality-coloured 1px border around a flattened item button.  The border starts
+--- as the plain neutral edge and recolours itself (poll driver) once the item's quality is
+--- resolvable; unknown / poor / common keep the plain edge, exactly like Bags.
+function Skin:ItemQualityBorder(btn)
+    if not btn or qualityBorders[btn] then return btn end
+    local border = NewBackdropFrame(btn, 1)
+    border:SetPoint("TOPLEFT", btn, "TOPLEFT", -1, 1)
+    border:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 1, -1)
+    Widget:Theme(border, { thickness = 1, bgAlpha = 0 })
+    self:Track(border)
+    qualityBorders[btn] = { frame = border }
+    EnsureQualityDriver()
+    return btn
+end
+
+--- Flatten an item-slot button's native art (Bags 案的共享版，原实现在 Modules/Bags/Bags.lua).
+-- 本客户端的物品格按钮有**圆角 IconMask**（遮罩把图标四角裁圆）+ **圆角 NormalTexture**
+-- （quickslot 槽框）——两样都和方形凹槽语言冲突。压掉遮罩与槽框、图标抬到 OVERLAY 7
+-- 铺满按钮，质量描边 (IconBorder) 一并压掉（品质色由 Skin:ItemQualityBorder 自绘补回）。
+-- 全程 pcall：不同模板的字段不齐（没有的就跳过）。
+function Skin:FlattenSlotArt(btn)
+    if not btn then return btn end
+    if btn.icon then
+        pcall(btn.icon.RemoveMaskTexture, btn.icon, btn.IconMask)
+        pcall(btn.icon.SetVertexColor, btn.icon, 1, 1, 1, 1)
+        pcall(btn.icon.SetTexCoord, btn.icon, 0, 1, 0, 1)
+        pcall(btn.icon.SetDrawLayer, btn.icon, "OVERLAY", 7)
+        pcall(btn.icon.ClearAllPoints, btn.icon)
+        pcall(btn.icon.SetAllPoints, btn.icon, btn)
+        pcall(btn.icon.Show, btn.icon)
+    end
+    if btn.IconMask then
+        pcall(btn.IconMask.SetTexture, btn.IconMask, nil)
+        pcall(btn.IconMask.SetSize, btn.IconMask, 0.001, 0.001)
+        pcall(btn.IconMask.Hide, btn.IconMask)
+    end
+    if btn.NewItemTexture then
+        pcall(btn.NewItemTexture.SetAlpha, btn.NewItemTexture, 0)
+        pcall(btn.NewItemTexture.Hide, btn.NewItemTexture)
+    end
+    if btn.BattlepayItemTexture then
+        pcall(btn.BattlepayItemTexture.SetAlpha, btn.BattlepayItemTexture, 0)
+        pcall(btn.BattlepayItemTexture.Hide, btn.BattlepayItemTexture)
+    end
+    if btn.flash then
+        pcall(btn.flash.SetAlpha, btn.flash, 0)
+        pcall(btn.flash.Hide, btn.flash)
+    end
+    if btn.NormalTexture then
+        pcall(btn.NormalTexture.SetAlpha, btn.NormalTexture, 0)
+    end
+    if btn.IconBorder then
+        pcall(btn.IconBorder.SetAlpha, btn.IconBorder, 0)
+    end
+    local ht = btn.GetHighlightTexture and btn:GetHighlightTexture()
+    if ht then
+        pcall(ht.ClearAllPoints, ht)
+        pcall(ht.SetAllPoints, ht, btn)
+    end
+    return btn
+end
+
 --- Crop an icon to a square and give it a Monet border.
 function Skin:Icon(icon, border)
     if not icon or Marked(icon, "icon") then return icon end
