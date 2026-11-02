@@ -40,23 +40,28 @@ TabardFrame、EncounterJournal、DressUpFrame、GossipFrame、LFGParentFrame、L
 - ✅ **已修**（`c2b6b2b`）：`Modules/UnitFrames/BossFrames.lua` `StarveBoss`
   —— 子框事件没被饿掉，停车的首领框子件仍在更新。改法照全仓口径
   `pcall(function() return { frame:GetChildren() } end)`，同时补了战斗守卫和脱战补压 ticker。
-- ⬜ **未修**（需 40 人团实机验证后再动）：`Modules/UnitFrames/Groups.lua`
+- ✅ **已修（`db12cf9`，2026-11-02 离线完成，待实机验收）**：`Modules/UnitFrames/Groups.lua`
   `AlphaTree` / `MuteTree`（约 :890 / :900）
-  —— 注释写着"必须逐件归零""成员按钮在第三层"，**实际只处理了根框**。
+  —— 注释写着"必须逐件归零""成员按钮在第三层"，**实际只处理了根框**：
+  `pcall(frame.GetChildren, frame)` 只接到第一个子框（帧对象），`type(kids) ~= "table"` 直接
+  return，递归从未发生。
   后果：暴雪团队框里设了 `SetIgnoreParentAlpha(true)` 的子件可能仍露出来（空心描边），
   子按钮的鼠标可能没被关掉。
 
-**为什么这两处不能一起改**：修好递归 = 真的去碰一堆**受保护的**暴雪框，而
+**为什么当初不能分期**：修好递归 = 真的去碰一堆**受保护的**暴雪框，而
 `StartMuteTicker` 是**每秒在战斗里**跑 `AlphaTree` / `MuteTree` 的。`MuteOne` 有战斗守卫，
 `AlphaTree` **没有** —— 递归一修，战斗中每秒对每个受保护子件 `SetAlpha`，就是当年那串
-`ADDON_ACTION_BLOCKED`（×984）重演。所以必须**同时**做三件事，并且只能实机验收：
+`ADDON_ACTION_BLOCKED`（×984）重演。所以三件事**一次做完**：
 
-1. `AlphaTree` 加战斗守卫（战斗中只压根框，或整段跳过）；
-2. 修递归写法（`pcall(function() return { f:GetChildren() } end)`）；
-3. `StartMuteTicker` 加门控：名册/包加载没变就不重扫（修完递归后它才真的变贵）。
+1. `ChildrenOf()` 统一走 `{ f:GetChildren() }`（与 BossFrames `c2b6b2b` 同一写法）；
+2. `AlphaTree` / `MuteTree` 入口加战斗守卫，战斗中整段跳过（受保护框写 `SetAlpha` 同样被拒）；
+3. `StartMuteTicker` 改成"脏标记 + 每 5 秒兜底"：`Repark` / 换区 / LoD `ADDON_LOADED` /
+   进组 / `PLAYER_REGEN_ENABLED` 置脏；顺手把小队那几个独立 `PartyMemberFrameN` /
+   `CompactPartyFrameMemberN` 纳入同一遍扫描（它们不是容器的子框，整树扫不到）。
 
-验收：40 人团 + 战斗中进出若干次，读 `Logs/taint.log` 与 `ADDON_ACTION_BLOCKED` 计数；
-确认暴雪团队框没有描边残留、点它那块屏幕不会误选/误拖。
+**待实机验收**：40 人团 + 小队各一次，进出战斗若干次；读 `Logs/taint.log` 与
+`ADDON_ACTION_BLOCKED` 计数（应当比修前**更低**：修前是每秒整树扫）；确认暴雪团队框没有
+描边残留、点它那块屏幕不会误选/误拖。
 
 ## 📉 2026-11-01 审查里"算过账、不做"的两条
 
