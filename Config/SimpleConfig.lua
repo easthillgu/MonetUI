@@ -29,7 +29,7 @@ local setOffset        -- Build 里定义，Show/Toggle 打开面板时归零
 local MODULE_ORDER = {
     "UnitFrames", "Cooldown", "BuffFrame",
     "Minimap", "Bags", "QuestTracker", "ActionBars", "Nameplates", "Skins",
-    "InfoBar", "Tooltip", "Cursor", "Toast", "Durability", "CombatText",
+    "InfoBar", "Tooltip", "Cursor", "Toast", "Durability", "CombatText", "DevTools",
 }
 
 local MODULE_LABEL = {
@@ -48,6 +48,7 @@ local MODULE_LABEL = {
     Toast        = "通知横幅 (Toast)",
     Durability   = "耐久警告 (Durability)",
     CombatText   = "战斗辅助 (CombatText)",
+    DevTools     = "开发工具 (DevTools)",
 }
 
 local function MakeCheckbox(parent, label, yOffset, getter, setter)

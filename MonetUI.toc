@@ -45,3 +45,4 @@ Modules\Durability.xml
 Modules\CombatText.xml
 Modules\InfoBar\InfoBar.xml
 Modules\Skins\Skins.xml
+Modules\DevTools\DevTools.xml

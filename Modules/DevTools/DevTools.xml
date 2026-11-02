@@ -1,0 +1,5 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- MonetUI · DevTools —— 开发工具（查询物品 / 技能 / 窗口参数）
+         单文件模块：只有一份 .lua，这里直接列它。 -->
+    <Script file="DevTools.lua"/>
+</Ui>

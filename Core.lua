@@ -25,6 +25,7 @@ local DEFAULTS = {
         Skins        = true,
         InfoBar      = true,
         Tooltip      = true,
+        DevTools     = false,   -- 开发工具：默认关，/mui dev 打开窗口（也可在配置面板开）
     },
     -- 位置服务（Utils/Mover.lua）：全 addon 的框共用一套拖拽 / 吸附 / 锁。locked 是全局锁，locks 按组覆盖；
     -- grid 是网格步长（物理像素，0 = 关），snap / snapRange 是框与框互相吸附的开关与范围（物理像素）。
@@ -1046,6 +1047,7 @@ local function PrintHelp()
     ns:Print("  |cffffd100/mui compat|r     客户端能力自查：换客户端第一趟跑它（bad 只看与假设不符的，tmpl 连模板一起探，find <片段> 扫暴雪帧真名）")
     ns:Print("  |cffffd100/mui enable|r     启用本体")
     ns:Print("  |cffffd100/mui disable|r    禁用本体（需 /reload）")
+    ns:Print("  |cffffd100/mui dev|r        打开开发工具（查询物品/技能/窗口能返回的参数）")
     ns:Print("  |cffffd100/mui <模块> on|off|r  单独开关模块")
     ns:Print("  |cffffd100/mui skins diagnose|r 对象名可达性账本（全仓一本账：skins / nameplates / infobar / minimap）")
     ns:Print("  |cffffd100/mui skins diagnose bad|r 只看\"命中但不是框体\"那一类（全量几百行，聊天框装不下）")
@@ -1220,6 +1222,14 @@ local function HandleSlash(message)
     elseif command == "disable" then
         ns:DB().enabled = false
         ns:Print("已禁用，执行 /reload 后生效。")
+
+    elseif command == "dev" then
+        local dev = ns.DevTools
+        if dev and type(dev.Toggle) == "function" then
+            dev:Toggle()
+        else
+            ns:Print("开发工具未加载。")
+        end
 
     elseif command == "reset" then
         -- 重置必须**就地清空再补默认值**：以前直接 `_G.MonetUIDB = nil`，之后 ns:DB() 建出来的
