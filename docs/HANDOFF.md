@@ -91,7 +91,7 @@ node tools/sync-check.js         # 仓库 vs 已安装副本（退出码 0 = 游
 | InfoBar | 可用（实机验收 2026-10-26） | 底边经验线 + 三角标记（尖端顶在线的上沿，见 3.15） |
 | Tooltip | 可用（实机验收 2026-10-26） | 三摆法（跟随 / 小地图右上角 / 暴雪默认）、1px 主题边、边缘翻转、Alt 常显 ID；见 3.13/3.18/3.19 |
 | Cursor / Toast / Durability | 可用 | 纯装饰 / 提示类，实机过过一遍 |
-| CombatText（战斗辅助） | 可用（实机验 2026-10-27） | 默认用暴雪数字；进出战斗剑+盾提示已验；**区域偏移功能已撤销**（涉及机密值，见 3.25） |
+| ~~CombatText（战斗辅助）~~ | **已于 2026-11-03 移除**（`48d9c70`） | 只保留"进入 / 离开战斗提醒"，并入 `Toast` 横幅（剑 / 盾图标 + danger/health 着色 + 文字）；浮动伤害/治疗/闪避数字、CVar 接管、私有动画帧一并删除 |
 | ~~BagFrame（旧排列式背包）~~ | **已于 2026-10-26 移除** | 两套背包只留 `Bags`（见 3.21） |
 | Skins | 可用 | 暴雪窗口美化；**只做窗口装饰，不碰里面的按钮/页签脚本** |
 
@@ -784,6 +784,11 @@ deploy 117 + sync-check 同步。**待实机看**：连按 B 十几次不会出�
 三个默认翻成 `false`（自己的数字降级为**可选**，开了才接管暴雪对应 CVar、关掉还原）；
 `SCHEMA` 5 → 6，`Migrate` 的 v6 块强制翻位 + 删掉作废的 `combat` 键。
 
+> **2026-11-03 补：整个模块已删除（`48d9c70`）。** 下面这段"进出战斗提示"的设计与贴图
+> 现在由 `Modules/Toast.lua` 的横幅承担（`Toast:Notify(head, text, { icon, tint, hold })`，
+> 开关 `toast.combatAlert`）；浮动数字、CVar 接管、`MonetUICombatAlert` 自绘框与私有
+> OnUpdate driver 全部移除。本节其余内容是历史记录，不再代表现状。
+
 **进出战斗醒目提示（新增，`alert` 默认开）**：
 
 - 参考 Andromeda `modules/combat/combat-alert.lua` 的编排（来自 ElvUI_WindTools）：
@@ -1090,7 +1095,7 @@ end
 - [ ] 小地图：位置/尺寸/矩形遮罩/面板/三个按钮/四角打标记/右键菜单/滚轮缩放；**编辑模式里拖小地图不再影响我们的位置**
 - [ ] 任务追踪：只剩自绘那一块（换地图、接任务、重载后再看）
 - [ ] 动作条：1–8 号条施法/翻页/拖放；宠物条左右键/冷却/自动施法；姿态条三个形态能点、位置贴 3 号条、`/reload` 后不变
-- [ ] 未动的模块各看一眼：Bags、InfoBar、Tooltip、Cursor、Toast、Durability、CombatText、Skins 各窗口
+- [ ] 未动的模块各看一眼：Bags、InfoBar、Tooltip、Cursor、Toast、Durability、Skins 各窗口
 
 ---
 
@@ -2495,6 +2500,60 @@ Media 键不变（`monet_role_tank/heal/dps`），STENCIL 名单不变（21 张�
 调用点不变（8.23 的 Groups / BossFrames 两处）。台架与验收页只在
 `%TEMP%\mui-role-ab` 和可视化目录 `monetui-role-ab.html`，不进 repo。
 
+## 8.25 2026-11-03 姓名板压制：BetterNamePlates 的钩子方案（**只记录，未改代码**）
+
+**背景**：`Nameplates` 现在用私有 `guardDriver`（`Modules/Nameplates/Nameplates.lua:747-764`）每 0.25s 对
+所有已接管的板子重跑 `KeepBlizzardHidden`：
+`uf:Show()`（若被藏）→ `uf:SetAlpha(0)` → `FadeBlizzardSiblings`（每拍 `{ base:GetChildren() }` 建表 +
+逐子框 `SetAlpha` 写入）。原因是牌成为当前目标时暴雪自己的高亮代码把 `UnitFrame` alpha 顶回 1
+（2026-10-28 实测 `blizzardHidden=true, ufAlpha=1.00`），而且没有可靠事件。
+常态下这 4 次/秒几乎全是"把已经是 0 的 alpha 再写一遍"。
+
+**参考实现（BetterNamePlates，含 Camelot 分支 = 本客户端同族）**：
+
+- 抑制只用 `UnitFrame:SetAlpha(0)`，**不轮询**：接管时给该实例挂一次
+  `hooksecurefunc(unitFrame, "SetAlpha", ...)`（`Runtime.lua:2046-2084`），回调里
+  `if state.suppressed and unitFrame:GetAlpha() ~= 0 then unitFrame:SetAlpha(0) end`。
+  目标高亮把 alpha 顶回 1 时，钩子在同一调用栈里立刻压回 0 —— 所以根本不存在"没有事件的复位"。
+- 状态放**弱键表**（`Runtime.lua:41` `blizzardFrameStates`），记录接管前的**原 alpha**并在交还时还原
+  （`Runtime.lua:2122-2124, 2138`），不硬编码 1，因此不破坏暴雪的距离淡出。
+- **从不** `Show()` / `Hide()` / `SetParent` / `SetScale` 暴雪的姓名板框，也没有 sibling 遍历。
+- 它的 OnUpdate（`Runtime.lua:2692-2710`）只管 hover（0.15s）与旧版施法文字，且**没有板子时会卸掉脚本**
+  （`Runtime.lua:69-79`）。
+- 生命周期走事件：`NAME_PLATE_UNIT_ADDED/REMOVED`、`PLAYER_ENTERING_WORLD`、
+  `PLAYER_LEAVING_WORLD`（归还池化框），启动时用 `C_NamePlate.GetNamePlates()` 补一遍
+  （`Runtime.lua:2979-2988`）。
+
+**可借鉴的具体点**：
+
+| MonetUI 现状 | 参考做法 | 价值 |
+|---|---|---|
+| 每拍 `uf:Show()` | 从不 Show（等游戏下一次 SetUnit/更新自己补） | 进本 9 条 `ADDON_ACTION_BLOCKED` 就来自这两处（见本文件 2026-11-02 那条注释） |
+| 交还时 `SetAlpha(1)` | 还原接管前的原值 | 不破坏暴雪 0.6 距离淡出 |
+| 0.25s 全量写 | 实例钩子按需写 + 读后写 | 常态写入/GC 归零 |
+| 私有 OnUpdate | 无 | 少一个常驻帧 |
+
+**为什么先不改（风险，必须交叉佐证）**：
+
+1. `hooksecurefunc(unitFrame, "SetAlpha")` 钩的是**产物实例**，不是驱动/池 —— 与
+   `NamePlateDriverFrame:UpdateNamePlateOptions`（生产者）不同类，但本客户端的污染是**按调用链**算的：
+   钩子一跑，之后同一链上的暴雪代码就算 MonetUI 的执行环境。姓名板链有机密比较前科
+   （`maxHealth` / `notInterruptible` / `isFullUpdate`），必须实机跑 `taint.log` 才能定。
+2. **BetterNamePlates 自己也有那个禁用写法**：`Runtime.lua:2753-2763` 对
+   `NamePlateDriverFrame:UpdateNamePlateOptions` 挂了 hook（刷友好 CVar）——
+   它的 suppression 路径可参考，**那一行不可照抄**。
+3. 它不做 sibling 淡出。我们注释里的 `base` 同级容器（`BuffListFrame` 一族、`SetIgnoreParentAlpha`）
+   在 1.60 是否真实存在需要一次性探针确认（打印 `base:GetChildren()` 的名字 + alpha）：
+   若它们其实是 `UnitFrame` 子框，`FadeBlizzardSiblings` 可以整段删除；若不是，保留低频兜底。
+
+**待做（顺序）**：
+
+1. 再挖 2–3 个插件交叉佐证钩子安全性（Plater / ElvUI / NDui / SilverNamePlates 之类），
+   重点看它们有没有对姓名板 `UnitFrame` 挂方法钩子、以及有没有在 1.60 同族客户端上长期运行。
+2. 安全半步（离线可做、零污染）：去掉每拍 `Show()`、读后写、缓存子框表、0.25s → 0.5s、
+   并入 `Utils/Scheduler`。
+3. 钩子半步：只在交叉佐证通过后做，并配 `taint.log` 实机验收。
+
 ## 9. 建议的下一步（按价值排序）
 
 1. **实机回归 P0/P1 的改动面**（`docs/HANDOFF.md` 8.6.2 + `TODO.md` 的 9 条清单）：
@@ -2509,7 +2568,7 @@ Media 键不变（`monet_role_tank/heal/dps`），STENCIL 名单不变（21 张�
 4. **小队/团队框**：确认自绘的正常、暴雪的那套按需在编辑模式里隐藏（我们不再代劳）。
 5. **SpellFlyout（技能弹出托盘）**：鼠标点选项必报 `ADDON_ACTION_FORBIDDEN CastSpellByID()`，
    快捷键正常。要么接受"鼠标点不展开、只提示一次"，要么自绘托盘（工作量中等）。
-6. 未动模块的实机过一遍（Bags、InfoBar、Tooltip、Cursor、Toast、Durability、CombatText）。
+6. 未动模块的实机过一遍（Bags、InfoBar、Tooltip、Cursor、Toast、Durability）。
 7. 想降噪的话：宠物条每次重载 10 条 `PetActionButton*:SetShown` BLOCKED（不改更稳，见 AGENTS）。
 8. **Forever 1.60 首趟（只记不改，见 8.13.4）**：先在 12.1.5 上跑 `/mui compat` 存基线，再部署到
    `_cn_beta_`（`-Interface 16001`）跑第二次，两份差集 = 适配清单；三条 Forever 专属窗口（LFG / 传承 / 微菜单）

@@ -186,6 +186,12 @@ TabardFrame、EncounterJournal、DressUpFrame、GossipFrame、LFGParentFrame、L
 13. **战斗中 /reload 后暴雪团队/小队框不能留残影**：`Park` 的几何 / 鼠标在受限窗口里被拒后
     已推迟到脱战，若屏幕中间仍出现 `CompactPartyFrame` / `CompactRaidFrame` 的 backdrop /
     选中描边，说明回退。
+14. **进出战斗提醒已并入 Toast**（`48d9c70`）：进 / 出战斗各弹一条横幅（剑 / 盾 + 着色 + 文字），
+    开关在「通知」里。实机确认：图标不糊、颜色对、1.6s 后自动消失、战斗中不弹两条。
+15. **姓名板压制优化（BNP 钩子方案）—— 暂缓，先交叉佐证**（`docs/HANDOFF.md` 8.25）：
+    参考实现用 `hooksecurefunc(unitFrame, "SetAlpha")` 代替 0.25s 轮询；污染风险未定，
+    要再挖 2–3 个插件（Plater / ElvUI / NDui / SilverNamePlates）交叉确认后再动。
+    在此之前可先做"零污染半步"（去掉每拍 `Show()`、读后写、0.5s + 调度器）。
 
 ## 事件派发中的受保护写入（批次 A，2026-11-02）
 
