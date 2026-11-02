@@ -90,6 +90,16 @@ local function SkinMerchant()
             Skin:Panel(box, { bgSurface = "lost", bgAlpha = 0.965, thickness = 1, borderAlpha = 0, host = root })
         end
     end
+    -- 金框的另一层真身（2026-11-02 实机判例）：MoneyInset / ExtraCurrencyInset 之外，
+    -- 暴雪还有一对独立的具名背景框 MerchantMoneyBg / MerchantExtraCurrencyBg（159x19，
+    -- MoneyBgMiddle 等原生金棕美术）叠在同一位置 —— 不叫 Inset、无 NineSlice、不在任何
+    -- 既有清单里。钱数文字（MerchantMoneyFrame）是独立框叠在其上，Strip 不伤内容。
+    for _, key in ipairs({ "MerchantMoneyBg", "MerchantExtraCurrencyBg" }) do
+        local bg = Skin:Need(key)
+        if bg then
+            Skin:Strip(bg)
+        end
+    end
 end
 
 local function SkinTrainer()
