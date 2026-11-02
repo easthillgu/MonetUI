@@ -29,7 +29,8 @@ local setOffset        -- Build 里定义，Show/Toggle 打开面板时归零
 local MODULE_ORDER = {
     "UnitFrames", "Cooldown", "BuffFrame",
     "Minimap", "Bags", "QuestTracker", "ActionBars", "Nameplates", "Skins",
-    "InfoBar", "Tooltip", "Cursor", "Toast", "Durability", "CombatText", "DevTools",
+    "InfoBar", "Tooltip", "Cursor", "Toast", "Durability", "CombatText",
+    "Atmosphere", "DevTools",
 }
 
 local MODULE_LABEL = {
@@ -48,6 +49,7 @@ local MODULE_LABEL = {
     Toast        = "通知横幅 (Toast)",
     Durability   = "耐久警告 (Durability)",
     CombatText   = "战斗辅助 (CombatText)",
+    Atmosphere   = "氛围暗角 (Atmosphere)",
     DevTools     = "开发工具 (DevTools)",
 }
 
@@ -1406,6 +1408,28 @@ function SimpleConfig:Build()
         ctHint:SetWidth(328)
         ctHint:SetJustifyH("LEFT")
         ctHint:SetText("战斗数字默认用暴雪自己的（机密值原因，我们画的拿不到明文）。打开哪一类，就接管暴雪对应的浮动文字，关闭时还原，不会出现两份数字。")
+        sec.bodyHeight = -row.y + 4
+    end
+
+    local atmosphere = ns:GetModule("Atmosphere")
+    if atmosphere then
+        sec = BeginSection("氛围暗角", false)
+        content = sec.body
+        row = LayoutCursor(0)
+
+        MakeDropdown(content, row(28), "强度", {
+            { value = 0.06, text = "轻 0.06" },
+            { value = 0.10, text = "中 0.10（默认）" },
+            { value = 0.12, text = "重 0.12" },
+        },
+            function() return atmosphere:Tier().alpha end,
+            function(value) atmosphere:SetTier(value) end)
+
+        local atHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
+        atHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(44))
+        atHint:SetWidth(328)
+        atHint:SetJustifyH("LEFT")
+        atHint:SetText("只在画面四周压暗，越靠中心越亮：压的是游戏世界，所有界面（面板、动作条、姓名板）都天然在这层之上，文字亮度一位不减。默认关。")
         sec.bodyHeight = -row.y + 4
     end
 

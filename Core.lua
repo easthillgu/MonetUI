@@ -26,6 +26,7 @@ local DEFAULTS = {
         InfoBar      = true,
         Tooltip      = true,
         DevTools     = false,   -- 开发工具：默认关，/mui dev 打开窗口（也可在配置面板开）
+        Atmosphere   = false,   -- A4 氛围暗角：默认关（它压的是整个画面，开不开是审美选择，不是缺省）
     },
     -- 位置服务（Utils/Mover.lua）：全 addon 的框共用一套拖拽 / 吸附 / 锁。locked 是全局锁，locks 按组覆盖；
     -- grid 是网格步长（物理像素，0 = 关），snap / snapRange 是框与框互相吸附的开关与范围（物理像素）。
@@ -43,6 +44,11 @@ local DEFAULTS = {
         -- Who owns the UI scale: "auto" pins it to the resolution (Utils/Media.lua scalePresets, so
         -- 1 UI unit is a whole number of physical pixels), "game" leaves it to the client's own setting.
         uiScaleMode    = "auto",
+    },
+    -- 氛围暗角（Modules/Atmosphere.lua）：strength = 压暗层的顶点 alpha，只有验收页量过的三档
+    -- （0.06 / 0.10 / 0.12）；认不到就退回 0.10 那一档。压的是世界，所有 UI 天然在这层之上。
+    atmosphere = {
+        strength = 0.10,
     },
     -- Big-number formatting for health text: "cn" = 万/亿 (natural on zhCN), "auto" = K/M/B.
     numberFormat = (GetLocale() == "zhCN") and "cn" or "auto",
@@ -959,7 +965,7 @@ local function BuildColorReport(su)
         mapID = mapID,
         zone = zoneName,
         envSource = envSource,
-        keys = { su.keys[1], su.keys[2], su.keys[3], su.keys[4] },
+        keys = { unpack(su.keys) },
         steps = su.steps,
         levels = su.levels,
         colors = colors,

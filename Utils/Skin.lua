@@ -670,28 +670,36 @@ function Skin:ControlBg(frame, opts)
     return bg
 end
 
---- Hover feedback on a Blizzard control: tint its Monet border to the highlight colour.
+--- Hover feedback on a Blizzard control: lift the plate we own under it.
 --- **不再 HookScript**：那会往暴雪框体的脚本槽里写我们的函数，把它标脏。
 --- 改用轮询（Widget:HoverWatch），不写字段、不铺遮挡层、也不吃点击。
+--- 2026-11-02（A5 / D +3）：这里以前只把边框涂成 highlight —— 实机读成"鼠标指着没反应"，
+--- 因为只有 1px 在动。现在走 `Widget:SetHoverLift`，同一拍里背板抬一档命名亮度（surface `hover`）、
+--- 边框换 highlight；写的仍然**只有我们自己的背板**（`skinBg` / `controlBg`），
+--- 暴雪控件一个 region 都不碰。没进过工厂的背板退回原来的"只换边框色"。
 function Skin:HoverHighlight(control, opts)
     if not control or type(control) ~= "table" then return end
     if Marked(control, "hover") then return end
     Mark(control, "hover", true)
     opts = opts or {}
 
-    local function border(bg)
-        return bg or Marked(control, "skinBg") or Marked(control, "controlBg")
+    local function plate()
+        return Marked(control, "skinBg") or Marked(control, "controlBg")
     end
 
     Widget:HoverWatch(control, function()
-        local bg = border()
-        if bg and bg.SetBackdropBorderColor then
+        local bg = plate()
+        if not bg then return end
+        if not Widget:SetHoverLift(bg, true) and bg.SetBackdropBorderColor then
             local r, g, b = Color:GetHighlight()
             bg:SetBackdropBorderColor(r, g, b, opts.alpha or 1)
         end
     end, function()
-        local bg = border()
-        if bg then Widget:Refresh(bg) end
+        local bg = plate()
+        if not bg then return end
+        if not Widget:SetHoverLift(bg, false) then
+            Widget:Refresh(bg)
+        end
     end)
 end
 

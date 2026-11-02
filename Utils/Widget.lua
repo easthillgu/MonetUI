@@ -1271,7 +1271,14 @@ function Widget:Refresh(frame, opts)
     elseif frame.SetBackdropColor then
         -- 底色的阶梯档：默认 panel（最暗那档 = 常规窗口/框底）；正文凹槽这类要"比窗口亮一档"的
         -- 传 bgSurface = "lost"。键只多这一个可选值，其余调用点不传就是原行为。
-        local pr, pg, pb = Color:GetSurface(opts.bgSurface or "panel")
+        -- 悬停档（hover）也走**命名档**，不在这里现算乘数（DESIGN-LANGUAGE §3）：
+        -- 2026-11-02 真像素实测 D +3 —— 有效底 L* 12.6 → 15.0，正文 neutral 对比度 5.72 → 5.38，
+        -- 离下一档 lost(28) 还差 13.0；扫描出的天花板是 +10（正好 4.50），+3 是最克制的那一档。
+        -- `hover` 是**在 panel 之上**定义的一档，所以只对常态底生效：本来就挂在更高档（lost 28）
+        -- 的正文凹槽悬停时不降档，那一块只动边框。
+        local base = opts.bgSurface or "panel"
+        local hovered = opts.hovered and true or false
+        local pr, pg, pb = Color:GetSurface(hovered and base == "panel" and "hover" or base)
         frame:SetBackdropColor(pr, pg, pb, opts.bgAlpha or 0.85)
 
         local state = opts.borderState
@@ -1279,9 +1286,16 @@ function Widget:Refresh(frame, opts)
             -- A live state (threat glow ...) outranks the themed colour and lives in this opts table, so a theme-refresh broadcast re-applies *it* instead of stomping it.
             frame:SetBackdropBorderColor(state.r, state.g, state.b, state.a or 1)
         else
-            local r, g, b = BorderColor(opts)
-            local _, _, _, ea = Color:GetEdge()
-            frame:SetBackdropBorderColor(r, g, b, opts.borderAlpha or ea or 1)
+            local r, g, b, a
+            if hovered then
+                -- §7-a：悬停那一拍边框换成 highlight（和常态边框同一个色族，只亮不跳）。
+                r, g, b, a = Color:GetHighlight()
+            else
+                r, g, b = BorderColor(opts)
+                local _, _, _, ea = Color:GetEdge()
+                a = ea
+            end
+            frame:SetBackdropBorderColor(r, g, b, opts.borderAlpha or a or 1)
         end
     end
 end
@@ -1305,6 +1319,23 @@ function Widget:SetBorderState(frame, r, g, b, a)
     else
         opts.borderState = nil
     end
+    Widget:Refresh(frame, opts)
+    return true
+end
+
+--- 悬停整块提亮（A5 / D +3）唯一的入口：把悬停态写进 widget 自己的主题条目，再重刷一次。
+-- 和 `SetBorderState` 同一套理由：状态存在 `themed[frame]` 的 opts 里，所以
+-- MONETUI_THEME_CHANGED 重涂时**重放的是悬停态**，不会被全局色盖回去；同一拍里
+-- 背板（surface `hover`）和边框（highlight）一起动，调用点不用各写一份。
+-- 只吃命名档，不在这里现算乘数（DESIGN-LANGUAGE §3）。
+-- @return false 表示这个框没进过工厂（没登记），调用方自己退回原路径
+function Widget:SetHoverLift(frame, on)
+    local opts = frame and themed[frame]
+    if not opts then return false end
+
+    local hovered = on and true or false
+    if (opts.hovered and true or false) == hovered then return true end
+    opts.hovered = hovered or nil
     Widget:Refresh(frame, opts)
     return true
 end

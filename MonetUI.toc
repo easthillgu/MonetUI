@@ -43,6 +43,9 @@ Modules\Cursor.xml
 Modules\Toast.xml
 Modules\Durability.xml
 Modules\CombatText.xml
+<!-- 暗角层排在信息条**之前**：同 BACKGROUND 档、同层级时创建更晚的盖在上面，
+     信息条 / 小地图面板要压在暗角之上（两者都显式 SetFrameLevel(1) 写死了，这里只是第二道保险）。 -->
+Modules\Atmosphere.xml
 Modules\InfoBar\InfoBar.xml
 Modules\Skins\Skins.xml
 Modules\DevTools\DevTools.xml

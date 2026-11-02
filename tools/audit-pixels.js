@@ -146,6 +146,9 @@ const STENCIL = new Set([
   'monet_map_tracking', 'monet_map_compartment', 'monet_map_difficulty',
   // 进出战斗提示的剑 / 盾：运行期 SetVertexColor 染主题高光 / 主题色，图内只许明度层次。
   'monet_combat_sword', 'monet_combat_shield',
+  // A4 氛围暗角：整张图只给径向 alpha，压暗的颜色（近黑）由运行期 SetVertexColor 给 ——
+  // 模具带色相会把那一点色相乘进"整个世界"，所以必须纯白。
+  'monet_vignette_62', 'monet_vignette_55',
 ]);
 
 // 色相偏离：非全透明像素里，三个通道两两之差的最大值。0 = 完全中性（纯白或纯灰都合法）。

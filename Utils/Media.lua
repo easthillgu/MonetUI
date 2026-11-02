@@ -314,6 +314,13 @@ Media.texture = {
     ["monet_map_tracking"]    = ASSET .. "Textures\\monet_map_tracking",
     ["monet_map_compartment"] = ASSET .. "Textures\\monet_map_compartment",
     ["monet_map_difficulty"]  = ASSET .. "Textures\\monet_map_difficulty",
+
+    -- A4 氛围暗角（Modules/Atmosphere）：128x128 纯白模具，整张图只给**径向 alpha**，
+    -- 压暗的近黑由运行期 SetVertexColor 给，强度（.06 / .10 / .12）给顶点 alpha。
+    -- 键名里的数字是剖面里"平段半径" r0（候选页 tools/gen-beauty-candidates.js 的 vignette）：
+    -- .06 / .10 用 _62，.12 用 _55（更深那一档要更宽的下探）。形状随变体不变，同 hairline。
+    ["monet_vignette_62"]     = ASSET .. "Textures\\monet_vignette_62",
+    ["monet_vignette_55"]     = ASSET .. "Textures\\monet_vignette_55",
 }
 
 --- Resolve a font key to a path (unknown keys fall back to the pixel font).

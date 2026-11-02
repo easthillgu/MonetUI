@@ -2,7 +2,7 @@
 -- Colour access layer: LibMonetColor-1.0 integration with a graceful fallback.
 -- "5 + 3" model (see MonetUI.md): functional 5 (primary / health / resource / danger / neutral) + signature 3 (edge glow / ambient tint / highlight wash).
 -- Only the signature colours (plus the Monet neutral) come from the engine; health / resource / danger stay UI-managed on purpose (they must never be "Monetised").
--- On top of the 5+3 sits the **surface ladder** (GetSurface): four CIE L* levels -- panel / lost / weave / fill -- recomputed once per theme refresh. The engine gives hue, the ladder gives separation; bar contrast is the consumer's job (see docs/HANDOFF.md 8.14.3).
+-- On top of the 5+3 sits the **surface ladder** (GetSurface): five CIE L* levels -- panel / hover / lost / weave / fill -- recomputed once per theme refresh. The engine gives hue, the ladder gives separation; bar contrast is the consumer's job (see docs/HANDOFF.md 8.14.3).
 
 local ADDON_NAME, ns = ...
 
@@ -26,24 +26,29 @@ local FALLBACK = {
     primary   = { r = 0.85, g = 0.66, b = 0.36, a = 1.00 },
 }
 
--- 亮度阶梯（CIE L*）：把"窗口底衬 / 掉血空槽 / 织纹 / 血条填充"四档在同一个色相家族里拉开。
+-- 亮度阶梯（CIE L*）：把"窗口底衬 / 悬停底衬 / 掉血空槽 / 织纹 / 血条填充"五档在同一个色相家族里拉开。
 -- 数字的来由见 docs/HANDOFF.md 8.14.3：这层之前是 ambient×0.35（面板）对 neutral×0.32（空槽），
 -- 14 个区域实测两者对比度只有 1.00–1.19 —— 不是"颜色不对"，是亮度几乎重合，所以怎么换色相都分不开。
 -- 阶梯只动亮度，色相仍由引擎给（下面 SURFACE_HUE / SURFACE_INVERT 那三行是 2026-10-25 配色案，不改）。
-local SURFACE_KEYS = { "panel", "lost", "weave", "fill" }
+-- hover 那一档是"鼠标压在这块底衬上"：panel +3 L*（2026-11-02 真像素候选实测，正文 neutral 对比度
+-- 5.72 → 5.38，仍在 4.5 线内；天花板实测在 +10）。它必须是一档**命名**的阶梯，
+-- 不是调用点现算的乘数 —— 见 docs/DESIGN-LANGUAGE.md §3。
+local SURFACE_KEYS = { "panel", "hover", "lost", "weave", "fill" }
 local SURFACE_STEPS = {
     panel = 10,   -- 窗口底衬：近乎无光，只负责承托内容
+    hover = 13,   -- 悬停底衬：只比面板亮 3 L*，读作"亮了一点"而不是"换了一块板"
     lost  = 28,   -- 掉血空槽：比面板亮一档，"少了的那截血"要看得出来
     weave = 40,   -- 织纹发丝线：压在空槽之上、比填充暗，读作布纹而不抢血量
     fill  = 46,   -- 血条填充：整条里最亮的一档
 }
 
 -- 每档吃哪个色相。fill 不在表里 = 走 edge 的 RGB 反相（保持"反色血条"的招牌识别）。
-local SURFACE_HUE = { panel = "ambient", lost = "neutral", weave = "neutral" }
+-- hover 和 panel 同色相（ambient）：悬停只许动亮度，动色相就成了"你的颜色"，那是 §7-a 的边界。
+local SURFACE_HUE = { panel = "ambient", hover = "ambient", lost = "neutral", weave = "neutral" }
 
 -- 引擎没带 1.2.0 工具函数（老 vendored 副本）时的回退乘数：就是这层之前各调用点自己写死的那几个数，
 -- 逐位一致，所以缺工具函数只是"回到旧观感"，不会算出别的颜色。
-local SURFACE_MUL_LEGACY = { panel = 0.35, lost = 0.32, weave = 1, fill = 1 }
+local SURFACE_MUL_LEGACY = { panel = 0.35, hover = 0.40, lost = 0.32, weave = 1, fill = 1 }
 
 local theme
 local surface
@@ -109,11 +114,11 @@ local function surfaceColor(t, key, step)
     return pr, pg, pb
 end
 
---- 算出这一套主题的四级阶梯（每刷新一次主题只算一遍，调用点 GetSurface 是 O(1) 读表）。
--- 返回 { panel/lost/weave/fill = {r,g,b}, steps, levels = {L*}, cr = {两两对比度} }；
+--- 算出这一套主题的阶梯（每刷新一次主题只算一遍，调用点 GetSurface 是 O(1) 读表）。
+-- 返回 { 每档 = {r,g,b}, steps, levels = {L*}, cr = {两两对比度} }；
 -- levels / cr 在没有工具函数时为 nil，正好给 /mui colors 当"这层有没有生效"的证据。
 local function computeSurface(t)
-    local s = { keys = { SURFACE_KEYS[1], SURFACE_KEYS[2], SURFACE_KEYS[3], SURFACE_KEYS[4] },
+    local s = { keys = { unpack(SURFACE_KEYS) },
                 steps = SURFACE_STEPS, levels = {}, cr = {} }
 
     for i = 1, #SURFACE_KEYS do
@@ -127,6 +132,10 @@ local function computeSurface(t)
         s.levels[key] = lightnessOf(s[key])
     end
     s.cr.panelLost = contrastOf(s.panel, s.lost)
+    -- **只是记账，不进闸门**：hover 只比 panel 高 3 个 L*（悬停态靠"贴得近才看得出的那点差"），
+    -- 折算对比度 ≈1.07，天然低于 Core.lua 的 COLOR_CR_MIN 1.4 那条"相邻两档要分得开"的门。
+    -- 别把它加进 CR_PAIRS 去"修红" —— 那一改等于把 D +3 推回 +6 以上，正文对比度先撑不住。
+    s.cr.panelHover = contrastOf(s.panel, s.hover)
     s.cr.lostWeave = contrastOf(s.lost, s.weave)
     s.cr.lostFill = contrastOf(s.lost, s.fill)
     s.cr.panelFill = contrastOf(s.panel, s.fill)

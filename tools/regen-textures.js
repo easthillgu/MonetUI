@@ -611,6 +611,29 @@ function drawHairline(ctx, w, h) {
 }
 
 
+// A4 氛围暗角：整张图只提供 **alpha**（径向 smoothstep），颜色全交给运行期 SetVertexColor。
+// 剖面逐位照抄验收页 tools/gen-beauty-candidates.js 的 vignette(W, H, edgeA, r0)：
+//   t = clamp((d/maxR - r0) / (1 - r0));  α = t²(3-2t)   （d = 到画布中心距离，maxR = 半对角线）
+// 画布是正方形、贴到屏幕上做非等比拉伸，所以等 α 线自动变成贴合屏幕比例的椭圆 —— 和候选页那三张同一形状。
+// 峰值归一化成 α = 1.0：强度（.06 / .10 / .12）由运行期的顶点色 alpha 给，一张图供多档。
+// 两张的差别只有 r0：候选页 .06 / .10 配 r0 = .62，.12 配 r0 = .55（更深那一档要更宽的下探）。
+// 与变体无关（和 hairline / barfill 同理：形状不是"视觉重量"的自由变量）。
+function drawVignette(ctx, w, h, r0) {
+  const img = ctx.createImageData(w, h);
+  const cx = w / 2, cy = h / 2, maxR = Math.hypot(cx, cy);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy) / maxR;
+      const t = Math.min(1, Math.max(0, (d - r0) / (1 - r0)));
+      const a = t * t * (3 - 2 * t);
+      const i = (y * w + x) * 4;
+      img.data[i] = 255; img.data[i + 1] = 255; img.data[i + 2] = 255;
+      img.data[i + 3] = Math.round(a * 255);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
 function drawCorner(ctx, size) {
   // 角落装饰：固定小圆弧（线宽 1px，半径 4px）
   // 圆心放在 (radius, radius)、中心线半径 radius - lineWidth/2，两端正好落在画布边缘上：
@@ -835,6 +858,9 @@ const generators = {
   'monet_role_tank':     (ctx, w, h) => drawRoleTank(ctx, w/2, h/2, Math.min(w,h)),
   'monet_scrollbar_track': (ctx, w, h) => glyphScrollTrack(ctx, w, h),
   'monet_scrollbar_thumb': (ctx, w, h) => glyphScrollThumb(ctx, w, h),
+  // A4 氛围暗角（只有 alpha，强度在运行期给）：见 drawVignette 的头注
+  'monet_vignette_62':     (ctx, w, h) => drawVignette(ctx, w, h, 0.62),
+  'monet_vignette_55':     (ctx, w, h) => drawVignette(ctx, w, h, 0.55),
 };
 // 以下 glyph 改由 tools/import-glyphgen.js 从 ../glyphgen 导入（覆盖率+像素对齐）：
 //   monet_chevron_up/down、monet_arrow_left/right、monet_close_normal/hover/push、
@@ -851,6 +877,11 @@ const SIZES = {
   'monet_hairline':      { w: 256, h: 1 },
   'monet_scrollbar_track': { w: 8, h: 64 },
   'monet_scrollbar_thumb': { w: 8, h: 64 },
+  // 暗角：径向渐变的"形状"要够细才不被看出来，但它是**低频**信号，128 已够
+  // （1920 宽的屏幕上 1 纹素 ≈ 15px，α 每步 0.12/128 ≈ 0.0007，肉眼无级差）；
+  // 再大一档只是把包体积抬 4 倍。
+  'monet_vignette_62':     { w: 128, h: 128 },
+  'monet_vignette_55':     { w: 128, h: 128 },
 };
 
 // 默认尺寸：图标类 64x64
