@@ -200,8 +200,8 @@ local function QueryItem(raw)
     AddLine("物品 ID: " .. id)
     AddLine("（返回值的位置 / 含义按当前客户端；品质、类型等多为数字枚举）")
     AddLine("")
-    CallApi("GetItemInfo(id)", ITEM_INFO_LABELS, "GetItemInfo", id)
-    CallApi("GetItemInfoInstant(id)", ITEM_INSTANT_LABELS, "GetItemInfoInstant", id)
+    CallApi("C_Item.GetItemInfo(id)", ITEM_INFO_LABELS, "C_Item.GetItemInfo", id)
+    CallApi("C_Item.GetItemInfoInstant(id)", ITEM_INSTANT_LABELS, "C_Item.GetItemInfoInstant", id)
     -- C_Item.GetItemInfoByID 在本项目校验的 1.60 客户端 dump 里没有，用动态拼接 + 下标访问，
     -- 既不在源码里留下连续的 "C_Item.GetItemInfoByID" 字面量（避免静态审计误报 HARD），
     -- 运行时也能优雅地显示「此客户端没有该函数」。
@@ -226,15 +226,14 @@ local function QuerySpell(raw)
         return
     end
     AddLine("法术 ID: " .. id)
+    AddLine("（1.60 下 GetSpellInfo / GetSpellCooldown 等旧全局已移除，统一走 C_Spell.*；")
+    AddLine("返回结构体的 API 会展开其字段。）")
     AddLine("")
-    CallApi("GetSpellInfo(id)", SPELL_INFO_LABELS, "GetSpellInfo", id)
-    CallApi("C_Spell.GetSpellInfo(id)", {}, "C_Spell.GetSpellInfo", id)
-    CallApi("GetSpellCooldown(id)", SPELL_CD_LABELS, "GetSpellCooldown", id)
-    CallApi("C_Spell.GetSpellCooldown(id)", {}, "C_Spell.GetSpellCooldown", id)
-    CallApi("GetSpellTexture(id)", { "图标" }, "GetSpellTexture", id)
-    CallApi("GetSpellDescription(id)", { "描述" }, "GetSpellDescription", id)
+    CallApi("C_Spell.GetSpellInfo(id)", SPELL_INFO_LABELS, "C_Spell.GetSpellInfo", id)
+    CallApi("C_Spell.GetSpellCooldown(id)", SPELL_CD_LABELS, "C_Spell.GetSpellCooldown", id)
+    CallApi("C_Spell.GetSpellTexture(id)", { "图标ID", "原图标ID", "条件图标ID" }, "C_Spell.GetSpellTexture", id)
     CallApi("C_Spell.GetSpellDescription(id)", { "描述" }, "C_Spell.GetSpellDescription", id)
-    CallApi("GetSpellLink(id)", { "链接" }, "GetSpellLink", id)
+    CallApi("C_Spell.GetSpellLink(id)", { "链接" }, "C_Spell.GetSpellLink", id)
     Render()
 end
 
@@ -394,7 +393,8 @@ local function StartPick()
         pickCatcher:SetScript("OnMouseDown", function(self)
             self:Hide()
             Defer(function()
-                local focus = GetMouseFocus()
+                local focusFn = _G.GetMouseFocus
+                local focus = (type(focusFn) == "function") and focusFn() or nil
                 if focus then
                     inputBox:SetText(CallMethod(focus, "GetName") or "")
                     ClearLines()
