@@ -2554,6 +2554,138 @@ Media 键不变（`monet_role_tank/heal/dps`），STENCIL 名单不变（21 张�
    并入 `Utils/Scheduler`。
 3. 钩子半步：只在交叉佐证通过后做，并配 `taint.log` 实机验收。
 
+## 8.26 2026-11-03 交叉佐证：hook 到底能不能替掉轮询（三样本，**未改代码**）
+
+接 8.25 待做第 1 条。第二个样本是 **BlizzThreatPlates-Forever**（`.toc` 写 `## Interface: 16001`，
+13100 行，**直接活在暴雪原生姓名板上**，不自建牌 —— 比 BetterNamePlates 更贴我们的场景）。
+下面所有行号：`BTP` = `../BlizzThreatPlates-Forever`，`BNP` = `../BetterNamePlates`。
+
+### 8.26.1 三样本合起来的根因修正（要回写 AGENTS.md 的那句）
+
+8.25 里"钩的是产物实例还是生产者"这个分类**不是决定性的**。真正的判据只有一条：
+
+> **`[受限]` API 不允许出现在暴雪自己的调用链里** —— 既不能在 hook 回调体内，
+> 也不能在事件派发栈里；要调就 `C_Timer.After(0, …)` 顶到新 tick + `not InCombatLockdown()`。
+
+- 我们那次 `hooksecurefunc(driver, "UpdateNamePlateOptions", …)`（`c09867e` 删掉）之所以炸，
+  是**钩子体里调了 `C_NamePlate.SetNamePlateSize`**，而快照给它标了 `[受限]`
+  （`docs/api` ← `nameplatedocumentation.lua`；`node tools/api-lookup.js SetNamePlateSize` 可复核）。
+- 同一个函数，BTP 照用不误（`BTP/NameplateDimensions.lua:77-88`），三条纪律齐备：
+  ①不在钩内 ②事件 → `ScheduleRefresh`（:117-127）→ `C_Timer.After(0, Run)` ③`not InCombatLockdown()`。
+  设计原话在 :113-115：*"Finish after Blizzard's event handlers have laid out the plates,
+  **without hooking methods on its pooled UnitFrames or nameplate driver.**"*
+- BNP 那两个钩（`BNP/Runtime.lua:2065-2079` 钩 `unitFrame.SetAlpha`、:2746-2763 钩驱动方法）没炸，
+  是因为**体内只调非受限方法**（`Frame:SetAlpha` 快照无限制标记、还额外标 `[允许污染代码传机密]`；
+  `C_CVar.SetCVar` 也非受限，且战斗时只记 `friendlyCVarPending` 延后，:2735-2738）。
+
+### 8.26.2 BTP 的钩子分布：装暴雪东西的只有 8 处，且体内零受限调用
+
+| 类别 | 处数 | 证据 |
+|---|---|---|
+| 钩**暴雪全局更新函数** | 4 | `CompactUnitFrame_UpdateHealth`（`BTP/MobNameSize.lua:207`）、`_UpdateName`（:213）、`_UpdateHealthColor`（`Threat.lua:243`）、`_UpdateLevel`（`ATDStyle.lua:996`） |
+| 钩**暴雪控件方法** | 4 | `selectedBorder` 的 `SetAlpha` / `Show` / `SetShown`（`NameplateBorders.lua:185, 192`、`ATDStyle.lua:478-486`） |
+| 钩自建对象 | 6 | `NameplateBorders.lua:306`、`ComboPoints.lua:549` |
+
+`SetScript` 195 处、`RegisterEvent` 108 处**全在自建框**（搜 `plate:SetScript` / `UnitFrame:SetScript` /
+`castBar:SetScript` 零命中）；`HookScript` 37 处里只有 1 组打在暴雪框上（`RaidTargetFrame`，
+`NameplateAttachments.lua:259-261`）。**没钩过 `NamePlateDriverFrame`。**
+
+钩子体里最终只调 `SetFont` / `SetTextHeight` / `ClearAllPoints` / `SetPoint` / `SetWidth` /
+`SetJustifyH` / `SetAlpha` / `SetShown` / `SetStatusBarColor` —— **一个 `C_*` 受限调用都没有**。
+字体这条链确实**没有 OnUpdate**（`MobNameSize.lua:233-264` 只有事件 + `C_Timer.After(0)`）。
+
+它另外两件事是"钩子敢用"的前置条件，我们现在一件都没有：
+
+- **身份收敛**（`MobNameSize.lua:137-165`）：`CompactUnitFrame_UpdateName` 是姓名板**与小队/团队框共用**
+  的函数，所以钩子体第一关是 `IsForbidden()` + `unit:match("^nameplate%d+$")` + 显式拒 `partyN/raidN`
+  （:152-154）+ `plate.UnitFrame == frame` 回指校验（:164）。不收敛 = "改姓名字号顺手改了玩家小队框"。
+- **挂钩前先判函数存在**：`if hooksecurefunc and CompactUnitFrame_UpdateHealthColor then`（`Threat.lua:242`）。
+
+### 8.26.3 BTP 划了一条比 BNP 更严的线（这条决定我们采不采纳钩子）
+
+`BTP/NameplateAttachments.lua:149-151` 原话：
+
+> *"Secure AuraButtons must remain script-free: **even hooks installed during initialization make
+> Blizzard's later SetShown(secret) fail.** Only our ordinary sample Frames may publish visibility
+> through script handlers."*
+
+同一处把 `HookScript` 关进 `previewOnly` 分支（:152）—— **真实 AuraButton 一个钩子都不装**。
+这是第三方在**我们踩过的同一个对象**（AuraButton 的 shown 由机密载荷驱动，见 AGENTS"战斗光环硬禁读"
+与 `__monetAuraHook` 判例）上独立得到的结论。
+
+于是 8.26.1 那条判据要补一个限定：**边界不是"体内调不调受限 API"，还包括"被钩的那个方法会不会
+以机密载荷被暴雪自己调用"**。`SetShown(secret)` / 机密 alpha 那一类，连钩子都不能存在。
+BNP 钩 `unitFrame.SetAlpha`、BTP 钩 `selectedBorder.SetAlpha` 都没炸 —— 但按 BTP 自己的论证，
+这一档属于"载荷暂时不机密"的**运气**，不是设计。→ **8.25 的钩子方案不能无条件采纳，仍需 `taint.log` 实机。**
+
+### 8.26.4 "hook 替掉轮询"的答案是分档，不是替代
+
+BTP 并没有把轮询删掉：威胁这条是**事件 + 轮询并存**（`UNIT_THREAT_SITUATION_UPDATE` /
+`UNIT_THREAT_LIST_UPDATE`，`Threat.lua:260-261`；0.10s OnUpdate :5/:305；差分 0.25s
+`ThreatDifferential.lua:342`），而 `Threat.lua:107` 注释 *"Clear first: Blizzard's update calls our
+hook again"* 说明**钩子会重入、时序要轮询兜**。它 `ThreatPercentage.lua:110` 还专门写
+"不要再开第二个轮询" —— 作者把轮询当稀缺资源在管。
+
+| 状态类型 | 该用 | 依据 |
+|---|---|---|
+| "暴雪重算之后补一刀"（字体、血条色、文本对齐） | **钩暴雪全局更新函数**（体内非受限 + 身份收敛） | `MobNameSize.lua:207-215`、`Threat.lua:227-244` |
+| "只有玩家改设置才会变"（牌子尺寸） | **事件 + `C_Timer.After(0)` 合并**，不钩不轮询 | `NameplateDimensions.lua:113-155` |
+| 让暴雪自己顶（尺寸档位 / 样式 / 亮度 / 信息位域） | **CVar**，写不动就排队 | `Core.lua:956`、`NameplateStyles.lua:208`、`Options.lua:874` |
+| 高频读值（威胁百分比） | 事件 + 低频轮询 | `Threat.lua:5`、`ThreatDifferential.lua:342` |
+| 悬停 / 可读性 / 选中 | 只能轮询或事件（本客户端无 `MouseIsOver`） | 我们的 `HoverWatch` / `PollWatch` |
+| 会被机密载荷驱动的方法（`SetShown` / 某些 `SetAlpha`） | **不装钩** | `NameplateAttachments.lua:149-151` |
+
+### 8.26.5 两家共有的反例：往暴雪对象写字段（别学，也别拿"它没事"当依据）
+
+BNP：`basePlate.BetterNamePlatesView = view`（`Runtime.lua:868`）。
+BTP：`hb.btpHealthAlignment`（`MobNameSize.lua:130`）、`bar.btpThreatColored`（`Threat.lua:101`）、
+`frame.btpATDOverlay`（`ATDStyle.lua:428`）、`widget.btpATDOriginalAlpha` / `btpATDLevelShowHooked`
+（:470/:477）、`plate.btpTargetNameFront`（`TargetNames.lua:151`）。
+BTP 甚至**双轨混用**：同一个"是否已装钩"的语义，`NameplateAttachments.lua:248` 用旁表 `hooked[frame]`，
+`ATDStyle.lua:477` 用暴雪控件字段 —— 作者自己没把它当原则。
+两家全文的 `taint` 都只出现在注释里（`Core.lua:388`、`NativeCCFallback.lua:48`），
+**都没有 `issecurevariable` 逐键自检、没有拦截计数**。我们是**有实测判例**的一方
+（`__monetAuraHook` 那个键 false → `CompactUnitFrame_OnUpdate` 报 `maxHealth`、10 秒刷屏），
+所以"它们这么写也没炸"证据强度低于我们自己的账本，`ns:Mark` 旁表这条不动摇。
+
+### 8.26.6 顺手挖到的三条工具级线索（都可在离线先落一半）
+
+1. **`SimpleFrameScriptObjectAPI:CanBeAccessedInContext` 是本客户端正规 API**
+   （`docs/api` ← `SimpleFrameScriptObjectAPIDocumentation.lua:45`，索引 `FUNCTIONS_INDEX.md:5961`）。
+   BTP 优先问它、`IsForbidden` 只当退路，理由写在 `NameplateAttachments.lua:158-166`：
+   *"temporary aura restrictions do not necessarily set the ordinary forbidden flag."*
+   → 我们的 `Widget:Readable` / `VisibilityOf` 现在只认"调 `IsVisible` 抛不抛"，**判定档位比客户端给的弱**；
+   这也接上"读不出来的框挂进轮询永久空转"那笔账。我们仓里只有扫描脚本认识这个名字
+   （`.opencode/skills/wow-secret-value-guard-audit/scripts/scan-secret-guards.cjs:136`），Lua 侧一个都没用。
+2. **CVar 能不能写，客户端给了正规问法**：`C_CVar.GetCVarInfo(name)` 返回
+   `value, defaultValue, isStoredServerAccount, isStoredServerCharacter, isLockedFromUser, isSecure, isReadOnly`
+   （`CVarDocumentation.lua:91-100`），而 `C_CVar.SetCVar` 的文档要求写着 `RequiresNonSecureCVar = true`（:131-136）。
+   → **待测风险**：`Modules/Nameplates/Nameplates.lua:61-68` 那 8 个 `nameplateShow*` / `nameplateMaxDistance`
+   由 `WriteCVar`（:76-79）**无条件写 + pcall 吞结果**。若其中有 `isSecure`，对应设置项就是**长期空转、
+   一行红字都不响**。BTP 的写法可照：`Core.lua:149` 先 `tonumber(GetCVar(name)) ~= tonumber(value)` 再写。
+3. **`CVAR_UPDATE` 是"值已变"的通知，不是触发器**：进出战斗本身不会发它，要它发得先有人写。
+   → 上一轮讨论的"进战斗显示姓名板 / 出战斗隐藏"**不能靠 CVar 实现**：
+   `isSecure` 的 CVar 插件根本写不了（与战斗无关），非 secure 的"战斗中禁写"那一类，
+   进战斗那一拍也已经没有安全落点（`PLAYER_REGEN_DISABLED` 派发当拍原始标志可能是旧值，见 AGENTS）。
+   **正解仍是我们自己的压制**：脱战 `Widget:Mute`（α0 + 关鼠标，绝不 `Hide`，命中测试锚在暴雪血条上，
+   见 `Modules/Nameplates/Nameplates.lua:729-730`）+ 停止喂牌；进战斗 Unmute + 开始画。
+
+### 8.26.7 待做（覆盖 8.25 的三步，顺序按风险从低到高）
+
+1. **零风险、离线可做**（把 8.25 第 2 步和 8.26.6 合并）：守卫去掉每拍 `Show()`、改"读后写"、
+   无可见牌时整条驱动停摆（现在 `M.active` 只是 OnUpdate 内部早退，帧还每帧醒）、并入 `Utils/Scheduler`；
+   `Widget:Readable` 先问 `CanBeAccessedInContext`；`WriteCVar` 加 `GetCVarInfo` 守卫 + 先读后写 + 失败记账。
+2. **尺寸链改造**：2 秒轮询（`Nameplates.lua:189-201`）→ 事件（`CVAR_UPDATE` 按 `^nameplate` 过滤 /
+   `NAME_PLATE_UNIT_ADDED` / `UNIT_FACTION` 带机密守卫 / `PLAYER_TARGET_CHANGED` / `UI_SCALE_CHANGED` /
+   `DISPLAY_SIZE_CHANGED`）→ 合并一次 → `C_Timer.After(0)` → 才允许 `[受限]` 调用。**零钩子、零空转拍。**
+3. **实机探针**（客户端开着时）：`/mui nameplates probe cvar` 打那 8 个 CVar 的
+   `isSecure / isReadOnly / isLockedFromUser / defaultValue / 当前值` + `SetCVar` 的 pcall 返回 +
+   `CVAR_UPDATE` 自记计数；顺带按 8.25 第 3 条打印 `base:GetChildren()` 的真实名字，决定
+   `FadeBlizzardSiblings` 能不能整段删。
+4. **钩子半步（只在探针 + `taint.log` 之后）**：若采纳，装的是**暴雪全局更新函数**
+   （`CompactUnitFrame_UpdateName` / `_UpdateHealth`），体内只调非受限方法 + 带 8.26.2 的身份收敛；
+   **不装在任何"机密载荷会经过的方法"上**（`SetShown` / AuraButton 一类，见 8.26.3）。
+
 ## 9. 建议的下一步（按价值排序）
 
 1. **实机回归 P0/P1 的改动面**（`docs/HANDOFF.md` 8.6.2 + `TODO.md` 的 9 条清单）：
