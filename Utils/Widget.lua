@@ -84,12 +84,38 @@ local function labelOf(frame)
     return label
 end
 
---- 这个框是不是**根本读不了**（forbidden 对象）。判据只用 `IsVisible`：它是三个驱动的每拍前置，
---- 也是实机里确定会抛的那一刀（"Attempt to access forbidden object from code tainted by an AddOn"）。
+--- 客户端给的**正规前置问法**：我这个调用上下文能不能访问这个对象
+--- （`FrameScriptObject:CanBeAccessedInContext()`，快照确认无参、返回 bool，
+--- 而且答案本身可以是机密值 `SecretReturnsForAspect`）。
+--- 它比"往暴雪框上调一次 `IsVisible` 看抛不抛"高一级：临时的光环限制**不置 ordinary
+--- forbidden 旗**，只在这里答 false —— 那种框走老判据会一直"可读"，回调每拍照跑，
+--- 就是 AGENTS 记的那笔"读不出来的框挂进轮询永久空转、5 秒复检一次永远检不回来"。
+--- @return boolean|nil true=可访问 · false=不可访问 · nil=问不出来（没有此方法/答案机密）
+local function ContextAccess(frame)
+    if type(frame) ~= "table" then return nil end
+    if type(frame.CanBeAccessedInContext) == "function" then
+        local ok, allowed = pcall(frame.CanBeAccessedInContext, frame)
+        if ok and type(allowed) == "boolean" and not Secrets.IsSecret(allowed) then
+            return allowed
+        end
+        return nil        -- 问不出来（含答案是机密）：不许把"读不懂"当成"不能访问"
+    end
+    if type(frame.IsForbidden) == "function" then
+        local ok, denied = pcall(frame.IsForbidden, frame)
+        if ok and denied == true then return false end
+    end
+    return nil
+end
+
+--- 这个框是不是**根本读不了**（forbidden 对象）。先问客户端（`ContextAccess`），
+--- 它给了明确答案就照它的；问不出来才退回老判据 —— 调 `IsVisible` 抛不抛
+--- （"Attempt to access forbidden object from code tainted by an AddOn"，实机确定会抛的那一刀）。
 --- 注意"读不到名字"不能当判据 —— 暴雪大量控件本来就是匿名 `CreateFrame`，`GetName` 老老实实返回
 --- nil，框体完全可读、换肤也没问题；把它们算成 forbidden 会让告警永远指错对象。
 local function Forbidden(frame)
     if type(frame) ~= "table" or type(frame.IsVisible) ~= "function" then return true end
+    local access = ContextAccess(frame)
+    if access ~= nil then return not access end
     return not pcall(frame.IsVisible, frame)
 end
 
@@ -124,7 +150,26 @@ local function OriginOf(frame)
     return frameOrigins[frame] or "登记点未知"
 end
 
+--- "读不出来"这一支的告警（每框一次，之后靠 `Widget:PrintStalled` 的账本看）。
+--- 归因分两种写：客户端自己答"当前上下文不能访问"和"调 `IsVisible` 直接抛"不是同一种病 ——
+--- 前者多半是临时光环 / 受限窗口（脱战会自己好），后者才是真碰不得的 forbidden 对象。
+local function Unreadable(frame, src, byClient)
+    forbidWarned = forbidWarned or setmetatable({}, { __mode = "k" })
+    if not forbidWarned[frame] then
+        forbidWarned[frame] = true
+        ns:Print(("|cffffa940轮询读不到可见性|r：%s（%s · 驱动 %s），暂停它的轮询，%d 秒复检一次。登记点：%s")
+            :format(labelOf(frame) or "无名框",
+                    byClient and "客户端答不可访问" or "forbidden 对象",
+                    src or "?", PAUSE_RETRY, OriginOf(frame)))
+    end
+    return false, false
+end
+
 local function Visible(frame, src)
+    -- 客户端答"这个上下文访问不了"就到此为止：不再去调 `IsVisible`（那样只会拿到机密的
+    -- 布尔、被下面当成"显示着"放回去，回调接着往一个碰不了的框上写）。
+    if ContextAccess(frame) == false then return Unreadable(frame, src, true) end
+
     local ok, value = pcall(frame.IsVisible, frame)
     if ok then
         -- 受限环境里 `IsVisible` 会返回**机密布尔**（SecretWhenAnchoringSecret）：对它做真值测试
@@ -139,13 +184,7 @@ local function Visible(frame, src)
         return value and true or false, true
     end
 
-    forbidWarned = forbidWarned or setmetatable({}, { __mode = "k" })
-    if not forbidWarned[frame] then
-        forbidWarned[frame] = true
-        ns:Print(("|cffffa940轮询读不到可见性|r：%s（forbidden 对象 · 驱动 %s），暂停它的轮询，%d 秒复检一次。登记点：%s")
-            :format(labelOf(frame) or "无名框", src or "?", PAUSE_RETRY, OriginOf(frame)))
-    end
-    return false, false
+    return Unreadable(frame, src, false)
 end
 
 --- 带暂停的可见性读（三个驱动都走这里）。读不出来就先把这个框挂起 PAUSE_RETRY 秒：

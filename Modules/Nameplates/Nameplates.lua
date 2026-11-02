@@ -66,6 +66,19 @@ local CVARS = {
 
 local savedCVars
 
+--- 每个 CVar 一行账，`/mui nameplates probe cvar` 读的就是它。
+--- 以前 `WriteCVar` 把 pcall 的结果直接丢掉，8 个 `nameplateShow*` 里只要有**一个**写不进去，
+--- 对应的设置项就是长期空转、一行红字都不响 —— 没人会知道。
+local cvarLedger = {}
+local cvarWarned = {}
+
+local function Text(value)
+    -- 从游戏拿来的值要进字符串（concat / format）之前必须再过一次机密判断：`type()` 判不出来。
+    if value == nil then return "-" end
+    if Secrets.IsSecret(value) then return "机密" end
+    return tostring(value)
+end
+
 local function ReadCVar(cvar)
     if not GetCVar then return nil end
     local ok, value = pcall(GetCVar, cvar)
@@ -73,9 +86,79 @@ local function ReadCVar(cvar)
     return nil
 end
 
+--- 客户端对"这个 CVar 插件能不能写"给了正规问法：`C_CVar.GetCVarInfo(name)` 返回
+--- value, defaultValue, isStoredServerAccount, isStoredServerCharacter,
+--- isLockedFromUser, isSecure, isReadOnly（快照 `cvardocumentation.lua:91-100`），
+--- 而 `C_CVar.SetCVar` 的前置条件写着 `RequiresNonSecureCVar` ——
+--- **`isSecure` 的 CVar 我们连写都写不进**，与在不在战斗无关（8.26.6 第 2 条）。
+--- @return table|nil { value, default, locked, secure, readonly }；nil = 客户端没答
+local function CVarInfo(cvar)
+    if not (C_CVar and type(C_CVar.GetCVarInfo) == "function") then return nil end
+    local ok, value, default, _, _, locked, secure, readonly = pcall(C_CVar.GetCVarInfo, cvar)
+    if not ok then return nil end
+    return { value = value, default = default, locked = locked,
+             secure = secure, readonly = readonly }
+end
+
+local function CVarRecord(cvar)
+    local rec = cvarLedger[cvar]
+    if not rec then
+        rec = {}
+        cvarLedger[cvar] = rec
+    end
+    return rec
+end
+
+--- 同一个 CVar 只印一条（AGENTS：失败一次性警告，不刷屏）；细账在 probe 里随时能重看。
+local function CVarFlag(cvar, note)
+    local rec = CVarRecord(cvar)
+    rec.note = note
+    if not cvarWarned[cvar] then
+        cvarWarned[cvar] = true
+        ns:Print(("|cffffa940姓名板设置空转|r：%s —— %s（期望 %s）")
+            :format(cvar, note, Text(rec.want)))
+    end
+end
+
+--- @return boolean 写进去了 / 本来就是那个值
 local function WriteCVar(cvar, value)
-    if not SetCVar then return end
-    pcall(SetCVar, cvar, value)
+    -- 期望值来自我们自己的表达式，但"调用点漏了一个 nil"会写成字符串 "nil" ——
+    -- 那是真会把客户端设置改坏的，边界上拦一下。
+    if value == nil then return false end
+    local want = tostring(value)
+    local info = CVarInfo(cvar)
+    local cur = (info and info.value) or ReadCVar(cvar)
+    local rec = CVarRecord(cvar)
+    rec.want, rec.got = want, cur
+
+    -- 先读后写（BTP `Core.lua:149` 同一写法）：常态下这 8 个值一个都没变，一笔都不该落。
+    if type(cur) == "string" and not Secrets.IsSecret(cur) and cur == want then
+        rec.note = "已是"
+        return true
+    end
+
+    if info and (info.secure or info.readonly or info.locked) then
+        CVarFlag(cvar, info.secure and "客户端拒写（isSecure，插件无权改）"
+                       or info.readonly and "只读（isReadOnly）"
+                       or "玩家已锁定（isLockedFromUser）")
+        return false
+    end
+
+    if not SetCVar then return false end
+    local ok, err = pcall(SetCVar, cvar, want)
+    if not ok then
+        CVarFlag(cvar, "写入被拒：" .. Text(err))
+        return false
+    end
+
+    -- 不报错不等于写进去了：secure / read-only 那一类可能就是"静默收下、值不动"。复验一次。
+    local after = ReadCVar(cvar)
+    if type(after) == "string" and not Secrets.IsSecret(after) and after ~= want then
+        CVarFlag(cvar, "写了没生效（复验仍是 " .. Text(after) .. "）")
+        return false
+    end
+    rec.note = "已写"
+    return true
 end
 
 local function OnOff(value)
@@ -405,6 +488,25 @@ local function BlizzardUnitFrame(base)
     return base and rawget(base, "UnitFrame") or nil
 end
 
+--- 读一个暴雪对象的 alpha：读不出来（机密 / forbidden / 没有这个方法）返回 nil。
+--- @return number|nil
+local function AlphaOf(obj)
+    if not obj or type(obj.GetAlpha) ~= "function" then return nil end
+    local ok, value = pcall(obj.GetAlpha, obj)
+    if not ok or type(value) ~= "number" or Secrets.IsSecret(value) then return nil end
+    return value
+end
+
+--- 这一拍要不要压回 0。读得出来且已经是 0 就跳过 —— 常态下守卫 4 次/秒，几乎全是
+--- "把已经是 0 的 alpha 再写一遍"（8.25 那笔账）。
+--- **读不出来时照旧写**：暴雪把 alpha 顶回 1 的正是在战斗中，那时"读不到"很可能只是
+--- "现在不许我判断"，当成"不用写"就等于把 2026-10-28 的实机判例（当前目标的暴雪牌
+--- `blizzardHidden=true` 但 `ufAlpha=1.00`，和自绘牌同屏）又放回来。宁可多写一次。
+local function NeedsFade(obj)
+    local a = AlphaOf(obj)
+    return a == nil or a ~= 0
+end
+
 --- Take the plate over: fade Blizzard's box out (kept and still shown, see below) and borrow its aura list;
 --- only faded, so a later Restore gives back exactly what the game drew.
 --
@@ -415,10 +517,19 @@ end
 -- UnitFrame 里，alpha 沿树继承救不了它们 → "暴雪牌子没藏掉、和自绘的同屏"。
 -- 一并压 0（SetAlpha 非 Hide：C++ 点击区锚在血条/名字上，见下，alpha 不影响命中）。
 local siblingFaded = setmetatable({}, { __mode = "k" })   -- 还原时要知道哪些被我们压过
+local siblingAlpha = setmetatable({}, { __mode = "k" })   -- 它们被压之前自己的 alpha（交还要还原）
 
 local function FadeBlizzardSiblings(base, keep)
-    for _, c in ipairs({ base:GetChildren() }) do
-        if c ~= keep and c.SetAlpha then
+    if not base or type(base.GetChildren) ~= "function" then return end
+    -- `ipairs({ base:GetChildren() })` 里那层 `{}` 是白建的第二张表：GetChildren 本来就
+    -- 返回一张新表。守卫每拍每牌都走这里，40 块牌 × 4 次/秒 × 2 张表就是纯 GC 压力。
+    local kids = base:GetChildren()
+    for i = 1, #kids do
+        local c = kids[i]
+        if c ~= keep and c.SetAlpha and NeedsFade(c) then
+            -- 只在**真要写**的时候记账：以前每个子框每拍都被标一遍，交还时于是把暴雪自己
+            -- 按距离算出来的 alpha（实测 base 0.60）一并顶回 1 —— 只有我们动过的才该还原。
+            if not siblingFaded[c] then siblingAlpha[c] = AlphaOf(c) end
             siblingFaded[c] = true
             pcall(c.SetAlpha, c, 0)
         end
@@ -426,10 +537,12 @@ local function FadeBlizzardSiblings(base, keep)
 end
 
 local function RestoreBlizzardSiblings(base)
-    for _, c in ipairs({ base:GetChildren() }) do
+    if not base or type(base.GetChildren) ~= "function" then return end
+    for _, c in ipairs(base:GetChildren()) do
         if siblingFaded[c] then
             siblingFaded[c] = nil
-            pcall(c.SetAlpha, c, 1)
+            pcall(c.SetAlpha, c, siblingAlpha[c] or 1)
+            siblingAlpha[c] = nil
         end
     end
 end
@@ -443,6 +556,9 @@ local function HideBlizzardPlate(base, plate)
     -- 暴雪的血条 / 名字上。把 UnitFrame 藏起来，这些锚点就没有可测的矩形了 —— 表现就是
     -- "点不中玩家 / 宠物，只有没被我们接管的 NPC 才点得中"。只把 alpha 压到 0：
     -- 视觉上一样看不见，但 hit test 仍然有效。
+    -- 压之前把它**当前**的 alpha 记在我们自己的牌上（不是暴雪框上）：暴雪按距离算淡出
+    -- （实测 base 0.60），交还时硬写 1 会把这套淡出顶掉 —— BetterNamePlates 也是还原原值。
+    if plate.blizzardAlpha == nil then plate.blizzardAlpha = AlphaOf(uf) end
     if uf.SetAlpha then pcall(uf.SetAlpha, uf, 0) end
     -- IsShown 也可能返回机密值：一律过 Secrets.Bool（读不出来就当"没显示"，再 Show 一次）。
     -- Show 是受保护项（下文 456 行注释）：战斗中被拒会弹玩家可见的 ADDON_ACTION_BLOCKED
@@ -472,7 +588,10 @@ end
 local function RestoreBlizzardPlate(base, plate)
     local uf = BlizzardUnitFrame(base)
     if uf then
-        if uf.SetAlpha then pcall(uf.SetAlpha, uf, 1) end
+        if uf.SetAlpha then
+            -- 还原接管前读到的那一个值；读不到（当时就机密）才退回 1 —— 那是暴雪自己的默认满不透明。
+            pcall(uf.SetAlpha, uf, (plate and plate.blizzardAlpha) or 1)
+        end
         -- 同 HideBlizzardPlate：战斗里 Show 必被拒（弹 ADDON_ACTION_BLOCKED），
         -- 跳过，等游戏自己的 SetUnit / 更新周期补齐。
         if not InCombat() then pcall(uf.Show, uf) end
@@ -481,6 +600,7 @@ local function RestoreBlizzardPlate(base, plate)
     if plate then
         plate.blizzardHidden = nil
         plate.blizzardUF = nil
+        plate.blizzardAlpha = nil
     end
     return uf ~= nil
 end
@@ -733,8 +853,16 @@ end
 local function KeepBlizzardHidden(plate)
     local uf = plate.blizzardUF
     if not uf then return end
-    if uf.IsShown and not Secrets.Bool(uf:IsShown(), false) then pcall(uf.Show, uf) end
-    if uf.SetAlpha then pcall(uf.SetAlpha, uf, 0) end
+    -- **守卫里不再 `Show()`**（这是这一档改动的主要目的）：以前每拍都问一次 `IsShown`、
+    -- 没显示就补一刀 `Show`，而它没有战斗门 —— 战斗中必被拒，2026-11-02 进本那 9 条
+    -- `ADDON_ACTION_BLOCKED` 就来自 Show 这一处（接管那一次的 Show 在 HideBlizzardPlate 里，
+    -- 那边有 `not InCombat()` 门，保留）。暴雪把牌子藏回去时会在下一次 SetUnit / 更新
+    -- 周期自己 Show（BetterNamePlates 从头到尾不 Show，就是等这一手）；alpha 已经 0 的框
+    -- 视觉上本来就没有可看见的东西，晚一拍点亮不影响压制。
+    if uf.SetAlpha and NeedsFade(uf) then
+        if plate.blizzardAlpha == nil then plate.blizzardAlpha = AlphaOf(uf) end
+        pcall(uf.SetAlpha, uf, 0)
+    end
     FadeBlizzardSiblings(plate.base, plate)
 end
 
@@ -744,23 +872,36 @@ end
 -- 暴雪抢先、之后就没人再压 —— 表现是"当前目标的暴雪牌整块亮着，和自绘牌同屏"，
 -- 它右侧的减益列也跟着回来（探针实锤：假人牌 blizzardHidden=true 但 ufAlpha=1.00）。
 -- 低频守卫对全部 blizzardHidden 的牌子整树回压；PLAYER_TARGET_CHANGED 再补一记即时的。
-local guardDriver, guardAcc = nil, 0
-local GUARD_INTERVAL = 0.25
+local guardJob = nil
+local GUARD_INTERVAL_MS = 250
 
-local function StartGuard()
-    if guardDriver then return end
-    guardDriver = CreateFrame("Frame")
-    guardDriver:SetScript("OnUpdate", function(_, elapsed)
-        if not M.active then return end
-        guardAcc = guardAcc + (elapsed or 0)
-        if guardAcc < GUARD_INTERVAL then return end
-        guardAcc = 0
-        for _, plate in pairs(plates) do
-            if plate.blizzardHidden and plate.base then
-                KeepBlizzardHidden(plate)
-            end
+local function GuardTick()
+    if not M.active then return end
+    for _, plate in pairs(plates) do
+        if plate.blizzardHidden and plate.base then
+            KeepBlizzardHidden(plate)
         end
-    end)
+    end
+end
+
+--- 回压订阅只在**真有牌压着**的时候存在。以前是一个私有 `CreateFrame("Frame")` + OnUpdate
+--- 常驻：`M.active` 为假时它照样每帧醒一次再早退（累加器省的是回调次数，省不下唤醒），
+--- 屏幕上一块牌都没有时也是。现在计数归零就摘掉订阅 —— `Utils/Scheduler` 的主框随之
+--- 隐藏，空闲时一个回调都不跑，全仓也少一个常驻驱动帧（8.26.7 第 1 条）。
+--- 调用点 = 任何让 `blizzardHidden` 增减的地方：`UpdatePlate` / `Apply` / `SetEnabled`。
+function M:SyncGuard()
+    local n = 0
+    for _, plate in pairs(plates) do
+        if plate.blizzardHidden and plate.base then n = n + 1 end
+    end
+    if n == 0 then
+        if guardJob then
+            ns.Scheduler:Unregister(guardJob)
+            guardJob = nil
+        end
+    elseif not guardJob then
+        guardJob = ns.Scheduler:Every(GUARD_INTERVAL_MS, GuardTick)
+    end
 end
 
 local function UpdatePlate(plate)
@@ -776,6 +917,7 @@ local function UpdatePlate(plate)
         if plate.blizzardHidden then RestoreBlizzardPlate(plate.base, plate) end
         plate:Hide()
         HideCast(plate)
+        M:SyncGuard()
         return false
     end
 
@@ -784,6 +926,7 @@ local function UpdatePlate(plate)
     else
         KeepBlizzardHidden(plate)
     end
+    M:SyncGuard()
 
     -- **接管失败就别画我们这块**（2026-10-25 实机：同一只怪出现两块牌子 —— 暴雪的牌子
     -- 右端显示冰冻陷阱，我们的牌子左上显示猎人标记）。拿不到暴雪 UnitFrame 时我们无法把它
@@ -922,6 +1065,7 @@ local function Removed(unit)
     plate.castEndClock = nil
     plate:Hide()
     plate.cast:Hide()
+    M:SyncGuard()
     return true
 end
 
@@ -1007,6 +1151,7 @@ function M:Apply()
     self:ApplyPlateSize()
     self:HookDriver()
     self:UpdateAll()
+    self:SyncGuard()
 end
 
 function M:Initialize()
@@ -1033,7 +1178,7 @@ function M:SetEnabled(enabled)
         self:ApplyPlateSize()
         self:AbsorbExisting()
         self:UpdateAll()
-        StartGuard()
+        self:SyncGuard()
         return
     end
 
@@ -1048,6 +1193,7 @@ function M:SetEnabled(enabled)
         plates[unit] = nil
     end
 
+    self:SyncGuard()      -- 一块牌都不剩：摘掉回压订阅，Scheduler 主框跟着隐藏
     self:RestoreCVars()
     self:RestorePlateSize()
 end
@@ -1059,12 +1205,58 @@ local PROBED = {
     "C_NamePlate.GetNamePlateForUnit",
     "C_NamePlate.GetNamePlateSize",
     "C_NamePlate.SetNamePlateSize",
+    "C_CVar.GetCVarInfo",
     "NamePlateDriverFrame",
     "NamePlateDriverFrame.UpdateNamePlateOptions",
 }
 
+--- 实机探针（`/mui nameplates probe cvar`）：一次把 8 个 CVar 读全 ——
+--- 客户端答"能不能写"（isSecure / isReadOnly / isLockedFromUser）、当前值、默认值、
+--- 我们要的值、以及本会话上一次写入的判决。
+--- 为什么要这条：`WriteCVar` 以前吞掉 pcall 结果，"设置项长期空转"这种病**一行红字都不响**，
+--- 光看代码看不出来；而按约定不能发长 `/run` 去现场摸，所以把它做成一条子命令。
+function M:ProbeCVars()
+    ns:Print(("姓名板 CVar 探针（%d 个）· 客户端 %s")
+        :format(#CVARS, Text(GetBuildInfo and GetBuildInfo())))
+    local unwritable = 0
+    for _, cvar in ipairs(CVARS) do
+        local info = CVarInfo(cvar)
+        local rec = cvarLedger[cvar]
+
+        local flags = "可写"
+        if not info then
+            flags = "GetCVarInfo 无答复"
+        elseif info.secure then
+            flags, unwritable = "isSecure（插件写不进）", unwritable + 1
+        elseif info.readonly then
+            flags, unwritable = "isReadOnly", unwritable + 1
+        elseif info.locked then
+            flags = "isLockedFromUser（玩家已锁）"
+        end
+
+        local got = (info and info.value) or ReadCVar(cvar)
+        ns:Print(("%s = %s · 默认 %s · %s · 期望 %s · %s")
+            :format(cvar, Text(got), Text(info and info.default), flags,
+                    Text(rec and rec.want), Text(rec and rec.note or "本会话没写过")))
+    end
+    if unwritable > 0 then
+        ns:Print(("|cffff6b6b%d 个不可写|r：这些设置项在本客户端只能由暴雪自己改（CVar 界面 / 控制台命令），"
+            .. "插件写了不生效 —— 设置面板里该把它们标掉，别留成「看起来能调」的开关。")
+            :format(unwritable))
+    else
+        ns:Print("全部可写。")
+    end
+end
+
 function M:HandleCommand(rest)
     local sub = string.lower(rest or "")
+
+    -- `/mui nameplates probe cvar`（也收 `/mui nameplates cvar`，客户端里少敲两个词）
+    if sub:find("^probe%s+cvar") or sub:find("^cvar") then
+        self:ProbeCVars()
+        return true
+    end
+
     if sub ~= "diagnose" and sub ~= "diag" and sub ~= "probe" then return false end
 
     -- 同一本账：确认 + 打印交给 `Skin:Verify`，`/mui skins diagnose` 才会一起带上这些名字。
@@ -1073,6 +1265,7 @@ function M:HandleCommand(rest)
         ns:Print(string.format("%d 个缺失：全部已按特性探测跳过，不会报错；"
             .. "`NamePlateDriverFrame` 缺失时点击区仍会在设置/区域变化时重设。", missing))
     end
+    ns:Print("  另：|cffffd100/mui nameplates probe cvar|r 读那 8 个 CVar 的可写性与写入判决账。")
     return true
 end
 
