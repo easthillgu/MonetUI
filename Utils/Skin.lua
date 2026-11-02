@@ -1459,32 +1459,6 @@ local function ResolveQuality(btn)
     return nil
 end
 
-local function EnsureQualityDriver()
-    if qualityDriver then return end
-    qualityDriver = CreateFrame("Frame")
-    qualityDriver:SetScript("OnUpdate", function(_, elapsed)
-        qualityAcc = (qualityAcc or 0) + (elapsed or 0)
-        if qualityAcc < 0.5 then return end
-        qualityAcc = 0
-        for btn, entry in pairs(qualityBorders) do
-            local border = entry.frame
-            if border and border.GetAlpha then
-                SnapQualityBorder(btn, border)
-                local q = ResolveQuality(btn)
-                local color = q and QUALITY_COLOR[q] or nil
-                if color ~= entry.last then
-                    entry.last = color
-                    if color then
-                        Widget:SetBorderState(border, color[1], color[2], color[3], 1)
-                    else
-                        Widget:SetBorderState(border, nil)
-                    end
-                end
-            end
-        end
-    end)
-end
-
 --- 把品质边框矩形吸附到物理像素栅格：外扩 1 物理像素（不是 1 UI 单位——有效缩放
 --- 0.6 时 1 单位只有 0.6 物理像素），且四缘各自取整到整数像素。2026-11-02 实机
 --- 判例：商人窗按钮物理坐标是小数（16.2 / 111.0 / 133.2 / 38.4），硬外扩 1 单位
@@ -1525,6 +1499,32 @@ local function SnapQualityBorder(btn, border)
     pcall(border.ClearAllPoints, border)
     pcall(border.SetPoint, border, "BOTTOMLEFT", btn, "BOTTOMLEFT", xl, yb)
     pcall(border.SetPoint, border, "TOPRIGHT", btn, "BOTTOMLEFT", xr, yt)
+end
+
+local function EnsureQualityDriver()
+    if qualityDriver then return end
+    qualityDriver = CreateFrame("Frame")
+    qualityDriver:SetScript("OnUpdate", function(_, elapsed)
+        qualityAcc = (qualityAcc or 0) + (elapsed or 0)
+        if qualityAcc < 0.5 then return end
+        qualityAcc = 0
+        for btn, entry in pairs(qualityBorders) do
+            local border = entry.frame
+            if border and border.GetAlpha then
+                SnapQualityBorder(btn, border)
+                local q = ResolveQuality(btn)
+                local color = q and QUALITY_COLOR[q] or nil
+                if color ~= entry.last then
+                    entry.last = color
+                    if color then
+                        Widget:SetBorderState(border, color[1], color[2], color[3], 1)
+                    else
+                        Widget:SetBorderState(border, nil)
+                    end
+                end
+            end
+        end
+    end)
 end
 
 --- Draw a quality-coloured 1px border around a flattened item button.  The border starts
