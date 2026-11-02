@@ -16,6 +16,7 @@ local Math     = ns.Math
 local Color    = ns.Color
 local EventBus = ns.EventBus
 local Secrets  = ns.Secrets
+local Skin     = ns.Skin
 
 --- 战斗中为真。**不要只用 InCombatLockdown**：登录 / 重载正好落在战斗里时，它有一小段时间
 --- 返回 false（客户端还没把受限状态铺开），于是"模板按钮不能在战斗里出生"这条就被绕过了。
@@ -372,42 +373,13 @@ end
 -- --- 幂等：Acquire 建钮时跑一遍，UpdateButton 每次重绘再跑（SetItemButtonTexture/disable
 -- --- 会把蒙版/顶点色重新带上）。一律**方法调用**，不写模板按钮属性（污染红线）。
 local function FlattenSlotArt(btn)
-    if btn.icon then
-        pcall(btn.icon.RemoveMaskTexture, btn.icon, btn.IconMask)
-        pcall(btn.icon.SetVertexColor, btn.icon, 1, 1, 1, 1)
-        pcall(btn.icon.SetTexCoord, btn.icon, 0, 1, 0, 1)
-        pcall(btn.icon.SetDrawLayer, btn.icon, "OVERLAY", 7)
-        pcall(btn.icon.ClearAllPoints, btn.icon)
-        pcall(btn.icon.SetAllPoints, btn.icon, btn)
-        pcall(btn.icon.Show, btn.icon)
-    end
-    if btn.IconMask then
-        pcall(btn.IconMask.SetTexture, btn.IconMask, nil)
-        pcall(btn.IconMask.SetSize, btn.IconMask, 0.001, 0.001)
-        pcall(btn.IconMask.Hide, btn.IconMask)
-    end
-    if btn.NewItemTexture then
-        pcall(btn.NewItemTexture.SetAlpha, btn.NewItemTexture, 0)
-        pcall(btn.NewItemTexture.Hide, btn.NewItemTexture)
-    end
-    if btn.BattlepayItemTexture then
-        pcall(btn.BattlepayItemTexture.SetAlpha, btn.BattlepayItemTexture, 0)
-        pcall(btn.BattlepayItemTexture.Hide, btn.BattlepayItemTexture)
-    end
-    if btn.flash then
-        pcall(btn.flash.SetAlpha, btn.flash, 0)
-        pcall(btn.flash.Hide, btn.flash)
-    end
-    if btn.NormalTexture then
-        pcall(btn.NormalTexture.SetAlpha, btn.NormalTexture, 0)
-    end
-    if btn.IconBorder then
-        pcall(btn.IconBorder.SetAlpha, btn.IconBorder, 0)
-    end
-    local ht = btn.GetHighlightTexture and btn:GetHighlightTexture()
-    if ht then
-        pcall(ht.ClearAllPoints, ht)
-        pcall(ht.SetAllPoints, ht, btn)
+    -- 实现已上移 Utils/Skin.lua 的 Skin:FlattenSlotArt（商人 / 交易窗同一份）。
+    Skin:FlattenSlotArt(btn)
+    -- 玩家 2026-11-02：背包图标放大一点 + 裁切到合适尺寸 —— 统一 8% 裁切档
+    -- （与动作条 / 商人 / 交易一致）：暴雪自带的描边圈消失，同框内容放大 ~17%。
+    -- CropIcon 的轮询账本每 0.5s 重压 texcoord，物品换贴图不会退回全幅。
+    if btn and btn.icon then
+        Skin:CropIcon(btn.icon, 0.08, 0.92, 0.08, 0.92)
     end
 end
 
