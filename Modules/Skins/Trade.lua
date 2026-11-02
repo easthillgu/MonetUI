@@ -74,11 +74,19 @@ local function SkinMerchant()
     -- 底部两条货币小框（MoneyInset / ExtraCurrencyInset）：同一套凹槽语言收掉原生浅底。
     -- 背板走 host 挂窗口本体（2026-11-02 渲染判例：中间容器名下 level 0 子框不渲染）；
     -- Strip 只压小框名下的那 1 条原生底框 texture，钱数内容在 child（MoneyFrame）里不受影响。
+    -- 原生金框的 8 件 9-slice（UI-Frame-Inner* atlas）挂在 child 名下，不剥会整圈盖在
+    -- 我们的背板之上（2026-11-02 实机判例：Strip 只剥本层，child 要点名）。
     local root = Skin:Need("MerchantFrame")
     for _, key in ipairs({ "MerchantMoneyInset", "MerchantExtraCurrencyInset" }) do
         local box = Skin:Need(key)
         if box and root then
             Skin:Strip(box)
+            if type(box.GetNumChildren) == "function" then
+                local cs = { box:GetChildren() }
+                for i = 1, #cs do
+                    Skin:Strip(cs[i])
+                end
+            end
             Skin:Panel(box, { bgSurface = "lost", bgAlpha = 0.965, thickness = 1, host = root })
         end
     end
