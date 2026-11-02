@@ -38,7 +38,7 @@ sandbox_mode = "workspace-write"
 # 允许改动的根目录（仓库 + 部署目标），参考插件不在里面 = 天然只读
 writable_roots = [
   "C:\\Users\\EastHillGu\\Documents\\wowaddonsdev\\MonetUI",
-  "C:\\Users\\EastHillGu\\Documents\\Blizzards\\World of Warcraft\\_retail_\\Interface\\AddOns\\MonetUI",
+  "C:\\Users\\EastHillGu\\Documents\\Blizzards\\WOWFOREVER\\World of Warcraft\\_forever_\\Interface\\AddOns\\MonetUI",
 ]
 network_access = true
 
@@ -72,10 +72,11 @@ startup_timeout_sec = 60
 ## 3. 没接上 wuxian MCP 时的降级流程
 
 1. `node tools/api-audit.js`（离线闸门，HARD 项必须清零）。
-2. `powershell -File tools/deploy-retail.ps1`（拷到 `Interface\AddOns\MonetUI` 并改写 toc 的 Interface）。
+2. `powershell -File tools/deploy-retail.ps1`（裸跑即部署到 `_forever_` 的 `Interface\AddOns\MonetUI`
+   并改写 toc 的 Interface；要指别处加 `-Dest` / `-Interface`）。
 3. 请玩家：游戏内 `/console scriptErrors 1` → `/reload` → 复现 → 把聊天框红字/截图发回来。
 4. 深挖污染：`/console taintLog 2` → `/reload` → 退出后读
-   `...\_retail_\Logs\taint.log`（**CVar 只在加载时生效**，运行中改无效）。
+   `...\WOWFOREVER\World of Warcraft\_forever_\Logs\taint.log`（**CVar 只在加载时生效**，运行中改无效）。
 5. 让玩家在游戏里跑一行诊断（可复制粘贴）：
 
 ```lua

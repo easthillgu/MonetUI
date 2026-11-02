@@ -15,8 +15,8 @@
 |---|---|
 | 仓库 | `C:\Users\EastHillGu\Documents\wowaddonsdev\MonetUI`（2026-10-26 转正：原 `MonetUI-refactor` 改名为 `MonetUI`，旧版封存在 `MonetUI-archive`） |
 | 游戏 | `C:\Users\EastHillGu\Documents\Blizzards\WOWFOREVER\World of Warcraft\_forever_\Wow.exe`（2026-11-02 作者确认的交付目录；`_retail_` 那套 12.1.5 **不再保留**，12.1.5 结论只当历史证据） |
-| 插件安装目录 | `...\WOWFOREVER\World of Warcraft\_retail_\Interface\AddOns\MonetUI`（由 `tools/deploy-retail.ps1` 从仓库拷过去；同目录还装着 Aurora，两者重叠面见 `docs/AURORA-COVERAGE.md`） |
-| 客户端日志 | `...\_retail_\Logs\`（`taint.log` 是污染日志，`EditMode.log` 是编辑模式布局的二进制转储） |
+| 插件安装目录 | `...\WOWFOREVER\World of Warcraft\_forever_\Interface\AddOns\MonetUI`（由 `tools/deploy-retail.ps1` 从仓库拷过去，裸跑就是这里；同目录还装着 Aurora，两者重叠面见 `docs/AURORA-COVERAGE.md`） |
+| 客户端日志 | `...\_forever_\Logs\`（`taint.log` 是污染日志，`EditMode.log` 是编辑模式布局的二进制转储） |
 | 版本 | `MonetUI.toc` 0.12.0，`## Interface: 16001`（部署脚本会按客户端改写） |
 | 当前 HEAD | `4fece67`（2026-10-31），比 `origin/main` 领先 **14** 个提交（含本轮 6 个 bug/视觉提交 + 2 个 make-lane 车道提交） |
 | 远端 | `origin` = github.com/easthillgu/MonetUI，**私有备份**。**在游戏上线并通过初步测试之前一律不 push**（作者定的，见 `TODO.md` 末尾） |
@@ -1251,8 +1251,8 @@ BLP 都是 `enc=3 alphaDepth=8 **alphaType=8**`；我们 32 张全是 `alphaType
 - 分支 `square-blp`，`44a4334`（基线 `6288692`）：四处 `Widget:Theme` 去掉 `round = true`，
   遮罩回 `rx=0`，32 张 BLP 全部按 `alphaType=8` 重出。
 - 门禁：`audit-pixels` 未通过 **0/32**、`luac -p` 5 个改动文件全过、mip0 与 TGA **逐像素一致**。
-- 部署目标：`...\Blizzards\WOWFOREVER\World of Warcraft\_retail_\Interface\AddOns\MonetUI`。
-  `tools/deploy-retail.ps1` 的默认 `-Dest` 指向旧的 `Blizzards\World of Warcraft`，**必须显式传 `-Dest`**。
+- 部署目标：`...\WOWFOREVER\World of Warcraft\_forever_\Interface\AddOns\MonetUI`。
+  2026-11-02 起 `tools/deploy-retail.ps1` 的默认 `-Dest` 就是 `_forever_`、`-Interface` 16001，裸跑即可。
 
 #### `tools/` 已入库（2026-10-30 起）
 
@@ -1865,7 +1865,8 @@ AGENTS 与本文里大量"本客户端有/没有 X"混指两个客户端（retai
 
 **读结果只认账本，别指望聊天框。** 65 行远超聊天框十几行的留存，所以 `Compat:Print` 把全量写进
 `MonetUIDB.compatReport`（`{client, when, total, odd, rows}`，每行 `{组, 名字, 结论, 不符?, 附注}`），
-落盘在 `_retail_/WTF/Account/039124100/SavedVariables/MonetUI.lua`。
+落盘在 `_retail_/WTF/Account/039124100/SavedVariables/MonetUI.lua`（1.60 那套对应
+`_forever_/WTF/Account/<账号>/SavedVariables/MonetUI.lua`）。
 **坑：写入比 `/reload` 晚 1–2 分钟**（实测 19:48 重载 → 19:50 才落盘），reload 完立刻读会读到上一趟的。
 
 5 项与假设不符（Forever 上逐条看它们会不会反过来）：

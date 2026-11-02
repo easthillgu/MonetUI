@@ -171,7 +171,7 @@ pcall(_G.C_CVar.SetCVar, "taintLog", "2")
 ```lua
 pcall(_G.C_CVar.SetCVar, "taintLog", "0")
 ```
-文件：`C:\Users\EastHillGu\Documents\Blizzards\World of Warcraft\_retail_\Logs\taint.log`
+文件：`C:\Users\EastHillGu\Documents\Blizzards\WOWFOREVER\World of Warcraft\_forever_\Logs\taint.log`
 （0 字节 = 这一整段会话没有任何污染事件，是"真干净"而不是"没触发"。）
 
 ---
