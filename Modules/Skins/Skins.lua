@@ -687,6 +687,12 @@ local FONT_OBJECTS = {
     -- 提示框用自己的字体对象（不是 GameFont*），不在这里列出来，全局字体开关就管不到物品 / 技能 / 角色
     -- 那几万行提示框文字 —— 它们会继续用暴雪的 FRIZQT__/ARHei，和界面其余部分不一样。
     "GameTooltipText", "GameTooltipTextSmall", "GameTooltipHeaderText",
+    -- 聊天：正文和说话泡泡各用一个共享字体对象，原先一个都不在这个名单里，
+    -- 于是"统一字体"号称管到所有暴雪窗口，聊天框和说话泡泡其实一直是暴雪的 FRIZQT__/ARHei。
+    -- 两个名字都取本客户端实名证据：EnhanceQoLChatSocial/ChatIM/UI.lua:269（读 ChatFontNormal:GetFont()
+    -- 拿聊天正文字体）、EnhanceQoL/EnhanceQoL_Camelot.lua:6 的 globals 行 + :3447（改 ChatBubbleFont）。
+    -- 同机的插件真在 SetFont 这两个对象，说明它们在这版客户端上就是活的字体对象。
+    "ChatFontNormal", "ChatBubbleFont",
 }
 
 function M:GetFontKey()

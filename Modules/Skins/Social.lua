@@ -82,7 +82,21 @@ local CHAT_SCROLLS = {
     "ChatFrame3ScrollFrame", "ChatFrame4ScrollFrame",
 }
 
-local CHAT_BUTTONS = { "ChatFrameToggleButton", "ChatFrameChannelButton" }
+-- 聊天窗右下角那两个按钮。原来的 `ChatFrameToggleButton` 是 3.x 时代的旧名，本客户端
+-- 拿不到它存在的任何证据；有实名证据的是 `ChatFrameMenuButton` —— 同机为 Camelot 写的
+-- EnhanceQoLChatSocial/ChatControlVisibility.lua:4-5（`ChatFrameChannelButton` /
+-- `ChatFrameMenuButton`）与 EnhanceQoL/EnhanceQoL_Camelot.lua 的 `luacheck: globals` 行。
+-- 所以那个菜单按钮从来没被换过皮。若实机 `/mui skins diagnose` 反过来证明旧名也在，再补回来。
+local CHAT_BUTTONS = { "ChatFrameMenuButton", "ChatFrameChannelButton" }
+
+-- 停靠在聊天窗底部的那排页签。有实名证据的命名是 **`<窗口名>Tab`**（`ChatFrame1Tab` /
+-- `ChatFrame2Tab`）：ChatControlVisibility.lua:6 用的就是 `ChatFrame1Tab`，
+-- EnhanceQoL_Camelot.lua 的 globals 行同时给 `GENERAL_CHAT_DOCK` / `FCFDock_UpdateTabs`。
+-- 反过来 `ChatFrameTab1..N`（老框架的编号命名）在这台机器上**没找到正面证据**——Polestar 里
+-- 那处 `ChatFrameTab` 是 `Interface\ChatFrame\ChatFrameTab` 贴图路径，不是框名，所以这里不列它。
+-- 有几个聊天窗就有几个页签；玩家自己开出来的临时/日志窗口没有实名证据，同样不列。
+-- 实机用 `/mui compat find ChatFrame` 扫真名 + `/mui skins diagnose` 核这两个名字。
+local CHAT_TABS = { "ChatFrame1Tab", "ChatFrame2Tab" }
 
 local CHAT_EDITS = {
     "ChatFrame1EditBox", "ChatFrame2EditBox", "ChatFrame3EditBox", "ChatFrame4EditBox",
@@ -137,6 +151,9 @@ local function SkinChat()
 
     M:Dress(CHAT_SCROLLS, { as = "scroll" })
     M:Dress(CHAT_BUTTONS, { as = "button" })
+    -- 页签走 Skin:Tab：选中态由现成的 0.5 秒轮询跟随（不 hook PanelTemplates_*，
+    -- 那条钩子的代价在 Skin.lua:830 记过——全局函数钩会把整条编辑模式链带脏）。
+    M:Dress(CHAT_TABS, { as = "tab" })
     M:Dress(CHAT_EDITS, { as = "editbox" })
 
     -- Channel management: the popup list, and the two create/edit dialogs it opens.
@@ -146,7 +163,7 @@ end
 
 M:Panel("chat", { label = "聊天", group = "社交", apply = SkinChat,
     frames = {
-        CHAT_FRAMES, CHAT_SCROLLS, CHAT_BUTTONS, CHAT_EDITS,
+        CHAT_FRAMES, CHAT_SCROLLS, CHAT_BUTTONS, CHAT_TABS, CHAT_EDITS,
         CHAT_CHANNEL_POPUPS, CHAT_CHANNEL_BUTTONS,
     } })
 
