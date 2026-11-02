@@ -66,13 +66,11 @@ local function SkinPopups()
     M:Dress(NOTICE_FRAMES, { panel = { bgAlpha = 0.97 } })
 end
 
--- 老版本客户端（12.1.5 之前）的主菜单按钮还带这些全局名；本客户端已改成匿名按钮。
--- 名单留着只是为了旧客户端 / 方便对照，本客户端靠下面的子控件遍历命中。
-local GAMEMENU_BUTTONS = {
-    "GameMenuButtonContinue", "GameMenuButtonSettings", "GameMenuButtonMacros",
-    "GameMenuButtonAddons", "GameMenuButtonLogout", "GameMenuButtonQuit",
-    "GameMenuButtonExit", "GameMenuButtonStore",
-}
+-- 老版本客户端（12.1.5 之前）的主菜单按钮还带这些全局名，本客户端已改成匿名按钮：
+-- GameMenuButtonContinue / Settings / Macros / Addons / Logout / Quit / Exit / Store。
+-- 只写在注释里作对照，**不进 frames 名单** —— 名单的语义是"这个皮肤会取用的对象"，
+-- 取用走下面 DressMenuButtons 的子控件遍历；闸门 tools/check-frame-list.js 会把名单里每个
+-- 名字对回代码取用路径（名单里有而代码不取 = 缺陷，这几条以前正是被漏掉的）。
 
 -- 12.x 的主菜单按钮是**匿名 + 按需创建**的（`GameMenuButtonSettings` 这类全局名已经没有了）：
 -- 名单式 `buttons` 一个都命中不了，而且这些按钮要等菜单打开时才建出来。所以：
@@ -606,7 +604,7 @@ M:Panel("popups", { label = "确认弹窗", group = "系统", apply = SkinPopups
     } })
 
 M:Panel("gamemenu", { label = "游戏菜单", group = "系统", apply = SkinGameMenu,
-    frames = { "GameMenuFrame", GAMEMENU_BUTTONS } })
+    frames = { "GameMenuFrame" } })
 
 M:Panel("settings", { label = "设置面板", group = "系统", apply = SkinSettings,
     frames = { "SettingsPanel", "SettingsPanel.CloseButton" } })

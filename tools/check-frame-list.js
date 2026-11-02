@@ -118,7 +118,13 @@ for (const f of skinsFiles) {
       }
     }
     // Bare UPPERCASE identifiers are shared const tables; flatten them into the ledger.
-    for (const n of body.matchAll(new RegExp(`^\\s*([A-Z][A-Z0-9_]*)\\s*,?\\s*$`, 'gm'))) {
+    // Match every identifier in the block, not only one-per-line: a list written as
+    // `CHAT_FRAMES, CHAT_SCROLLS, CHAT_BUTTONS,` on a single line used to be invisible here, which
+    // meant the whole chat panel's list was never checked (that is how a wrong frame name survived).
+    // Quoted literals are blanked first; `tables.get()` is the real filter -- an identifier that
+    // isn't a known const table is ignored, so over-matching costs nothing.
+    const bare = body.replace(/"[^"]*"|'[^']*'/g, ' ');
+    for (const n of bare.matchAll(/\b([A-Z][A-Z0-9_]+)\b/g)) {
       const table = tables.get(n[1]);
       if (!table) continue;
       for (const member of table.members) {
