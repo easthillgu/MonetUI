@@ -295,6 +295,7 @@ function M:SweepDeep(frame, controlOpts)
             M:SkinButtonsIn(frame, controlOpts)
             M:SkinScrollsIn(frame)
             M:SkinSlidersIn(frame)
+            M:IconWidgetsIn(frame)
         end)
         if not ok then
             -- 名字走 Widget 那本账：这个框变 forbidden 之后 GetName 自己也会抛。
@@ -347,7 +348,8 @@ end
 --               tabs / buttons / scrolls = { 点名的控件 } }
 --               （window 档还吃 titleSize / noTitle / noClose / inset=true|{opts} 补正文凹槽那一档底色；
 --               wells={ 后缀=true|{opts} } 给次级内容区吃同一套凹槽语言（多内容窗口）；
---               icons=true 走子树给物品图标裁掉原生一圈边（静态内容窗口）；
+--               icons=false 关掉图标铺平裁切（**默认开**：.icon 指纹按钮压圆角遮罩 / 原生
+--               槽框 + 8% 裁切 + 1px 方边，与背包 / 动作条同语言；deep 轮询里追新格子）；
 --               noPanel 只剥原美术、不挂底衬）
 function M:Dress(spec, opts)
     opts = opts or {}
@@ -396,6 +398,7 @@ function M:Dress(spec, opts)
                         M:SkinButtonsIn(frame, opts.control)
                         M:SkinScrollsIn(frame)
                         M:SkinSlidersIn(frame)
+                        M:IconWidgetsIn(frame)
                     end
                 elseif opts.templates ~= false then
                     -- 模板层默认开（`templates = false` 可关）：只铺金币 / 输入框 /
@@ -404,10 +407,12 @@ function M:Dress(spec, opts)
                     M:SweepTemplates(frame, opts.control)
                 end
 
-                -- 物品图标裁切（`icons = true`）：子树里带 .icon 指纹的按钮，贴图裁掉
-                -- 原生一圈边。与 deep 互补——deep 的按钮扫**跳过**物品按钮，这条只管它们。
-                -- 商人 / 交易这类内容静态的窗口够用；运行期才建格子的窗口别开（没有补扫）。
-                if opts.icons then
+                -- 物品图标铺平 + 裁切（**默认开**，`icons = false` 才关）：子树里带 .icon 指纹的
+                -- 按钮压掉圆角遮罩 / 原生槽框，图标 8% 裁切 + 1px 主题方边——与背包 / 动作条
+                -- 同一语言。与 deep 互补——deep 的按钮扫**跳过**物品按钮，这条只管它们；
+                -- deep+lazy 的窗口由 SweepDeep 的轮询补扫追新格子，非 lazy 的窗口建格时机
+                -- 覆盖不了的（如运行期才建的列表）单独点名 `icons = true` 再补一遍。
+                if opts.icons ~= false then
                     M:IconWidgetsIn(frame)
                 end
             end)
@@ -491,14 +496,19 @@ function M:SkinButtonsIn(frame, opts)
     end
 end
 
---- Crop the native border ring off item icons, walking a frame's subtree.  Item buttons are
---- the ones `Skin:LooksLikeItemButton` fingerprints (`.icon` / `.Icon` / ... fields), which the
---- button sweeps deliberately skip -- their icons keep Blizzard's baked-in edge.  This pass is
---- the complement: crop that ring, exactly like the action bar / buff / nameplate icons.
+--- Flatten + square-crop every item-icon button in a frame's subtree.  This is Dress's
+--- **default pass**（`icons = false` 才关）：物品按钮是按钮扫**故意跳过**的那批
+--- （`Skin:LooksLikeItemButton` 指纹，`.icon` / `.Icon` / ... 字段），这条是它们的补集——
+--- 压掉圆角 IconMask 与原生 NormalTexture 槽框、图标 8% 裁切 + 1px 主题方边，
+--- 与背包 / 动作条完全同一套语言。
 --- **认字段不认名字**：12.x 的物品格大量匿名（商人物品格 / 交易双方物品格 / 附魔格都是
 --- 「容器 frame > ItemButton」的形状），按名字的名单永远追不上，按指纹一遍全收。
 --- 裁剪参数进 `Skin:CropIcon` 的轮询账本：商人翻页 / 交易换物品重设贴图后，每 0.5s
 --- 重压一遍 texcoord，不会退回竖缝（12.x 秘密纹素那条判例）。
+--- 已处理的按钮走旁表标记（iconFlat）跳过：deep 轮询补扫反复进来时不再做功，
+--- 也不会跟账本抢 texcoord（FlattenSlotArt 会把 texcoord 重置回 0..1，重复调用就是拉锯）。
+--- 模板计数（SetItemButtonCount 写的 .count）抬到 OVERLAY 8——图标在 OVERLAY 7，
+--- 不抬会被整个盖住（Bags 案判例；Bags 自绘白字在 9，不受影响）。
 function M:IconWidgetsIn(frame, depth)
     if not frame or type(frame.GetChildren) ~= "function" then return end
     depth = depth or 0
@@ -510,17 +520,35 @@ function M:IconWidgetsIn(frame, depth)
         local okKind, kind = pcall(child.GetObjectType, child)
         if okKind then
             if kind == "Button" then
-                local okItem, isItem = pcall(Skin.LooksLikeItemButton, Skin, child)
-                if okItem and isItem then
+                if not Marked(child, "iconFlat") then
+                    Mark(child, "iconFlat", true)
+                    -- `.itemButton / .ItemButton` 指纹：真正的格子按钮挂在字段上（容器框包一格）。
+                    local target = child
+                    for _, key in ipairs({ "itemButton", "ItemButton" }) do
+                        local okInner, inner = pcall(function() return child[key] end)
+                        if okInner and type(inner) == "table" and inner.GetObjectType
+                            and pcall(inner.GetObjectType, inner) == "Button" then
+                            target = inner
+                            break
+                        end
+                    end
+                    pcall(Skin.FlattenSlotArt, Skin, target)
                     for _, key in ipairs({ "icon", "Icon", "iconTexture", "IconTexture" }) do
-                        local okIcon, tex = pcall(function() return child[key] end)
+                        local okIcon, tex = pcall(function() return target[key] end)
                         local okTex, texKind
                         if okIcon and type(tex) == "table" then
                             okTex, texKind = pcall(tex.GetObjectType, tex)
                         end
                         if okTex and texKind == "Texture" then
-                            pcall(Skin.CropIcon, Skin, tex, 0.08, 0.92, 0.08, 0.92)
+                            pcall(Skin.Icon, Skin, tex, true)
                         end
+                    end
+                    -- 模板计数抬层（Bags 案判例：图标 OVERLAY 7 会盖住模板 count）。
+                    local okCount, count = pcall(function() return target.count end)
+                    if okCount and count and type(count.SetDrawLayer) == "function" then
+                        pcall(count.SetDrawLayer, count, "OVERLAY", 8)
+                        pcall(count.ClearAllPoints, count)
+                        pcall(count.SetPoint, count, "BOTTOMRIGHT", target, "BOTTOMRIGHT", -2, 2)
                     end
                 end
             elseif kind == "Frame" then

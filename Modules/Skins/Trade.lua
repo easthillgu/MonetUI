@@ -18,6 +18,9 @@ local TRADE_BUTTONS = { "TradeFrameTradeButton", "TradeFrameCancelButton" }
 -- 旁边那组 Okay / Cancel 小按钮整组不存在（金额是内联输入框），所以只收拾两个 money frame。
 local TRADE_MONEY_FRAMES = { "TradePlayerInputMoneyFrame", "TradeRecipientMoneyFrame" }
 
+--- 物品格按钮铺平 + 方形描边已上移为 Dress 引擎的**默认档**（Skins.lua 的
+--- IconWidgetsIn：压圆角 IconMask / 原生槽框 + 8% 裁切 + 1px 主题方边），这里不再本地实现。
+
 local function SkinTrade()
     M:Dress("TradeFrame", {
         window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true, buttons = TRADE_BUTTONS,
@@ -32,8 +35,7 @@ local function SkinTrade()
             TradeRecipientMoneyInset = { borderAlpha = 0 },
             TradeRecipientMoneyBg = { panel = false },
         },
-        -- 物品格图标裁掉原生一圈边（双方物品 6+6 + 附魔格，认 .icon 指纹不点名）。
-        icons = true,
+        -- 物品格铺平裁切走引擎默认档（双方物品 6+6 + 附魔格，认 .icon 指纹不点名）。
     })
     -- 金额输入框：以前把 `panel` 塞进 Skin:Panel 的参数里（它读的是 opts.bgAlpha），
     -- 底衬一直是默认的 0.85 而不是 0.96；走 Dress 之后参数只有一层，不会再套错。
@@ -79,8 +81,7 @@ local function SkinMerchant()
         panel = { bgAlpha = 0.96 },
         buttons = MERCHANT_BUTTONS,
         scrolls = { "MerchantFrameScrollFrame" },
-        -- 12 格商品 + 回购格的图标裁掉原生一圈边（翻页后 CropIcon 轮询账本重压 texcoord）。
-        icons = true,
+        -- 12 格商品 + 回购格的铺平裁切走引擎默认档（翻页后 CropIcon 轮询账本重压 texcoord）。
     })
     -- 翻页按钮换成细线左右箭头（monet_arrow_left/right）。
     Skin:PageArrow(Skin:Need("MerchantPrevPageButton"), "left")
@@ -114,6 +115,24 @@ local function SkinMerchant()
         if bg then
             Skin:Strip(bg)
         end
+    end
+
+    -- 每格的文字衬底（2026-11-02 实机判例）：MerchantItem<N> 格自带两块**圆角**美术
+    -- （fileID 130766 / 136423，α1.00 原样），四角不是方形，与凹槽语言不统一。
+    -- Strip 后给整格挂方形 lost 底；host=root——2026-11-02 渲染判例，中间容器名下
+    -- level 0 的背板不渲染，必须挂窗口本体。回购格同模板，一并处理。
+    -- borderAlpha=0：行格是控件底语义（12 行格都描边会太吵），与金钱两框同档。
+    for i = 1, 12 do
+        local tile = Skin:Need("MerchantItem" .. i)
+        if tile and root then
+            Skin:Strip(tile)
+            Skin:Panel(tile, { bgSurface = "lost", bgAlpha = 0.965, thickness = 1, borderAlpha = 0, host = root })
+        end
+    end
+    local buyback = Skin:Need("MerchantBuyBackItem")
+    if buyback and root then
+        Skin:Strip(buyback)
+        Skin:Panel(buyback, { bgSurface = "lost", bgAlpha = 0.965, thickness = 1, borderAlpha = 0, host = root })
     end
 end
 
