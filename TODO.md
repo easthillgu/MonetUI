@@ -1,5 +1,9 @@
 # 待办
 
+> **上线后开发计划（2026-11-02 定稿）**：`C:\Users\EastHillGu\.opencode\plan\wowforever-post-launch-plan.md`
+> —— 阶段 0 离线收口 / 阶段 1 1.60 基线 / 阶段 2 实机回归 / 阶段 3 统一调度器 / 阶段 4 架构 / 阶段 5 发布。
+> 当前进度：阶段 0 已完成（两个静态测试对齐、孤儿贴图核实、队伍框待办关闭、全套闸门绿）。
+
 ## 🧩 2026-11-02 接手 Qoder：正文凹槽共享层 `Skin:InsetWell`（已实现，待实机验收）
 
 > 接手 Qoder 未提交的工作，已收尾并本地提交 `7bd4829`。
@@ -171,10 +175,14 @@ TabardFrame、EncounterJournal、DressUpFrame、GossipFrame、LFGParentFrame、L
 8. `/mui reset` 现在要 `/mui reset confirm`。
 9. `Logs/taint.log` 与 `ADDON_ACTION_BLOCKED` 计数对比基线。
 
-**已知遗留（本轮未动）**
-- `test-mult.js` 3 条、`test-skin-lua.js` 42 条断言在**基线就是红的**（和本轮改动无关），
-  说明这两个静态测试已经跟当前代码脱节，需要单独一轮对齐。
-- `Assets/Textures/monet_barfill_gradient.blp` 是未跟踪的孤儿贴图（没有 TGA 源、Media 也没注册）。
+**已知遗留**
+- ✅ **已解决（2026-11-02）**：`test-mult.js` 已全绿；`test-skin-lua.js` 44 条红已与当前代码对齐
+  （按下/禁用态改轮询、A 方案断言改指 `UnitFrames/Auras.lua`、姓名板减益换皮已取消改守压制路径、
+  trade/editmode/邮件滚动框换真名、pixel glow 放行并校验定义）。两个静态测试现在都是
+  "仓库当前实现"的回归闸门，再红就是真回归。
+- ✅ **不是孤儿（2026-11-02 核实）**：`Assets/Textures/monet_barfill_gradient.blp` 有 TGA 源
+  （`Assets-src/Textures/monet_barfill_gradient.tga`）、已进 git、`Media.lua` 已注册、
+  `Widget:BarFill` 在用（`Widget.lua:844`）。旧记载作废。
 
 
 ## 📦 交付状态（2026-10-29 收口）
@@ -283,7 +291,10 @@ TabardFrame、EncounterJournal、DressUpFrame、GossipFrame、LFGParentFrame、L
 
 **C. 等拍板**
 
-- ⏳ 暴雪队伍/团队框重复：A 共存 / B 关自绘 Groups / C 自动藏（C 有污染风险）。
+- ✅ **暴雪队伍/团队框重复**（2026-11-02 核实代码已解决）：`Groups.lua` 的 `SetBlizzardHidden`
+  （`groupFrames.hideBlizzard`，默认开）对四条暴雪框做饿事件 + alpha 0 + 关鼠标，
+  不 Hide / 不换父 / 不写字段；LoD 晚到由 `ReparkBlizzardGroups` 补做。要"共存"把该键关掉即可。
+  详见 `docs/HANDOFF.md` 3.5.4。
 - ⏳ SpellFlyout 弹出托盘：鼠标点击只能看，选项必须走快捷键（客户端限制，已实测）。
 
 **D. 素材交付（2026-10-28）**

@@ -1,6 +1,9 @@
 # MonetUI 交接文档（换开发平台用）
 
 > 写于 2026-10-24 22:30，跟着 `36b7280` 这个提交；**2026-10-25 追加了"拦截族 + 战斗中 buff"这一轮的收档（见第 3.5 节）**。
+> **2026-11-02 更新**：交付目标改为本机实际游戏目录 `_forever_`（1.60）；12.1.5（`_retail_`）**不再保留**，
+> 本文所有"12.1.5 实测"结论均为历史证据，只有 1.60 复验通过才算数。上线后开发计划见
+> `C:\Users\EastHillGu\.opencode\plan\wowforever-post-launch-plan.md`。
 > 读者：接手这个仓库的 AI agent（Codex）或未来的自己。
 > 先读顺序：**本文件 → `AGENTS.md`（硬规则）→ `TODO.md`（待办）→ `docs/DESIGN-LANGUAGE.md`（视觉语言/配色阶梯）→ `MonetUI.md`（设计/决策，147KB，别整篇塞进上下文，按标题查）**。
 
@@ -11,7 +14,7 @@
 | 事 | 值 |
 |---|---|
 | 仓库 | `C:\Users\EastHillGu\Documents\wowaddonsdev\MonetUI`（2026-10-26 转正：原 `MonetUI-refactor` 改名为 `MonetUI`，旧版封存在 `MonetUI-archive`） |
-| 游戏 | `C:\Users\EastHillGu\Documents\Blizzards\WOWFOREVER\World of Warcraft\_retail_\Wow.exe`（2026-10-31 实测 **12.1.5.70688**；`_cn_beta_` 那套是交付目标 1.60，暂未部署） |
+| 游戏 | `C:\Users\EastHillGu\Documents\Blizzards\WOWFOREVER\World of Warcraft\_forever_\Wow.exe`（2026-11-02 作者确认的交付目录；`_retail_` 那套 12.1.5 **不再保留**，12.1.5 结论只当历史证据） |
 | 插件安装目录 | `...\WOWFOREVER\World of Warcraft\_retail_\Interface\AddOns\MonetUI`（由 `tools/deploy-retail.ps1` 从仓库拷过去；同目录还装着 Aurora，两者重叠面见 `docs/AURORA-COVERAGE.md`） |
 | 客户端日志 | `...\_retail_\Logs\`（`taint.log` 是污染日志，`EditMode.log` 是编辑模式布局的二进制转储） |
 | 版本 | `MonetUI.toc` 0.12.0，`## Interface: 16001`（部署脚本会按客户端改写） |
@@ -231,8 +234,11 @@ NamePlateAuras.lua:366     boolean test on 'isFullUpdate' (secret)
   **诊断这类拦截只认它**，别再等 taint.log。
 - `QuestTracker` 的压制动作（alpha / 鼠标 / 子树静音）统一加战斗闸，脱战 1 秒 ticker 补做——
   战斗中碰追踪框子树会被拦（×29 形态）。
-- **仍开着**：暴雪小队/团队框与自绘框重复——编辑模式关可见性保存、重载后仍显示，判为 16001
-  客户端 EditMode 可见性接线断；三条选项（共存 / 关自绘 / 带风险自动藏）待作者拍板。
+- ~~**仍开着**：暴雪小队/团队框与自绘框重复~~ —— **已解决（2026-11-02 核实代码）**：
+  `Groups.lua` 的 `SetBlizzardHidden`（`groupFrames.hideBlizzard`，默认 `true`）对
+  `CompactPartyFrame` / `PartyFrame` / `CompactRaidFrameContainer` / `CompactRaidFrameManager`
+  做**饿事件 + alpha 0 + 关鼠标**（不 Hide / 不 SetParent / 不写字段），自绘 GroupFrames 开着时自动藏暴雪框；
+  LoD 晚到由 `ReparkBlizzardGroups` 三时机补做。作者要"共存"就把 `hideBlizzard` 关掉，退回完全放手。
 
 ---
 

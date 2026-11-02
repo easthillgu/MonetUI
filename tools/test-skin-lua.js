@@ -118,7 +118,8 @@ console.log('\n[5] RadioButton 不能被当成 CheckButton');
 // GetObjectType 对 radio 返回 "RadioButton"；不单独分支的话每个单选钮都会拿到勾号。
 has(skin, /function Skin:RadioButton\(/, 'Skin:RadioButton 已定义');
 has(skins, /Skin:RadioButton\(button/, 'M:Buttons 分派 RadioButton');
-has(skins, /Skin:RadioButton\(child/, 'M:SkinButtonsIn 分派 RadioButton');
+// 2026-10-30 起 SkinButtonsIn 走 pcall 点号调用（forbidden 对象上冒号调用会把 self 传错）
+has(skins, /pcall\(Skin\.RadioButton, Skin, child, opts\)/, 'M:SkinButtonsIn 分派 RadioButton');
 has(skin, /SwapArt\(checked, "monet_radio"\)/, '用的是 monet_radio（monet_check 会画成勾）');
 
 // ---------------------------------------------------------------- 6
@@ -141,10 +142,18 @@ has(skins, /__applyFailed/, 'M:Apply 记住已失败的面板');
 check('失败 print 在 __applyFailed 判断之内', /if not entry\.__applyFailed then[\s\S]{0,240}Print\(/.test(skins));
 
 // ---------------------------------------------------------------- 8
-console.log('\n[8] 按下 / 禁用态必须有表现');
-has(skin, /HookScript\("OnDown"/, 'OnDown 用 HookScript（SetScript 会吃掉暴雪的点击脚本）');
-has(skin, /HookScript\("OnUp"/, 'OnUp 用 HookScript');
-has(skin, /hooksecurefunc\(control, "Enable"/, 'Enable/Disable 被 hook（暴雪切状态不经过任何脚本）');
+console.log('\n[8] 按下 / 禁用态必须有表现（轮询，不写暴雪框的脚本槽）');
+// 2026-10-30 起 HookScript / hooksecurefunc 全面停用（AGENTS：往暴雪框的脚本/方法槽写东西=污染，
+// 法术书图标 OnIconEnter → ClearOnBarHighlightMarks 就是这么被带脏的）。按下/悬停改由
+// Widget:HoverWatch 轮询、enabled 改由 Widget:PollWatch 每 0.2 秒比一次 —— 断言这条路径在，
+// 且旧的挂钩写法没有悄悄回来。
+has(skin, /Widget:HoverWatch\(control, apply, apply, function\(\)\s*\n\s*pressed = true/,
+    'OnDown 走 HoverWatch 轮询（不再 HookScript）');
+has(skin, /pressed = false; apply\(\)\s*\n\s*end\)/, 'OnUp 走 HoverWatch 轮询');
+check('不再往暴雪控件挂 OnDown/OnUp 脚本', !/HookScript\("OnDown"|HookScript\("OnUp"/.test(skin));
+check('不再 hooksecurefunc 控件 Enable', !/hooksecurefunc\(control, "Enable"/.test(skin));
+has(skin, /Widget:PollWatch\(control, function\(\)[\s\S]{0,400}IsEnabled/,
+    'enabled 状态走 PollWatch（暴雪切状态不经过任何脚本，只能比）');
 check('ControlState 从不在 Skin:Button 里被跳过',
       /function Skin:Button[\s\S]{0,1200}self:ControlState\(/.test(skin));
 check('ControlState 从不在 Skin:CheckButton 里被跳过',
@@ -173,19 +182,28 @@ widgetLines.forEach((l, i) => {
   // 扫整行而不是参数：`(opts.height or 9) * Media:Mult()` 的参数在第一个 ')' 就断了，
   // 只看 args 会漏掉这个已经按物理像素换算过的写法。
   if (/SnapUnit|Media:Mult/.test(l)) return;
+  if (args === 'pixel, pixel') return;               // pixel glow 的点，定义见下一条校验
   offenders.push(`L${i + 1} ${l.trim()}`);
 });
 check(`Widget.lua 的 SetSize/Width/Height 都已吸附（发现: ${offenders.join(' ; ') || '无'}）`,
       offenders.length === 0);
+// 上面放行的 `tex:SetSize(pixel, pixel)`（pixel glow 点阵）依赖 pixel 是物理像素换算值：
+// `local pixel = (opts.pixel or 2) * mult / scale`。定义一旦不再是这个形状，放行就不成立。
+const pixelDef = widgetLines.find(l => /local pixel\s*=/.test(l));
+check('pixel glow 的 pixel 定义仍是物理像素换算（* mult / scale）',
+      !!pixelDef && /mult\s*\/\s*scale/.test(pixelDef),
+      pixelDef ? pixelDef.trim() : '没找到 local pixel 定义');
 
 // ---------------------------------------------------------------- 10
 console.log('\n[10] 缺口窗口必须真的接上了');
 // 这几个窗口此前完全没有 handler：ItemRefTooltip / TradeFrame / EditModeManager / ChatFrame /
 // SpellBook / ObjectiveTracker。名字进了 frames 名单不等于皮肤碰了它，所以断言有实际取用路径。
 const registered = [...skinsFilesSrc.matchAll(/M:Panel\("(\w+)"/g)].map(m => m[1]);
+// 名单以实机真名为准：Trade.lua 注释记过 —— 12.1.5 上判定/取消是 TradeFrameTradeButton /
+// TradeFrameCancelButton，AcceptTradeButton / CancelTradeButton 这对旧名根本不存在。
 const required = {
-  trade:          ['TradeFrame', 'AcceptTradeButton', 'CancelTradeButton'],
-  editmode:       ['EditModeManager', 'EditModeSystemSettingsDialog'],
+  trade:          ['TradeFrame', 'TradeFrameTradeButton', 'TradeFrameCancelButton'],
+  editmode:       ['EditModeManagerFrame', 'EditModeSystemSettingsDialog'],
   chat:           ['ChatFrame1', 'ChatFrame1EditBox', 'ChatChannelManagerPopup'],
   playerspells:   ['PlayerSpellsFrame', 'SpellBookFrame', 'PlayerSpellsTab1'],
   objectivetracker: ['ObjectiveTrackerFrame', 'ObjectiveTrackerHeader'],
@@ -198,8 +216,8 @@ for (const [key, names] of Object.entries(required)) {
   check(`面板 ${key} 引用了 ${names.length} 个窗口（缺: ${missing.join(',') || '无'}）`, missing.length === 0);
 }
 // 邮件滚动框曾经把子窗口 InboxFrame 直接当滚动框传进 Skin:ScrollFrame —— 拿不到 ScrollBar 成员，
-// 函数静默返回，邮件列表的滚动条从来没被换过。
-has(skinsFilesSrc, /frame\.MailListScrollFrame/, '邮件滚动框走正确成员名');
+// 函数静默返回，邮件列表的滚动条从来没被换过。现在走 Skin:Need 点路径（错名会在账本里留 ✗）。
+has(skinsFilesSrc, /Skin:Need\("MailListScrollFrame"\)/, '邮件滚动框走 Skin:Need 正确成员名');
 check('Skin:ScrollFrame 不再直接收 frame.InboxFrame（那是子窗口不是滚动框）',
       !/Skin:ScrollFrame\(frame\.InboxFrame\s+or/.test(skinsFilesSrc));
 
@@ -233,37 +251,40 @@ check('Widget:Hairline 打开了 SetSnapToPixelGrid', hairBody && /SetSnapToPixe
 console.log('\n[13] 目标光环走 B 方案（原生 AuraContainer），A 方案必须可回滚');
 // A 方案（借 TargetFrame 的光环子帧）超的是一整段代码，回滚就是「删掉块注释的两个标记」，
 // 所以这里守的不变量是：A 段完整躺在注释里、注释外没有活引用、B 段的硬约束都还在。
-const ufLines = linesOf('Modules/UnitFrames/UnitFrames.lua');
-const uf = ufLines.join('\n');
-const openAt = ufLines.findIndex(l => l.trim() === '--[==[');
-const closeAt = ufLines.findIndex(l => l.trim() === ']==]');
+// 2026-10-26 拆文件（fbf7bd4）后这套整体搬进 Auras.lua，UnitFrames.lua 只剩 M.auras.* 调用 ——
+// 断言跟着文件走（旧版盯 UnitFrames.lua，拆完就全红了）。
+const aurLines = linesOf('Modules/UnitFrames/Auras.lua');
+const uf = srcOf('Modules/UnitFrames/UnitFrames.lua');
+const openAt = aurLines.findIndex(l => l.trim() === '--[==[');
+const closeAt = aurLines.findIndex(l => l.trim() === ']==]');
 
 check('A 方案的块注释成对', openAt >= 0 && closeAt > openAt, `open=${openAt + 1} close=${closeAt + 1}`);
 check('块注释内没有提前出现 ]==]',
-      openAt >= 0 && closeAt > openAt && ufLines.slice(openAt + 1, closeAt).every(l => !l.includes(']==]')));
+      openAt >= 0 && closeAt > openAt && aurLines.slice(openAt + 1, closeAt).every(l => !l.includes(']==]')));
 
 // A 段的每一根骨头都还在注释范围内
 for (const marker of ['TARGET_AURA_CHILDREN', 'local function AuraChild', 'local function StackTargetAuras',
                       'local function BorrowTargetAuras', 'function RestoreTargetAuras', 'local function HookAuraRelayout']) {
-  const at = ufLines.findIndex(l => l.includes(marker));
+  const at = aurLines.findIndex(l => l.includes(marker));
   check(`A 的 ${marker} 完整保留在注释里`, at > openAt && at < closeAt, `L${at + 1}`);
 }
 
 // 注释之外不许再有活引用，否则删注释回滚会立刻撞上重复定义 / 未定义
 const liveRefs = [];
-ufLines.forEach((l, i) => {
+aurLines.forEach((l, i) => {
   if (i > openAt && i < closeAt) return;
   if (/^\s*--/.test(l)) return;
   for (const name of ['BorrowTargetAuras', 'RestoreTargetAuras', 'StackTargetAuras',
-                      'HookAuraRelayout', 'blizzardAuras', 'TARGET_AURA_CHILDREN']) {
+                      'HookAuraRelayout', 'blizzardAuras', 'TARGET_AURA_CHILDREN', 'AuraChild']) {
     if (new RegExp(`\\b${name}\\b`).test(l)) liveRefs.push(`L${i + 1} ${name}`);
   }
 });
 check(`A 的函数在注释外零引用（发现: ${liveRefs.join(', ') || '无'}）`, liveRefs.length === 0);
-check('RefreshUnit 调的是 EnsureTargetAuras', /if unit == "target" then EnsureTargetAuras\(frame\) end/.test(uf));
+check('RefreshUnit 调的是 M.auras.EnsureTargetAuras（拆文件后经模块表）',
+      /if unit == "target" and M\.auras then M\.auras\.EnsureTargetAuras\(frame\) end/.test(uf));
 
 // B 方案的硬约束（每一条都是 EllesmereUI 在同一个客户端上踩出来的）
-const liveUf = ufLines.filter((_, i) => !(i > openAt && i < closeAt)).join('\n');
+const liveUf = aurLines.filter((_, i) => !(i > openAt && i < closeAt)).join('\n');
 for (const [label, re] of Object.entries({
   '先 LoadAddOn Blizzard_AuraContainer': /LoadAddOn[\s\S]{0,40}Blizzard_AuraContainer/,
   'CreateFrame AuraContainer + CustomAuraContainerTemplate': /CreateFrame, "AuraContainer", nil, parent, "CustomAuraContainerTemplate"/,
@@ -271,42 +292,37 @@ for (const [label, re] of Object.entries({
   'AddAuraGroup 传 initializeFrame': /AddAuraGroup, container, key, filterString, opts/,
   'SetUnit + UpdateAllAuras': /SetUnit, container, "target"[\s\S]{0,120}UpdateAllAuras, container/,
   '关掉引擎按钮的点击（否则吃掉换目标）': /SetMouseClickEnabled, button, false/,
-  '字体在 SetApplicationCount 之前': /SetFont\(stack[\s\S]{0,700}SetApplicationCount/,
+  // 字体先建好（EnsureAuraTexts 内部 SetFont）再 SetApplicationCount。拆函数后两步隔几百行，
+  // 断言**调用顺序**而不是行距。
+  'EnsureAuraTexts 在 SetApplicationCount 之前': /pcall\(EnsureAuraTexts, button, cd, spec\)[\s\S]{0,400}pcall\(button\.SetApplicationCount/,
   '两代 Flow/AuraLayout setter 兜底': /FlowCall\(container, "SetFlowLayoutAnchorPoint", "SetAuraLayoutAnchorPoint"/,
-  '主题变化重涂引擎按钮': /MONETUI_THEME_CHANGED[\s\S]{0,220}TintTargetAuras\(\)/,
 })) check(label, re.test(liveUf));
 
-// ---------------------------------------------------------------- 14
-console.log('\n[14] 姓名板 debuff 图标走 B1（借来打补丁）');
-// 姓名板的减益图标是借 Blizzard 的 AurasFrame 画的，原先只设锚点、一点样式都没碰。
-// B1 只做三件低风险的事，且不依赖暴雪内部成员名（这个 fork 的字段名离线查不到）。
-const np = srcOf('Modules/Nameplates/Nameplates.lua');
-for (const [label, re] of Object.entries({
-  'DressDebuffButton 已定义':            /local function DressDebuffButton\(button\)/,
-  'DressDebuffList 已定义':              /local function DressDebuffList\(list\)/,
-  'AnchorDebuffs 里真的调用了':           /pcall\(list\.SetPoint, list, "BOTTOMLEFT"[\s\S]{0,220}DressDebuffList\(list\)/,
-  '每个按钮额外挂 OnShow（池化复用）':      /HookScript, child, "OnShow"/,
-  '边框是我们自己建的 OVERLAY 贴图':       /CreateTexture\(nil, "OVERLAY"\)/,
-  '暴雪边框按名字优先、几何兜底':          /TextureOf\(button, "Border", "DebuffBorder"[\s\S]{0,1500}rw > bw \+ 0\.5/,
-  '图标按名字优先、几何兜底':              /TextureOf\(button, "Icon", "icon"[\s\S]{0,900}rw >= bw - 0\.5/,
-  '图标裁边（和施法图标同比例）':           /icon\.SetTexCoord, icon, DEBUFF_ICON_CROP/,
-  '驱散色：读 GetVertexColor 后复用':      /GetVertexColor, stock[\s\S]{0,1400}SetColorTexture, bd, sr, sg, sb/,
-  '一律淡掉暴雪厚边框':                    /if stock then\s*\n\s*pcall\(stock\.SetAlpha, stock, 0\)/,
-  '读不到颜色时退回主题边框色':            /if not sr then\s*\n\s*sr, sg, sb = Color:GetBorder\(\)/,
-  '边框来源记进 d.borderSource（实机可查）': /d\.borderSource = "dispel"[\s\S]{0,300}d\.borderSource = "theme"/,
-  '冷却关描边、保留扫圈':                  /SetDrawEdge, c, false[\s\S]{0,90}SetDrawSwipe, c, true/,
-  '字号跟着图标高度走':                    /bh \* 0\.42/,
-  '字体换成 pixel 数字体':                /SetFont, Widget, d\.fonts\[i\], d\.size, "cooldown"/,
-  '字体每次重设（回收会写回）':            /for i = 1, #d\.fonts do[\s\S]{0,140}SetFont/,
-  '文字只收 FontString，不碰贴图':          /GetObjectType\(\) == "FontString"/,
-})) check(label, re.test(np));
+// 主题变化：2026-10-25 判例 —— **绝不重建容器**（重建后那批按钮被我们碰过，引擎在战斗里再写
+// 它们就被记成 MonetUI → 连环 ADDON_ACTION_BLOCKED UNKNOWN() ×11，只有 /reload 能清）。
+// 处理器只许 UpdateAll，不许出现 Rebuild / CreateAuraContainer。
+const themeHandler = /EventBus:Register\("MONETUI_THEME_CHANGED", function\(\)([\s\S]{0,400}?)\n\s*end\)/.exec(uf);
+check('MONETUI_THEME_CHANGED 处理器存在', !!themeHandler);
+check('主题变化只 UpdateAll、不重建容器（2026-10-25 判例）',
+      !!themeHandler && /M:UpdateAll\(\)/.test(themeHandler[1]) && !/Rebuild|CreateAuraContainer/.test(themeHandler[1]));
 
-// 绝不能出现：改图标贴图 / 重锚文字（会和暴雪每帧重设打架）
-check('没有对 borrowed 按钮 SetTexture（图标归游戏）',
-      !/button:SetTexture|button\.Icon:SetTexture/.test(np));
-check('没有给 debuff 的 FontString ClearAllPoints（会和暴雪重锚打架）',
-      !/pcall\(r\.ClearAllPoints, r\)/.test(np));
-check('diagnose 会打印已修饰按钮数', /已修饰的 debuff 按钮：%d 个/.test(np));
+// ---------------------------------------------------------------- 14
+console.log('\n[14] 姓名板不给减益换皮（2026-10-28 玩家拍板：维持现状）');
+// 曾经的 B1（借 Blizzard AurasFrame 打补丁，DressDebuff* 一族 + borderSource 记账）已整段移除。
+// 现在的口径是"暴雪画的一律压掉"：HideBlizzardPlate 把 base 的全部子框（含动态再建的
+// BuffListFrame 一族）alpha 压 0，只留我们自绘的牌（2026-10-28 HANDOFF 3.28）。
+// 这里守两件事：换皮代码不悄悄长回来、压制路径保持完整。
+const np = srcOf('Modules/Nameplates/Nameplates.lua');
+check('减益换皮代码不在了（DressDebuff* / AnchorDebuffs / borderSource）',
+      !/DressDebuff|AnchorDebuffs|borderSource/.test(np));
+check('不给暴雪光环按钮挂 OnShow 钩子', !/HookScript,\s*child,\s*"OnShow"/.test(np));
+has(np, /local function FadeBlizzardSiblings\(base, keep\)/, 'FadeBlizzardSiblings 已定义');
+check('FadeBlizzardSiblings 扫 { base:GetChildren() }（多返回值别当表）',
+      /ipairs\(\{ base:GetChildren\(\) \}\)/.test(np));
+has(np, /pcall\(c\.SetAlpha, c, 0\)/, '兄弟子框压 alpha 0（不是 Hide，保住 C++ 点击区）');
+has(np, /local function RestoreBlizzardSiblings\(base\)/, '有还原创（模块关掉原样归还）');
+has(np, /FadeBlizzardSiblings\(base, plate\)/, 'HideBlizzardPlate 里真的调了');
+check('绝不在暴雪框上写字段的纪律注释还在', /绝不往暴雪的框体[\s\S]{0,80}上写字段/.test(np));
 
 console.log('\n' + (bad === 0 ? '全部通过' : bad + ' 项未通过'));
 process.exit(bad === 0 ? 0 : 1);

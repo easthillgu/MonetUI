@@ -2,6 +2,11 @@
 
 WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约定，违反即为缺陷。
 
+> **2026-11-02 起：12.1.5 不再保留为开发环境。** 交付目标是《无限》1.60，游戏目录
+> `C:\Users\EastHillGu\Documents\Blizzards\WOWFOREVER\World of Warcraft\_forever_`（`_retail_` 那套 12.1.5 停用）。
+> 本文中所有"12.1.5 实测"的条目一律降级为**历史证据**：只有 1.60 上复验过的结论才算数，
+> 新写结论只标 `1.60 实测` / `1.60 文档`。
+
 ## 交接（先读这两份）
 
 - **`docs/HANDOFF.md`** —— 项目做到哪了、2026-10-24 这一轮修了什么（带 commit）、仍开着的问题、
@@ -49,10 +54,11 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   不是名字写错 —— 先 `/mui compat` 末段确认规则状态，再去改 `frames` 名单。
   另外 1.60 有 `C_AddOns.GetScriptsDisallowedForBeta()` 与 `UserScriptsDisabled`：**/run 随时可能整条被禁**，
   所有诊断必须是 `/mui <模块> ...` 子命令。Forever 部署：
-  `tools/deploy-retail.ps1 -Dest "...\WOWFOREVER\World of Warcraft\_cn_beta_" -Interface 16001`
-  （那台里已有 `!WuxianWorkshop` / `WoWBridge` / `163UI_Info`，只加 MonetUI 目录，别人的一个字节都不碰）。
+  `tools/deploy-retail.ps1 -Dest "C:\Users\EastHillGu\Documents\Blizzards\WOWFOREVER\World of Warcraft\_forever_" -Interface 16001`
+  （那台里已有 `!WuxianWorkshop` / `WoWBridge` / `WuxianKit` / `QuestEcho*`，只加 MonetUI 目录，别人的一个字节都不碰）。
+  注意 `_cn_beta_` 是旧交付目标、已不存在于这台机器。
 
-## 客户端行为细则（12.1.5 实测，2026-10-31 补）
+## 客户端行为细则（12.1.5 实测留下的历史证据，2026-10-31 补 —— 1.60 待逐条复验）
 
 这几条都是"代码看着对、闸门全绿、实机不一样"，只能记下来别再踩：
 
