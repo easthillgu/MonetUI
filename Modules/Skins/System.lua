@@ -19,7 +19,7 @@ local LOOT_ARROWS = { "LootFramePrevPageButton", "LootFrameNextPageButton" }
 local GROUP_LOOT_FRAMES = { "GroupLootFrame1", "GroupLootFrame2", "GroupLootFrame3", "GroupLootFrame4" }
 
 local function SkinLoot()
-    M:Dress("LootFrame", { window = true, panel = { bgAlpha = 0.96 }, rule = true, buttons = LOOT_ARROWS })
+    M:Dress("LootFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 }, rule = true, buttons = LOOT_ARROWS })
     -- The close button is handled by SkinWindow; the pager arrows above get the plate, then their glyphs.
     Skin:PageArrow(Skin:Need("LootFramePrevPageButton"), "left")
     Skin:PageArrow(Skin:Need("LootFrameNextPageButton"), "right")
@@ -30,7 +30,7 @@ local function SkinLoot()
     M:Dress(GROUP_LOOT_FRAMES, { panel = { bgAlpha = 0.96 } })
 
     -- The rolling history window builds its entry buttons lazily on open（deep 的显示时补扫就是为它）.
-    M:Dress("GroupLootHistoryFrame", { window = true, panel = { bgAlpha = 0.96 }, deep = true })
+    M:Dress("GroupLootHistoryFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true })
 end
 
 local POPUP_FRAMES = { "LFGListInviteDialog", "LFGInvitePopup" }
@@ -103,7 +103,7 @@ local function SkinGameMenu()
 end
 
 local function SkinSettings()
-    M:Dress("SettingsPanel", { window = true, panel = { bgAlpha = 0.97 }, deep = true })
+    M:Dress("SettingsPanel", { window = true, inset = true, panel = { bgAlpha = 0.97 }, deep = true })
 end
 
 -- Edit Mode: the manager bar plus the three dialogs it opens.  Without this, moving a bar leaves you
@@ -133,6 +133,7 @@ end
 local function SkinAddonList()
     M:Dress("AddonList", {
         window = true,
+        inset = true,
         panel = { bgAlpha = 0.97 },
         buttons = {
             "AddonListEnableAllButton", "AddonListDisableAllButton",
@@ -646,6 +647,7 @@ local function SkinMacros()
 
     M:Dress(frame, {
         window = true,
+        inset = true,
         panel = { bgAlpha = 0.96 },
         deep = true,
         tabs = { "MacroFrameTab1", "MacroFrameTab2" },
@@ -688,7 +690,7 @@ M:Panel("timemanager", { label = "时钟 / 秒表", group = "系统", apply = Sk
 
 -- 帮助 / 客服：Blizzard_HelpFrame 是 AllowLoad: Game。
 local function SkinHelp()
-    M:Dress("HelpFrame", { window = true, panel = { bgAlpha = 0.96 }, deep = true, rule = true })
+    M:Dress("HelpFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true, rule = true })
 end
 
 M:Panel("help", { label = "帮助", group = "系统", apply = SkinHelp,

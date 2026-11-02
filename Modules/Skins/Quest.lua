@@ -8,7 +8,6 @@ local M = ns.Skins
 local Media = ns.Media
 local Widget = ns.Widget
 local Skin = ns.Skin
-local Color = ns.Color
 
 -- 阅读型窗口一档 0.965（DESIGN-LANGUAGE §2 的独立一档）：任务日志 / 任务详情 / 剧情 / 书信。
 -- 为什么不是 0.97：那一档是**对话框**（挡操作、要压住世界）；阅读窗口是"长时间对着看"，
@@ -24,6 +23,7 @@ local READ_ALPHA = 0.965
 -- 平底，层次分不出来；现在织纹和 lost 凹槽底都锚到正文凹槽矩形（QuestFrameInset），只铺正文、
 -- 不再盖窗口边。实机量过（`/mui skins layers QuestFrame`）：窗口 338x496、QuestFrameInset 328x410
 -- 都在窗口内；四块面板 384x512 超尺寸（背板会把主题边框画到窗口外），所以凹槽底和织纹都**不跟面板尺寸走**。
+-- 凹槽那档底色走**共享 API `Skin:InsetWell`**（见 Utils/Skin.lua）：任何有 `.Inset` 的窗口都能用 `inset = true` 拿到同一套层次。
 local WEAVE_SIZE = 64
 -- ADD 混合会把下面那层提亮：0.30 时窗口那道主题边框读不出来，0.20 留得住（实机定的档）。
 local WEAVE_ALPHA = 0.20
@@ -82,22 +82,14 @@ local function BrightenTree(f)
     end
 end
 
--- 正文凹槽矩形：优先窗口自带的 Inset（QuestFrame 的直接字段，secure 读，**不挂 Need 账本** ——
--- 这块 inset 只在正文面板出现时才落地，记进账本会被 `/mui skins diagnose` 报成"缺帧"）。
--- 没有 inset 或读不到时退回窗口本身；连窗口都读不到才返回 nil（调用方再退回面板）。
-local function InsetRect(win)
-    if not win then return nil end
-    local ok, inset = pcall(function() return win.Inset end)
-    if ok and inset and Widget:Readable(inset) then return inset end
-    if Widget:Readable(win) then return win end
-    return nil
-end
-
--- 织纹要覆盖的那个框 = 正文凹槽（不是整窗，也不是超尺寸的面板：面板比窗口大，锚面板会画到窗口外）。
--- 返回它交给 UpdateWeave 按矩形重算 texcoord。
+-- 织纹要覆盖的那个框 = 正文凹槽（Skin:FindInset 认的那块）。没有 inset 才退回窗口矩形，
+-- 再退回面板：面板超尺寸（384x512），锚它会画到窗口外，所以窗口优先于面板。返回它交给 UpdateWeave 算 texcoord。
 local function ContentHost(panel)
     local ok, win = pcall(panel.GetParent, panel)
-    if ok then return InsetRect(win) or panel end
+    if not ok or not win then return panel end
+    local inset = Skin:FindInset(win)
+    if inset then return inset end
+    if Widget:Readable(win) then return win end
     return panel
 end
 
@@ -107,21 +99,6 @@ local function AnchorWeave(weave, panel)
     weave:SetPoint("TOPLEFT", host, "TOPLEFT")
     weave:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT")
     return host
-end
-
--- 正文凹槽那一档（insetFrame.bg）：把暴雪 inset 自己的美术件剥掉，再挂**我们自己的**背板 ——
--- 底色走 surface `lost`（比窗口那档 panel 亮一档），边框走我们和其它窗口同一套的主题边框
--- （Skin:Panel 的 BackdropTemplate edgeFile=blank 那条，不是暴雪原生 #4B493C 边框）。
--- Skin:Panel 只在 host 上建我们自己的子背板框、用 ns:Mark 记一笔（旁表，不写暴雪对象的字段 = 不污染），
--- 底色和边框都进 Widget 的 themed 表，换主题自动重涂，这里不用自己挂 OnTheme。
-local function InsetWell(window)
-    local host = InsetRect(window)
-    if not host then return end
-
-    -- 先剥原生 inset 的美术件（它自带一圈浅底 + 原生边框，就是"正文里漏出浅框"的来源），再叠我们的。
-    ns.Skin:Strip(host)
-
-    Skin:Panel(host, { bgSurface = "lost", bgAlpha = INSET_ALPHA, thickness = 1 })
 end
 
 local function WeavePanel(panel)
@@ -165,7 +142,8 @@ local function BrightenQuestPanels()
     local window = Skin.With("questframe", function() return Skin:Need("QuestFrame") end)
     Skin:Panel(window, { bgAlpha = READ_ALPHA })
     -- 正文凹槽那一层（insetFrame.bg，lost 档 + 我们的凹槽边框）：与窗口档拉开色差 = 本次要解决的层次问题。
-    InsetWell(window)
+    -- 走共享的 Skin:InsetWell（QuestFrame 的 inset 是懒建的，所以放在 Show 路径里补，不放 Dress）。
+    Skin:InsetWell(window, { bgAlpha = INSET_ALPHA })
     -- 四块面板是暴雪按任务内容懒建/换的，Apply 时可能还没落地，所以 WeavePanel 整段重跑：
     -- 它是幂等的（Strip 靠 Marked "hidden" 去重，织纹靠 Marked "questWeave" 去重）。
     M:Controls(QUEST_PANELS, WeavePanel)
@@ -207,13 +185,13 @@ local QUESTLOG_SCROLLS = {
 }
 
 local function SkinQuestLog()
-    M:Dress("QuestLogFrame", { window = true, panel = { bgAlpha = READ_ALPHA } })
+    M:Dress("QuestLogFrame", { window = true, inset = true, panel = { bgAlpha = READ_ALPHA } })
     M:Dress(QUESTLOG_BUTTONS, { as = "button" })
     M:Dress(QUESTLOG_TABS, { as = "tab" })
     M:Dress(QUESTLOG_SCROLLS, { as = "scroll" })
 
-    M:Dress("QuestLogDetailFrame", { window = true, noTitle = true, panel = { bgAlpha = READ_ALPHA } })
-    M:Dress("QuestLogPopupDetailFrame", { window = true, noTitle = true, panel = { bgAlpha = READ_ALPHA } })
+    M:Dress("QuestLogDetailFrame", { window = true, noTitle = true, inset = true, panel = { bgAlpha = READ_ALPHA } })
+    M:Dress("QuestLogPopupDetailFrame", { window = true, noTitle = true, inset = true, panel = { bgAlpha = READ_ALPHA } })
 end
 
 local QUESTFRAME_BUTTONS = {
@@ -321,6 +299,7 @@ end)
 local function SkinItemText()
     M:Dress("ItemTextFrame", {
         window = true,
+        inset = true,
         panel = { bgAlpha = READ_ALPHA },
         buttons = { "ItemTextNextPageButton", "ItemTextPrevPageButton" },
         scrolls = { "ItemTextScrollFrame" },

@@ -169,13 +169,19 @@ function M:Debounce(fn)
 end
 
 --- The common window treatment: fade the frame's *own* chrome (not its children, so icons stay intact), hang a Monet backplate under it, restyle title and close button.
--- @param opts { layer, inset, panel = Widget:Theme opts, titleSize, noTitle = true, noClose = true }
+-- @param opts { layer, inset, panel = Widget:Theme opts, titleSize, noTitle = true, noClose = true, inset = true|{opts} }
 function M:SkinWindow(frame, opts)
     if not frame then return nil end
     opts = opts or {}
 
     Skin:Strip(frame, opts.strip)
     Skin:Panel(frame, opts.panel)
+
+    -- 正文凹槽那一档（insetFrame.bg）：窗口有 `.Inset` 就补 lost 底 + 我们的凹槽边框，没有就什么都不做
+    -- （Skin:InsetWell 自带这层判断）。`inset = true` 用默认档；要调底色/边框传 `inset = { bgSurface=..., ... }`。
+    if opts.inset then
+        Skin:InsetWell(frame, type(opts.inset) == "table" and opts.inset or nil)
+    end
 
     -- 标题字串和关闭按钮的位置各家不同：新框架挂在 TitleContainer 里，老框架直接挂在框上，
     -- 还有一批（WorldMapFrame 这类）两者都在 BorderFrame 那一层。
@@ -326,7 +332,7 @@ end
 --               templates=false 关掉模板层补扫（金币/输入框/ColoredProgressBar，默认开）,
 --               control={传给单个控件的参数}, as="tab|button|scroll|slider|dropdown|editbox|fade",
 --               tabs / buttons / scrolls = { 点名的控件 } }
---               （window 档还吃 titleSize / noTitle / noClose；noPanel 只剥原美术、不挂底衬）
+--               （window 档还吃 titleSize / noTitle / noClose / inset=true|{opts} 补正文凹槽那一档底色；noPanel 只剥原美术、不挂底衬）
 function M:Dress(spec, opts)
     opts = opts or {}
     local list = Skin:AsList(spec)

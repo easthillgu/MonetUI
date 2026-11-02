@@ -20,7 +20,7 @@ local TRADE_MONEY_FRAMES = { "TradePlayerInputMoneyFrame", "TradeRecipientMoneyF
 
 local function SkinTrade()
     M:Dress("TradeFrame", {
-        window = true, panel = { bgAlpha = 0.96 }, deep = true, buttons = TRADE_BUTTONS,
+        window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true, buttons = TRADE_BUTTONS,
     })
     -- 金额输入框：以前把 `panel` 塞进 Skin:Panel 的参数里（它读的是 opts.bgAlpha），
     -- 底衬一直是默认的 0.85 而不是 0.96；走 Dress 之后参数只有一层，不会再套错。
@@ -40,7 +40,7 @@ local MAIL_BUTTONS = {
 
 local function SkinMail()
     M:Dress(MAIL_FRAMES, {
-        window = true, panel = { bgAlpha = 0.96 }, deep = true, buttons = MAIL_BUTTONS,
+        window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true, buttons = MAIL_BUTTONS,
     })
     -- 收件箱列表的滚动区在两种布局里挂在不同对象上：全局名，或 MailFrame 的子窗成员。
     -- 以前传的是 `frame.InboxFrame`（一个 Window，没有 ScrollBar），Skin:ScrollFrame 静默返回，
@@ -62,6 +62,7 @@ local MERCHANT_BUTTONS = {
 local function SkinMerchant()
     M:Dress("MerchantFrame", {
         window = true,
+        inset = true,
         panel = { bgAlpha = 0.96 },
         buttons = MERCHANT_BUTTONS,
         scrolls = { "MerchantFrameScrollFrame" },
@@ -74,6 +75,7 @@ end
 local function SkinTrainer()
     M:Dress({ "ClassTrainerFrame", "TrainerFrame" }, {
         window = true,
+        inset = true,
         panel = { bgAlpha = 0.96 },
         deep = true,
         buttons = { "ClassTrainerTrainButton", "ClassTrainerCancelButton" },
@@ -92,7 +94,7 @@ local AUCTION_BUTTONS = {
 local AUCTION_EDITS = { "BrowseName", "BrowseMinLevel", "BrowseMaxLevel", "BrowsePrice" }
 
 local function SkinAuction()
-    M:Dress("AuctionFrame", { window = true, panel = { bgAlpha = 0.96 }, tabs = AUCTION_TABS })
+    M:Dress("AuctionFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 }, tabs = AUCTION_TABS })
     M:Dress(AUCTION_PANELS, { panel = { bgAlpha = 0.96 }, deep = true })
     M:Dress(AUCTION_BUTTONS, { as = "button" })
     -- BrowseMinLevel 一类在别的构建里是 Slider：editbox 档会先认类型，认错就跳过。
@@ -102,6 +104,7 @@ end
 local function SkinProfessions()
     M:Dress({ "ProfessionsFrame", "TradeSkillFrame" }, {
         window = true,
+        inset = true,
         panel = { bgAlpha = 0.96 },
         deep = true,
         tabs = { "ProfessionsFrameTab1", "ProfessionsFrameTab2", "TradeSkillFrameTab1" },
@@ -109,7 +112,7 @@ local function SkinProfessions()
 end
 
 local function SkinBank()
-    M:Dress({ "BankFrame", "WarbandBankFrame" }, { window = true, panel = { bgAlpha = 0.96 } })
+    M:Dress({ "BankFrame", "WarbandBankFrame" }, { window = true, inset = true, panel = { bgAlpha = 0.96 } })
 end
 
 M:Panel("trade", { label = "交易", group = "交易", apply = SkinTrade,
@@ -151,6 +154,7 @@ M:Panel("bank", { label = "银行", group = "交易", apply = SkinBank,
 local function SkinSocketing()
     M:Dress("ItemSocketingFrame", {
         window = true,
+        inset = true,
         panel = { bgAlpha = 0.96 },
         deep = true,
         buttons = { "ItemSocketingSocketButton" },
@@ -167,7 +171,7 @@ M:Panel("socket", { label = "宝石镶嵌", group = "交易", apply = SkinSocket
 -- 制造订单：Blizzard_ProfessionsCustomerOrders 无 game-type 门控。
 local function SkinCraftOrders()
     M:Dress("ProfessionsCustomerOrdersFrame",
-        { window = true, panel = { bgAlpha = 0.96 }, deep = true })
+        { window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true })
 end
 
 M:Panel("craftorders", { label = "制造订单", group = "交易", apply = SkinCraftOrders,

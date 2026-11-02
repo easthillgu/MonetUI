@@ -24,6 +24,7 @@ local function SkinFriends()
     -- 不触发父帧的显示瞬间）；deep 改成"一帧一条轮询，只在窗口可见时跑"，切页也能补上。
     M:Dress("FriendsFrame", {
         window = true,
+        inset = true,
         panel = { bgAlpha = 0.96 },
         deep = true,
         rule = true,
@@ -39,7 +40,7 @@ local function SkinWho()
     -- Who 在本客户端要么是独立窗口，要么就是 FriendsFrame 的第 4 页（查无独立窗口时退回它）。
     local frame = Skin:Need("WhoFrame") or Skin:Need("FriendsFrame")
     M:Dress(frame, {
-        window = true, noTitle = true, panel = { bgAlpha = 0.96 },
+        window = true, noTitle = true, inset = true, panel = { bgAlpha = 0.96 },
         buttons = WHO_BUTTONS, scrolls = { "WhoListScrollFrame" },
     })
 end
@@ -48,14 +49,14 @@ local COMMUNITIES_TABS = { "CommunitiesFrameTab1", "CommunitiesFrameTab2", "Comm
 
 local function SkinCommunities()
     M:Dress("CommunitiesFrame", {
-        window = true, panel = { bgAlpha = 0.96 }, deep = true, tabs = COMMUNITIES_TABS,
+        window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true, tabs = COMMUNITIES_TABS,
     })
 end
 
 local GUILD_FRAMES = { "GuildFrame", "GuildControlUI", "GuildRegistrarFrame", "GuildInviteFrame" }
 
 local function SkinGuild()
-    M:Dress(GUILD_FRAMES, { window = true, panel = { bgAlpha = 0.96 } })
+    M:Dress(GUILD_FRAMES, { window = true, inset = true, panel = { bgAlpha = 0.96 } })
     -- 名单滚动区挂在各窗口自己的成员上，两种命名都见过；逐个窗口短路取第一个存在的。
     for _, name in ipairs(GUILD_FRAMES) do
         local scroll = Skin:Need(name .. ".GuildRosterScrollFrame")
@@ -67,7 +68,7 @@ end
 local CALENDAR_FRAMES = { "CalendarFrame", "GameCalendarFrame", "GameCalendarFrameSet" }
 
 local function SkinCalendar()
-    M:Dress(CALENDAR_FRAMES, { window = true, panel = { bgAlpha = 0.96 }, deep = true })
+    M:Dress(CALENDAR_FRAMES, { window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true })
 end
 
 -- Chat: the window chrome, its scroll bars, the toggle / channel buttons and the input box.  The chat
@@ -139,7 +140,7 @@ local function SkinChat()
     M:Dress(CHAT_EDITS, { as = "editbox" })
 
     -- Channel management: the popup list, and the two create/edit dialogs it opens.
-    M:Dress(CHAT_CHANNEL_POPUPS, { window = true, panel = { bgAlpha = 0.97 } })
+    M:Dress(CHAT_CHANNEL_POPUPS, { window = true, inset = true, panel = { bgAlpha = 0.97 } })
     M:Dress(CHAT_CHANNEL_BUTTONS, { as = "button" })
 end
 
@@ -195,7 +196,7 @@ local PETITION_BUTTONS = {
 
 local function SkinPetition()
     M:Dress("PetitionFrame", {
-        window = true, panel = { bgAlpha = 0.96 }, deep = true, buttons = PETITION_BUTTONS,
+        window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true, buttons = PETITION_BUTTONS,
     })
 end
 

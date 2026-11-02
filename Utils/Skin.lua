@@ -518,6 +518,43 @@ function Skin:Panel(frame, opts)
     return bg
 end
 
+--- 找出一个窗口"正文凹槽"那个子框：优先 `frame.Inset`（暴雪内容底板的通用字段），
+--- 没有就退回同名全局 `<窗口名>Inset`。都读不到返回 nil。
+--- **只认字段 / 同名全局这两条路，不猜别的帧名** —— 有没有这块由客户端自己决定，我们不记名字。
+function Skin:FindInset(frame)
+    if not frame then return nil end
+    local ok, inset = pcall(function() return frame.Inset end)
+    if ok and inset and Widget:Readable(inset) then return inset end
+    if type(frame.GetName) == "function" then
+        local okN, name = pcall(frame.GetName, frame)
+        if okN and name then
+            local g = rawget(_G, name .. "Inset")
+            if g and Widget:Readable(g) then return g end
+        end
+    end
+    return nil
+end
+
+--- 给一个窗口补"正文凹槽"那一档底色（insetFrame.bg），和窗口本身那档（frame.bg，调用方的
+--- Skin:Panel 负责）拉开两层次：先剥掉暴雪 inset 自带的美术件（那圈浅底 + 原生边框 = "正文里
+--- 漏出的浅框"），再挂**我们自己的**背板 —— 底色走 surface `lost`（比窗口那档 panel 亮一档），
+--- 边框走和其它窗口同一套的主题边框（Skin:Panel 的 edgeFile=blank，不是暴雪原生 #4B493C）。
+--- 全程只建我们自己的子背板 + ns:Mark 旁表，不写暴雪对象字段。
+--- **没有 inset 的窗口直接返回 nil、什么都不画** —— 所以任何窗口都能安全地传 opts.inset = true。
+-- @param opts { bgSurface = "lost", bgAlpha = 0.965, borderKey =, thickness = }
+function Skin:InsetWell(frame, opts)
+    local inset = self:FindInset(frame)
+    if not inset then return nil end
+    opts = opts or {}
+    self:Strip(inset)
+    return self:Panel(inset, {
+        bgSurface = opts.bgSurface or "lost",
+        bgAlpha   = opts.bgAlpha or 0.965,
+        borderKey = opts.borderKey,
+        thickness = opts.thickness or 1,
+    })
+end
+
 --- A backplate for a control that already sits inside a panel, drawn *under* the control (buttons / drop-downs / edit boxes).
 function Skin:ControlBg(frame, opts)
     if not frame or not self:IsScriptObject(frame) then return nil end

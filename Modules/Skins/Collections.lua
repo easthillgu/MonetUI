@@ -30,7 +30,7 @@ local COLLECTIONS_FILTERS = {
 }
 
 local function SkinCollections()
-    M:Dress("CollectionsJournal", { window = true, panel = { bgAlpha = 0.96 }, rule = true, tabs = COLLECTIONS_TABS })
+    M:Dress("CollectionsJournal", { window = true, inset = true, panel = { bgAlpha = 0.96 }, rule = true, tabs = COLLECTIONS_TABS })
     -- 子面板：剥原美术 + 挂底衬 + 深扫（收藏格子是带图标的按钮，LooksLikeItemButton 会跳过）。
     -- 面板里的行是切页时才建的，deep 的可见期补扫负责之后每次翻页。
     M:Dress(COLLECTIONS_PANELS, { panel = { bgAlpha = 0.96 }, deep = true })
@@ -51,7 +51,7 @@ local PLAYERSPELLS_BUTTONS = { "AssistedCombatRotationFrame", "PlayerSpellsClose
 
 local function SkinPlayerSpells()
     M:Dress({ "PlayerSpellsFrame", "SpellBookFrame" }, {
-        window = true, panel = { bgAlpha = 0.96 }, deep = true, tabs = PLAYERSPELLS_TABS,
+        window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true, tabs = PLAYERSPELLS_TABS,
     })
     -- 搜索框两种模板（EditBox / SearchBox）都认；另一个名字若是按钮会被 editbox 档跳过，
     -- 所以两类分开点名，不再在一个循环里判类型。
@@ -70,7 +70,7 @@ local ACHIEVEMENT_SCROLLS = {
 }
 
 local function SkinAchievements()
-    M:Dress("AchievementFrame", { window = true, panel = { bgAlpha = 0.96 }, tabs = ACHIEVEMENT_TABS })
+    M:Dress("AchievementFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 }, tabs = ACHIEVEMENT_TABS })
     -- 这三块只剥原美术、不另挂底衬：成就列表要贴着窗口自己的背景读，多一层板子会把行距压脏。
     M:Dress(ACHIEVEMENT_PANELS, { noPanel = true, deep = true })
     M:Dress(ACHIEVEMENT_SCROLLS, { as = "scroll" })
@@ -135,7 +135,7 @@ M:Panel("encounterjournal", {
 -- 幻化：Blizzard_Transmog 是 AllowLoad: Game（不限 game-type），本客户端有幻化（外观/试衣间数据齐全）。
 -- 装备格子带图标，深扫会自动跳过。
 local function SkinTransmog()
-    M:Dress("TransmogFrame", { window = true, panel = { bgAlpha = 0.96 }, deep = true })
+    M:Dress("TransmogFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true })
 end
 
 M:Panel("transmog", {

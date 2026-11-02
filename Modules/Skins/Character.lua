@@ -46,7 +46,7 @@ local function MakePortraitSquare()
 end
 
 local function SkinCharacter()
-    M:Dress("CharacterFrame", { window = true, panel = { bgAlpha = 0.96 } })
+    M:Dress("CharacterFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 } })
     -- 美化后把肖像压成方形，与方形背景协调
     MakePortraitSquare()
     M:Dress(CHARACTER_TABS, { as = "tab" })
@@ -54,7 +54,7 @@ local function SkinCharacter()
 end
 
 local function SkinInspect()
-    M:Dress("InspectFrame", { window = true, panel = { bgAlpha = 0.96 } })
+    M:Dress("InspectFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 } })
     M:Dress(INSPECT_TABS, { as = "tab" })
     M:Dress(INSPECT_PANELS, SUB_PANEL)
 end
