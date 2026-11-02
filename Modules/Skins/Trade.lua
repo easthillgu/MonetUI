@@ -87,7 +87,7 @@ local function SkinMerchant()
                     Skin:Strip(cs[i])
                 end
             end
-            Skin:Panel(box, { bgSurface = "lost", bgAlpha = 0.965, thickness = 1, host = root })
+            Skin:Panel(box, { bgSurface = "lost", bgAlpha = 0.965, thickness = 1, borderAlpha = 0, host = root })
         end
     end
 end
