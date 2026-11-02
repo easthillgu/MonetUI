@@ -2672,6 +2672,9 @@ BTP 甚至**双轨混用**：同一个"是否已装钩"的语义，`NameplateAtt
 
 ### 8.26.7 待做（覆盖 8.25 的三步，顺序按风险从低到高）
 
+> 2026-11-03 状态：**第 1 条已落地 `7108581`**（逐条见 8.27.1），第 3 条的 `probe cvar` 已建好待实机跑，
+> 第 2、4 条未动。
+
 1. **零风险、离线可做**（把 8.25 第 2 步和 8.26.6 合并）：守卫去掉每拍 `Show()`、改"读后写"、
    无可见牌时整条驱动停摆（现在 `M.active` 只是 OnUpdate 内部早退，帧还每帧醒）、并入 `Utils/Scheduler`；
    `Widget:Readable` 先问 `CanBeAccessedInContext`；`WriteCVar` 加 `GetCVarInfo` 守卫 + 先读后写 + 失败记账。
@@ -2685,6 +2688,89 @@ BTP 甚至**双轨混用**：同一个"是否已装钩"的语义，`NameplateAtt
 4. **钩子半步（只在探针 + `taint.log` 之后）**：若采纳，装的是**暴雪全局更新函数**
    （`CompactUnitFrame_UpdateName` / `_UpdateHealth`），体内只调非受限方法 + 带 8.26.2 的身份收敛；
    **不装在任何"机密载荷会经过的方法"上**（`SetShown` / AuraButton 一类，见 8.26.3）。
+
+## 8.27 2026-11-03 第 1 档落地（`7108581`）+ 第四样本：EnhanceQoLUnitFrames 怎么藏暴雪队伍框
+
+### 8.27.1 已落地：8.26.7 第 1 条（零风险那半步），钩子方案一行都没动
+
+只碰 `Modules/Nameplates/Nameplates.lua` 与 `Utils/Widget.lua`（266+/34-），commit `7108581`。逐条与**失败方向**：
+
+| 位置 | 改了什么 | 为什么这样改 |
+|---|---|---|
+| `Nameplates.lua:876-905` | 私有 `guardDriver`（自己的 OnUpdate + `M.active` 内部早退）→ 订进 `Utils/Scheduler`，`M:SyncGuard()` 按"有几块牌压着"起停 | 原来没有可见牌时**帧还每帧醒**；现在最后一块 `blizzardHidden` 牌交就整条 `Unregister`，master frame 自己隐 |
+| `KeepBlizzardHidden`（:853） | **删掉每拍 `uf:Show()`** | 那一句没有战斗门，进本 9 条 `ADDON_ACTION_BLOCKED` 就来自它（8.25 表第 1 行）。alpha 0 的框**本来就一直算显示**，`Show` 只是给暴雪顶回来的机会 |
+| `AlphaOf` / `NeedsFade`（:493 / :505） | 常态读后写；**读不出来照旧写** | 保守方向选"多写一次"而不是"少压一次"：读不到多半正在战斗，当成"不用写"等于把 2026-10-28 判例（当前目标 `blizzardHidden=true` 但 `ufAlpha=1.00`，和自绘牌同屏）放回来 |
+| `FadeBlizzardSiblings`（:522） | ① `{ base:GetChildren() }` 里白建的第二张表删掉；②只把**真的写过**的 sibling 记进 `siblingAlpha` | 顺带修一个潜伏 bug：旧代码每拍无条件 `siblingFaded[c]=true`，交还时把整棵树顶回 alpha **1** —— 等于**抹掉暴雪实测 0.60 的距离淡出**（与 8.25 表第 2 行同一条病） |
+| `HideBlizzardPlate` / `RestoreBlizzardPlate`（:550 / :588） | 接管前把 `UnitFrame` 的原 alpha 记在**我们自绘牌**的 `plate.blizzardAlpha` 上，交还还原它，不再硬编码 1 | 8.25 表第 2 行。字段只写我们自己的对象（AGENTS「绝不往暴雪对象写字段」） |
+| `WriteCVar`（:124） | 先 `C_CVar.GetCVarInfo` 问 `isSecure / isReadOnly / isLockedFromUser` → 拒写并记账；先读后写；写完复验；每种失败原因每个 CVar 只 print 一次 | 8.26.6 第 2 条那笔"长期空转、一行红字都不响"。原来是无条件写 + `pcall` 吞结果 |
+| `M:ProbeCVars`（:1218）+ `HandleCommand` | `/mui nameplates probe cvar`（另认 `/mui nameplates cvar`） | 离线判不了：快照只给签名，**当前值 / 当前客户端的锁定状态**只有实机有。按「短命令」规矩不做 `/run` |
+| `Widget.lua:94-131` | `ContextAccess` 前置：`CanBeAccessedInContext` → `IsForbidden` → 才退回"`IsVisible` 抛不抛"；告警按两种原因分别归因；`Visible()` 也先问一次 | 8.26.6 第 1 条。**临时光环限制不置 ordinary forbidden 旗**，老判据对那种框一直答"可读"、回调每拍照跑。它的返回带 `[机密[SecretReturnsForAspect]]` → **只有拿到非机密 boolean 才改判**，问不出来不动老结论（误判方向是"静默少换肤/永久空转"，两边都不许猜） |
+
+闸门（离线）：`api-audit` HARD 全清、`audit-taint` 0 BLOCKER（剩 1 条 HIGH 是 DevTools 里既有的
+`hooksecurefunc("ChatEdit_InsertLink")`，与本档无关）、`audit-locals` 53/53、`check-frame-list` 373 一致、`luac -p` 通过。
+
+**仍未验（客户端开着时一趟跑完）**：
+
+1. `/mui nameplates probe cvar` → 那 8 个 `nameplateShow*` / `nameplateMaxDistance` 里到底几个 `isSecure`
+   （决定 `viewDistance` 这类设置项是不是本来就在空转）。
+2. 进本打一轮：`taint.log` 空 + 那 9 条 `ADDON_ACTION_BLOCKED` 消失。
+3. 关模块 → 暴雪牌还原成**接管前那个值**（0.6 距离淡出还在），不是 1。
+4. 打印 `base:GetChildren()` 的真名 → 决定 `FadeBlizzardSiblings` 整段能不能删（8.25 第 3 条，现在还留着）。
+5. `/mui restrict` 末尾"轮询被暂停的框"清单 + `/mui skins diagnose` 的 ✗ 账：确认新判据没把本来能换肤的框
+   误判成不可访问 —— **这条误判不报错，只能靠账本看**。
+
+### 8.27.2 第四样本：EnhanceQoLUnitFrames（同客户端自绘组框）—— 队伍框隐藏方式
+
+8.26 挖的是姓名板，这次是**队伍框**，来自游戏目录里装着的那套（只读，未改一行、未导代码）。
+`GAMEDIR` = `C:\Users\EastHillGu\Documents\Blizzards\WOWFOREVER\World of Warcraft\_forever_\Interface\AddOns`，
+`EQUF` = `GAMEDIR/EnhanceQoLUnitFrames`，`EQOL` = `GAMEDIR/EnhanceQoL`。
+选它不选 ElvUI / NDui 的理由：`.toc` 写 `## Interface: 16001` + `## X-EQOL-Flavor: forever`，
+**正跑在交付客户端上**，而且自绘 party / raid / mt / ma 四种组框，与我们的场景一对一。
+
+它的隐藏五步（`EQUF/UF_GroupFrames_Camelot.lua:6259-6317`；`EQOL/General/functions.lua:1250-1298`
+是同一份 helper 的第二份拷贝）：`UnregisterAllEvents` → 能 Hide 就 `Hide()`、不能就 `SetAlpha(0)`
+→ `SetParent(常隐框)` → 给该框的 `Show` / `SetShown` 挂 `hooksecurefunc` 反拉锯
+→ 团队框再补一刀 `CompactRaidFrameManager_SetSetting("IsShown", "0")`（:6314）。
+目标名单：`PartyFrame` / `CompactPartyFrame` / `CompactPartyFrameTitle` / `CompactRaidFrameContainer`。
+
+**可借鉴三条**：
+
+| # | 它的做法 | 我们的现状与动作 |
+|---|---|---|
+| 1 | 写之前**逐框**问 `IsProtected()`（:6272-6274），只有"战斗中 **且** 这个框受保护"才退回 alpha | `Groups.lua:940 MuteOne` 是整个受限窗口一刀切 `return` —— **非受保护的子件在战斗里也白白跳过**，只能等脱战补扫（实机 ×984 那批的成因之一）。改成逐框判能少掉一批补做。**但**快照 `ScriptRegion:IsProtected() → isProtected, isProtectedExplicitly` 带 `[机密[SecretReturnsForAspect]]` → 必须 `Secrets.Bool(frame:IsProtected(), true)`（默认按"受保护"保守跳过）；直接 `if frame:IsProtected() then` 就是 AGENTS 那刀 `UNKNOWN()` |
+| 2 | 用**暴雪设置面板自己那条开关**关掉团队框：`CompactRaidFrameManager_SetSetting("IsShown","0")` | 这是 8.26.4 表第 3 行"让暴雪自己顶"在 FrameXML 层的对应物：状态写进**暴雪自己的表**，它之后的显隐逻辑读到的是"玩家选了关" → **没有拉锯、没有逐框写、没有子树鼠标残留**。若成立，比我们整套 `Starve + AlphaTree + MuteTree` 都便宜。两条前提：①调暴雪全局函数 = 该函数体内以 MonetUI 名义执行，它内部 Show/Hide 管理器属受保护项 → **只能在非受限窗口调**；②本地快照 `docs/api/FUNCTIONS.md` grep `RaidFrame` / `PartyFrame` **零命中**（客户端没给任何 `C_*` 门），所以这个 global 在 1.60 存不存在、调完进不进拦截日志**只能实机探针**。→ 待做 `/mui groups probe`：`CompactRaidFrameManager_SetSetting` 是否存在 + 调用后 `CompactRaidFrameContainer` 的 `IsShown()/GetAlpha()` + 拦截计数 |
+| 3 | `DisableBlizzardFrames` 第一行 `if not GF.CanUseSecureGroupHeaders() then return end`（:6297）：**确认自己顶替得了才去藏** | 我们 `SetBlizzardHidden(cfg, partyActive, raidActive)`（`Groups.lua:1045`）已是等价判据 → 不动代码，把这条当口径依据存档 |
+
+**反例（第四家往暴雪对象写字段的；同时确认我们现有规矩的方向对）**：
+
+- `Hide()` + `hooksecurefunc(frame,"Show")` 反拉锯，外加 `CompactPartyFrameTitle:HookScript("OnShow", → Hide)`
+  （`EQUF/UnitFrameRuntime.lua:129-132`）。**它需要那些钩子，正是因为它选了 Hide** —— 我们「收暴雪 HUD 用
+  `SetAlpha(0)` 不 `Hide()`」那条把这一整类消掉了，不是巧合。
+- 往暴雪框写 `frame._eqolHidden` / `_eqolAlphaHidden` / `_eqolHiddenHooks` → 8.26.5 的字段反例添第四家
+  （BNP、BTP、EQoL），`ns:Mark` 旁表这条继续不动摇。
+- 全文**没有** `EnableBlizzardFrames`：**单向压制**，玩家关掉组框功能只能 `/reload` 才拿回暴雪的框。
+  我们 `UnparkGroup`（`Groups.lua:1020`）有归还路径（`Starve` 那半截确实也要重载，代码里已明写在 print 上）。
+- `PLAYER_REGEN_ENABLED` 派发当拍直接重跑被延后的动作（`EQUF/UF_GroupFrames_Camelot.lua:36544-36557`），
+  **没有** `C_Timer.After(0)` → 正是 AGENTS 记的"要脱两次战才生效"：它 `hideFrameLocked` 里第一句就问
+  `InCombatLockdown()`，那一拍标志还是旧值 `true`，于是动作又排回队列。**我们的 `ns:AfterCombat` 已避开，别照它改回去。**
+- 钩子体内**裸用**机密返回：`hooksecurefunc("TextStatusBar_UpdateTextStringWithValues", …)` 里
+  `fmt(..., UnitHealth(unit), UnitHealthMax(unit), unit)`（`EQUF/HealthText.lua:204-219`），一个 `issecretvalue` 都没有。
+  那两个值一旦是机密，`string.format` 直接 `invalid value (secret)` —— 而且**抛在暴雪自己的更新链里**，归属记它名下。
+  → 给 8.26.1 那条判据补一刀：**"体内不调 `[受限]` API"还不够，体内读到的每个值都要过守卫**。
+- 它 `hooksecurefunc` 打在暴雪全局函数上的共 3 个（`PlayerFrame_UpdateStatus` / `PlayerFrame_UpdatePlayerRestLoop` /
+  `TextStatusBar_UpdateTextStringWithValues`），`HookScript` 10 组打在暴雪框上，**长期活在本客户端** ——
+  这是 8.26.4"钩暴雪全局更新函数"那一档**跑得起来**的第四份证据。但它钩子体内 `Hide()` 一个战斗门都没加，
+  这类拦截只能靠"只进日志、不弹窗"忍着，**不是干净**，别拿"它没事"当依据（AGENTS 已定过这条口径）。
+
+### 8.27.3 待做（接 8.26.7 / 8.27，按风险从低到高）
+
+1. 8.26.7 第 1 条**已落地 `7108581`**；第 2 条（尺寸链事件化）与第 4 条（钩子半步要 `taint.log`）仍未动，计划不变。
+   注意行号已随 8.27.1 位移：尺寸那条现在是 `Nameplates.lua:267-286`（`M:HookDriver` 里的 `Widget:PollWatch`）。
+2. **新增（组框）**：`/mui groups probe` 验 `CompactRaidFrameManager_SetSetting("IsShown","0")`（8.27.2 第 2 条）。
+   **若它成立，姓名板一侧值得回头问同族问题** —— 先 `node tools/api-lookup.js C_NamePlate` 把那个命名空间整个过一遍，
+   找有没有暴雪自己的"显隐开关"能替掉我们的逐框压制（要找的是**开关**，不是尺寸/距离那几个 `[受限]` setter）。
+3. **新增（组框）**：`Groups.lua:940 MuteOne` 的 `Restricted()` 一刀切改成逐框 `Secrets.Bool(frame:IsProtected(), true)`。
+   验收只看一个数：`/mui restrict` 的拦截计数**下降**；持平或上升就是判据用错，回滚。
 
 ## 9. 建议的下一步（按价值排序）
 
