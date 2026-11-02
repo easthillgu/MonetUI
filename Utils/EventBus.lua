@@ -17,8 +17,16 @@ local frame
 -- Report a handler failure, but only the FIRST time per event.  Without this a handler that throws on
 -- a high-frequency event (UPDATE_*, PLAYER_ENTERING_WORLD, ...) prints the same line on every single
 -- fire, which floods the chat log -- exactly what the project rule "失败一次性 print 警告，不刷屏" forbids.
--- The count is kept so the final message says how many times it was swallowed after the burst.
+-- The count is kept (1) so the player learns at the SECOND failure that the noise is being suppressed
+-- instead of thinking the error stopped, and (2) for a future `/mui` diagnostic to read.
 local reported = {}
+
+--- 每个事件被静默掉的失败次数（诊断用；不要在热路径里调用）。
+function EventBus:FailureCounts()
+    local copy = {}
+    for event, n in pairs(reported) do copy[event] = n end
+    return copy
+end
 
 local function Report(event, err)
     local key = tostring(event)
@@ -28,6 +36,9 @@ local function Report(event, err)
     -- high-frequency event would otherwise print once per fire and flood the chat log.
     if n == 1 then
         print("|cffff6b6b[MonetUI]|r EventBus '" .. key .. "': " .. tostring(err))
+    elseif n == 2 then
+        -- 第二条才说"后面的不再打印"：只静默、什么都不提示，会让人以为错误只发生了一次。
+        print("|cffff6b6b[MonetUI]|r EventBus '" .. key .. "' 的失败会继续被静默（同一事件只提示一次）")
     end
 end
 

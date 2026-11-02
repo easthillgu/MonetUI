@@ -886,14 +886,36 @@ end
 --- `debugstack`。这一族就是 docs/PLAN-refactor 里那批 `UNKNOWN()`（机密布尔被真值测试）。
 --- 只覆盖 `Secrets.Bool`：别的来源（引擎容器 / 半套压制）这里看不到，得走开关式二分。
 local function PrintBlockLedger(rest)
+    -- 事件处理器抛错也在这本账里露一面：EventBus 每个事件只提示一次、之后静默（不这样会刷屏），
+    -- 所以"到底还在不在报"只能靠这里读。
+    local function PrintBusErrors()
+        local bus = ns.EventBus
+        if not bus or type(bus.FailureCounts) ~= "function" then return end
+        local counts = bus.FailureCounts()
+        local order = {}
+        for event in pairs(counts) do order[#order + 1] = event end
+        if #order == 0 then return end
+        table.sort(order, function(a, b) return counts[a] > counts[b] end)
+        ns:Print("事件处理器失败（同一事件只提示一次，其余静默）：")
+        for i = 1, #order do
+            if i > 8 then
+                ns:Print(("  …另有 %d 个事件"):format(#order - 8))
+                break
+            end
+            ns:Print(("  |cffffd100×%d|r %s"):format(counts[order[i]], order[i]))
+        end
+    end
+
     if type(ns.Secrets) ~= "table" or type(ns.Secrets.BoolBlocks) ~= "function" then
         ns:Print("这个构建没有 BoolBlocks 账本。")
+        PrintBusErrors()
         return
     end
     local blocks, total = ns.Secrets.BoolBlocks()
     if total == 0 or #blocks == 0 then
         ns:Print("|cff88ff88账本为空|r：本会话没有机密布尔被拦的记录。")
         ns:Print("（只统计 `Secrets.Bool` 的失败路径；其它 `UNKNOWN()` 来源要靠关模块二分。）")
+        PrintBusErrors()
         return
     end
     local order, groups = {}, {}
@@ -920,6 +942,7 @@ local function PrintBlockLedger(rest)
             ns:Print("  " .. line)
         end
     end
+    PrintBusErrors()
 end
 
 --- 亮度阶梯自查（`/mui colors`）。HANDOFF 8.14.3 的实测：面板（ambient×0.35）和掉血空槽
