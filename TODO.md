@@ -179,6 +179,10 @@ TabardFrame、EncounterJournal、DressUpFrame、GossipFrame、LFGParentFrame、L
 7. 按钮三态：悬停高亮 / 按下 / 禁用变暗同时生效（HoverWatch 多监听）。
 8. `/mui reset` 现在要 `/mui reset confirm`。
 9. `Logs/taint.log` 与 `ADDON_ACTION_BLOCKED` 计数对比基线。
+10. **脱战补做只该等一次脱战**（`6ece33a` 修的战斗时序）：改姓名板尺寸 / 开关单位框 /
+    挪受保护框 / 小地图位置，**脱战一次**必须生效；要脱两次就是回退了。
+11. **第一次战斗里就要有战斗光环容器**（战斗 buff/debuff 图标）；空着说明容器还是没建出来。
+12. `/mui blocks` 除机密布尔外，还要列出事件处理器失败次数（`7bf5419`）。
 
 **已知遗留**
 - ✅ **已解决（2026-11-02）**：`test-mult.js` 已全绿；`test-skin-lua.js` 44 条红已与当前代码对齐
