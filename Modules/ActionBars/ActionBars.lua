@@ -412,22 +412,51 @@ end
 M.SlotOf = SlotOf
 
 --- 快捷键太长会顶出按钮（SHIFT-1、MOUSEWHEELUP…），缩成 s1 / MU 这类写法。
+--- 修饰键和按键**分两段处理**。以前是一条 gsub 链，跨段命中过：`BUTTON` → M 作用在
+--- LEFTBUTTON 上把 M 拼到尾巴（按钮角实测显示 `LEFTM`），而往链尾追加 UP / DOWN / LEFT
+--- 又会把 PAGEDOWN 缩成 PAGED、LEFTBRACKET 缩成 LBRACKET。所以先按 `-` 切段，
+--- 修饰段查前缀表、按键段查 token 表，认不出的一段原样留着。
+local KEY_MODIFIER = {
+    SHIFT = "s", CTRL = "c", CONTROL = "c", ALT = "a", META = "m", COMMAND = "m",
+}
+local KEY_TOKEN = {
+    MOUSEWHEELUP = "MU", MOUSEWHEELDOWN = "MD",
+    LEFTBUTTON = "LMB", RIGHTBUTTON = "RMB", MIDDLEBUTTON = "MMB",
+    LEFTBRACKET = "[", RIGHTBRACKET = "]", APOSTROPHE = "'", BACKSLASH = "\\",
+    SEMICOLON = ";", COMMA = ",", PERIOD = ".", SLASH = "/", MINUS = "-", EQUALS = "=",
+    PLUS = "+", MULTIPLY = "*", DIVIDE = "/",
+    PAGEUP = "PgU", PAGEDOWN = "PgD", INSERT = "Ins", DELETE = "Del",
+    BACKSPACE = "Bk", ESCAPE = "Esc", ENTER = "En", TAB = "Tab",
+    UP = "U", DOWN = "D", LEFT = "L", RIGHT = "R",
+    SPACE = "Sp", CAPSLOCK = "CL",
+}
+
+--- 一个绑定段（切掉 `-` 之后的最短单位）→ 短写法。
+local function ShortenKeyPart(seg)
+    local token = KEY_TOKEN[seg]
+    if token then return token end
+    -- "词 + 后缀" 的两类：侧键 BUTTON4、小键盘 NUMPAD7。旧写法无条件 gsub 前缀，
+    -- 于是 LEFTBUTTON 被拼成 LEFTM；这里只认**以它开头**的段，后缀继续查同一张表
+    -- （NUMPADENTER → N + En，NUMPADSLASH → N + /）。
+    local rest = seg:match("^BUTTON(.+)$")
+    if rest then return "M" .. ShortenKeyPart(rest) end
+    rest = seg:match("^NUMPAD(.+)$")
+    if rest then return "N" .. ShortenKeyPart(rest) end
+    return seg
+end
+
 local function ShortenKey(text)
     if type(text) ~= "string" or text == "" then return text end
     if RANGE_INDICATOR and text == RANGE_INDICATOR then return text end
 
-    local short = text
-    short = short:gsub("MOUSEWHEELUP", "MU")
-    short = short:gsub("MOUSEWHEELDOWN", "MD")
-    short = short:gsub("SHIFT%-", "s")
-    short = short:gsub("CTRL%-", "c")
-    short = short:gsub("ALT%-", "a")
-    short = short:gsub("META%-", "m")
-    short = short:gsub("BUTTON", "M")
-    short = short:gsub("NUMPAD", "N")
-    short = short:gsub("SPACE", "Sp")
-    short = short:gsub("CAPSLOCK", "CL")
-    return short
+    local out = {}
+    for seg in text:gmatch("[^%-]+") do
+        out[#out + 1] = KEY_MODIFIER[seg] or ShortenKeyPart(seg)
+    end
+    if #out == 0 then return text end
+    -- 段与段之间**不加**分隔符：旧写法把 `SHIFT%-` 连字符一起吃掉，出来的就是 s1 / csA，
+    -- 而 `s-1` 这种写法在 12px 字号下更容易顶出按钮，还会让 SHIFT-MINUS 读成 "s--"。
+    return table.concat(out, "")
 end
 
 --- 把热键写在按钮角上（没有绑定、或面板里关了就藏起来）。
@@ -859,7 +888,11 @@ end
 -- 槽位来自我们自己画的 slot（`Marked(button,"slot")`），**不读**安全属性 action。
 -- 收养来的宠物/姿态按钮不参与：暴雪自己的按钮本来就会做距离着色。
 -- ---------------------------------------------------------------------------
-local RANGE_DIM = 0.45        -- 超出距离时图标的顶点色（灰色压暗，不上色相）
+-- 超出距离时图标的顶点色（灰色压暗，不上色相）。
+-- 0.45 → 0.20（2026-11-02 玩家定 C 档）：按图标亮度算落点，亮图标 115→51、中 80→36、
+-- 暗 52→25、很暗 29→13（8bit）。再往下到 0.12 时最暗那档只剩 8/255，和空槽那块纯黑 well
+-- 分不开，读起来会变成"这格没放东西"而不是"够不着"——0.20 是还留得住形状的下限。
+local RANGE_DIM = 0.20
 
 -- EnableActionRangeCheck 一开就是整场，客户端每帧多算一格，所以两条纪律：
 --   * 只给**我们真正画出来的槽**开（EnsureRangeCheck 只在遍历到已登记的 slot 时调）；
