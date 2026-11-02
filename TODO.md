@@ -183,6 +183,38 @@ TabardFrame、EncounterJournal、DressUpFrame、GossipFrame、LFGParentFrame、L
     挪受保护框 / 小地图位置，**脱战一次**必须生效；要脱两次就是回退了。
 11. **第一次战斗里就要有战斗光环容器**（战斗 buff/debuff 图标）；空着说明容器还是没建出来。
 12. `/mui blocks` 除机密布尔外，还要列出事件处理器失败次数（`7bf5419`）。
+13. **战斗中 /reload 后暴雪团队/小队框不能留残影**：`Park` 的几何 / 鼠标在受限窗口里被拒后
+    已推迟到脱战，若屏幕中间仍出现 `CompactPartyFrame` / `CompactRaidFrame` 的 backdrop /
+    选中描边，说明回退。
+
+## 事件派发中的受保护写入（批次 A，2026-11-02）
+
+复查范围：所有 `UNIT_*` / `GROUP_*` / `PLAYER_TARGET_CHANGED` / `NAME_PLATE_UNIT_ADDED` /
+`ZONE_CHANGED*` / `PLAYER_ENTERING_WORLD` 等事件回调中是否包含受保护写入
+（`SetPoint` / `Show` / `Hide` / `SetAttribute` / `RegisterStateDriver` / `EnableMouse` /
+`SetSize` / `SetParent` / 创建受保护子框）。
+
+| 事件 | 模块 | 回调 | 受保护写入 | 当前守卫 | 结论 |
+|---|---|---|---|---|---|
+| `GROUP_ROSTER_UPDATE` / `GROUP_JOINED` / `PLAYER_ENTERING_WORLD` / `ZONE_CHANGED_NEW_AREA` / `ADDON_LOADED` | `Groups` | `ReparkBlizzardGroups → Park` | `ClearAllPoints` / `SetPoint` / `EnableMouse` on `CompactPartyFrame` / `PartyFrame` / `CompactRaidFrameContainer` | **无**（仅子树 `MuteOne` 判战斗） | **已修**：新增 `Restricted()` 判六类受限窗口，alpha 当场做，几何/鼠标推迟 |
+| 上同（配置/离开队伍时 `UnparkGroup`） | `Groups` | `UnparkGroup → Unpark` | `Show` on 暴雪框 + 子树 `EnableMouse` | **无** | **已修**：受限窗口里 `Show`/子树鼠标恢复推迟 |
+| `PLAYER_TARGET_CHANGED` / `UNIT_TARGET` | `UnitFrames` | `RefreshUnit → EnsureTargetAuras` | 创建原生 `AuraContainer`（目标/焦点光环） | `InCombat()` + `ns:AfterCombat` | 战斗路径已守卫；Map/Chat 未验证（低风险，保持观察） |
+| `GROUP_ROSTER_UPDATE` | `UnitFrames` | `M:UpdateAll → RefreshUnit` | 同上 | 同上 | 同上 |
+| `UNIT_*`（health/power/name/...） | `UnitFrames` / `Groups` | `M:UpdateUnit` | 仅 painting，无显隐/几何写入 | n/a | 无受保护写入 |
+| `NAME_PLATE_UNIT_ADDED` | `Nameplates` | `Added → HideBlizzardPlate` | `SetAlpha(0)` / `Show` on 暴雪 `UnitFrame` | `Show` 已判 `InCombat()` | 已守卫 |
+| `PLAYER_TARGET_CHANGED` | `Nameplates` | `KeepBlizzardHidden` | 同上 | 同上 | 同上 |
+| `PLAYER_ENTERING_WORLD` | `Nameplates` | `M:ApplyPlateSize` | `C_NamePlate.SetNamePlateSize` | `InCombat()` + `ns:AfterCombat` | 已守卫 |
+| `UPDATE_BINDINGS` | `ActionBars` | `ReassignBindings` | `SetOverrideBindingClick` / `ClearOverrideBindings` | `Locked()` + `ns:AfterCombat` | 已守卫 |
+| `PLAYER_ENTERING_WORLD` / `CVAR_UPDATE` / ... | `ActionBars` | `M:Apply` / `M:SetClickOptions` | 安全属性/状态驱动 | `Locked()` 守门 | 已守卫 |
+| `BANKFRAME_OPENED` / `CLOSED` | `Bags` | 窗口显示/隐藏 | 自有窗口 | n/a | 无受保护写入 |
+| `ZONE_CHANGED_NEW_AREA` | `Minimap` | `Skin → M.buttons:Apply` | `SetParent` / `SetPoint` 小地图按钮 | 无战斗守卫 | 换区通常不在战斗中；保持观察 |
+| `ZONE_CHANGED_NEW_AREA` | `QuestTracker` | `SuppressBlizzard` | `Widget:Mute` 追踪框 | `Widget:Mute` 内部判 `ns:InCombat()` | 已守卫 |
+| `PLAYER_ENTERING_WORLD` | `Cooldown` | `HideBlizzardViewer` | `Hide` 暴雪 viewer | `ParkViewer` 判 `InCombatLockdown()` | 已守卫 |
+
+> **口径**：`Groups` 的 `Restricted()` 现在一次性判断六类受限窗口；其余模块仍只判战斗。
+> 这是离线阶段的最小改动 —— Map / Chat 等窗口里是否真的会发生这些受保护写入，
+> 要等 `/mui compat` 与实机阶段 2 才能确认。如果复现，再把 `Auras` / `BuffFrame` /
+> `Nameplates` 的容器创建入口也升级到 `ns:IsRestricted()`。
 
 **已知遗留**
 - ✅ **已解决（2026-11-02）**：`test-mult.js` 已全绿；`test-skin-lua.js` 44 条红已与当前代码对齐

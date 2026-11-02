@@ -808,6 +808,38 @@ end
 
 local parked = setmetatable({}, { __mode = "k" })
 
+--- 受保护写入的唯一门槛。**六类受限窗口都算**（Combat / Encounter / ChallengeMode /
+--- PvPMatch / Map / Chat）：只判战斗会漏掉后三类，那些窗口里 `EnableMouse` / `SetPoint`
+--- 一样被拒（见 AGENTS「受限窗口不止战斗」）。
+local function Restricted()
+    if type(ns.IsRestricted) == "function" then return ns.IsRestricted() end
+    return InCombat()
+end
+
+--- Park 的第二段（关鼠标 + 移出屏幕）。这两步在受限窗口里会被无声拒绝，而 `parked`
+--- 一旦置位就**再没有人来补** —— 症状是"战斗里 /reload 之后，团队的 backdrop / 选中描边
+--- 带着 alpha 0 的根框留在屏幕中间"。所以战斗里只做 alpha（不受保护），几何记进弱键账，
+--- 脱战后由 `ns:AfterCombat` 与静音 ticker 各补一次（两边都幂等）。
+local geometryPending = setmetatable({}, { __mode = "k" })
+
+local function ParkGeometry(frame)
+    if not frame then return end
+    if type(frame.ClearAllPoints) == "function" then pcall(frame.ClearAllPoints, frame) end
+    if type(frame.SetPoint) == "function" then
+        pcall(frame.SetPoint, frame, "TOPLEFT", "UIParent", "BOTTOMRIGHT", 1, -1)
+    end
+    if type(frame.EnableMouse) == "function" then pcall(frame.EnableMouse, frame, false) end
+    if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, false) end
+    geometryPending[frame] = nil
+end
+
+--- 补做所有"只做了 alpha"的 Park。返回 false = 还在受限窗口里，留队重试。
+local function FlushParkGeometry()
+    if Restricted() then return false end
+    for frame in pairs(geometryPending) do ParkGeometry(frame) end
+    return true
+end
+
 --- 藏掉暴雪的团队/小队框。
 --- **不写字段、不挂 OnShow 钩子、也不 Hide()**：
 ---   * 写字段 / HookScript 会把框标脏；
@@ -819,23 +851,47 @@ local parked = setmetatable({}, { __mode = "k" })
 local function Park(frame)
     if not frame or parked[frame] then return end
     parked[frame] = true
-    -- 1. alpha 0（保持"仍在显示"的语义，不与自身 Show 拉锯）
+    -- 1. alpha 0（保持"仍在显示"的语义，不与自身 Show 拉锯）。alpha 不受保护，
+    --    受限窗口里也写得动 —— 视觉上先藏住是最要紧的一步。
     pcall(frame.SetAlpha, frame, 0)
-    -- 2. 关鼠标（EnableMouse 不受保护）
-    pcall(frame.EnableMouse, frame, false)
-    if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, false) end
-    -- 3. 移出屏幕 —— 暴雪可能画 backdrop/border/selection highlight 且
-    --    SetIgnoreParentAlpha，alpha 0 挡不住；SetPoint 不受保护。
-    if type(frame.ClearAllPoints) == "function" then pcall(frame.ClearAllPoints, frame) end
-    if type(frame.SetPoint) == "function" then
-        pcall(frame.SetPoint, frame, "TOPLEFT", "UIParent", "BOTTOMRIGHT", 1, -1)
+    -- 2./3. 关鼠标 + 移出屏幕：受限窗口里一律被拒，交给脱战后补。
+    if Restricted() then
+        geometryPending[frame] = true
+        if type(ns.AfterCombat) == "function" then
+            ns:AfterCombat("groups-park-geometry", FlushParkGeometry)
+        end
+        return
     end
+    ParkGeometry(frame)
+end
+
+--- 放开一个框。`Show` 是受保护项：受限窗口里被拒之后 `parked` 已经清掉，也没人会再补，
+--- 所以同样排进 `ns:AfterCombat`。alpha 不受保护，当场恢复。
+local showPending = setmetatable({}, { __mode = "k" })
+
+local function FlushShowPending()
+    if Restricted() then return false end
+    for frame in pairs(showPending) do
+        showPending[frame] = nil
+        pcall(frame.Show, frame)
+        -- 归还时要把子框鼠标也开回来（刚才受限窗口里 MuteTree 整段跳过了）。
+        MuteChildren(frame, true)
+    end
+    return true
 end
 
 local function Unpark(frame)
     if not frame or not parked[frame] then return end
     parked[frame] = nil
+    geometryPending[frame] = nil   -- 还回去了就别再把它搬出屏幕
     pcall(frame.SetAlpha, frame, 1)
+    if Restricted() then
+        showPending[frame] = true
+        if type(ns.AfterCombat) == "function" then
+            ns:AfterCombat("groups-show", FlushShowPending)
+        end
+        return
+    end
     pcall(frame.Show, frame)
 end
 
@@ -883,10 +939,10 @@ end
 
 local function MuteOne(frame, enable)
     if not frame then return end
-    -- 战斗中**不能**对受保护的成员框 EnableMouse / EnableMouseMotion —— 会被客户端拦成
-    -- ADDON_ACTION_BLOCKED（实机 ×984，每秒一条，来自压制 ticker）。战斗中只靠 AlphaTree 的
+    -- 受限窗口里**不能**对受保护的成员框 EnableMouse / EnableMouseMotion —— 会被客户端拦成
+    -- ADDON_ACTION_BLOCKED（实机 ×984，每秒一条，来自压制 ticker）。战斗里只靠 AlphaTree 的
     -- alpha 0 + 移出屏幕挡视觉；鼠标在脱战后由 1s ticker 补关（那时不受保护）。
-    if type(InCombatLockdown) == "function" and InCombatLockdown() then return end
+    if Restricted() then return end
     if type(frame.EnableMouse) == "function" then pcall(frame.EnableMouse, frame, enable) end
     if type(frame.EnableMouseMotion) == "function" then pcall(frame.EnableMouseMotion, frame, enable) end
 end
@@ -919,7 +975,7 @@ AlphaWalk = function(frame, alpha, depth)
 end
 
 local function AlphaTree(frame, alpha, depth)
-    if not frame or InCombat() then return end
+    if not frame or Restricted() then return end
     AlphaWalk(frame, alpha, depth or 0)
 end
 
@@ -936,7 +992,7 @@ end
 --- 同理：战斗里 `EnableMouse` 对受保护框一律被拒（MuteOne 自己也会早退），
 --- 整棵扫下来只剩几百次白 pcall，所以入口直接跳过。
 local function MuteTree(frame, enable, depth)
-    if not frame or InCombat() then return end
+    if not frame or Restricted() then return end
     MuteWalk(frame, enable, depth or 0)
 end
 
@@ -1056,9 +1112,11 @@ local function StartMuteTicker()
     muteTicker = C_Timer.NewTicker(1, function()
         slow = slow + 1
         if not muteDirty and slow < MUTE_SLOW then return end
-        -- 战斗里 SetAlpha / EnableMouse 都会被拒（受保护框），扫了也是白扫 + 刷日志。
+        -- 受限窗口里 SetAlpha / EnableMouse 都会被拒（受保护框），扫了也是白扫 + 刷日志。
         -- 脏标记留着，脱战后那一拍会立刻补做。
-        if InCombat() then return end
+        if Restricted() then return end
+        -- 战斗中只做了 alpha 的那批框（Park 的几何被拒）：这里补搬一次。
+        for frame in pairs(geometryPending) do ParkGeometry(frame) end
         muteDirty = false
         slow = 0
         for _, name in ipairs(MUTE_ROOTS) do
