@@ -9,6 +9,7 @@
     <Script file="Media.lua"/>
     <Script file="EventBus.lua"/>
     <Script file="Color.lua"/>
+    <Script file="Scheduler.lua"/>
     <Script file="Widget.lua"/>
     <Script file="Layout.lua"/>
     <Script file="Mover.lua"/>

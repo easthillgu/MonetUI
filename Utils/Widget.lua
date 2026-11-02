@@ -13,6 +13,7 @@ local Color = ns.Color
 local Media = ns.Media
 local EventBus = ns.EventBus
 local Secrets = ns.Secrets      -- Secrets.lua 在本文件之前加载（见 Utils.xml）
+local Scheduler = ns.Scheduler  -- Scheduler.lua 在本文件之前加载（见 Utils.xml）
 
 -- ---------------------------------------------------------------------------
 -- 轮询式 hover / 显隐观察（见 AGENTS.md 的「界面美化原则」）
@@ -1406,6 +1407,7 @@ end
 --- Subtle hover highlight used by the modules: one shared driver breathes the border alpha every ~1.2 s between 40% and full while hovered -- the Andromeda "button hover animation" idea, run against our border slot so it reads as the Monet edge quietly pulsing.
 local pulsing = setmetatable({}, { __mode = "k" })
 local PULSE_PERIOD = 1.2
+local pulseSubId = nil
 
 --- Put a border back to whatever it should show when not hovered: its live dynamic state (quality, threat) if it has one, otherwise the theme slot.
 local function RestoreBorder(frame)
@@ -1436,9 +1438,8 @@ function Widget:IsMouseOver(frame)
     return value and true or false
 end
 
-local pulseDriver = CreateFrame("Frame")
-pulseDriver:Hide()
-pulseDriver:SetScript("OnUpdate", function(self, elapsed)
+--- Border breath tick, driven by the unified scheduler (batch B).
+local function PulseTick(elapsed)
     for frame, st in pairs(pulsing) do
         if not frame:IsShown() or not Widget:IsMouseOver(frame) then
             -- lost the leave event (hidden / teleported) -- close out by hand
@@ -1452,8 +1453,7 @@ pulseDriver:SetScript("OnUpdate", function(self, elapsed)
                 st.amax * (0.4 + 0.6 * wave))
         end
     end
-    if next(pulsing) == nil then self:Hide() end
-end)
+end
 
 --- Start the border breath on a frame.  Public so hand-written hover scripts (the bag slots also drive a tooltip) can breathe exactly like Widget:Highlight -- one driver, one look.
 --   r,g,b  hue to breathe;  amax peak alpha (default 1)
@@ -1461,13 +1461,17 @@ function Widget:Pulse(frame, r, g, b, amax)
     if not frame or not frame.SetBackdropBorderColor then return end
     pulsing[frame] = { r = r, g = g, b = b, amax = amax or 1, t = 0 }
     frame:SetBackdropBorderColor(r, g, b, amax or 1)
-    pulseDriver:Show()
+    pulseSubId = Scheduler:EveryFrame(PulseTick)
 end
 
 --- Stop the breath and put the border back (dynamic state first).
 function Widget:UnPulse(frame)
     if not frame then return end
     pulsing[frame] = nil
+    if pulseSubId then
+        Scheduler:Unregister(pulseSubId)
+        pulseSubId = nil
+    end
     RestoreBorder(frame)
 end
 
