@@ -1469,6 +1469,7 @@ local function EnsureQualityDriver()
         for btn, entry in pairs(qualityBorders) do
             local border = entry.frame
             if border and border.GetAlpha then
+                SnapQualityBorder(btn, border)
                 local q = ResolveQuality(btn)
                 local color = q and QUALITY_COLOR[q] or nil
                 if color ~= entry.last then
@@ -1484,17 +1485,58 @@ local function EnsureQualityDriver()
     end)
 end
 
+--- 把品质边框矩形吸附到物理像素栅格：外扩 1 物理像素（不是 1 UI 单位——有效缩放
+--- 0.6 时 1 单位只有 0.6 物理像素），且四缘各自取整到整数像素。2026-11-02 实机
+--- 判例：商人窗按钮物理坐标是小数（16.2 / 111.0 / 133.2 / 38.4），硬外扩 1 单位
+--- 让四边落在不同的亚像素位置——顶边被拆成两行各 55% 强度、底边满强度一行，
+--- 视觉上"底边比三边厚"。吸附后四边都是完整 1px。
+--- 0.5s 驱动帧顺带重吸附：窗口拖动 / 缩放变化自动跟上（几何没变时 SetPoint
+--- 写的是同值，幂等）。
+local function AbsRectUnits(fr)
+    -- 绝对单位坐标（父链同尺度累计；读不动就放弃，调用方保持现状）
+    local absL, absB = 0, 0
+    while fr do
+        local okL, l = pcall(fr.GetLeft, fr)
+        local okB, b = pcall(fr.GetBottom, fr)
+        if not okL or not okB or type(l) ~= "number" or type(b) ~= "number" then return nil end
+        absL, absB = absL + l, absB + b
+        if fr == UIParent then return absL, absB end
+        fr = fr:GetParent()
+    end
+    return nil
+end
+
+local function SnapQualityBorder(btn, border)
+    local okS, s = pcall(btn.GetEffectiveScale, btn)
+    if not okS or type(s) ~= "number" or s <= 0 then return end
+    local absL, absB = AbsRectUnits(btn)
+    if not absL then return end
+    local okW, W = pcall(btn.GetWidth, btn)
+    local okH, H = pcall(btn.GetHeight, btn)
+    if not okW or not okH or type(W) ~= "number" or type(H) ~= "number" then return end
+    local pxL, pxB = absL * s, absB * s
+    local pxR, pxT = pxL + W * s, pxB + H * s
+    -- 边框矩形 = 按钮矩形外扩 1 物理像素，四缘全部落在整数像素上（局部坐标以按钮
+    -- 左下角为原点、y 向上；backdrop 的 edge 画在矩形内侧 = 按钮外那一整行像素）。
+    local xl = (math.floor(pxL + 0.5) - 1 - pxL) / s
+    local xr = W + (math.floor(pxR + 0.5) + 1 - pxR) / s
+    local yb = (math.floor(pxB + 0.5) - 1 - pxB) / s
+    local yt = H + (math.floor(pxT + 0.5) + 1 - pxT) / s
+    pcall(border.ClearAllPoints, border)
+    pcall(border.SetPoint, border, "BOTTOMLEFT", btn, "BOTTOMLEFT", xl, yb)
+    pcall(border.SetPoint, border, "TOPRIGHT", btn, "BOTTOMLEFT", xr, yt)
+end
+
 --- Draw a quality-coloured 1px border around a flattened item button.  The border starts
 --- as the plain neutral edge and recolours itself (poll driver) once the item's quality is
 --- resolvable; unknown / poor / common keep the plain edge, exactly like Bags.
 function Skin:ItemQualityBorder(btn)
     if not btn or qualityBorders[btn] then return btn end
     local border = NewBackdropFrame(btn, 1)
-    border:SetPoint("TOPLEFT", btn, "TOPLEFT", -1, 1)
-    border:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 1, -1)
     Widget:Theme(border, { thickness = 1, bgAlpha = 0 })
     self:Track(border)
     qualityBorders[btn] = { frame = border }
+    SnapQualityBorder(btn, border)
     EnsureQualityDriver()
     return btn
 end
