@@ -1251,11 +1251,23 @@ function M:RegisterEvents()
         end)
     end
 
-    -- 进组/退组时暴雪会新建（或复活）成员框，鼠标要重新关一遍
-    EventBus:Register("GROUP_ROSTER_UPDATE", function()
+    -- 进组/退组时暴雪会新建（或复活）成员框，鼠标要重新关一遍。
+    -- **时序竞态判例（2026-11-02 实机）**：组建瞬间本事件触发时，安全头的
+    -- ConfigureChildren 还没跑（属性驱动，晚事件一帧），按钮 unit 未挂、未显示
+    -- ——当场刷一遍扑空；之后队友血量/名字不再变，UNIT_* 不再来，框体一直空白
+    -- 直到 reload（PLAYER_ENTERING_WORLD → RefreshAll 才补上）。错峰补刷几拍，
+    -- 属性配好后的那一拍会真正填充。
+    local rosterChanged = function()
         M:RefreshAll()
         ReparkBlizzardGroups()
-    end)
+        for _, delay in ipairs({ 0.05, 0.3, 1.0 }) do
+            if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
+                C_Timer.After(delay, function() M:RefreshAll() end)
+            end
+        end
+    end
+    EventBus:Register("GROUP_ROSTER_UPDATE", rosterChanged)
+    EventBus:Register("GROUP_JOINED", rosterChanged)
     -- 暴雪的框是 LoD + 会被换成新对象：进世界 / 换区 / 该包加载时都补一次压制。
     EventBus:Register("PLAYER_ENTERING_WORLD", function()
         M:RefreshAll()
