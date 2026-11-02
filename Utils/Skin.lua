@@ -1589,10 +1589,16 @@ function Skin:FlattenSlotArt(btn)
 end
 
 --- Crop an icon to a square and give it a Monet border.
+--- **Atlas 门**：UI 图形图标（锤子 / 钱袋 / 箭头这类）是 atlas 贴图，内容只占图集页
+--- 的一小块——对它们做 0.08 裁切 = 把整页图集拉到按钮上，比例必崩（2026-11-02 实机
+--- 判例：商人修理 / 出售 / 回购三钮）。物品图标是文件贴图（整幅 0..1），裁切才有意义；
+--- atlas 图标原样保留。
 function Skin:Icon(icon, border)
     if not icon or Marked(icon, "icon") then return icon end
     Mark(icon, "icon", true)
 
+    local okAtlas, atlas = pcall(icon.GetAtlas, icon)
+    if okAtlas and type(atlas) == "string" then return icon end
     self:CropIcon(icon, 0.08, 0.92, 0.08, 0.92)
     if border and icon.GetObjectType and icon:GetObjectType() == "Texture" then
         local bg = NewBackdropFrame(icon:GetParent(), 1)

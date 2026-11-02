@@ -551,7 +551,23 @@ function M:IconWidgetsIn(frame, depth)
                         if ratio < 1 then ratio = 1 / ratio end
                         isSlot = ratio <= 1.5
                     end
-                    if isSlot then
+                    -- **Atlas 门**：图标纹理是 atlas（锤子 / 钱袋 / 回购箭头这类 UI 图形，
+                    -- 内容只占图集页一小块）就整钮跳过——FlattenSlotArt 的 SetTexCoord 0..1
+                    -- 和 Skin:Icon 的 0.08 裁切都按"整幅文件贴图"假设来，对 atlas 是整页
+                    -- 拉伸（2026-11-02 实机判例：商人修理 / 出售 / 回购三钮比例崩）。
+                    -- 物品格图标是文件贴图（SetTexture fileID，GetAtlas 为 nil），不受影响。
+                    local hasAtlas = false
+                    for _, key in ipairs({ "icon", "Icon", "iconTexture", "IconTexture" }) do
+                        local okIcon, tex = pcall(function() return target[key] end)
+                        if okIcon and type(tex) == "table" and type(tex.GetAtlas) == "function" then
+                            local okA, atlas = pcall(tex.GetAtlas, tex)
+                            if okA and type(atlas) == "string" then
+                                hasAtlas = true
+                                break
+                            end
+                        end
+                    end
+                    if isSlot and not hasAtlas then
                     pcall(Skin.FlattenSlotArt, Skin, target)
                     for _, key in ipairs({ "icon", "Icon", "iconTexture", "IconTexture" }) do
                         local okIcon, tex = pcall(function() return target[key] end)
@@ -575,7 +591,7 @@ function M:IconWidgetsIn(frame, depth)
                         pcall(count.ClearAllPoints, count)
                         pcall(count.SetPoint, count, "BOTTOMRIGHT", target, "BOTTOMRIGHT", -2, 2)
                     end
-                    end -- isSlot
+                    end -- isSlot and not hasAtlas
                 end
             elseif kind == "Frame" then
                 M:IconWidgetsIn(child, depth + 1)
