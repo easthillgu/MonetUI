@@ -887,27 +887,53 @@ local function MuteOne(frame, enable)
     if type(frame.EnableMouseMotion) == "function" then pcall(frame.EnableMouseMotion, frame, enable) end
 end
 
+--- `GetChildren` 返回的是**多返回值**，不是表：老的 `pcall(frame.GetChildren, frame)` 只接到
+--- 第一个子框（一个帧对象），随后 `type(kids) ~= "table"` 直接 return —— 递归**从来没发生过**，
+--- 归零 alpha 与关鼠标都只作用在根框上（BossFrames 同款 bug，`c2b6b2b` 已修）。
+local function ChildrenOf(frame)
+    if type(frame.GetChildren) ~= "function" then return nil end
+    local ok, kids = pcall(function() return { frame:GetChildren() } end)
+    if not ok or type(kids) ~= "table" then return nil end
+    return kids
+end
+
 --- 暴雪的紧凑框对很多子件设了 `SetIgnoreParentAlpha(true)`，
 --- 所以根框 `SetAlpha(0)` 挡不住它们露出来（空心描边）。
 --- 必须逐件归零；归还时统一拉回 1（简单、安全、幂等）。
-local function AlphaTree(frame, alpha, depth)
+---
+--- **战斗中整段跳过**：这些子件全是受保护框，`SetAlpha` 在战斗里同样会被拦成
+--- ADDON_ACTION_BLOCKED；而根框的 alpha 已由 `Park()` 压好，剩下的等脱战后由
+--- `StartMuteTicker` 的脏标记补做（PLAYER_REGEN_ENABLED → MarkMuteDirty）。
+local AlphaWalk
+AlphaWalk = function(frame, alpha, depth)
     if not frame then return end
-    depth = depth or 0
     if type(frame.SetAlpha) == "function" then pcall(frame.SetAlpha, frame, alpha) end
-    if depth >= 4 or type(frame.GetChildren) ~= "function" then return end
-    local ok, kids = pcall(frame.GetChildren, frame)
-    if not ok or type(kids) ~= "table" then return end
-    for i = 1, #kids do AlphaTree(kids[i], alpha, depth + 1) end
+    if depth >= 4 then return end
+    local kids = ChildrenOf(frame)
+    if not kids then return end
+    for i = 1, #kids do AlphaWalk(kids[i], alpha, depth + 1) end
 end
 
-local function MuteTree(frame, enable, depth)
+local function AlphaTree(frame, alpha, depth)
+    if not frame or InCombat() then return end
+    AlphaWalk(frame, alpha, depth or 0)
+end
+
+local MuteWalk
+MuteWalk = function(frame, enable, depth)
     if not frame then return end
-    depth = depth or 0
     MuteOne(frame, enable)
-    if depth >= 4 or type(frame.GetChildren) ~= "function" then return end
-    local ok, kids = pcall(frame.GetChildren, frame)
-    if not ok or type(kids) ~= "table" then return end
-    for i = 1, #kids do MuteTree(kids[i], enable, depth + 1) end
+    if depth >= 4 then return end
+    local kids = ChildrenOf(frame)
+    if not kids then return end
+    for i = 1, #kids do MuteWalk(kids[i], enable, depth + 1) end
+end
+
+--- 同理：战斗里 `EnableMouse` 对受保护框一律被拒（MuteOne 自己也会早退），
+--- 整棵扫下来只剩几百次白 pcall，所以入口直接跳过。
+local function MuteTree(frame, enable, depth)
+    if not frame or InCombat() then return end
+    MuteWalk(frame, enable, depth or 0)
 end
 
 local function MuteChildren(frame, enable)
@@ -974,6 +1000,13 @@ local function SetBlizzardHidden(cfg, partyActive, raidActive)
     end
 end
 
+--- 子框鼠标 ticker 的**脏标记**（前置声明：ReparkBlizzardGroups 与事件回调都要用它）。
+--- 含义="可能长出了新子框 / 刚从战斗里出来 / 压制状态刚变过"，下一次 tick 才值得整树重扫。
+local muteDirty = true
+local function MarkMuteDirty()
+    muteDirty = true
+end
+
 --- LoD 补做：`Blizzard_CompactRaidFrames` 可能在登录之后才加载，而且加载时会把框换成新对象
 --- （"藏一次 + 盯 OnShow"永远漏），所以三个时机各补一次。
 --- Park/Starve 都是幂等的（弱键旁表守卫），重复调用只是两次查表。
@@ -988,14 +1021,21 @@ local function ReparkBlizzardGroups()
     SetBlizzardHidden(cfg,
         party ~= nil and partyCfg.enabled ~= false,
         raid ~= nil and raidCfg.enabled ~= false)
+    MarkMuteDirty()   -- 刚重扫过一遍整树；LoD/换区后再让 ticker 补一次 LoD 后建的子件
 end
 
 -- ============================================================================
 -- 子框鼠标循环静音（补 LoD 漏网）
 -- ============================================================================
---- 子框（StatusIcon、Pet 等）是 LoD 后建的，`MuteTree` 跑一次抓不全。
---- 用一个轻量 ticker 每 1 秒重扫 parked 框的整棵子树，pcall 关鼠标 —— 只有几十个
---- EnableMouse 调用，开销可忽略；幂等，对已关的框重复调用无副作用。
+--- 子框（StatusIcon、Pet 等）是 LoD 后建的，`MuteTree` 跑一次抓不全，所以要有一个
+--- 兜底循环。但**不能每秒无条件整树重扫**：递归修好之后，一次重扫 = 几十个框 ×
+--- `SetAlpha` / `EnableMouse` / `GetChildren` 的 pcall，每秒数百次；其中受保护框的
+--- 写操作还会一条条写进拦截日志（实机 ×984 就是这类"看起来无害的循环"刷出来的）。
+---
+--- 两档门控：
+---   * `muteDirty` —— 事件置脏（Repark / 换区 / LoD 加载 / 脱战 / 进出组），只在脏时扫；
+---   * 每 `MUTE_SLOW` 秒兜底扫一次，防"没人置脏但子件是后来才建的"这种漏网。
+local MUTE_SLOW = 5
 local muteTicker
 
 local function StopMuteTicker()
@@ -1008,12 +1048,32 @@ local MUTE_ROOTS = { "CompactPartyFrame", "PartyFrame",
 local function StartMuteTicker()
     StopMuteTicker()
     if type(C_Timer) ~= "table" or type(C_Timer.NewTicker) ~= "function" then return end
+    local slow = 0
     muteTicker = C_Timer.NewTicker(1, function()
+        slow = slow + 1
+        if not muteDirty and slow < MUTE_SLOW then return end
+        -- 战斗里 SetAlpha / EnableMouse 都会被拒（受保护框），扫了也是白扫 + 刷日志。
+        -- 脏标记留着，脱战后那一拍会立刻补做。
+        if InCombat() then return end
+        muteDirty = false
+        slow = 0
         for _, name in ipairs(MUTE_ROOTS) do
             local f = _G[name]
             if f and parked[f] then
                 AlphaTree(f, 0)
                 MuteTree(f, false)
+            end
+        end
+        -- 小队的独立成员框不一定是容器的子框，整树扫不到，单独补一遍
+        -- （战斗中跳过的那一次也在这里补齐）。
+        local partyRoot = _G.CompactPartyFrame or _G.PartyFrame
+        if partyRoot and parked[partyRoot] then
+            for _, name in ipairs(EXTRA_PARTY_MEMBERS) do
+                local m = _G[name]
+                if m then
+                    MuteOne(m, false)
+                    AlphaTree(m, 0)
+                end
             end
         end
     end)
@@ -1277,6 +1337,8 @@ function M:RegisterEvents()
     EventBus:Register("ADDON_LOADED", function(_, name)
         if name == "Blizzard_CompactRaidFrames" then ReparkBlizzardGroups() end
     end)
+    -- 脱战：战斗里被跳过的 alpha / 鼠标压制在这里补做（受保护框战斗中写不了）。
+    EventBus:Register("PLAYER_REGEN_ENABLED", function() MarkMuteDirty() end)
 
     -- 选中目标边框：切目标只改四条边的 alpha，战斗里也能立刻跟上
     EventBus:Register("PLAYER_TARGET_CHANGED", function() SyncSelection() end)
