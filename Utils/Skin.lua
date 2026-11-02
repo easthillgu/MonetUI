@@ -414,6 +414,17 @@ function Skin:Strip(frame, opts)
         end
     end
 
+    -- 12.x 的 9-slice 边框（InsetFrameTemplate 等模板的 UI-Frame-Inner 系）是挂在
+    -- frame.NineSlice 上的**独立 Frame 对象**，既不在 GetRegions 也不在 GetChildren
+    -- 的常规枚举里（2026-11-02 MerchantMoneyInset 判例：树遍历三遍都看不见的金框）。
+    -- 它整体压 α0 即整圈边框消失；走 Fade 通道记录原始值，回滚可用。
+    if opts.nineSlice ~= false then
+        local ns9 = frame.NineSlice
+        if ns9 and type(ns9.SetAlpha) == "function" then
+            self:Fade(ns9)
+        end
+    end
+
     if opts.art then
         self:FadeButtonArt(frame)
     end
