@@ -183,6 +183,16 @@ function M:SkinWindow(frame, opts)
         Skin:InsetWell(frame, type(opts.inset) == "table" and opts.inset or nil)
     end
 
+    -- 多内容窗口的次级内容区（列表 / 详情 / 侧栏 / 底栏）：同一套凹槽语言
+    -- （Skin:Well）。键是**名字后缀**：`wells = { MountDisplay = true, MoneyBg = { borderAlpha = 0 } }`
+    -- 解析 frame[suffix] 或同名全局 <窗口名>..suffix；懒建区（第一次显示才生成）由 Well 内部的
+    -- ShowWatch 延迟补。区不存在整体 no-op，任何窗口都能安全地写。
+    if opts.wells then
+        for suffix, wopts in pairs(opts.wells) do
+            Skin:Well(frame, suffix, type(wopts) == "table" and wopts or nil)
+        end
+    end
+
     -- 标题字串和关闭按钮的位置各家不同：新框架挂在 TitleContainer 里，老框架直接挂在框上，
     -- 还有一批（WorldMapFrame 这类）两者都在 BorderFrame 那一层。
     local border = frame.BorderFrame
@@ -332,7 +342,9 @@ end
 --               templates=false 关掉模板层补扫（金币/输入框/ColoredProgressBar，默认开）,
 --               control={传给单个控件的参数}, as="tab|button|scroll|slider|dropdown|editbox|fade",
 --               tabs / buttons / scrolls = { 点名的控件 } }
---               （window 档还吃 titleSize / noTitle / noClose / inset=true|{opts} 补正文凹槽那一档底色；noPanel 只剥原美术、不挂底衬）
+--               （window 档还吃 titleSize / noTitle / noClose / inset=true|{opts} 补正文凹槽那一档底色；
+--               wells={ 后缀=true|{opts} } 给次级内容区吃同一套凹槽语言（多内容窗口）；
+--               noPanel 只剥原美术、不挂底衬）
 function M:Dress(spec, opts)
     opts = opts or {}
     local list = Skin:AsList(spec)

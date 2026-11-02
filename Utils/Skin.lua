@@ -565,23 +565,70 @@ end
 --- 回滚不用另记 —— Fade 自己的 Record 存的是 Fade **之前**的原始 alpha。
 --- （QuestFrame 的 inset 懒建、躲过了根窗 Strip，所以那一处此前看着是好的 —— 同一套修复对它无操作。）
 -- @param opts { bgSurface = "lost", bgAlpha = 0.965, borderKey =, thickness = }
+--- Resolve a named content region of a window: the `frame[suffix]` field first, then the
+--- global `<frameName>..suffix`（暴雪两种命名混用：`CollectionsJournal.MountDisplay` 是字段，
+--- `MerchantFrame` + `"MerchantMoneyBg"` 是同名全局）。
+--- 读不到返回 nil —— 调用方必须容忍 no-op（懒建窗口的区在第一次显示前不存在）。
+function Skin:FindRegion(frame, suffix)
+    if not frame or type(suffix) ~= "string" or suffix == "" then return nil end
+    local ok, region = pcall(function() return frame[suffix] end)
+    if ok and region and Widget:Readable(region) then return region end
+    if type(frame.GetName) == "function" then
+        local okN, name = pcall(frame.GetName, frame)
+        if okN and name then
+            local g = rawget(_G, name .. suffix)
+            if g and Widget:Readable(g) then return g end
+        end
+    end
+    return nil
+end
+
+--- 正文凹槽那一档（insetFrame.bg）—— 泛化版见 Skin:Well；这里是主凹槽的便捷入口。
 function Skin:InsetWell(frame, opts)
     local inset = self:FindInset(frame)
     if not inset then return nil end
+    return self:Well(frame, inset, opts)
+end
+
+--- 给窗口的**任意内容区**补「凹槽」那一档底色 —— Skin:InsetWell 的泛化，多内容窗口
+--- （列表 + 详情 + 侧栏）每块内容区都吃同一套语言：先剥暴雪原生美术（region + 名单内
+--- 字段 + NineSlice），容器 alpha 亮回 1，再挂我们自己的背板 —— lost 档（比窗壳亮一档）
+--- + 1px 主题边，背板挂窗口本体（2026-11-02 渲染判例：不挂中间容器名下）。
+--- region 可以传**对象**或**名字后缀**（走 Skin:FindRegion 解析）；后缀解析不到且
+--- opts.lazy ~= false 时挂 Widget:ShowWatch，等窗口第一次显示再试（懒建模板窗口）。
+--- Panel 幂等（Marked "skinBg" 去重），所以 ShowWatch 里反复重试安全。
+--- @return 背板对象，或 nil（区不存在且尚未懒建）。
+function Skin:Well(frame, region, opts)
+    if not frame then return nil end
     opts = opts or {}
-    self:Strip(inset)
-    local okA, a = pcall(inset.GetAlpha, inset)
-    if okA and a and a <= 0.001 then
-        pcall(inset.SetAlpha, inset, 1)
+    if type(region) == "string" then
+        local suffix = region
+        region = self:FindRegion(frame, suffix)
+        if not region then
+            if opts.lazy ~= false and Widget and Widget.ShowWatch then
+                Widget:ShowWatch(frame, function()
+                    local found = self:FindRegion(frame, suffix)
+                    if found then self:Well(frame, found, opts) end
+                end)
+            end
+            return nil
+        end
     end
-    -- 背板挂到窗口本体（host = frame）而不是 inset 名下：本客户端（70688）对"中间层容器里
+    if not region or not self:IsScriptObject(region) then return nil end
+    self:Strip(region)
+    local okA, a = pcall(region.GetAlpha, region)
+    if okA and a and a <= 0.001 then
+        pcall(region.SetAlpha, region, 1)
+    end
+    -- 背板挂到窗口本体（host = frame）而不是 region 名下：本客户端（70688）对"中间层容器里
     -- level 0 的子框"不渲染，挂窗口直下与根窗大板同父同级、创建在后，层次稳（见 Panel 注释）。
-    return self:Panel(inset, {
-        host      = frame,
-        bgSurface = opts.bgSurface or "lost",
-        bgAlpha   = opts.bgAlpha or 0.965,
-        borderKey = opts.borderKey,
-        thickness = opts.thickness or 1,
+    return self:Panel(region, {
+        host        = frame,
+        bgSurface   = opts.bgSurface or "lost",
+        bgAlpha     = opts.bgAlpha or 0.965,
+        borderKey   = opts.borderKey,
+        borderAlpha = opts.borderAlpha,
+        thickness   = opts.thickness or 1,
     })
 end
 
