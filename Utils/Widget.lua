@@ -1286,14 +1286,16 @@ function Widget:Refresh(frame, opts)
             -- A live state (threat glow ...) outranks the themed colour and lives in this opts table, so a theme-refresh broadcast re-applies *it* instead of stomping it.
             frame:SetBackdropBorderColor(state.r, state.g, state.b, state.a or 1)
         else
-            local r, g, b, a
+            -- alpha 只从**常态那一份**取（opts.borderAlpha → edge 的 a），highlight 只贡献 RGB。
+            -- 理由：`Color:GetHighlight()` 自带 a = 0.5（那是调色板里"高亮文字"的强度），
+            -- 拿它当边框 alpha 会让页签这类只走 HoverHighlight、后面没有 ControlState 二次覆写的
+            -- 控件，悬停边框比改动前（`opts.alpha or 1`）更暗；`Skin:ControlState` 的悬停分支
+            -- 早就是"取 highlight 的色、alpha 自己给"，这里跟它对齐。
+            local r, g, b = BorderColor(opts)
+            local _, _, _, a = Color:GetEdge()
             if hovered then
-                -- §7-a：悬停那一拍边框换成 highlight（和常态边框同一个色族，只亮不跳）。
-                r, g, b, a = Color:GetHighlight()
-            else
-                r, g, b = BorderColor(opts)
-                local _, _, _, ea = Color:GetEdge()
-                a = ea
+                -- §7-a：悬停那一拍边框换成 highlight（只亮不跳），alpha 保持这一块板自己的。
+                r, g, b = Color:GetHighlight()
             end
             frame:SetBackdropBorderColor(r, g, b, opts.borderAlpha or a or 1)
         end
