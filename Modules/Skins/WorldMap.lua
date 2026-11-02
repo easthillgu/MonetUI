@@ -65,7 +65,7 @@ end)
 -- 飞行点地图：本客户端没有 TaxiFrame（vanilla/mainline 专属门控），用的是 Blizzard_FlightMap
 -- （无 game-type 门控）。航线图本身是内容，只收拾窗口壳。
 local function SkinFlightMap()
-    M:Dress("FlightMapFrame", { window = true, panel = { bgAlpha = 0.96 } })
+    M:Dress("FlightMapFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 } })
 end
 
 M:Panel("flightmap", {

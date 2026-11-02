@@ -212,6 +212,13 @@ M:Panel("petition", {
 local function SkinTabard()
     M:Dress("TabardFrame", {
         window = true,
+        inset = true,
+        -- 和商人窗同族：MoneyInset + MoneyBg 一对货币承托（实机 2026-11-02 枚举确认存在），
+        -- 控件底语义：纯 lost 底 / 纯剥离，不上签名色边框。
+        wells = {
+            MoneyInset = { borderAlpha = 0 },
+            MoneyBg = { panel = false },
+        },
         panel = { bgAlpha = 0.96 },
         buttons = { "TabardFrameAcceptButton", "TabardFrameCancelButton" },
     })

@@ -566,8 +566,9 @@ end
 --- （QuestFrame 的 inset 懒建、躲过了根窗 Strip，所以那一处此前看着是好的 —— 同一套修复对它无操作。）
 -- @param opts { bgSurface = "lost", bgAlpha = 0.965, borderKey =, thickness = }
 --- Resolve a named content region of a window: the `frame[suffix]` field first, then the
---- global `<frameName>..suffix`（暴雪两种命名混用：`CollectionsJournal.MountDisplay` 是字段，
---- `MerchantFrame` + `"MerchantMoneyBg"` 是同名全局）。
+--- global `<frameName>..suffix`, then the **exact global name**（暴雪三种命名混用：
+--- `CollectionsJournal.MountDisplay` 是字段；`TabardFrameMoneyBg` 带窗口前缀；
+--- `TradeRecipientItemsInset` / `MerchantMoneyBg` 是不带前缀的独立全局名）。
 --- 读不到返回 nil —— 调用方必须容忍 no-op（懒建窗口的区在第一次显示前不存在）。
 function Skin:FindRegion(frame, suffix)
     if not frame or type(suffix) ~= "string" or suffix == "" then return nil end
@@ -580,6 +581,8 @@ function Skin:FindRegion(frame, suffix)
             if g and Widget:Readable(g) then return g end
         end
     end
+    local exact = rawget(_G, suffix)
+    if exact and Widget:Readable(exact) then return exact end
     return nil
 end
 
@@ -622,6 +625,8 @@ function Skin:Well(frame, region, opts)
     end
     -- 背板挂到窗口本体（host = frame）而不是 region 名下：本客户端（70688）对"中间层容器里
     -- level 0 的子框"不渲染，挂窗口直下与根窗大板同父同级、创建在后，层次稳（见 Panel 注释）。
+    -- opts.panel == false：纯剥离（比如 Bg 类原生承托美术 —— 它身后已有另一层的背板）。
+    if opts.panel == false then return region end
     return self:Panel(region, {
         host        = frame,
         bgSurface   = opts.bgSurface or "lost",

@@ -21,6 +21,17 @@ local TRADE_MONEY_FRAMES = { "TradePlayerInputMoneyFrame", "TradeRecipientMoneyF
 local function SkinTrade()
     M:Dress("TradeFrame", {
         window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true, buttons = TRADE_BUTTONS,
+        -- 交易窗是多内容窗口（实机 2026-11-02 枚举）：对方/我方物品区、附魔区、金额输入区
+        -- 各是独立的 Inset 框；金钱两件是控件底语义（不上签名色边）。
+        wells = {
+            TradeRecipientItemsInset = true,
+            TradePlayerItemsInset = true,
+            TradeRecipientEnchantInset = true,
+            TradePlayerEnchantInset = true,
+            TradePlayerInputMoneyInset = true,
+            TradeRecipientMoneyInset = { borderAlpha = 0 },
+            TradeRecipientMoneyBg = { panel = false },
+        },
     })
     -- 金额输入框：以前把 `panel` 塞进 Skin:Panel 的参数里（它读的是 opts.bgAlpha），
     -- 底衬一直是默认的 0.85 而不是 0.96；走 Dress 之后参数只有一层，不会再套错。
@@ -142,7 +153,12 @@ local function SkinProfessions()
 end
 
 local function SkinBank()
-    M:Dress({ "BankFrame", "WarbandBankFrame" }, { window = true, inset = true, panel = { bgAlpha = 0.96 } })
+    M:Dress({ "BankFrame", "WarbandBankFrame" }, {
+        window = true, inset = true, panel = { bgAlpha = 0.96 },
+        -- 现代框架的包裹格挂在 BankPanel（PanelTemplate）名下 —— 同一套凹槽语言收它
+        -- （Strip 含 NineSlice）。实机核对后再定去留。
+        wells = { BankPanel = true },
+    })
 end
 
 M:Panel("trade", { label = "交易", group = "交易", apply = SkinTrade,

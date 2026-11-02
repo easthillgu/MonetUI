@@ -87,7 +87,7 @@ local ENCOUNTER_PANELS = {
 }
 
 local function SkinEncounterJournal()
-    M:Dress("EncounterJournal", { window = true, panel = { bgAlpha = 0.96 }, rule = true, tabs = ENCOUNTER_TABS })
+    M:Dress("EncounterJournal", { window = true, inset = true, panel = { bgAlpha = 0.96 }, rule = true, tabs = ENCOUNTER_TABS })
     M:Dress(ENCOUNTER_PANELS, { noPanel = true, deep = true })
 end
 
@@ -152,6 +152,7 @@ local function SkinDressUp()
     -- Link / 外观切换挂在帧的成员上（不是全局名），点路径同样能查，缺了只是账本上一行 ✗。
     M:Dress("DressUpFrame", {
         window = true,
+        inset = true, -- DressUpFrameInset（实机 2026-11-02 枚举确认）
         panel = { bgAlpha = 0.96 },
         rule = true,
         buttons = {

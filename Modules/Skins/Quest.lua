@@ -214,7 +214,7 @@ local function SkinQuestFrame()
     -- Show 后再跑一次（暴雪 quest 数据是 Show 后才塞的，面板也可能是那时候才建出来）
     HookQuestBrighten(Skin:Need("QuestFrame"))
 
-    M:Dress("GossipFrame", { window = true, panel = { bgAlpha = READ_ALPHA } })
+    M:Dress("GossipFrame", { window = true, inset = true, panel = { bgAlpha = READ_ALPHA } })
     M:Dress(QUESTFRAME_SCROLLS, { as = "scroll" })
     M:Dress("GossipFrameGreetingGoodbyeButton", { as = "button" })
 

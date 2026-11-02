@@ -638,7 +638,7 @@ local function SkinMacroPopup()
     local popup = Skin:Need("MacroPopupFrame")
     if not popup or Marked(popup, "macroPopupSkinned") then return end
     Mark(popup, "macroPopupSkinned", true)
-    M:Dress(popup, { window = true, panel = { bgAlpha = 0.97 }, deep = true })
+    M:Dress(popup, { window = true, inset = true, panel = { bgAlpha = 0.97 }, deep = true })
 end
 
 local function SkinMacros()

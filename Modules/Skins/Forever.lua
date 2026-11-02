@@ -34,7 +34,7 @@ local LFG_BUTTONS = {
 local LFG_SIDE_TABS = { "ListingTab", "BrowsingTab", "WhoListingTab" }
 
 local function SkinLFG()
-    M:Dress("LFGParentFrame", { window = true, panel = { bgAlpha = 0.96 } })
+    M:Dress("LFGParentFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 } })
 
     -- The animated eye in the portrait slot is a button of its own: alpha it away AND take the mouse, so the idle 64px region cannot swallow clicks.
     local eye = Skin:Need("LFGParentFramePortrait")
@@ -71,7 +71,7 @@ local LEGACY_SIDE_TABS = { "LegacyRewardTrackTab", "LegacyChallengeTab", "Legacy
 local LEGACY_PAGES     = { "RewardTrackPage", "ChallengesPage" }
 
 local function SkinLegacySystem()
-    M:Dress("LegacySystemFrame", { window = true, panel = { bgAlpha = 0.96 } })
+    M:Dress("LegacySystemFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 } })
     SideTabs("LegacySystemFrame", LEGACY_SIDE_TABS)
 
     M:Controls(LEGACY_PAGES, function(page)
