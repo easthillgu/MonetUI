@@ -53,7 +53,12 @@ local UnitOnTaxi              = _G.UnitOnTaxi
 local RANGE_INDICATOR         = _G.RANGE_INDICATOR
 
 --- True while the client refuses protected work.
+--- **Prefer Core's `ns:InCombat()`**: this client dispatches PLAYER_REGEN_* *before* it flips
+--- `InCombatLockdown()`, and the `ns:AfterCombat` flush runs inside that dispatch -- so the raw
+--- flag still says "in combat" there and every deferred action would queue itself again
+--- (nothing lands until the *second* combat ends).
 local function Locked()
+    if type(ns.InCombat) == "function" then return ns:InCombat() end
     return (InCombatLockdown and InCombatLockdown()) and true or false
 end
 

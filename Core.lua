@@ -497,11 +497,16 @@ end
 --     （Minimap 的套用队列就是这种：Skin 在执行中失败会自己再排一次）。
 --     队里的 fn 返回 false 表示"这次还做不了"（条件未满足，如秘值仍存活）：
 --     留队等下一次排空重试，不计失败、不提示。
+--
+-- **排空的 fn 里判战斗一律用 `ns:InCombat()`，不要用原始的 `InCombatLockdown()`**：
+-- 本客户端先派发 PLAYER_REGEN_ENABLED、之后才翻那个标志（见下面 combatState 的注释），
+-- 所以排空执行当拍 `InCombatLockdown()` 仍然返回 **true** —— 拿它当门会把"脱战补做"
+-- 判成"还在战斗"，动作再排回队列，玩家得**脱两次战**才看到生效（Nameplates 的牌子尺寸、
+-- Auras 的战斗光环容器、BuffFrame 的战斗容器、Mover 挪受保护框都是这个症状）。
 
 local afterCombatPending = {}   -- key -> fn
 local afterCombatOrder   = {}   -- 排队顺序（pairs 无序，这里保插入序）
 local afterCombatWarned  = {}   -- key -> true（该 key 的失败提示打过了）
-local afterCombatHooked  = false
 
 -- ---- 战斗状态的唯一来源：PLAYER_REGEN_* 事件 ----------------------------------
 -- **不要**在 PLAYER_REGEN_* 的回调里直接读 InCombatLockdown()：本客户端先把事件派给插件、
@@ -551,13 +556,14 @@ local function FlushAfterCombat()
     end
 end
 
+-- **在 Core 加载期就注册，不要等第一次排队**：EventBus 按注册序派发，早点注册才能保证
+-- 排空一定早于模块自己挂的 PLAYER_REGEN_ENABLED 处理（UnitFrames / BuffFrame 的注释
+-- "由 ns:AfterCombat 在更早的统一排空里做掉"依赖的就是这一条；旧写法是惰性注册，谁先
+-- 排一次队就决定了顺序，等于随机）。
+ns.EventBus:Register("PLAYER_REGEN_ENABLED", FlushAfterCombat)
+
 function ns:AfterCombat(key, fn, mode)
     if type(key) ~= "string" or type(fn) ~= "function" then return end
-
-    if not afterCombatHooked then
-        afterCombatHooked = true
-        ns.EventBus:Register("PLAYER_REGEN_ENABLED", FlushAfterCombat)
-    end
 
     -- 当场能做的条件从"不在战斗中"放宽成"不在任何一类受限窗口里"（见下面 6 类限制）：
     -- Map / Chat 这类限制生效时写入同样会被拒，排到队列里等状态清掉。

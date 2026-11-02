@@ -12,6 +12,14 @@ local EventBus = ns.EventBus
 
 local M = { name = "BuffFrame" }
 
+--- 战斗中为真。**优先问 Core 的 `ns:InCombat()`**：本客户端先派发 PLAYER_REGEN_*、之后才翻
+--- `InCombatLockdown()`，而 `ns:AfterCombat` 的排空就跑在那次派发里 —— 拿原始标志当门，
+--- 战斗光环容器会把自己再排回队列，第一次脱战建不出来（战斗里没图标，得再打一场）。
+local function InCombat()
+    if type(ns.InCombat) == "function" then return ns:InCombat() end
+    return type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown()
+end
+
 local ICON_GAP    = 4
 local MAX_AURAS   = 32
 
@@ -416,7 +424,7 @@ end
 
 local function EnsureCombatAuras()
     if combatBuffs and combatDebuffs then return true end
-    if type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown() then
+    if InCombat() then
         -- 战斗里建出来的容器永远是空的：排队到脱战补做（ns:AfterCombat）。
         ns:AfterCombat("buffframe-auras", EnsureCombatAuras)
         return false

@@ -28,6 +28,14 @@ local Secrets  = ns.Secrets
 
 local M = { name = "Minimap" }
 
+--- 战斗中为真。**优先问 Core 的 `ns:InCombat()`**：本客户端先派发 PLAYER_REGEN_*、之后才翻
+--- `InCombatLockdown()`，而 `ns:AfterCombat` 的排空（`RunQueue`）就跑在那次派发里 ——
+--- 拿原始标志当门，队列会把自己再排回一轮，小地图位置要**脱两次战**才归位。
+local function InCombat()
+    if type(ns.InCombat) == "function" then return ns:InCombat() end
+    return type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown()
+end
+
 -- ------------------------------------------------------------------ 几何
 
 -- 可见的地图：256×190。画布保持正方 256×256，用遮罩裁掉上下两条带 —— 地图画面**不重绘**，
@@ -198,7 +206,7 @@ local function HookShow(obj, entry)
     Widget:ShowWatch(obj, function(self)
         if not active then return end
         if not Settings()[entry.key] then return end
-        if InCombatLockdown() then
+        if InCombat() then
             Queue("skin")
             return
         end
@@ -218,7 +226,7 @@ local function HideObject(obj, entry)
     if entry.art then
         pcall(obj.SetAlpha, obj, 0)
     else
-        if InCombatLockdown() and obj.IsProtected and obj:IsProtected() then
+        if InCombat() and obj.IsProtected and obj:IsProtected() then
             Queue("skin")
         else
             pcall(obj.Hide, obj)
@@ -286,7 +294,7 @@ end
 local function AlignMap()
     -- 地图和它的父框体不是受保护框，但战斗中 SetPoint 仍可能被拒（本函数会从
     -- C_Timer.After 的回调里跑，见 PlaceMinimap），所以守卫放在最前面。
-    if InCombatLockdown() then
+    if InCombat() then
         Queue("skin")
         return false
     end
@@ -318,7 +326,7 @@ local function AlignMap()
 end
 
 local function PlaceMinimap()
-    if InCombatLockdown() then
+    if InCombat() then
         Queue("skin")
         return
     end
@@ -356,7 +364,7 @@ local function PlaceMinimap()
     AlignMap()
     if C_Timer and C_Timer.After then
         C_Timer.After(0, function()
-            if InCombatLockdown() then Queue("skin") return end
+            if InCombat() then Queue("skin") return end
             for _ = 1, 3 do
                 if not AlignMap() then break end
             end
@@ -653,7 +661,7 @@ local function HookMinimapConfig()
         -- 只改 alpha，不跑整套 Skin()，免编辑模式里每半秒重贴一次。
         if active and not restoring then
             local okAlpha, alpha = pcall(self.GetAlpha, self)
-            if okAlpha and type(alpha) == "number" and alpha > 0 and not InCombatLockdown() then
+            if okAlpha and type(alpha) == "number" and alpha > 0 and not InCombat() then
                 pcall(self.SetAlpha, self, 0)
             end
         end
@@ -664,7 +672,7 @@ local function HookMinimapConfig()
             local function reskin()
                 reskinQueued = false
                 if restoring or not active then return end
-                if InCombatLockdown() then Queue("skin") else Skin() end
+                if InCombat() then Queue("skin") else Skin() end
             end
             if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
                 C_Timer.After(0, reskin)

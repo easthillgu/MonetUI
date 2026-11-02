@@ -206,6 +206,14 @@ local function Stored(entry)
     return nil
 end
 
+--- 战斗中为真。优先问 Core 的 `ns:InCombat()`：本客户端先派发 PLAYER_REGEN_*、之后才翻
+--- `InCombatLockdown()`，而 `ns:AfterCombat` 的排空就跑在那次派发里 —— 拿原始标志当门，
+--- 排队中的挪框会把自己再排回队列（第一次脱战不生效）。
+local function InCombat()
+    if type(ns.InCombat) == "function" then return ns:InCombat() end
+    return type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown()
+end
+
 local function ApplyOne(entry)
     local frame = entry.frame
     if not frame then return end
@@ -213,7 +221,7 @@ local function ApplyOne(entry)
     -- 挪受保护框（安全单位框 / 动作条）只能在脱战做：战斗中 SetPoint 会被拒，
     -- 而且这记失败会算在 MonetUI 名下（AGENTS「secure 元素战斗中禁改」）。
     local isProtected = frame.IsProtected and frame:IsProtected()
-    if isProtected and type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown() then
+    if isProtected and InCombat() then
         if ns.AfterCombat then
             ns:AfterCombat("mover:" .. tostring(entry.key), function() ApplyOne(entry) end)
         end
@@ -342,8 +350,7 @@ local function InstallDrag(entry)
 
     frame:SetScript("OnDragStart", function(self)
         if Mover:IsLocked(entry.group) then return end
-        if self.IsProtected and self:IsProtected()
-           and type(InCombatLockdown) == "function" and InCombatLockdown() then
+        if self.IsProtected and self:IsProtected() and InCombat() then
             return
         end
         self:StartMoving()

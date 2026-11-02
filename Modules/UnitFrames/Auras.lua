@@ -12,6 +12,14 @@ local Secrets = ns.Secrets
 local Widget  = ns.Widget
 local Media   = ns.Media
 
+--- 战斗中为真。**优先问 Core 的 `ns:InCombat()`**：本客户端先派发 PLAYER_REGEN_*、之后才翻
+--- `InCombatLockdown()`，而 `ns:AfterCombat` 的排空就跑在那次派发里。拿原始标志当门，容器
+--- 重建会把自己再排回队列 —— 症状就是"第一次脱战目标光环还是没出来，要再脱一次战"。
+local function InCombat()
+    if type(ns.InCombat) == "function" then return ns:InCombat() end
+    return type(InCombatLockdown) == "function" and InCombatLockdown()
+end
+
 local M = ns:GetModule("UnitFrames")
 if not M then return end
 
@@ -747,7 +755,7 @@ local function EnsureTargetAuras(frame)
     if not targetAuraDebuffs then
         -- 战斗中建容器会被拦：拿到的一组容器**永远是空的**（实测 0 个按钮显示、换目标也不刷新），
         -- 而且之后没人再重建。所以战斗里干脆不建，排队到脱战补做（ns:AfterCombat）。
-        if type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown() then
+        if InCombat() then
             ns:AfterCombat("unitframes-auras", RebuildTargetAuras)
             return
         end
@@ -793,7 +801,7 @@ end
 --- 所以边框颜色只能在创建窗口里定稿，换主题的唯一出路是把容器连同按钮一起扔掉重建。
 --- 战斗中建容器会被拦（会得到一组永远空的容器）：把自己排进 ns:AfterCombat，脱战重试。
 function RebuildTargetAuras()
-    if type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown() then
+    if InCombat() then
         ns:AfterCombat("unitframes-auras", RebuildTargetAuras)
         return
     end

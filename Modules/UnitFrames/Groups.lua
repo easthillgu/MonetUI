@@ -39,7 +39,11 @@ local function Config()
     return db and db.groupFrames
 end
 
+--- 战斗中为真。**优先问 Core 的 `ns:InCombat()`**：本客户端先派发 PLAYER_REGEN_*、之后才翻
+--- `InCombatLockdown()`，而 `ns:AfterCombat` 的排空就跑在那次派发里 —— 用原始标志会把
+--- "脱战补做"判成"还在战斗"，动作再排回队列，玩家得脱两次战才看到生效。
 local function InCombat()
+    if type(ns.InCombat) == "function" then return ns:InCombat() end
     return type(InCombatLockdown) == "function" and InCombatLockdown()
 end
 

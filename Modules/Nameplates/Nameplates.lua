@@ -12,6 +12,14 @@ local EventBus = ns.EventBus
 
 local M = { name = "Nameplates" }
 
+--- 战斗中为真。**优先问 Core 的 `ns:InCombat()`**：本客户端先派发 PLAYER_REGEN_*、之后才翻
+--- `InCombatLockdown()`，而 `ns:AfterCombat` 的排空就跑在那次派发里 —— 拿原始标志当门，
+--- 牌子尺寸会把自己再排回队列（"改完尺寸第一次脱战不生效，要再打一场")。
+local function InCombat()
+    if type(ns.InCombat) == "function" then return ns:InCombat() end
+    return type(InCombatLockdown) == "function" and InCombatLockdown()
+end
+
 local plates = {}   -- unit token ("nameplate3") -> our plate frame
 local driverHooked = false
 
@@ -127,7 +135,7 @@ end
 --- Resize Blizzard's plate hitbox to the box this module draws.
 function M:ApplyPlateSize()
     if Setting("forcePlateSize") == false then return end
-    if InCombatLockdown and InCombatLockdown() then
+    if InCombat() then
         -- Protected territory: ns:AfterCombat 排队，脱战补做（失败也留在队列直到成功）。
         ns:AfterCombat("nameplates-plate-size", function() M:ApplyPlateSize() end)
         return
@@ -180,7 +188,7 @@ function M:HookDriver()
     local lastTry = 0
     Widget:PollWatch(_G.UIParent, function()
         if Setting("forcePlateSize") == false then return end
-        if InCombatLockdown and InCombatLockdown() then return end
+        if InCombat() then return end
         if not C_NamePlate or type(C_NamePlate.GetNamePlateSize) ~= "function" then return end
         local ok, w, h = pcall(C_NamePlate.GetNamePlateSize)
         if not ok or type(w) ~= "number" or type(h) ~= "number" then return end
@@ -440,7 +448,7 @@ local function HideBlizzardPlate(base, plate)
     -- Show 是受保护项（下文 456 行注释）：战斗中被拒会弹玩家可见的 ADDON_ACTION_BLOCKED
     -- （2026-11-02 实机：进本姓名板 churn 一次 9 条，BLOCKED 日志全来自这两处）。
     -- 战斗里跳过 —— 被拒的 Show 本来就是 no-op，游戏在下一个 SetUnit / 更新周期自补。
-    if uf.IsShown and not (InCombatLockdown and InCombatLockdown())
+    if uf.IsShown and not InCombat()
         and not Secrets.Bool(uf:IsShown(), false) then pcall(uf.Show, uf) end
     FadeBlizzardSiblings(base, plate)
 
@@ -467,7 +475,7 @@ local function RestoreBlizzardPlate(base, plate)
         if uf.SetAlpha then pcall(uf.SetAlpha, uf, 1) end
         -- 同 HideBlizzardPlate：战斗里 Show 必被拒（弹 ADDON_ACTION_BLOCKED），
         -- 跳过，等游戏自己的 SetUnit / 更新周期补齐。
-        if not (InCombatLockdown and InCombatLockdown()) then pcall(uf.Show, uf) end
+        if not InCombat() then pcall(uf.Show, uf) end
     end
     RestoreBlizzardSiblings(base)
     if plate then

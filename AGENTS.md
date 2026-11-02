@@ -73,6 +73,18 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   反过来，**`PLAYER_REGEN_ENABLED` 派发当拍这两个标志仍可能是旧值 `true`** —— 在脱战回调里
   再判断一次"是否战斗"会二次延后到下一次脱战（等于永远不做）。做法：脱战回调里换成新 tick
   （`C_Timer.After(0, ...)`）再判断（模块里 `Bags` 的停车就是这么修的）。
+- **判断"能不能碰受保护的东西"只有一个正确来源：`ns:InCombat()`**（Core 用 PLAYER_REGEN_*
+  事件记状态，派发当拍就是新值；`ns:IsRestricted()` 在此之上再叠六类受限窗口）。
+  三种场合分别这样写（2026-11-02 复查 `ns:AfterCombat` 链路时定稿）：
+  ① **普通路径**（轮询回调、点击、OnShow）—— `InCombatLockdown()` 够用，它对"此刻能不能写"
+  最准；② **登录 / 重载当拍**—— 原始标志会给假 `false`，此时 `ns:InCombat()` 的初值也来自它，
+  所以要额外 `UnitAffectingCombat("player")`（`Bags` 的做法）；③ **`ns:AfterCombat` 排的 fn
+  里** —— **必须用 `ns:InCombat()`**，因为排空就跑在 `PLAYER_REGEN_ENABLED` 派发里，原始标志
+  还是 `true`。用错的症状很好认：动作把自己又排回队列，玩家要**脱两次战**才看到生效
+  （历史实例：姓名板尺寸、目标光环容器、战斗光环容器、小地图位置、挪受保护框）。
+  Core 侧配套：`FlushAfterCombat` 在**加载期**就注册（不是第一次排队时才注册），EventBus 按
+  注册序派发，因此排空一定早于模块自己挂的 `PLAYER_REGEN_ENABLED` 处理 —— 这条顺序是
+  `UnitFrames` / `BuffFrame` 注释里"由 `ns:AfterCombat` 在更早的统一排空里做掉"的前提。
 - **12.x 的 UIMenu 是 `assertsafe` 包起来的**：`menu:CreateTexture()` / `CreateFontString()` /
   `SetFont` **返回 nil**，同时把 `Use of function 'X' is disallowed` **打到玩家屏幕上**。
   菜单能做的只有两件：改**已有 region 的颜色**，和挂一个**我们自己的子框体**

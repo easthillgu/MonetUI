@@ -7,6 +7,13 @@ local ADDON_NAME, ns = ...
 local M    = ns.Skins
 local Skin = ns.Skin
 
+--- 战斗中为真。**优先问 Core 的 `ns:InCombat()`**：本客户端先派发 PLAYER_REGEN_*、之后才翻
+--- `InCombatLockdown()`，而 `ns:AfterCombat` 的排空就跑在那次派发里（微按钮换皮就是排队的）。
+local function InCombat()
+    if type(ns.InCombat) == "function" then return ns:InCombat() end
+    return type(InCombatLockdown) == "function" and InCombatLockdown()
+end
+
 -- The two Forever windows carry gold "side tabs" (LFG 的列表/浏览/谁在找, 传承进度的三个页签): the ornate gold frame and glow go, the icon stays.
 local function SideTab(tab)
     if not tab then return end
@@ -131,7 +138,7 @@ local microHooked = false
 local function SkinMicroMenu()
     -- Micro buttons are secure: never touch them in combat; ns:AfterCombat defers the
     -- repaint to combat end instead of failing silently.
-    if InCombatLockdown() then
+    if InCombat() then
         ns:AfterCombat("skins-micromenu", function()
             if M.active then Skin.With("micromenu", SkinMicroMenuCore) end
         end)
@@ -146,7 +153,7 @@ local function SkinMicroMenu()
         -- 改成每 1 秒轮询一次（Debounce 内部本来就合并）。
         microHooked = true
         local repaint = M:Debounce(function()
-            if InCombatLockdown() then return end
+            if InCombat() then return end
             -- 轮询回调不在任何面板的作用域里，自己套一层，账本才不会把这 19 个名字记到 "_" 名下。
             Skin.With("micromenu", function()
                 for i = 1, #MICRO_BUTTONS do
