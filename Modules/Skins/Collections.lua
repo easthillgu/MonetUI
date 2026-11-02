@@ -30,7 +30,16 @@ local COLLECTIONS_FILTERS = {
 }
 
 local function SkinCollections()
-    M:Dress("CollectionsJournal", { window = true, inset = true, panel = { bgAlpha = 0.96 }, rule = true, tabs = COLLECTIONS_TABS })
+    M:Dress("CollectionsJournal", {
+        window = true, inset = true, panel = { bgAlpha = 0.96 }, rule = true, tabs = COLLECTIONS_TABS,
+        -- 宠物页的三块内容区（实机 2026-11-02 枚举确认）：左列表 / 右宠物卡 / 卡内详情，
+        -- 独立全局名。挂在窗口级 wells 上走 Skin:Well（exact 全局名解析）。
+        wells = {
+            PetJournalLeftInset = true,
+            PetJournalRightInset = true,
+            PetJournalPetCardInset = true,
+        },
+    })
     -- 子面板：剥原美术 + 挂底衬 + 深扫（收藏格子是带图标的按钮，LooksLikeItemButton 会跳过）。
     -- 面板里的行是切页时才建的，deep 的可见期补扫负责之后每次翻页。
     M:Dress(COLLECTIONS_PANELS, { panel = { bgAlpha = 0.96 }, deep = true })
@@ -70,7 +79,12 @@ local ACHIEVEMENT_SCROLLS = {
 }
 
 local function SkinAchievements()
-    M:Dress("AchievementFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 }, tabs = ACHIEVEMENT_TABS })
+    M:Dress("AchievementFrame", {
+        window = true, inset = true, panel = { bgAlpha = 0.96 }, tabs = ACHIEVEMENT_TABS,
+        -- 统计页的原生承托底（实机 2026-11-02 枚举）：纯剥离不挂板 —— 与下面
+        -- ACHIEVEMENT_PANELS 的 noPanel 同一纪律（成就列表要贴着窗口背景读）。
+        wells = { AchievementFrameStatsBG = { panel = false } },
+    })
     -- 这三块只剥原美术、不另挂底衬：成就列表要贴着窗口自己的背景读，多一层板子会把行距压脏。
     M:Dress(ACHIEVEMENT_PANELS, { noPanel = true, deep = true })
     M:Dress(ACHIEVEMENT_SCROLLS, { as = "scroll" })
