@@ -53,8 +53,9 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   `BagsUIDisabled` / `CompactRaidFrameManagerDisabled` / `PlayerCastBarDisabled` / `EditModeDisabled` …），
   不是名字写错 —— 先 `/mui compat` 末段确认规则状态，再去改 `frames` 名单。
   另外 1.60 有 `C_AddOns.GetScriptsDisallowedForBeta()` 与 `UserScriptsDisabled`：**/run 随时可能整条被禁**，
-  所有诊断必须是 `/mui <模块> ...` 子命令。Forever 部署：
-  `tools/deploy-retail.ps1 -Dest "C:\Users\EastHillGu\Documents\Blizzards\WOWFOREVER\World of Warcraft\_forever_" -Interface 16001`
+  所有诊断必须是 `/mui <模块> ...` 子命令。Forever 部署（默认目标已是 `_forever_` / 16001，裸跑即可）：
+  `powershell -File tools/deploy-retail.ps1`，要指别处才加
+  `-Dest "...\WOWFOREVER\World of Warcraft\_forever_" -Interface 16001`
   （那台里已有 `!WuxianWorkshop` / `WoWBridge` / `WuxianKit` / `QuestEcho*`，只加 MonetUI 目录，别人的一个字节都不碰）。
   注意 `_cn_beta_` 是旧交付目标、已不存在于这台机器。
 

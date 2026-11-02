@@ -13,8 +13,8 @@
  * (a stale copy explains "my changes do not show up" without any error).
  *
  * Usage:
- *   node tools/sync-check.js                 # default CN install
- *   node tools/sync-check.js --dest "D:\WoW\_retail_"
+ *   node tools/sync-check.js                 # default delivery install (_forever_)
+ *   node tools/sync-check.js --dest "D:\WoW\_forever_"
  *   node tools/sync-check.js --quiet         # exit code only
  */
 'use strict';
@@ -29,7 +29,7 @@ const quiet = args.includes('--quiet');
 const destAt = args.indexOf('--dest');
 const dest = destAt >= 0
     ? path.resolve(args[destAt + 1] || '')
-    : 'C:\\Users\\EastHillGu\\Documents\\Blizzards\\WOWFOREVER\\World of Warcraft\\_retail_';
+    : 'C:\\Users\\EastHillGu\\Documents\\Blizzards\\WOWFOREVER\\World of Warcraft\\_forever_';
 
 const DIRS = ['Assets', 'Libs', 'Utils', 'Config', 'Modules'];
 const FILES = ['MonetUI.toc', 'Core.lua', 'LICENSE', 'THIRD-PARTY-NOTICES.txt'];

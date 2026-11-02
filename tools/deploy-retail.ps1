@@ -28,12 +28,12 @@
 # NOTE: this script must stay ASCII-only. Windows PowerShell 5.1 reads BOM-less
 # .ps1 files as ANSI, and a non-ASCII byte inside param() breaks parameter
 # binding ("cannot bind argument to parameter 'Path' because it is null").
-# Default target = the client actually in use (WOWFOREVER); before 2026-10-29 it
-# pointed at the old ...\Blizzards\World of Warcraft\_retail_ install, so a bare
-# run would deploy into the wrong client.
+# Default target = the delivery client (WOWFOREVER, Interface 16001).  Until
+# 2026-11-02 it pointed at the retired 12.1.5 _retail_ install; a bare run now
+# deploys straight into the client that actually ships.
 param(
-    [string]$Dest = 'C:\Users\EastHillGu\Documents\Blizzards\WOWFOREVER\World of Warcraft\_retail_',
-    [int]$Interface = 120105
+    [string]$Dest = 'C:\Users\EastHillGu\Documents\Blizzards\WOWFOREVER\World of Warcraft\_forever_',
+    [int]$Interface = 16001
 )
 
 $ErrorActionPreference = 'Stop'
