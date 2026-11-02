@@ -541,12 +541,22 @@ end
 --- 边框走和其它窗口同一套的主题边框（Skin:Panel 的 edgeFile=blank，不是暴雪原生 #4B493C）。
 --- 全程只建我们自己的子背板 + ns:Mark 旁表，不写暴雪对象字段。
 --- **没有 inset 的窗口直接返回 nil、什么都不画** —— 所以任何窗口都能安全地传 opts.inset = true。
+--- **容器 alpha 必须亮回 1**（2026-11-02 实机 MerchantFrame 探针判例）：根窗的 Strip 会把
+--- `frame["Inset"]` 当"背景件"整框 Fade 成 α0（BACKDROP_PIECES 含 "Inset"），而背板是这个
+--- α0 容器的子框、继承父 alpha —— 不亮回来，凹槽层"已挂我们的背板"却游戏里看不见。
+--- 容器里的暴雪美术件已被上面 Strip 逐件压掉（region + 名单内字段），容器亮回不会漏原美术；
+--- 回滚不用另记 —— Fade 自己的 Record 存的是 Fade **之前**的原始 alpha。
+--- （QuestFrame 的 inset 懒建、躲过了根窗 Strip，所以那一处此前看着是好的 —— 同一套修复对它无操作。）
 -- @param opts { bgSurface = "lost", bgAlpha = 0.965, borderKey =, thickness = }
 function Skin:InsetWell(frame, opts)
     local inset = self:FindInset(frame)
     if not inset then return nil end
     opts = opts or {}
     self:Strip(inset)
+    local okA, a = pcall(inset.GetAlpha, inset)
+    if okA and a and a <= 0.001 then
+        pcall(inset.SetAlpha, inset, 1)
+    end
     return self:Panel(inset, {
         bgSurface = opts.bgSurface or "lost",
         bgAlpha   = opts.bgAlpha or 0.965,
@@ -1367,7 +1377,13 @@ local function probeState(obj, owner, fadedParent)
         if Marked(owner, "questWeave") == obj then return "我们的织纹", false end
         if Marked(owner, "controlBg") == obj then return "我们的控件底", false end
     end
-    if Marked(obj, "skinBg") then return "已挂我们的背板", false end
+    if Marked(obj, "skinBg") then
+        -- 背板挂在谁身上，谁的 alpha 决定它显不显形（2026-11-02 MerchantFrame 判例：
+        -- 容器被 Strip 整框 Fade 成 α0，「已挂我们的背板」的绿标签会把这件事遮住）。
+        local _, hostA = probeAlpha(obj)
+        if hostA and hostA <= 0.001 then return "已挂背板但容器α0", true end
+        return "已挂我们的背板", false
+    end
     if Marked(obj, "questWeave") then return "已挂我们的织纹", false end
     if Marked(obj, "art") then return "我们的美术件", false end
     if Marked(obj, "hidden") then return "已剥掉", true end
