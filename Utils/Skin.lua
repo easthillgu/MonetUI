@@ -1409,37 +1409,50 @@ local QUALITY_COLOR = {
 local qualityBorders = setmetatable({}, { __mode = "k" })   -- btn -> { frame, last }
 local qualityDriver, qualityAcc
 
+--- 品质查询：本客户端（WOWFOREVER 12.1.5）把全局 `GetItemInfo` / `GetItemInfoInstant` /
+--- `GetItemQualityColor` 整族**砍了**（实机探针全 nil），但 `C_Item.*` 在——
+--- `C_Item.GetItemQualityByID` 直吃 link / itemID，实机验证 q=2 直接解出。
+--- 标准客户端走 GetItemInfo 兜底。
+local function QualityOf(idOrLink)
+    if C_Item and C_Item.GetItemQualityByID then
+        local ok, q = pcall(C_Item.GetItemQualityByID, idOrLink)
+        if ok and type(q) == "number" then return q end
+    end
+    if GetItemInfo then
+        local ok, _, _, q = pcall(GetItemInfo, idOrLink)
+        if ok and type(q) == "number" then return q end
+    end
+    return nil
+end
+
 --- 品质多路解析（模板不齐，按特征不按名字）：`btn.link` 字段（商人 / 交易窗模板常写）
 --- → `btn.itemID` 字段 → ItemButtonMixin 的 `GetItemID()` / `GetItem()`（ItemLocation）。
 --- 全程 pcall，读不出就 nil（素边），绝不抛。
 local function ResolveQuality(btn)
     local okLink, link = pcall(function() return btn.link end)
     if okLink and type(link) == "string" and link ~= "" then
-        local ok, _, _, q = pcall(GetItemInfo, link)
-        if ok and type(q) == "number" then return q end
+        local q = QualityOf(link)
+        if q then return q end
     end
     local okID, itemID = pcall(function() return btn.itemID end)
     if okID and type(itemID) == "number" and itemID > 0 then
-        local ok, _, _, q = pcall(GetItemInfo, itemID)
-        if ok and type(q) == "number" then return q end
+        local q = QualityOf(itemID)
+        if q then return q end
     end
     if type(btn.GetItemID) == "function" then
         local ok, v = pcall(btn.GetItemID, btn)
         if ok and type(v) == "number" and v > 0 then
-            local ok2, _, _, q = pcall(GetItemInfo, v)
-            if ok2 and type(q) == "number" then return q end
+            local q = QualityOf(v)
+            if q then return q end
         end
     end
-    if type(btn.GetItem) == "function" and C_Item and C_Item.GetItemID then
+    if type(btn.GetItem) == "function" and C_Item and C_Item.GetItemQuality then
         local ok, loc = pcall(btn.GetItem, btn)
         if ok and type(loc) == "table" then
             local okV, valid = pcall(function() return loc:IsValidItem() end)
             if okV and valid then
-                local okI, iid = pcall(C_Item.GetItemID, loc)
-                if okI and type(iid) == "number" and iid > 0 then
-                    local ok2, _, _, q = pcall(GetItemInfo, iid)
-                    if ok2 and type(q) == "number" then return q end
-                end
+                local okQ, q = pcall(C_Item.GetItemQuality, loc)
+                if okQ and type(q) == "number" then return q end
             end
         end
     end
