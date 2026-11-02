@@ -33,7 +33,7 @@ local FADE_IN    = 0.15
 local FADE_OUT   = 0.25
 local TOP        = -64    -- 离屏幕上沿（信息栏在 0..14，往下让开）
 
-local frame, accent, title, body, drain
+local frame, accent, title, body, drain, icon
 local queue = {}          -- 待播：{ title=, text= }
 local showing             -- 正在播的那条
 local phase, t            -- "in" / "hold" / "out" 与阶段内计时
@@ -60,12 +60,41 @@ local function Paint()
     local r, g, b = Color:GetHighlight()
     accent:SetColorTexture(r, g, b, 1)
     drain:SetColorTexture(r, g, b, 0.85)
+    -- 标题回到主题色：战斗提醒会按进入/离开单独染色（见 Fill）。
+    local er, eg, eb = Color:GetEdge()
+    title:SetTextColor(er, eg, eb, 1)
 end
 
 local function Fill(entry)
     showing = entry
     title:SetText(entry.title or "")
     body:SetText(entry.text or "")
+
+    -- 可选图标（战斗提醒的"形状"：剑 / 盾）。有图标就把文字右移，避免压住图形。
+    local inset = ACCENT + PAD
+    if entry.icon then
+        icon:SetTexture(Media:Texture(entry.icon))
+        icon:Show()
+        inset = ACCENT + PAD + 26
+    else
+        icon:Hide()
+    end
+    title:SetPoint("TOPLEFT", frame, "TOPLEFT", inset, -8)
+    title:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -PAD, -8)
+    body:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", inset, 9)
+    body:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -PAD, 9)
+
+    -- 可选着色：左侧色条 / 标题 / 图标同色；没有 tint 就回主题色。
+    if entry.tint then
+        local r, g, b = entry.tint[1], entry.tint[2], entry.tint[3]
+        accent:SetColorTexture(r, g, b, 1)
+        drain:SetColorTexture(r, g, b, 0.85)
+        title:SetTextColor(r, g, b, 1)
+        if entry.icon then icon:SetVertexColor(r, g, b, 1) end
+    else
+        Paint()
+    end
+
     frame:SetAlpha(0)
     -- 先读宽度并检查是否为机密值（防止 SetWidth 里的机密值拦截）
     local fw = frame:GetWidth() or WIDTH
@@ -73,7 +102,8 @@ local function Fill(entry)
     drain:SetWidth(fw)
     frame:Show()
 
-    holdFor = math.max(1, tonumber(M:GetSetting("duration")) or 5)
+    -- 提醒类（战斗进出）用 entry.hold 覆盖停留时间，不跟普通通知的 5 秒走。
+    holdFor = entry.hold or math.max(1, tonumber(M:GetSetting("duration")) or 5)
     phase, t = "in", 0
     frame:SetScript("OnUpdate", M.Tick)
 end
@@ -119,9 +149,18 @@ function M.Tick(self, elapsed)
 end
 
 --- 对外入口。正在播 / 有排队时压队列，播完自动接上。
-function M:Notify(head, text)
+--- 弹一条通知（在窗口外 / 排队时自动压栈）。opts 可带 icon / tint / hold：
+--   icon = Media 键（战斗提醒用 monet_combat_sword / monet_combat_shield）
+--   tint = { r, g, b }（色条、标题、图标同色）
+--   hold = 停留秒数（覆盖全局 duration）
+function M:Notify(head, text, opts)
     if not (self.active and frame) then return end
     local entry = { title = head, text = text }
+    if type(opts) == "table" then
+        entry.icon = opts.icon
+        entry.tint = opts.tint
+        entry.hold = opts.hold
+    end
     if showing then
         queue[#queue + 1] = entry
         -- 队列不能无限长：掉线重连那种场景会一次涌进来一堆。
@@ -146,6 +185,12 @@ local function Build()
     accent:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
     accent:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
     accent:SetWidth(ACCENT)
+
+    -- 战斗提醒用的图标位（形状：剑 / 盾）。平时隐藏，只有带 icon 的通知才显示。
+    icon = frame:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(22, 22)
+    icon:SetPoint("LEFT", frame, "LEFT", ACCENT + PAD, 0)
+    icon:Hide()
 
     title = Widget:Font(frame, 12, "pixel", "edge", "LEFT", nil, Media.outlineFlags)
     title:SetWordWrap(false)
@@ -230,6 +275,29 @@ function M:Initialize()
 
     EventBus:Register("BAG_UPDATE_DELAYED", function()
         if M.active and M:GetSetting("bagFull") ~= false then CheckBags() end
+    end)
+
+    -- 进入 / 离开战斗提醒：原 Modules/CombatText 的 alert 唯一保留项（2026-11-02 并入）。
+    -- 只留"形状 + 颜色 + 文字"，飘字动画与私有驱动帧一并删除。
+    EventBus:Register("PLAYER_REGEN_DISABLED", function()
+        if not (M.active and M:GetSetting("combatAlert") ~= false) then return end
+        local text = _G.ENTERING_COMBAT
+        if type(text) ~= "string" then text = "进入战斗" end
+        M:Notify("进入战斗", text, {
+            icon = "monet_combat_sword",
+            tint = { Color:GetDanger() },
+            hold = 1.6,
+        })
+    end)
+    EventBus:Register("PLAYER_REGEN_ENABLED", function()
+        if not (M.active and M:GetSetting("combatAlert") ~= false) then return end
+        local text = _G.LEAVING_COMBAT
+        if type(text) ~= "string" then text = "离开战斗" end
+        M:Notify("离开战斗", text, {
+            icon = "monet_combat_shield",
+            tint = { Color:GetHealth() },
+            hold = 1.6,
+        })
     end)
 
     -- 主题一换，竖条与排空线重涂（两个文字由 Widget 的颜色槽自己跟）。

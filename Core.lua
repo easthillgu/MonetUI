@@ -269,21 +269,12 @@ local DEFAULTS = {
         mail    = true,
         bagFull = true,
         duration = 5,
+        combatAlert = true,   -- 进入 / 离开战斗提醒（原 CombatText 的 alert，2026-11-02 并入）
     },
     -- 装备耐久警告 (Modules/Durability)：跌破 threshold 时弹一条通知，修好/换装后才再次提醒。
     durability = {
         warn      = true,
         threshold = 30,
-    },
-    -- 战斗辅助 (Modules/CombatText)：
-    --   * 战斗数字默认**用暴雪自己的** —— 本客户端 C_CombatText.GetCurrentEventInfo 是
-    --     SecretReturns，我们自己画的数字拿不到明文，所以 damage/heal/avoid 默认关（开了才接管）。
-    --   * alert = 进出战斗醒目提示（剑 + 盾 + 大字，自绘贴图）。
-    combatText = {
-        damage = false,
-        heal   = false,
-        avoid  = false,
-        alert  = true,
     },
 }
 ns.DEFAULTS = DEFAULTS

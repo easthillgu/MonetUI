@@ -29,7 +29,7 @@ local setOffset        -- Build 里定义，Show/Toggle 打开面板时归零
 local MODULE_ORDER = {
     "UnitFrames", "Cooldown", "BuffFrame",
     "Minimap", "Bags", "QuestTracker", "ActionBars", "Nameplates", "Skins",
-    "InfoBar", "Tooltip", "Cursor", "Toast", "Durability", "CombatText",
+    "InfoBar", "Tooltip", "Cursor", "Toast", "Durability",
     "Atmosphere", "DevTools",
 }
 
@@ -48,7 +48,6 @@ local MODULE_LABEL = {
     Cursor       = "光标拖尾 (Cursor)",
     Toast        = "通知横幅 (Toast)",
     Durability   = "耐久警告 (Durability)",
-    CombatText   = "战斗辅助 (CombatText)",
     Atmosphere   = "氛围暗角 (Atmosphere)",
     DevTools     = "开发工具 (DevTools)",
 }
@@ -1319,6 +1318,12 @@ function SimpleConfig:Build()
                 toast:Settings().bagFull = value and true or false
             end)
 
+        MakeCheckbox(content, "进入 / 离开战斗时弹一条提醒（剑 / 盾 + 着色 + 文字）", row(28),
+            function() return toast:GetSetting("combatAlert") ~= false end,
+            function(value)
+                toast:Settings().combatAlert = value and true or false
+            end)
+
         MakeDropdown(content, row(26), "停留时长", {
             { value = 3, text = "3 秒" },
             { value = 5, text = "5 秒" },
@@ -1366,48 +1371,6 @@ function SimpleConfig:Build()
         durHint:SetWidth(328)
         durHint:SetJustifyH("LEFT")
         durHint:SetText("只看身上穿着的 10 个部位（头肩胸腿脚腕手腰主副手），取最低的那件。")
-        sec.bodyHeight = -row.y + 4
-    end
-
-    local combatText = ns:GetModule("CombatText")
-    if combatText then
-        sec = BeginSection("战斗辅助", false)
-        content = sec.body
-        row = LayoutCursor(0)
-
-        MakeCheckbox(content, "进出战斗醒目提示（剑 + 盾 + 大字）", row(26),
-            function() return combatText:GetSetting("alert") end,
-            function(value)
-                combatText:Settings().alert = value and true or false
-                combatText:Apply()
-            end)
-
-        MakeCheckbox(content, "自己的数字：受到伤害（可选，默认关）", row(26),
-            function() return combatText:GetSetting("damage") end,
-            function(value)
-                combatText:Settings().damage = value and true or false
-                combatText:Apply()
-            end)
-
-        MakeCheckbox(content, "自己的数字：受到治疗（可选，默认关）", row(26),
-            function() return combatText:GetSetting("heal") end,
-            function(value)
-                combatText:Settings().heal = value and true or false
-                combatText:Apply()
-            end)
-
-        MakeCheckbox(content, "自己的数字：闪避/招架/格挡（可选，默认关）", row(26),
-            function() return combatText:GetSetting("avoid") end,
-            function(value)
-                combatText:Settings().avoid = value and true or false
-                combatText:Apply()
-            end)
-
-        local ctHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-        ctHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(48))
-        ctHint:SetWidth(328)
-        ctHint:SetJustifyH("LEFT")
-        ctHint:SetText("战斗数字默认用暴雪自己的（机密值原因，我们画的拿不到明文）。打开哪一类，就接管暴雪对应的浮动文字，关闭时还原，不会出现两份数字。")
         sec.bodyHeight = -row.y + 4
     end
 
