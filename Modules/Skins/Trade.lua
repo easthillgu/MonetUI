@@ -32,6 +32,8 @@ local function SkinTrade()
             TradeRecipientMoneyInset = { borderAlpha = 0 },
             TradeRecipientMoneyBg = { panel = false },
         },
+        -- 物品格图标裁掉原生一圈边（双方物品 6+6 + 附魔格，认 .icon 指纹不点名）。
+        icons = true,
     })
     -- 金额输入框：以前把 `panel` 塞进 Skin:Panel 的参数里（它读的是 opts.bgAlpha），
     -- 底衬一直是默认的 0.85 而不是 0.96；走 Dress 之后参数只有一层，不会再套错。
@@ -77,6 +79,8 @@ local function SkinMerchant()
         panel = { bgAlpha = 0.96 },
         buttons = MERCHANT_BUTTONS,
         scrolls = { "MerchantFrameScrollFrame" },
+        -- 12 格商品 + 回购格的图标裁掉原生一圈边（翻页后 CropIcon 轮询账本重压 texcoord）。
+        icons = true,
     })
     -- 翻页按钮换成细线左右箭头（monet_arrow_left/right）。
     Skin:PageArrow(Skin:Need("MerchantPrevPageButton"), "left")

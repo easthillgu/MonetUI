@@ -437,7 +437,11 @@ local function HideBlizzardPlate(base, plate)
     -- 视觉上一样看不见，但 hit test 仍然有效。
     if uf.SetAlpha then pcall(uf.SetAlpha, uf, 0) end
     -- IsShown 也可能返回机密值：一律过 Secrets.Bool（读不出来就当"没显示"，再 Show 一次）。
-    if uf.IsShown and not Secrets.Bool(uf:IsShown(), false) then pcall(uf.Show, uf) end
+    -- Show 是受保护项（下文 456 行注释）：战斗中被拒会弹玩家可见的 ADDON_ACTION_BLOCKED
+    -- （2026-11-02 实机：进本姓名板 churn 一次 9 条，BLOCKED 日志全来自这两处）。
+    -- 战斗里跳过 —— 被拒的 Show 本来就是 no-op，游戏在下一个 SetUnit / 更新周期自补。
+    if uf.IsShown and not (InCombatLockdown and InCombatLockdown())
+        and not Secrets.Bool(uf:IsShown(), false) then pcall(uf.Show, uf) end
     FadeBlizzardSiblings(base, plate)
 
     plate.blizzardUF = uf
@@ -461,7 +465,9 @@ local function RestoreBlizzardPlate(base, plate)
     local uf = BlizzardUnitFrame(base)
     if uf then
         if uf.SetAlpha then pcall(uf.SetAlpha, uf, 1) end
-        pcall(uf.Show, uf)
+        -- 同 HideBlizzardPlate：战斗里 Show 必被拒（弹 ADDON_ACTION_BLOCKED），
+        -- 跳过，等游戏自己的 SetUnit / 更新周期补齐。
+        if not (InCombatLockdown and InCombatLockdown()) then pcall(uf.Show, uf) end
     end
     RestoreBlizzardSiblings(base)
     if plate then

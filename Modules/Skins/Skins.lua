@@ -347,6 +347,7 @@ end
 --               tabs / buttons / scrolls = { 点名的控件 } }
 --               （window 档还吃 titleSize / noTitle / noClose / inset=true|{opts} 补正文凹槽那一档底色；
 --               wells={ 后缀=true|{opts} } 给次级内容区吃同一套凹槽语言（多内容窗口）；
+--               icons=true 走子树给物品图标裁掉原生一圈边（静态内容窗口）；
 --               noPanel 只剥原美术、不挂底衬）
 function M:Dress(spec, opts)
     opts = opts or {}
@@ -401,6 +402,13 @@ function M:Dress(spec, opts)
                     -- ColoredProgressBar 这几类静态控件，**不碰按钮** —— 所以对每个面板
                     -- 都安全，不必像 `deep` 那样逐个确认。deep 里已经包含它，别重复登记。
                     M:SweepTemplates(frame, opts.control)
+                end
+
+                -- 物品图标裁切（`icons = true`）：子树里带 .icon 指纹的按钮，贴图裁掉
+                -- 原生一圈边。与 deep 互补——deep 的按钮扫**跳过**物品按钮，这条只管它们。
+                -- 商人 / 交易这类内容静态的窗口够用；运行期才建格子的窗口别开（没有补扫）。
+                if opts.icons then
+                    M:IconWidgetsIn(frame)
                 end
             end)
         end
@@ -478,6 +486,45 @@ function M:SkinButtonsIn(frame, opts)
                 if not okItem or not isItem then
                     pcall(Skin.Button, Skin, child, opts)
                 end
+            end
+        end
+    end
+end
+
+--- Crop the native border ring off item icons, walking a frame's subtree.  Item buttons are
+--- the ones `Skin:LooksLikeItemButton` fingerprints (`.icon` / `.Icon` / ... fields), which the
+--- button sweeps deliberately skip -- their icons keep Blizzard's baked-in edge.  This pass is
+--- the complement: crop that ring, exactly like the action bar / buff / nameplate icons.
+--- **认字段不认名字**：12.x 的物品格大量匿名（商人物品格 / 交易双方物品格 / 附魔格都是
+--- 「容器 frame > ItemButton」的形状），按名字的名单永远追不上，按指纹一遍全收。
+--- 裁剪参数进 `Skin:CropIcon` 的轮询账本：商人翻页 / 交易换物品重设贴图后，每 0.5s
+--- 重压一遍 texcoord，不会退回竖缝（12.x 秘密纹素那条判例）。
+function M:IconWidgetsIn(frame, depth)
+    if not frame or type(frame.GetChildren) ~= "function" then return end
+    depth = depth or 0
+    if depth > 4 then return end
+    local children = { frame:GetChildren() }
+    for i = 1, #children do
+        local child = children[i]
+        -- forbidden 对象上连 GetObjectType 都会抛（见 SkinButtonsIn 同款注释），全程 pcall。
+        local okKind, kind = pcall(child.GetObjectType, child)
+        if okKind then
+            if kind == "Button" then
+                local okItem, isItem = pcall(Skin.LooksLikeItemButton, Skin, child)
+                if okItem and isItem then
+                    for _, key in ipairs({ "icon", "Icon", "iconTexture", "IconTexture" }) do
+                        local okIcon, tex = pcall(function() return child[key] end)
+                        local okTex, texKind
+                        if okIcon and type(tex) == "table" then
+                            okTex, texKind = pcall(tex.GetObjectType, tex)
+                        end
+                        if okTex and texKind == "Texture" then
+                            pcall(Skin.CropIcon, Skin, tex, 0.08, 0.92, 0.08, 0.92)
+                        end
+                    end
+                end
+            elseif kind == "Frame" then
+                M:IconWidgetsIn(child, depth + 1)
             end
         end
     end
