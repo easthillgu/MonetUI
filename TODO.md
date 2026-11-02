@@ -1,5 +1,32 @@
 # 待办
 
+## 🧩 2026-11-02 接手 Qoder：正文凹槽共享层 `Skin:InsetWell`（已实现，待实机验收）
+
+> 接手 Qoder 未提交的工作，已收尾并本地提交 `7bd4829`。
+
+**做了什么**
+- `Utils/Skin.lua` 新增 `Skin:FindInset` / `Skin:InsetWell`：把「正文凹槽」那一层（insetFrame.bg，lost 档底色 + 主题凹槽边框）抽成共享 API。任何带 `.Inset` 的窗口都能用 `inset = true` 拿到同一套层次；**没有 inset 时安全 no-op**（读 `frame.Inset` 或同名全局 `<窗口名>Inset`，都读不到就返回 nil、什么都不画）。
+- `M:SkinWindow` / `M:Dress` 吃 `opts.inset = true|{opts}`，自动补凹槽层（`M:Dress` 的 window 档统一走这条）。
+- `Quest.lua` 删掉本地重复的 `InsetRect` / `InsetWell`，改用共享 API；QuestFrame 的 inset 是懒建的，仍留在 Show 路径（`BrightenQuestPanels`）里补，不放 Dress。
+- 为约 30 个窗口接通 `inset = true`：Loot / GroupLootHistory / Settings / AddonList / Macros / Help / Character / Inspect / Collections / PlayerSpells / Achievements / Transmog / QuestLog(+Detail/Popup) / ItemText / Friends / Who / Communities / Guild / Calendar / ChatChannelPopups / Petition / Trade / Mail / Merchant / Trainer / Auction / Professions / Bank / Socketing / CraftOrders。
+
+**离线闸门（全绿）**：`luac -p` 8 文件语法 OK；`api-audit` 0 HARD；`audit-locals` 51 文件全过；`audit-taint` 0/0/0。
+
+**🐞 实机第一枪就抓到真 bug（已修，`4323a1b`）**：`Skin:InsetWell` 的背板挂在 inset 容器**里面**，
+而根窗 Strip 的 backdrops 循环把 `frame["Inset"]` 当背景件**整框 Fade 成 α0** → 子板继承父 alpha，
+「已挂我们的背板」的绿标签底下整层隐形。MerchantFrame 探针实证（`MerchantFrameInset α0.00`）。
+QuestFrame 的 inset 懒建、躲过根窗 Strip，所以此前只有那一处看着是好的。
+修法：InsetWell Strip 完把容器 alpha 亮回 1（美术件已逐件压掉，不会漏原美术）；
+探针 `probeState` 新增「已挂背板但容器α0」状态，绿标签不再遮 α0。已部署 `_retail_`，待 `/reload` 复验。
+
+**待实机验收（开游戏逐窗口截图确认）**
+- 凹槽底（lost 档）与窗口档（panel）色差拉开、层次分明，无「正文里漏出浅框」；
+- 凹槽边框走主题边（非暴雪原生 #4B493C）；切主题后自动重涂；
+- 无浅框/原美术残留（尤其 Collections / Achievements / Trade / Auction 这类内容密集窗口）。
+
+**未决（待拍板）**：以下 `window = true` 窗口尚未接 `inset = true`，要不要补？
+TabardFrame、EncounterJournal、DressUpFrame、GossipFrame、LFGParentFrame、LegacySystemFrame、FlightMapFrame、System 的某个 popup（`System.lua:641`）。`Skin:InsetWell` 对无 inset 的窗口是 no-op，补了也不报错，但层次是否好看要逐个看。
+
 ## 🐞 2026-11-01 审查发现：三处 `GetChildren` 把多返回值当表用
 
 `Frame:GetChildren()` 返回的是**多返回值**，不是表。`local ok, kids = pcall(f.GetChildren, f)`
