@@ -897,24 +897,28 @@ function Skin:ScrollBar(scrollbar)
 
     -- Vertical scroll bars (UIPanelScrollFrameTemplate): up/down arrows -> chevrons.
     -- Horizontal variants (seen on the auction browse sort bar): left/right -> arrow left/right.
+    -- 一张朝上的图 + `Widget:Arrow` 转向（理由见 Widget.lua 头注）：这里只登记**方向**，
+    -- 不再一个方向一个材质键。
     local arrowMap = {
-        ScrollUpButton    = "monet_chevron_up",
-        ScrollDownButton  = "monet_chevron_down",
-        ScrollUp          = "monet_chevron_up",
-        ScrollDown        = "monet_chevron_down",
-        ScrollLeftButton  = "monet_arrow_left",
-        ScrollRightButton = "monet_arrow_right",
-        ScrollLeft        = "monet_arrow_left",
-        ScrollRight       = "monet_arrow_right",
+        ScrollUpButton    = "up",
+        ScrollUp          = "up",
+        ScrollDownButton  = "down",
+        ScrollDown        = "down",
+        ScrollLeftButton  = "left",
+        ScrollLeft        = "left",
+        ScrollRightButton = "right",
+        ScrollRight       = "right",
     }
-    for member, key in pairs(arrowMap) do
+    for member, dir in pairs(arrowMap) do
         local button = scrollbar[member]
         if button then
             self:Strip(button, { regions = true })
             -- FadeButtonArt zeros every art; then SwapArt puts our glyph back.
             self:FadeButtonArt(button)
-            local normal = self:SwapArt(button.GetNormalTexture and button:GetNormalTexture(), key)
-            local pushed = self:SwapArt(button.GetPushedTexture and button:GetPushedTexture(), key)
+            local normal = self:SwapArt(button.GetNormalTexture and button:GetNormalTexture(), "monet_chevron_up")
+            local pushed = self:SwapArt(button.GetPushedTexture and button:GetPushedTexture(), "monet_chevron_up")
+            Widget:Arrow(normal, dir)
+            Widget:Arrow(pushed, dir)
             -- Run the same border tint cycle Skin:CloseButton uses -- the glyph sits on a
             -- strip of Monet plate, so it reads as a control belonging to this skin.
             if normal and normal.SetVertexColor then
@@ -977,8 +981,8 @@ end
 ---   ② 另建一张我们自己的箭头贴图（独立纹理，Blizzard 改 atlas 也盖不掉）；
 ---   ③ 轮询驱动兜底：暴雪偶尔会把 alpha 顶回 1（滚动/禁用态），驱动每 0.3s 重新压回 0。
 local SCROLL_ARROW_ATLAS = {
-    ["minimal-scrollbar-arrow-top"]    = "monet_chevron_up",
-    ["minimal-scrollbar-arrow-bottom"] = "monet_chevron_down",
+    ["minimal-scrollbar-arrow-top"]    = "up",
+    ["minimal-scrollbar-arrow-bottom"] = "down",
 }
 local arrowRegions = setmetatable({}, { __mode = "k" })  -- [blizzardRegion] = true
 local arrowDriver, arrowAcc
@@ -1008,19 +1012,20 @@ function Skin:ScrollArrowButton(button)
     for _, reg in ipairs(regions) do
         if type(reg.GetAtlas) == "function" then
             local ok, atlas = pcall(reg.GetAtlas, reg)
-            local key = ok and atlas and SCROLL_ARROW_ATLAS[atlas]
-            if key then
+            local dir = ok and atlas and SCROLL_ARROW_ATLAS[atlas]
+            if dir then
                 Mark(button, "scrollArrow", true)
                 -- ① 藏掉暴雪 atlas（它每次滚动会重设贴图，但 alpha 由驱动持续压回 0）
                 pcall(reg.SetAlpha, reg, 0)
                 arrowRegions[reg] = true
                 EnsureArrowDriver()
-                -- ② 我们自己的箭头：独立纹理，压在上层
+                -- ② 我们自己的箭头：独立纹理，压在上层（一张朝上的图 + Widget:Arrow 转向）
                 local w = button:GetWidth() or 16
                 local h = button:GetHeight() or 16
                 local our = button:CreateTexture(nil, "ARTWORK", nil, 2)
                 our:SetAllPoints(button)
-                our:SetTexture(Media:Texture(key))
+                our:SetTexture(Media:Texture("monet_chevron_up"))
+                Widget:Arrow(our, dir)
                 local r, g, b = Color:GetBorder()
                 our:SetVertexColor(r, g, b)
                 return true
@@ -1062,9 +1067,11 @@ end
 --- 翻页按钮的左右箭头（商人 / 邮件 / 拾取 / 任务文本）：换 Normal/Pushed 贴图 + 主题色。
 function Skin:PageArrow(button, dir)
     if not button then return button end
-    local key = (dir == "left") and "monet_arrow_left" or "monet_arrow_right"
-    local normal = self:SwapArt(button.GetNormalTexture and button:GetNormalTexture(), key)
-    self:SwapArt(button.GetPushedTexture and button:GetPushedTexture(), key)
+    -- 一张朝上的图 + `Widget:Arrow` 转向（dir 仍是 "left" / "right"，调用点不用改）。
+    local normal = self:SwapArt(button.GetNormalTexture and button:GetNormalTexture(), "monet_chevron_up")
+    local pushed = self:SwapArt(button.GetPushedTexture and button:GetPushedTexture(), "monet_chevron_up")
+    Widget:Arrow(normal, dir)
+    Widget:Arrow(pushed, dir)
     if normal and normal.SetVertexColor then
         local r, g, b = Color:GetBorder()
         normal:SetVertexColor(r, g, b)

@@ -83,7 +83,7 @@ local function SkinMerchant()
         scrolls = { "MerchantFrameScrollFrame" },
         -- 12 格商品 + 回购格的铺平裁切走引擎默认档（翻页后 CropIcon 轮询账本重压 texcoord）。
     })
-    -- 翻页按钮换成细线左右箭头（monet_arrow_left/right）。
+    -- 翻页按钮换成细线左右箭头（monet_arrow_up + Widget:Arrow 转向）。
     Skin:PageArrow(Skin:Need("MerchantPrevPageButton"), "left")
     Skin:PageArrow(Skin:Need("MerchantNextPageButton"), "right")
 

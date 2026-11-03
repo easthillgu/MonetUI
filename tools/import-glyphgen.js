@@ -18,14 +18,12 @@ const SRC = path.join(ROOT, 'Assets-src', 'Textures');
 const SHIP = path.join(ROOT, 'Assets', 'Textures');
 
 // dest -> { src, tint?, bar? }
+// 2026-11-03：箭头只剩**一张**（monet_chevron_up，朝上），down/left/right 由 Widget:Arrow 在运行期
+// 转向，所以这里只导一张（源仍是 glyphgen 的 chevron-up_64.tga）。
+// close 三态已改由 tools/regen-textures.js 的 drawCloseX 绘制（HANDOFF 8.26），从本表移除 ——
+// 留着会在下次导入时把按 Andromeda 比例重画的 close 覆盖回 glyphgen 的旧比例。
 const MAP = {
-  'monet_chevron_up':   { src: 'chevron-up_64.tga' },
-  'monet_chevron_down': { src: 'chevron-down_64.tga' },
-  'monet_arrow_left':   { src: 'arrow-left_64.tga' },
-  'monet_arrow_right':  { src: 'arrow-right_64.tga' },
-  'monet_close_normal': { src: 'close_64.tga' },
-  'monet_close_hover':  { src: 'close_64.tga', tint: [0.910, 0.753, 0.471] },  // #e8c078 金
-  'monet_close_push':   { src: 'close_64.tga', tint: [0.675, 0.675, 0.675] },  // #acacac 灰
+  'monet_chevron_up':     { src: 'chevron-up_64.tga' },
   'monet_win_minimize': { src: 'minus_64.tga' },
   'monet_win_maximize': { src: 'square_64.tga', bar: [0.910, 0.753, 0.471] },  // 方框 + 金条
 };

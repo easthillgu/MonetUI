@@ -269,10 +269,9 @@ Media.texture = {
 
     ["monet_check"]         = ASSET .. "Textures\\monet_check",
     ["monet_radio"]         = ASSET .. "Textures\\monet_radio",
-    ["monet_chevron_down"]  = ASSET .. "Textures\\monet_chevron_down",
-    ["monet_chevron_up"]    = ASSET .. "Textures\\monet_chevron_up",
-    ["monet_arrow_left"]    = ASSET .. "Textures\\monet_arrow_left",
-    ["monet_arrow_right"]   = ASSET .. "Textures\\monet_arrow_right",
+    -- 箭头：**只有一张，朝上**。down / left / right 一律由 `Widget:Arrow(tex, dir)` 在运行期
+    -- 转出来（up↔down 走 SetTexCoord 双轴镜像，left/right 走 SetRotation），不要再加新键。
+    ["monet_chevron_up"]      = ASSET .. "Textures\\monet_chevron_up",
     -- 三角火花（SVG 手绘，tools/svg/monet_spark_*.svg）：16×8 的纯白模具，整张图只提供 alpha，
     -- 颜色由运行期 SetVertexColor 给。**尖端在贴图边缘**（up = 顶边，down = 底边），
     -- 所以摆放时把那条边锚在能量条下沿 / 经验线上就是"尖端精确顶住"。

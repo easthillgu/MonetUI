@@ -111,8 +111,7 @@ const STRICT = new Set([
 const NO_SOFT_EDGE = new Set([
   ...STRICT,
   'minimap_rect_mask', 'monet_corner',
-  'monet_arrow_left', 'monet_arrow_right',
-  'monet_check', 'monet_chevron_up', 'monet_chevron_down',
+  'monet_check', 'monet_chevron_up',
   'monet_close_normal', 'monet_close_hover', 'monet_close_push',
   // 窗口按钮：maximize / minimize 都是横竖直边（minimize 是那条横杠）。
   'monet_win_maximize', 'monet_win_minimize',
@@ -136,8 +135,7 @@ const STENCIL = new Set([
   'monet_close_normal', 'monet_close_push',
   'monet_win_minimize',   // WorldMap 的还原/minimize 按钮：中性白，跟主题染色
   'monet_check', 'monet_radio',
-  'monet_chevron_up', 'monet_chevron_down',
-  'monet_arrow_left', 'monet_arrow_right',
+  'monet_chevron_up',
   // 施法条火花 / 经验线三角：整张图只提供 alpha，颜色全交给 SetVertexColor（红 / 中性 / 经验色）。
   'monet_spark_up', 'monet_spark_down',
   'monet_role_tank', 'monet_role_heal', 'monet_role_dps',

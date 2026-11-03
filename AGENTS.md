@@ -63,6 +63,14 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
 
 这几条都是"代码看着对、闸门全绿、实机不一样"，只能记下来别再踩：
 
+- **AddOns 的文件索引是客户端启动那一刻建的：新建 / 改名的文件要完全重启客户端才认**（12.1.5 实测，
+  2026-11-03）：把 `monet_chevron_up.blp` 改名成 `monet_arrow_up.blp` 并部署后，
+  `GetFileIDFromPath` 对**新名字返回 nil**，而对**已经从磁盘删掉**的旧名字 `monet_arrow_left`
+  仍返回 -48（索引里还在）。`/reload` 不重建这个索引 —— 所以"换个贴图文件名"在当前会话里
+  等于贴图丢失（`SetTexture` 照样返回 true，但画面是空的）。要么留到下次重启客户端再改名，
+  要么干脆沿用旧文件名。一行判据：`return GetFileIDFromPath("Interface\\AddOns\\...\\xxx")`，
+  nil 就说明这个会话里用不了。
+
 - **`GetAlpha()` 和顶点色的 alpha 是同一个存储**：`SetAlpha(0.25)` 之后 `GetVertexColor()` 的 a
   也是 0.25；反过来 `SetVertexColor(r,g,b,0.9)` 会让 `GetAlpha()` 变成 0.9。所以"调淡一张贴图"
   只能走**一个**旋钮 —— 用 `SetAlpha` 调、之后任何一次 `SetVertexColor` 都会把它顶回去

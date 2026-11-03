@@ -893,8 +893,13 @@ const generators = {
 };
 // close 三态从 2026-11-03 起回到本脚本绘制（同一几何 + 各档 CLOSE 颜色）；
 // 它此前来自仓库外的 glyphgen，源已不在仓库里。
-// 仍由外部导入、**不在** generators 里的只有：
-//   monet_win_maximize/minimize —— 跑 regen 不会覆盖它们。
+// 仍由外部导入、**不在** generators 里的：
+//   monet_win_maximize/minimize —— 跑 regen 不会覆盖它们；
+//   monet_chevron_up —— 2026-11-03 起箭头只剩这一张**朝上**的图，down/left/right 由
+//     `Widget:Arrow` 在运行期转向（up↔down 走 SetTexCoord 双轴镜像，left/right 走 SetRotation），
+//     同样由 tools/import-glyphgen.js 导入，本脚本不画它。
+// glyphChevron / drawChevronUp / drawChevronDown / drawArrowLeft / drawArrowRight 这几个
+// draw* 是历史残留（generators 里已无条目），别再当成现役路线。
 
 // 尺寸定义（2 的幂次方）
 const SIZES = {

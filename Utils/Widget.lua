@@ -1245,6 +1245,42 @@ function Widget:StyleCooldownText(cd, size, key, color, flags, exact)
     end
 end
 
+-- ---------------------------------------------------------------------------
+-- 箭头：**只 ship 一张朝上的图**，其余方向全部靠这里转（滚动条上下 / 翻页左右 / 旋转左右）。
+--
+-- 为什么不四张图：同一根 V 形折线的四个方向本就是同一张图的刚体变换，四张图意味着四处
+-- 生成、四处改比例、四处漂移。转向两条路：
+--   * up ↔ down 是 180°，用 4 参 `SetTexCoord` 双轴镜像 —— 逐像素精确，**不重采样**；
+--   * left / right 是 90°，4 参 texcoord 只能做轴对齐矩形，做不了转 90°（本客户端没有
+--     8 参形式），所以走 `Texture:SetRotation`。代价是非整数 UI 缩放下整张图重采样一次，
+--     在 20px 上下的箭头里看不出来。
+--
+-- **旋转方向的口径**（拿 EllesmereUI 两个用例互相印证后定的）：`SetRotation(θ)` 把贴图
+-- **逆时针**转 θ 弧度。基图朝左时 θ=-π/2 → 朝上、θ=+π/2 → 朝下；基图朝下时 θ=π → 朝上。
+-- 四条都对得上它自己的语义（排序「升序 ▲ / 降序 ▼」、折叠「展开 ▼ / 收起 ►」）。
+-- 实机若发现左右反了，只改 ARROW_ROT 两张表的符号，不要动调用点。
+local ARROW_ROT = { left = -math.pi / 2, right = math.pi / 2 }
+local ARROW_UV = {
+    up    = { 0, 1, 0, 1 },
+    down  = { 1, 0, 1, 0 },   -- 双轴镜像 = 精确的 180°，任何图形都成立
+    left  = { 0, 1, 0, 1 },
+    right = { 0, 1, 0, 1 },
+}
+
+--- 把一张**朝上**的箭头贴图转到 dir（`"up"` / `"down"` / `"left"` / `"right"`）。
+-- 幂等：texcoord 与 rotation 都是全量重设，重复调用结果一致。
+-- 配合 `Skin:SwapArt` 用：先 SwapArt 换成本仓的图（它会把 texcoord 归 0..1），再转方向。
+function Widget:Arrow(tex, dir)
+    if not tex or type(tex.SetTexCoord) ~= "function" then return tex end
+    local uv = ARROW_UV[dir]
+    if not uv then dir, uv = "up", ARROW_UV.up end
+    pcall(tex.SetTexCoord, tex, uv[1], uv[2], uv[3], uv[4])
+    if type(tex.SetRotation) == "function" then
+        pcall(tex.SetRotation, tex, ARROW_ROT[dir] or 0)
+    end
+    return tex
+end
+
 --- Our close button: UIPanelCloseButton 的尺寸与行为 + **统一的 ✕ 材质**。
 -- 皮肤这一步刻意放在工厂里，不留给调用点：以前每个调用点自己补一句 `Skin:CloseButton(close)`，
 -- 2026-11-03 发现 InfoBar 属性面板漏了这一句 —— 面板上就是暴雪的红色圆钮，和其余窗口的

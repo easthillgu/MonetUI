@@ -50,7 +50,7 @@ function toDataURL(dec) {
 const STRICT = new Set(['monet_barfill', 'monet_hairline', 'monet_plus', 'monet_minus',
   'monet_win_maximize', 'monet_win_minimize', 'monet_win_restore']);
 const NO_SOFT_EDGE = new Set([...STRICT, 'minimap_rect_mask', 'monet_corner',
-  'monet_arrow_left', 'monet_arrow_right', 'monet_check', 'monet_chevron_up', 'monet_chevron_down',
+  'monet_chevron_up', 'monet_check',
   'monet_close_normal', 'monet_close_hover', 'monet_close_push',
   'monet_canvas_weave', 'monet_diagonal_weave']);
 
