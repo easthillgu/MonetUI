@@ -1,4 +1,4 @@
--- Modules/Tooltip.lua
+-- Modules/Tooltip/Tooltip.lua
 -- 鼠标提示：**位置** + **内容增强**（精简自 Andromeda 的 modules/tooltip）。
 --
 -- 位置有三种摆法（设置键 anchor）：
@@ -8,11 +8,14 @@
 --   off     —— 不动，用暴雪自己的锚点。
 --   偏移按物理像素算（Media:Mult），不随 UI 缩放浮动。
 --
--- 内容（只保留两样，其余在 HANDOFF 3.13 里写了为什么砍）：
---   * 单位：一行「目标: <名字>」—— 这个单位正在打谁（名字用职业色，NPC 用高光色）；
+-- 内容（三样，其余在 HANDOFF 3.13 里写了为什么砍）：
+--   * 单位：一行「目标: <名字>」—— 这个单位正在打谁（名字用职业色，NPC 用中性色）；
 --   * Alt：一行 ID —— 单位是 NPC ID（GUID 里的 creature 编号）、物品是 itemID、法术是 spellID。
 --   这两行画在**我们自己的小框**里（挂在提示框下沿，1px 主题色边框），不用 tooltip:AddLine ——
 --   本客户端的提示框是数据行驱动的，追加的行会被下一次重填抹掉（HANDOFF 3.18）。
+--   * 正文染色（开关 neutralText）：把暴雪画在提示框里的**通用说明文字**（无彩色的属性行、
+--     纯黄的描述行）归一成主题 neutral；品质 / 职业 / 套装绿 / 未达标红这些**身份信息**不碰，
+--     标题行整行不参与 —— 判据与实证理由见 RecolorStaticText 的注释。
 --
 -- 触发（2026-11-03 改）：**暴雪自己的 tooltip 数据回调** `TooltipDataProcessor.AddTooltipPostCall`
 -- —— 它在 Blizzard 每次填完数据之后叫我们一次，所以内容**不再晚一帧**，也不需要在
@@ -60,7 +63,7 @@ local EDGE_H = 320
 --- 从 0.05s（每帧级别）降到 250ms：即时性已经由回调负责，轮询只是保险。
 local CONTENT_INTERVAL_MS = 250
 
-local mode, enrich, idsByAlt       -- 设置缓存（每帧要读，别去翻 DB）：cursor / minimap / off
+local mode, enrich, idsByAlt, neutralText   -- 设置缓存（每帧要读，别去翻 DB）：mode = cursor / minimap / off
 local cursorKey, mmKey
 local placeJob, contentJob         -- Utils/Scheduler 订阅号（本仓不再自建 OnUpdate 帧）
 local wasShown, modDown            -- 提示框显隐上升沿 / Alt 当前状态
@@ -78,7 +81,7 @@ local typeLedger = {}
 local typeLedgerN = 0
 
 -- ============================================================================
--- 设置（键：anchor / enrich / idsByAlt，面板与 /mui 都走这里）
+-- 设置（键：anchor / enrich / idsByAlt / neutralText，面板与 /mui 都走这里）
 -- ============================================================================
 
 function M:Settings()
@@ -492,11 +495,99 @@ local function RecolorSpellTitle(tip)
     pcall(line.SetTextColor, line, r, g, b)
 end
 
+-- ---- 正文染色：通用说明文字归一到主题 neutral --------------------------------
+--
+-- 判据只看**这一行此刻的颜色**，不看行号 —— 一行排第几完全由内容决定（物品八九行、
+-- 法术三行、单位两行，还会随 Shift 对比、套装件数变化），按行号猜必错；
+-- 而"用什么颜色画"本身就是暴雪的分类信号：
+--   * 无彩色（r≈g≈b）：属性行、"需要等级"、普通说明 —— 纯白或灰白；
+--   * 纯黄（r≈g 且 b 明显掉下去）：描述文字与"使用："那一族。
+-- 其余一律不动：物品品质、职业色、套装/附魔的绿与蓝、未达标的红都是**身份信息**。
+-- 传说装的橙（1,0.8,0）r 与 g 差 0.2，落在"r≈g"之外，不会被当成纯黄吃掉。
+--
+-- **第 1 行（标题）整行不参与**：标题天然就是身份 —— 物品品质色、玩家职业色、
+-- 精英与首领的红。尤其精英 / 世界首领的标题正是纯黄（Quality2 = 1,1,0），
+-- 这条就是"标题不碰"的实证理由。唯一被归一的标题是法术类（金色没有身份信息），
+-- 那条走上面的 `RecolorSpellTitle`。
+local ACHROMA_SPAN = 0.06    -- 三通道最大差小于这个 → 当无彩色
+local YELLOW_MIN   = 0.75    -- 纯黄的两条腿：r、g 都够亮
+local YELLOW_SPAN  = 0.08    -- 且 r 与 g 基本相等
+local YELLOW_MAX_B = 0.45    -- 而 b 明显掉下去
+
+local function IsStaticTextColor(r, g, b)
+    if math.max(r, g, b) - math.min(r, g, b) < ACHROMA_SPAN then return true end
+    return math.abs(r - g) < YELLOW_SPAN
+       and r >= YELLOW_MIN and g >= YELLOW_MIN and b <= YELLOW_MAX_B
+end
+
+--- 逐行走提示框的文字（左列 + 右列），从第 2 行起（标题不参与，见上）。
+--- 取行只用 `NumLines` + `GameTooltipTextLeft<i>` 这套 FrameXML 全局名：
+--- `GameTooltip:GetLine` 不在本客户端手册里（api-audit 报 undocumented），而这个写法是
+--- 参考件在**同一客户端**上用的（EnhanceQoLTooltip_Camelot.lua:1137）。
+--- 行数读不出（受限）或名字拿不到就整趟什么都不做，并把 `linePathOK` 记成 false 让自检报出来 ——
+--- 宁可不染色，不要猜。
+local linePathOK = false
+local function EachTooltipLine(tip, fn, firstIndex)
+    if type(tip.NumLines) ~= "function" or type(tip.GetName) ~= "function" then return end
+    local okN, num = pcall(tip.NumLines, tip)
+    local n = okN and Secrets.Number(num) or nil
+    local okName, name = pcall(tip.GetName, tip)
+    local prefix = okName and Plain(name) or nil
+    if not n or type(prefix) ~= "string" then return end
+    linePathOK = true
+    for i = firstIndex, n do
+        fn(_G[prefix .. "TextLeft" .. i], i, "Left")
+        fn(_G[prefix .. "TextRight" .. i], i, "Right")
+    end
+end
+
+--- 上一趟的账（自检读它）：见到几行、改了几行。
+local recolorSeen, recolorChanged = 0, 0
+
+--- 真正动手的地方。**alpha 必须原样传回去**：暴雪用 alpha 表示"这一行被调暗了多少"
+--- （不可用/置灰的属性行就是靠它），而 `SetTextColor` 少传第四个参数会把 alpha 顶成 1。
+--- 四个分量有一个读不出来（机密）就跳过这一行 —— 手册给 `FontString:GetTextColor` 与
+--- `GetText` 都标着 `SecretReturnsForAspect`（按规则集会返回机密值），所以这不是假想的防护。
+local function RecolorStaticText(tip)
+    if not neutralText then return 0, 0 end
+    local r, g, b = Color:GetNeutral()
+    if not r then return 0, 0 end
+
+    local changed, seen = 0, 0
+    local function Handle(fs)
+        if not fs or type(fs.GetTextColor) ~= "function"
+           or type(fs.SetTextColor) ~= "function" then return end
+        local ok, cr, cg, cb, ca = pcall(fs.GetTextColor, fs)
+        if not ok then return end
+        cr, cg, cb = Secrets.Number(cr), Secrets.Number(cg), Secrets.Number(cb)
+        if not (cr and cg and cb) then return end
+        local a = Secrets.Number(ca)
+        -- `ca ~= nil` 是机密数字也做得动的比较（AGENTS 的执法强度表），可以放心当"有没有第四个值"用
+        if ca ~= nil and not a then return end
+        a = a or 1
+        seen = seen + 1
+        if not IsStaticTextColor(cr, cg, cb) then return end
+        if math.abs(cr - r) < 0.01 and math.abs(cg - g) < 0.01 and math.abs(cb - b) < 0.01 then
+            return                                   -- 已经是我们的颜色：不重复写
+        end
+        pcall(fs.SetTextColor, fs, r, g, b, a)
+        changed = changed + 1
+    end
+
+    EachTooltipLine(tip, Handle, 2)
+    return changed, seen
+end
+
 --- 补一次内容：算签名，没变就只对齐小框；变了（换目标 / 按 Alt / 换物品）才重写文字。
 --- payload 来自暴雪的 post-call（见文件头）；兜底扫描那一路传的是上次缓存的那份。
 local function Enrich(tip, payload)
-    -- 标题配色属于"美化"本身，和「显示 ID」「补全描述」两个开关无关，所以放在早退之前
+    -- 两件"美化"（法术标题、正文归一）属于美化本身，和「显示 ID」「补全描述」两个开关无关，
+    -- 所以都放在早退之前。
     pcall(RecolorSpellTitle, tip)
+    local okR, changed, seen = pcall(RecolorStaticText, tip)
+    if okR and changed then
+        recolorChanged, recolorSeen = changed, seen or recolorSeen
+    end
 
     if not enrich and not idsByAlt then
         UpdateBox(tip, {}, nil)
@@ -688,7 +779,8 @@ end
 --- 不给调度器留一条空转订阅；模块关掉了 frame 也一并摘掉）。
 local function SyncJobs()
     local needFrame   = (mode ~= "off") or enrich or idsByAlt
-    local needContent = enrich or idsByAlt
+    -- 正文染色也算"要内容"：暴雪每次重填都会把颜色画回去，靠 post-call + 这一拍兜底重刷。
+    local needContent = enrich or idsByAlt or neutralText
 
     if needFrame then
         if not placeJob then placeJob = ns.Scheduler:EveryFrame(PlaceTick) end
@@ -737,6 +829,14 @@ end
 --- 依据是 `docs/api` 零命中，而快照只收 `C_*`）；②`Enum.TooltipDataType` 里那些键名在本客户端
 --- 对不对得上（写错就是"ID 行安静地不出现"，没有报错）；③运行期真见过哪些 type。
 function M:Diagnose(verbose)
+    -- 每一行既打到聊天框也记进 rows：type 账本最多 40 行，加上表头一定超出聊天框能留住的
+    -- 十几行（AGENTS「结果只认账本」同一条），所以末尾整本存进 SavedVariables。
+    local rows = {}
+    local function Say(line)
+        rows[#rows + 1] = line
+        ns:Print(line)
+    end
+
     local TDP = _G.TooltipDataProcessor
     local allTypes = (type(TDP) == "table") and TDP.AllTypes or nil
     local allText
@@ -749,26 +849,36 @@ function M:Diagnose(verbose)
         allText = n and tostring(n) or ("非数字(" .. type(allTypes) .. ")")
     end
 
-    ns:Print("---- 鼠标提示自检 ----")
-    ns:Print(("TooltipDataProcessor：表=%s，AddTooltipPostCall=%s，AllTypes=%s｜注册状态=%s"):format(
+    Say("---- 鼠标提示自检 ----")
+    Say(("TooltipDataProcessor：表=%s，AddTooltipPostCall=%s，AllTypes=%s｜注册状态=%s"):format(
         type(TDP),
         (type(TDP) == "table" and type(TDP.AddTooltipPostCall) == "function") and "有" or "无",
         allText, processorState))
-    ns:Print(("Enum.TooltipDataType：命中 %d 个，缺席 %d 个"):format(
+    Say(("Enum.TooltipDataType：命中 %d 个，缺席 %d 个"):format(
         enumHit and #enumHit or 0, enumMiss and #enumMiss or 0))
-    if enumHit and #enumHit > 0 then ns:Print("  认得：" .. table.concat(enumHit, ", ")) end
-    if enumMiss and #enumMiss > 0 then ns:Print("  没这个键名：" .. table.concat(enumMiss, ", ")) end
+    if enumHit and #enumHit > 0 then Say("  认得：" .. table.concat(enumHit, ", ")) end
+    if enumMiss and #enumMiss > 0 then Say("  没这个键名：" .. table.concat(enumMiss, ", ")) end
 
     local tip = _G.GameTooltip
-    ns:Print(("设置：位置=%s｜补全描述=%s｜Alt 显示 ID=%s"):format(
-        tostring(mode), enrich and "开" or "关", idsByAlt and "开" or "关"))
-    ns:Print(("订阅：每帧摆位=%s｜兜底扫描=%s（%dms）｜Alt 事件帧=%s"):format(
+    Say(("设置：位置=%s｜补全描述=%s｜Alt 显示 ID=%s｜正文归一=%s"):format(
+        tostring(mode), enrich and "开" or "关", idsByAlt and "开" or "关",
+        neutralText and "开" or "关"))
+    -- 正文染色的账：`取行路径` 是 NumLines + GameTooltipTextLeft<i> 那套能不能走通
+    -- （走不通就是"染色安静地不生效"，和枚举键名写错同一类毛病）；
+    -- 后两个数只反映**上一趟**，所以自检要边悬停边跑。
+    Say(("正文归一：取行路径=%s｜上一趟 见 %d 行 / 改 %d 行（neutral=%s）"):format(
+        linePathOK and "可用" or "没走通", recolorSeen, recolorChanged,
+        (function()
+            local r, g, b = Color:GetNeutral()
+            return r and ("%.2f,%.2f,%.2f"):format(r, g, b) or "读不出"
+        end)()))
+    Say(("订阅：每帧摆位=%s｜兜底扫描=%s（%dms）｜Alt 事件帧=%s"):format(
         placeJob and "在" or "无", contentJob and "在" or "无", CONTENT_INTERVAL_MS,
         modFrame and "在" or "无"))
     -- 可见性一律走 `TooltipVisible`（pcall + Secrets.Bool）：GameTooltip 属于可能被引擎
     -- 临时禁读的框，直接 `tip:IsVisible()` 会抛（AGENTS：三个 Watch 驱动都为此设了这道漏斗）。
     local _, tipVisible = TooltipVisible()
-    ns:Print(("驱动提示框：GameTooltip=%s，可见性=%s，我们的小框=%s"):format(
+    Say(("驱动提示框：GameTooltip=%s，可见性=%s，我们的小框=%s"):format(
         tip and "有" or "无",
         tip and (tipVisible and "可见" or "不可见/读不出") or "-",
         (box and box:IsShown()) and "显示" or "隐藏"))
@@ -777,16 +887,29 @@ function M:Diagnose(verbose)
     for k in pairs(typeLedger) do keys[#keys + 1] = k end
     table.sort(keys, function(a, b) return (typeLedger[a] or 0) > (typeLedger[b] or 0) end)
     if #keys == 0 then
-        ns:Print("type 账本：还没被暴雪回调叫过（悬停一个物品/单位再跑一次）。")
+        Say("type 账本：还没被暴雪回调叫过（悬停一个物品/单位再跑一次）。")
     else
         local shownCount = verbose and #keys or math.min(8, #keys)
-        ns:Print(("type 账本（共 %d 种，按次数排）："):format(#keys))
+        Say(("type 账本（共 %d 种，按次数排）："):format(#keys))
         for i = 1, shownCount do
-            ns:Print(("  %-18s ×%d"):format(keys[i], typeLedger[keys[i]]))
+            Say(("  %-18s ×%d"):format(keys[i], typeLedger[keys[i]]))
         end
         if #keys > shownCount then
-            ns:Print(("  ……另 %d 种：/mui tooltip diagnose all"):format(#keys - shownCount))
+            Say(("  ……另 %d 种：/mui tooltip diagnose all"):format(#keys - shownCount))
         end
+    end
+
+    -- 落盘（读法同 `compatReport`：**写盘比 /reload 晚 1–2 分钟**，别跑完立刻去读）：
+    --   <游戏目录>/WTF/Account/<账号>/SavedVariables/MonetUI.lua 里的 tooltipDiag
+    local ok, db = pcall(function() return ns:DB() end)
+    if ok and type(db) == "table" then
+        db.tooltipDiag = {
+            when = (_G.date and _G.date("%Y-%m-%d %H:%M:%S")) or nil,
+            processorState = processorState,
+            allTypes = allText,
+            rows = rows,
+        }
+        Say(("（全量 %d 行已存 MonetUIDB.tooltipDiag，WTF 里可直接读）"):format(#rows))
     end
 end
 
@@ -794,10 +917,18 @@ end
 -- 生命周期
 -- ============================================================================
 
+--- 四个设置一次读进缓存（每帧 / 每次回调都要读，别去翻 DB）。
+--- Apply / Initialize / SetEnabled 三个入口共用这一份 —— 加一个键漏一处，
+--- 症状是"面板上改了要重载才生效"，静态闸门抓不出来。
+local function ReadSettings(self)
+    mode        = ResolveMode(self)
+    enrich      = self:GetSetting("enrich") and true or false
+    idsByAlt    = self:GetSetting("idsByAlt") and true or false
+    neutralText = self:GetSetting("neutralText") and true or false
+end
+
 function M:Apply()
-    mode     = ResolveMode(self)
-    enrich   = self:GetSetting("enrich") and true or false
-    idsByAlt = self:GetSetting("idsByAlt") and true or false
+    ReadSettings(self)
     -- 开关变了：记账清零，下一拍按新设置重来。
     -- 注意**不 Hide 提示框**（以前的毛病：取消勾选会把正在看的提示框直接收掉）；
     -- SyncJobs 只会收掉**我们自己的**那块小框。
@@ -807,22 +938,78 @@ function M:Apply()
 end
 
 function M:Initialize()
-    mode     = ResolveMode(self)
-    enrich   = self:GetSetting("enrich") and true or false
-    idsByAlt = self:GetSetting("idsByAlt") and true or false
+    ReadSettings(self)
     Install()
 end
 
---- 模块开关：关掉只是让跟随、增强与 Alt 失效；`TooltipDataProcessor` 那层**没有反注册接口**，
---- 所以回调留着（它第一件事就是看开关），下次打开零成本。
+--- 模块开关：关掉只是让跟随、增强、Alt 与正文染色失效；`TooltipDataProcessor` 那层
+--- **没有反注册接口**，所以回调留着（它先问开关），下次打开零成本。
 function M:SetEnabled(value)
     if value then
         self:Apply()
         Install()
     else
-        mode, enrich, idsByAlt = "off", false, false
+        mode, enrich, idsByAlt, neutralText = "off", false, false, false
         SuppressHealthBar(false)
         SyncJobs()          -- 订阅整条摘掉 + 我们的小框收掉（Reset 在里面）
+    end
+end
+
+--- `/mui tooltip probe colors`：把**此刻**提示框每一行的颜色与文字记进 SavedVariables。
+--- 为什么要它：正文归一的判据是"按颜色分类"，而 1.60 上到底哪些行是白 / 灰 / 黄、
+--- 哪些是品质色与职业色，本仓没有实测过（`docs/api` 快照也不收这些行）。
+--- 悬停一件物品、一个单位、一个法术各跑一次，然后读
+---   WTF/Account/<账号>/SavedVariables/MonetUI.lua 里的 tooltipProbe
+--- 每行给：序号、左右列、颜色四分量、我们把它判成"静态"还是"身份"、文字前 40 字。
+--- 判错的行就改 `IsStaticTextColor` 的那四个阈值 —— 有这本账才谈得上调参。
+function M:ProbeLineColors()
+    local tip = _G.GameTooltip
+    local _, visible = TooltipVisible()
+    if not tip or not visible then
+        ns:Print("提示框此刻没显示：先用鼠标悬停一个物品 / 单位 / 法术，再跑一次。")
+        return
+    end
+
+    local rows = {}
+    local function Handle(fs, i, side)
+        if not fs or type(fs.GetText) ~= "function" or type(fs.GetTextColor) ~= "function" then return end
+        local okT, text = pcall(fs.GetText, fs)
+        local t = (okT and Plain(text)) or ""
+        if t ~= "" then
+            t = (t:gsub("|c%x+", "")):gsub("|r", "")     -- 行内色码只是噪声，去掉再记账
+        else
+            t = "(空)"
+        end
+        local okC, cr, cg, cb, ca = pcall(fs.GetTextColor, fs)
+        local r = okC and Secrets.Number(cr) or nil
+        local g = okC and Secrets.Number(cg) or nil
+        local b = okC and Secrets.Number(cb) or nil
+        local a = okC and Secrets.Number(ca) or nil
+        local verdict
+        if r and g and b then
+            verdict = IsStaticTextColor(r, g, b) and "静态" or "身份"
+        else
+            verdict = "读不出"
+        end
+        rows[#rows + 1] = ("%2d %-5s %-16s a=%-5s %-6s %s"):format(
+            i, side,
+            (r and g and b) and ("%.2f,%.2f,%.2f"):format(r, g, b) or "机密/读不出",
+            a and ("%.2f"):format(a) or "-",
+            verdict, t:sub(1, 40))
+    end
+
+    EachTooltipLine(tip, Handle, 1)     -- 探针从第 1 行起（要连标题的身份色一起看）
+
+    local ok, db = pcall(function() return ns:DB() end)
+    if ok and type(db) == "table" then
+        db.tooltipProbe = {
+            when = (_G.date and _G.date("%Y-%m-%d %H:%M:%S")) or nil,
+            lines = rows,
+        }
+    end
+    ns:Print(("提示框逐行颜色 %d 行：已存 MonetUIDB.tooltipProbe（WTF 里可直接读，写盘比 /reload 晚 1–2 分钟）"):format(#rows))
+    if not linePathOK then
+        ns:Print("取行路径没走通：NumLines / GameTooltipTextLeft<i> 在本客户端拿不到 —— 正文归一不会生效。")
     end
 end
 
@@ -835,6 +1022,10 @@ function M:HandleCommand(rest)
     end
     if sub == "diagnose all" or sub == "diag all" or sub == "all" then
         self:Diagnose(true)
+        return true
+    end
+    if sub == "probe" or sub == "probe colors" or sub == "colors" then
+        self:ProbeLineColors()
         return true
     end
     return false
