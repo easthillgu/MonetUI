@@ -460,11 +460,14 @@ local function CollectLines(tip, payload)
     return lines
 end
 
---- 法术 / 光环提示的标题统一成主题中性色。
+--- 法术 / 光环提示的标题**提亮**成主题 highlight 档，正文才归一成 neutral（灰）。
+---
+--- 2026-11-03 前这里写的是 `Color:GetNeutral()` —— 和正文同一个灰，实机读成
+--- "正文比标题还亮、标题反而发灰"（玩家报"颜色写反了"）。层级本来就该反过来：
+--- **标题亮、正文灰**，highlight 是设计语言里的强调色、neutral 是通用静态文字。
 ---
 --- 暴雪按"法术品质"把标题染成金色（实机 2026-11-01：`飞行模式：驭空术` = 1.00,0.82,0.00），
---- 而单位提示的标题是白色 —— 两种提示框的标题色不一致，也和 docs/DESIGN-LANGUAGE.md
---- 的决策 a（通用静态文字用 neutral，highlight 只给 hover/选中/焦点）冲突。
+--- 而单位提示的标题是白色 —— 两种提示框的标题色不一致，统一成主题色。
 ---
 --- **只动法术类**：物品提示的品质色（橙装 / 紫装）是有信息量的，保留。
 --- 判据：`GameTooltip:GetSpell()` 拿得到 spellID，且没有物品链接。
@@ -484,7 +487,9 @@ local function RecolorSpellTitle(tip)
     if not line or type(line.SetTextColor) ~= "function"
        or type(line.GetTextColor) ~= "function" then return end
 
-    local r, g, b = Color:GetNeutral()
+    -- 标题走 highlight（亮档），正文走 neutral（灰档）。只取 RGB：GetHighlight 自带
+    -- a = 0.5（那是洗色的强度，不是文字的），alpha 显式给 1。
+    local r, g, b = Color:GetHighlight()
     if not r then return end
     local okC, cr, cg, cb = pcall(line.GetTextColor, line)
     if okC and Secrets.Number(cr) and Secrets.Number(cg) and Secrets.Number(cb) then
@@ -492,7 +497,7 @@ local function RecolorSpellTitle(tip)
             return                                  -- 已经是我们的颜色：不重复写
         end
     end
-    pcall(line.SetTextColor, line, r, g, b)
+    pcall(line.SetTextColor, line, r, g, b, 1)
 end
 
 -- ---- 正文染色：通用说明文字归一到主题 neutral --------------------------------
@@ -507,17 +512,40 @@ end
 --
 -- **第 1 行（标题）整行不参与**：标题天然就是身份 —— 物品品质色、玩家职业色、
 -- 精英与首领的红。尤其精英 / 世界首领的标题正是纯黄（Quality2 = 1,1,0），
--- 这条就是"标题不碰"的实证理由。唯一被归一的标题是法术类（金色没有身份信息），
--- 那条走上面的 `RecolorSpellTitle`。
+-- 这条就是"标题不碰"的实证理由。唯一被改色的标题是法术类（金色没有身份信息），
+-- 那条走上面的 `RecolorSpellTitle` —— 但它是**提亮**成 highlight，不是拉平成 neutral。
 local ACHROMA_SPAN = 0.06    -- 三通道最大差小于这个 → 当无彩色
 local YELLOW_MIN   = 0.75    -- 纯黄的两条腿：r、g 都够亮
 local YELLOW_SPAN  = 0.08    -- 且 r 与 g 基本相等
 local YELLOW_MAX_B = 0.45    -- 而 b 明显掉下去
 
+-- 上面那条"窄黄带"只认 (1,1,0) 这种纯黄，正好漏掉暴雪真正用来写**普通说明文字**的两档
+-- （本客户端全局常量实测）：`NORMAL_FONT_COLOR` (1, 0.82, 0) —— r-g = 0.18，掉出窄带；
+-- `LIGHTYELLOW_FONT_COLOR` (1, 1, 0.6) —— b = 0.6，掉出 b 上限。结果就是"使用："这类正文
+-- 保持暴雪的亮黄，读起来比我们染灰的标题还亮（2026-11-03 玩家报"颜色写反了"）。
+-- 补的是**已知常量的容差比对**，不是把窄带放宽：放宽会把神器金 (1, 0.9, 0.41)、
+-- 橙装 (1, 0.5, 0) 这些**带信息量**的颜色一起拉平。
+local STATIC_TEXT_COLORS = {
+    { 1.00, 0.82, 0.00 },   -- NORMAL_FONT_COLOR
+    { 1.00, 1.00, 0.60 },   -- LIGHTYELLOW_FONT_COLOR
+    { 1.00, 1.00, 0.00 },   -- YELLOW_FONT_COLOR
+}
+local STATIC_TOL = 0.03
+
 local function IsStaticTextColor(r, g, b)
     if math.max(r, g, b) - math.min(r, g, b) < ACHROMA_SPAN then return true end
-    return math.abs(r - g) < YELLOW_SPAN
-       and r >= YELLOW_MIN and g >= YELLOW_MIN and b <= YELLOW_MAX_B
+    if math.abs(r - g) < YELLOW_SPAN
+       and r >= YELLOW_MIN and g >= YELLOW_MIN and b <= YELLOW_MAX_B then
+        return true
+    end
+    for i = 1, #STATIC_TEXT_COLORS do
+        local c = STATIC_TEXT_COLORS[i]
+        if math.abs(r - c[1]) <= STATIC_TOL and math.abs(g - c[2]) <= STATIC_TOL
+           and math.abs(b - c[3]) <= STATIC_TOL then
+            return true
+        end
+    end
+    return false
 end
 
 --- 逐行走提示框的文字（左列 + 右列），从第 2 行起（标题不参与，见上）。
