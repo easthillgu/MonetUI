@@ -1,0 +1,18 @@
+<!-- Modules/Tools/Tools.xml -->
+<!-- 工具模块加载清单：鼠标发光、耐久度、提示条、氛围暗角 -->
+<!-- 
+    加载顺序：
+    1. Cursor.lua - 鼠标发光效果
+    2. Durability.lua - 装备耐久度提示
+    3. Toast.lua - 通知提示条
+    4. Atmosphere.lua - 氛围暗角层
+    
+    注意：Atmosphere 必须在 InfoBar 之前加载（见 MonetUI.toc 注释）
+-->
+<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/
+..\FrameXML\UI.xsd">
+    <Script file="Cursor.lua"/>
+    <Script file="Durability.lua"/>
+    <Script file="Toast.lua"/>
+    <Script file="Atmosphere.lua"/>
+</Ui>

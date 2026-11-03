@@ -1,4 +1,4 @@
--- Modules/Toast.lua
+-- Modules/Tools/Toast.lua
 -- 通知横幅 (toast): 屏幕顶部一条主题化的提示，一次只显示一条，排队播完。
 --
 -- 自写实现，思路参考 Andromeda 的 Notification（GPL-3.0，代码不可复用）。和它的区别都跟本项目的

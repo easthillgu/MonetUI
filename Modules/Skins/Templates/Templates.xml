@@ -1,0 +1,16 @@
+<!-- Modules/Skins/Templates/Templates.xml -->
+<!-- 模板数据库加载清单 -->
+<!-- 
+    加载顺序：
+    1. TemplateDB.lua - 自动生成的模板数据库（从 FrameXML 提取）
+    2. CamelotOverrides.lua - 1.60 特有调整
+    3. TemplateRecognizer.lua - 增强版识别引擎
+    
+    必须在 Modules/Skins/Skins.xml 之前加载（在 MonetUI.toc 中配置）
+-->
+<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/
+..\FrameXML\UI.xsd">
+    <Script file="TemplateDB.lua"/>
+    <Script file="CamelotOverrides.lua"/>
+    <Script file="TemplateRecognizer.lua"/>
+</Ui>

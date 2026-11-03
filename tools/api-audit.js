@@ -197,7 +197,7 @@ const files = [];
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
     if (e.isDirectory()) {
-      if (e.name !== ".git" && e.name !== "tools" && (WITH_LIBS || e.name !== "Libs")) walk(p);
+      if (e.name !== ".git" && e.name !== "tools" && e.name !== "framexml-source" && (WITH_LIBS || e.name !== "Libs")) walk(p);
     } else if (e.name.endsWith(".lua")) files.push(p);
   }
 })(ADDON);

@@ -38,13 +38,12 @@ Modules\Bags\Bags.xml
 Modules\QuestTracker\QuestTracker.xml
 Modules\ActionBars\ActionBars.xml
 Modules\Nameplates\Nameplates.xml
-Modules\Tooltip.xml
-Modules\Cursor.xml
-Modules\Toast.xml
-Modules\Durability.xml
-# 暗角层排在信息条**之前**：同 BACKGROUND 档、同层级时创建更晚的盖在上面。
+Modules\Tooltip\Tooltip.xml
+# 工具模块：鼠标发光、耐久度、提示条、氛围暗角
+# 暗角层（Atmosphere）必须在信息条之前加载：同 BACKGROUND 档、同层级时创建更晚的盖在上面。
 # 信息条 / 小地图面板要压在暗角之上（两者都显式 SetFrameLevel(1) 写死了，这里只是第二道保险）。
-Modules\Atmosphere.xml
+Modules\Tools\Tools.xml
 Modules\InfoBar\InfoBar.xml
+# 模板数据库必须在皮肤引擎之前加载（TemplateDB -> TemplateRecognizer -> Skin:Recognize 查询）
+Modules\Skins\Templates\Templates.xml
 Modules\Skins\Skins.xml
-Modules\DevTools\DevTools.xml

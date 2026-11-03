@@ -1,4 +1,4 @@
--- Modules/Atmosphere.lua
+-- Modules/Tools/Atmosphere.lua
 -- A4 氛围暗角：一整张"世界之上、所有 UI 之下"的压暗层。
 --
 -- 只有暗角，没有画布齿纹（2026-11-02 点名：a4 做暗角，周边向中心变亮）。

@@ -1,4 +1,4 @@
--- Modules/Durability.lua
+-- Modules/Tools/Durability.lua
 -- 装备耐久警告（durability warning）：最低的装备耐久掉到阈值以下时，用通知横幅提醒一次；
 -- 修好 / 换装回到阈值以上之后才重新武装。
 --

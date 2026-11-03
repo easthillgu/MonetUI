@@ -1,5 +1,5 @@
 -- Modules/InfoBar/Blocks.lua
--- The six data blocks the strip can carry (money, durability, currency, system, spec, friends).
+-- The eight data blocks the strip can carry (money, durability, currency, system, spec, friends, quest, stats).
 -- Every value is read defensively: secret numbers go through Utils/Secrets.lua first, and a missing or unfit call simply leaves its block empty. Money formatting and the durability probe are ours, not copied from any reference addon.
 
 local ADDON_NAME, ns = ...
@@ -7,6 +7,7 @@ local M = ns.InfoBar
 if not M then return end
 
 local Secrets = ns.Secrets
+local Widget  = ns.Widget
 
 local function Tip()
     return _G.GameTooltip
@@ -79,49 +80,47 @@ M:RegisterBlock({
     end,
 })
 
-local DUR_SLOTS = { 1, 3, 5, 6, 7, 8, 9, 10, 15, 16 }
--- 头 / 肩 / 胸 / 腿 / 脚 / 手腕 / 手 / 腰 / 主手 / 副手
-
--- This client documents `GetInventoryItemDurability(slot)` where retail has `(unit, slot)`; a wrong arity raises, so the first successful call settles it for the session (shown by `/mui infobar diagnose`).
-local function DurabilityForSlot(slot)
-    if M.durabilityMode == nil then
-        local fn = _G.GetInventoryItemDurability
-        if type(fn) ~= "function" then return nil end
-
-        if pcall(fn, slot) then
-            M.durabilityMode = "slot"
-        elseif pcall(fn, "player", slot) then
-            M.durabilityMode = "unit"
-        else
-            return nil
-        end
-    end
-
-    local fn = _G.GetInventoryItemDurability
-    local ok, current, maximum
-    if M.durabilityMode == "unit" then
-        ok, current, maximum = pcall(fn, "player", slot)
-    else
-        ok, current, maximum = pcall(fn, slot)
-    end
-    if not ok then return nil end
-
-    current, maximum = Secrets.Number(current), Secrets.Number(maximum)
-    if not current or not maximum or maximum == 0 then return nil end
-    return current, maximum
-end
-
+-- 1.60 客户端的耐久 API 只支持背包物品：C_Container.GetContainerItemDurability(containerIndex, slotIndex)
+-- containerIndex: 0-4（角色背包 + 4 个背包）
+-- slotIndex: 背包内的槽位
+-- 已装备物品的耐久无法直接查询，需要实机验证是否有其他 API。
 local function DurabilityUpdate(block)
+    local api = _G.C_Container
+    if not api or type(api.GetContainerItemDurability) ~= "function" then
+        M:SetText(block, "")
+        return
+    end
+    
     local sum, count = 0, 0
-    for i = 1, #DUR_SLOTS do
-        local current, maximum = DurabilityForSlot(DUR_SLOTS[i])
-        if current then
-            sum = sum + current / maximum
-            count = count + 1
+    
+    -- 遍历 5 个背包（0 = 角色背包，1-4 = 额外背包）
+    for bagIndex = 0, 4 do
+        local numSlotsFn = api.GetContainerNumSlots
+        if type(numSlotsFn) ~= "function" then break end
+        
+        local okSlots, numSlots = pcall(numSlotsFn, bagIndex)
+        if not okSlots or not numSlots or numSlots < 1 then break end
+        numSlots = Secrets.Number(numSlots)
+        if not numSlots or numSlots < 1 then break end
+        
+        -- 遍历背包内的每个槽位
+        for slotIndex = 1, numSlots do
+            local ok, current, maximum = pcall(api.GetContainerItemDurability, bagIndex, slotIndex)
+            if ok and current and maximum then
+                current, maximum = Secrets.Number(current), Secrets.Number(maximum)
+                if current and maximum and maximum > 0 then
+                    sum = sum + current / maximum
+                    count = count + 1
+                end
+            end
         end
     end
-
-    if count == 0 then M:SetText(block, "") return end
+    
+    if count == 0 then
+        M:SetText(block, "")
+        return
+    end
+    
     M:SetText(block, string.format("%.0f%%", sum / count * 100))
 end
 
@@ -455,5 +454,399 @@ M:RegisterBlock({
         if button == "LeftButton" then
             M:OpenPanel("ToggleFriends")
         end
+    end,
+})
+
+-- =========================================================================
+-- 任务（Quest）
+-- =========================================================================
+
+local function QuestUpdate(block)
+    local api = _G.C_QuestLog
+    if not api or type(api.GetNumQuestLogEntries) ~= "function" then
+        M:SetText(block, "")
+        return
+    end
+    
+    local ok, numEntries = pcall(api.GetNumQuestLogEntries)
+    if not ok then
+        M:SetText(block, "")
+        return
+    end
+    
+    numEntries = Secrets.Number(numEntries)
+    if not numEntries then
+        M:SetText(block, "")
+        return
+    end
+    
+    M:SetText(block, string.format("%d", numEntries))
+end
+
+local function QuestTooltip()
+    local tip = Tip()
+    if not tip then return end
+    
+    local api = _G.C_QuestLog
+    if not api then return end
+    
+    pcall(tip.AddLine, tip, "任务日志", 0.6, 0.8, 1)
+    
+    local ok, numShown, numTotal = pcall(api.GetNumQuestLogEntries)
+    if ok then
+        numShown = Secrets.Number(numShown)
+        numTotal = Secrets.Number(numTotal)
+        
+        if numShown and numTotal then
+            pcall(tip.AddDoubleLine, tip, "显示任务", string.format("%d", numShown), 1, 1, 1, 1, 1, 1)
+            pcall(tip.AddDoubleLine, tip, "总任务数", string.format("%d", numTotal), 1, 1, 1, 1, 1, 1)
+        elseif numShown then
+            pcall(tip.AddLine, tip, string.format("当前任务: %d", numShown), 1, 1, 1)
+        else
+            pcall(tip.AddLine, tip, "没有活跃任务", 0.8, 0.8, 0.8)
+        end
+    else
+        pcall(tip.AddLine, tip, "无法读取任务日志", 0.8, 0.8, 0.8)
+    end
+end
+
+M:RegisterBlock({
+    key      = "quest",
+    label    = "任务",
+    position = "RIGHT",
+    events   = { "QUEST_LOG_UPDATE", "PLAYER_ENTERING_WORLD" },
+    update   = QuestUpdate,
+    tooltip  = QuestTooltip,
+    onClick  = function(_, button)
+        if button == "LeftButton" then
+            M:OpenPanel("ToggleQuestLog")
+        end
+    end,
+})
+
+-- =========================================================================
+-- 属性（Stats）
+-- =========================================================================
+-- 按职业 + 专精把玩家归到三类之一，分别显示对应的四项：
+--   法系输出：命中 / 法强 / 暴击 / 穿透（有值才显示）
+--   坦克    ：躲闪 / 招架 / 格挡 / 护甲减伤
+--   物理输出：命中 / AP / 暴击
+-- 每个 API 都 pcall + Secrets.Number，读不到就跳过这一行；分类失败整块空。
+-- 属性来源与 StatsPro_Forever 一致（本客户端所有 Unit*/Get* 都带
+-- SecretWhenUnitStatsRestricted 标记，脱战能读、战斗/副本可能变 nil）。
+
+-- classID 常量（1.60 只存在经典九职业，DK/DH/Monk 后续加）。
+local CLASS_WARRIOR, CLASS_MAGE, CLASS_ROGUE, CLASS_DRUID, CLASS_HUNTER = 1, 2, 3, 4, 5
+local CLASS_PRIEST, CLASS_PALADIN, CLASS_WARLOCK, CLASS_SHAMAN          = 6, 7, 9, 11
+
+-- { classID = { [specIndex] = category } }
+-- specIndex 来自 C_SpecializationInfo.GetSpecialization()（1..N），比专精名本地化稳。
+-- 治疗专精按主属性归入 caster（智力 + 法强），符合用户"其余"的三分法。
+local SPEC_CATEGORY = {
+    [CLASS_WARRIOR] = { "physical", "physical", "tank" },        -- Arms / Fury / Prot
+    [CLASS_MAGE]    = { "caster",   "caster",   "caster" },      -- Arcane / Fire / Frost
+    [CLASS_ROGUE]   = { "physical", "physical", "physical" },
+    [CLASS_DRUID]   = { "caster",   "tank",     "caster" },      -- Balance / Feral / Resto
+    [CLASS_HUNTER]  = { "physical", "physical", "physical" },
+    [CLASS_PRIEST]  = { "caster",   "caster",   "caster" },      -- Disc / Holy / Shadow
+    [CLASS_PALADIN] = { "caster",   "tank",     "physical" },    -- Holy / Prot / Ret
+    [CLASS_WARLOCK] = { "caster",   "caster",   "caster" },
+    [CLASS_SHAMAN]  = { "caster",   "physical", "caster" },      -- Ele / Enhance / Resto
+}
+
+-- pcall 一个函数，把第 n 个返回值走 Secrets.Number（读不到 → nil）。
+local function ReadNth(fn, n, ...)
+    if type(fn) ~= "function" then return nil end
+    local pack = { pcall(fn, ...) }
+    if not pack[1] then return nil end
+    return Secrets.Number(pack[n + 1])
+end
+
+-- 同一 API 的前 count 个返回值累加（UnitAttackPower 的 base / posBuff / negBuff）。
+local function SumNth(fn, from, count, ...)
+    if type(fn) ~= "function" then return nil end
+    local pack = { pcall(fn, ...) }
+    if not pack[1] then return nil end
+    local total = 0
+    for i = from, from + count - 1 do
+        local v = Secrets.Number(pack[i + 1])
+        if not v then return nil end
+        total = total + v
+    end
+    return total
+end
+
+-- 命中 = GetCombatRatingBonus(rating) + 对应的 *HitModifier（两个百分比相加）。
+-- rating 常量是本客户端的全局数字（CR_HIT_MELEE 等），拿不到就整行跳过。
+local function HitRating(ratingName, modifierName)
+    local rating = _G[ratingName]
+    if type(rating) ~= "number" then return nil end
+    local bonus = ReadNth(_G.GetCombatRatingBonus, 1, rating)
+    local mod   = ReadNth(_G[modifierName], 1)
+    if not bonus or not mod then return nil end
+    return bonus + mod
+end
+
+local function SpellHit()   return HitRating("CR_HIT_SPELL", "GetSpellHitModifier") end
+local function MeleeHit()   return HitRating("CR_HIT_MELEE", "GetHitModifier")      end
+local function MeleeCrit()  return ReadNth(_G.GetCritChance, 1)                     end
+local function SpellCrit()  return ReadNth(_G.GetSpellCritChance, 1)                end
+local function SpellPen()   return ReadNth(_G.GetSpellPenetration, 1)               end
+local function Dodge()      return ReadNth(_G.GetDodgeChance, 1)                    end
+local function Parry()      return ReadNth(_G.GetParryChance, 1)                    end
+local function Block()      return ReadNth(_G.GetBlockChance, 1)                    end
+
+-- UnitAttackPower 返回 (base, posBuff, negBuff)；三者相加与角色面板对齐，客户端允许负 buff（虚弱等 debuff）
+-- 时钳到 0，与 StatsPro 的 Nonnegative 一致。
+local function MeleeAP()
+    local total = SumNth(_G.UnitAttackPower, 1, 3, "player")
+    if not total then return nil end
+    return math.max(0, total)
+end
+
+-- 六系法强取最大值：Holy=2 / Fire=3 / Nature=4 / Frost=5 / Shadow=6 / Arcane=7（StatsPro 同款 school 索引）。
+-- 不猜专精对应哪系，直接给"你能打出的最高那一系"；对多系职业（战斗/惩戒圣骑士、平衡德）尤其合适。
+local function BestSpellPower()
+    local best
+    for school = 2, 7 do
+        local v = ReadNth(_G.GetSpellBonusDamage, 1, school)
+        if v and (not best or v > best) then best = v end
+    end
+    return best
+end
+
+-- 护甲减伤：优先用 C_PaperDollInfo.GetArmorEffectiveness（返回伤害倍率，1 - 倍率 = 减伤）；
+-- 客户端没这条 API 时退回经典公式 armor / (armor + 400 + 85 * attackerLevel)，上限 75%。
+-- attackerLevel 用 玩家等级 + 3（副本 BOSS 的等级修正）。
+local function ArmorMitigation()
+    local armor = ReadNth(_G.UnitArmor, 2, "player")
+    if not armor then return nil end
+    local level = ReadNth(_G.UnitLevel, 1, "player")
+    if not level or level < 1 then return nil end
+    local attackerLevel = level + 3
+
+    local api = _G.C_PaperDollInfo
+    if api and type(api.GetArmorEffectiveness) == "function" then
+        local ok, eff = pcall(api.GetArmorEffectiveness, armor, attackerLevel)
+        eff = ok and Secrets.Number(eff) or nil
+        if eff and eff >= 0 and eff <= 1 then
+            local pct = (1 - eff) * 100
+            if pct > 75 then pct = 75 end
+            return pct
+        end
+    end
+
+    local pct = armor / (armor + 400 + 85 * attackerLevel) * 100
+    if pct > 75 then pct = 75 end
+    return pct
+end
+
+local ROWS = {
+    caster = {
+        { label = "命中", value = SpellHit,        format = "%.1f%%" },
+        { label = "法强", value = BestSpellPower,  format = "%.0f"   },
+        { label = "暴击", value = SpellCrit,       format = "%.1f%%" },
+        { label = "穿透", value = SpellPen,        format = "%.0f"   }, -- 属性不存在时 value 返回 nil，自动不显示
+    },
+    tank = {
+        { label = "躲闪", value = Dodge,          format = "%.1f%%" },
+        { label = "招架", value = Parry,          format = "%.1f%%" },
+        { label = "格挡", value = Block,          format = "%.1f%%" },
+        { label = "减伤", value = ArmorMitigation, format = "%.1f%%" },
+    },
+    physical = {
+        { label = "命中", value = MeleeHit,   format = "%.1f%%" },
+        { label = "AP",   value = MeleeAP,    format = "%.0f"   },
+        { label = "暴击", value = MeleeCrit,  format = "%.1f%%" },
+    },
+}
+
+local CATEGORY_LABEL = { caster = "法系输出", tank = "坦克", physical = "物理输出" }
+
+local function CurrentCategory()
+    local classID = ClassID()
+    if not classID then return nil end
+    local specIndex = CurrentSpecIndex()
+    if not specIndex then return nil end
+    local list = SPEC_CATEGORY[classID]
+    if not list then return nil end
+    return list[specIndex]
+end
+
+-- 下挂窗口：块本体只画"属性"两个字（入口按钮）；点击才建面板、才读 API，关闭即停表。
+-- 之所以点开才读：本客户端所有属性 API 都带 SecretWhenUnitStatsRestricted，
+-- 常驻轮询在战斗 / 副本里 90% 是拿到 nil 的空转；玩家真要看时才读，节省资源。
+
+local PANEL_WIDTH   = 200
+local PANEL_LINE_H  = 18
+local PANEL_PAD     = 10
+local PANEL_REFRESH = 2   -- 面板开着时每 2 秒重读一遍
+local PANEL_ROWS    = 4   -- 最多四行（caster / tank 有 4 行，physical 只有 3 行，最后一行留空）
+
+local statsPanel, statsPanelTitle, statsPanelClose
+local statsPanelRows, statsTick = {}, 0
+
+local function HideStatsPanel()
+    if statsPanel then statsPanel:Hide() end
+end
+
+-- 每次打开 / 每次 tick 都跑：读值 + 写字段。读不到写 "—"（专精判不出则整块空）。
+local function FillStatsPanel()
+    if not statsPanel then return end
+
+    local category = CurrentCategory()
+    if not category then
+        statsPanelTitle:SetText("属性")
+        for i = 1, PANEL_ROWS do
+            local view = statsPanelRows[i]
+            if view then
+                view.label:SetText("")
+                view.value:SetText("")
+            end
+        end
+        return
+    end
+
+    statsPanelTitle:SetText("属性 · " .. (CATEGORY_LABEL[category] or ""))
+    local spec = ROWS[category]
+    for i = 1, PANEL_ROWS do
+        local view = statsPanelRows[i]
+        local row  = spec[i]
+        if view then
+            if not row then
+                view.label:SetText("")
+                view.value:SetText("")
+            else
+                local v = row.value()
+                view.label:SetText(row.label)
+                view.value:SetText(v and string.format(row.format, v) or "—")
+            end
+        end
+    end
+end
+
+-- 条贴屏幕上沿 → 面板向下挂；贴下沿 → 向上挂。每次 Show 都重锚（编辑模式可能已经搬动过条）。
+local function AnchorStatsPanel()
+    local block = M:GetBlock("stats")
+    if not statsPanel or not block or not block.frame then return end
+    statsPanel:ClearAllPoints()
+    if M:GetSetting("anchorTop") ~= false then
+        statsPanel:SetPoint("TOPLEFT",  block.frame, "BOTTOMLEFT", 0, -2)
+    else
+        statsPanel:SetPoint("BOTTOMLEFT", block.frame, "TOPLEFT",   0,  2)
+    end
+end
+
+local function BuildStatsPanel()
+    if statsPanel then return statsPanel end
+    local block = M:GetBlock("stats")
+    if not block or not block.frame then return nil end
+    if type(Widget) ~= "table" or type(Widget.Theme) ~= "function" then return nil end
+
+    -- UIParent 子框（不是 block.frame 的子框）：条体是 BACKGROUND 档，面板要压过游戏世界。
+    local frame = CreateFrame("Frame", "MonetUIInfoBarStatsPanel", UIParent, "BackdropTemplate")
+    frame:SetFrameStrata("DIALOG")
+    frame:SetSize(PANEL_WIDTH, PANEL_PAD * 2 + PANEL_LINE_H * (PANEL_ROWS + 1))
+    frame:SetClampedToScreen(true)
+    frame:EnableMouse(true)
+    frame:SetMovable(false)
+    if Widget.Theme then
+        Widget:Theme(frame, { thickness = 1, bgAlpha = 0.92, borderAlpha = 1 })
+    end
+
+    -- 标题
+    local title = Widget:Font(frame, 12, "pixel", "bright", "LEFT")
+    title:SetPoint("TOPLEFT",  frame, "TOPLEFT",  PANEL_PAD, -PANEL_PAD)
+    title:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -PANEL_PAD * 3, -PANEL_PAD)
+    title:SetText("属性")
+    statsPanelTitle = title
+
+    -- 关闭：模板自带 UIPanelCloseButton 外观，OnClick 覆盖成"只收我们的面板"。
+    local close = Widget:CloseButton(frame, 20)
+    close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 3, 3)
+    close:SetScript("OnClick", HideStatsPanel)
+    statsPanelClose = close
+
+    -- 四行 label / value
+    for i = 1, PANEL_ROWS do
+        local label = Widget:Font(frame, 12, "pixel", "neutral", "LEFT")
+        label:SetPoint("TOPLEFT", frame, "TOPLEFT", PANEL_PAD, -PANEL_PAD - PANEL_LINE_H * i)
+        label:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -PANEL_WIDTH / 2, -PANEL_PAD - PANEL_LINE_H * i)
+
+        local value = Widget:Font(frame, 12, "pixel", "bright", "RIGHT")
+        value:SetPoint("TOPLEFT", frame, "TOPLEFT", PANEL_WIDTH / 2, -PANEL_PAD - PANEL_LINE_H * i)
+        value:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -PANEL_PAD, -PANEL_PAD - PANEL_LINE_H * i)
+
+        statsPanelRows[i] = { label = label, value = value }
+    end
+
+    -- 关窗即停表：OnUpdate 只在 Show 期间跑；隐藏后什么都不做。
+    frame:SetScript("OnUpdate", function(self, elapsed)
+        local b = M:GetBlock("stats")
+        if not b or not b.frame or not b.frame:IsShown() then self:Hide() return end
+        local parent = b.frame:GetParent()
+        if parent and not parent:IsShown() then self:Hide() return end
+        statsTick = statsTick + elapsed
+        if statsTick >= PANEL_REFRESH then
+            statsTick = 0
+            FillStatsPanel()
+        end
+    end)
+
+    -- 条本体在宠物对战 / 关模块时会被 SetShown(false)；面板此时也要跟着收，不然会残留一个 DIALOG 层的框体。
+    if block.frame.SetScript then
+        local prevOnHide = block.frame:GetScript("OnHide")
+        block.frame:SetScript("OnHide", function(self)
+            if prevOnHide then prevOnHide(self) end
+            HideStatsPanel()
+        end)
+    end
+
+    statsPanel = frame
+    frame:Hide()
+    return frame
+end
+
+local function ShowStatsPanel()
+    if not BuildStatsPanel() then return end
+    AnchorStatsPanel()
+    statsTick = 0
+    FillStatsPanel()
+    statsPanel:Show()
+    statsPanel:SetFrameStrata("DIALOG")
+end
+
+local function ToggleStatsPanel()
+    if statsPanel and statsPanel:IsShown() then
+        HideStatsPanel()
+    else
+        ShowStatsPanel()
+    end
+end
+
+local function StatsUpdate(block)
+    -- 块本体只是入口按钮：常驻只画"属性"两个字，不做任何属性读取。
+    M:SetText(block, "属性")
+end
+
+local function StatsTooltip(block)
+    local tip = Tip()
+    if not tip then return end
+    if statsPanel and statsPanel:IsShown() then
+        pcall(tip.AddLine, tip, "再次点击收起面板", 0.8, 0.8, 0.8)
+    else
+        pcall(tip.AddLine, tip, "点击查看属性面板", 0.8, 0.8, 0.8)
+    end
+end
+
+M:RegisterBlock({
+    key      = "stats",
+    label    = "属性",
+    position = "LEFT",
+    -- 面板打开时由 OnUpdate 自己刷；关闭后一条 API 都不问，所以块本体不需要挂事件。
+    update   = StatsUpdate,
+    tooltip  = StatsTooltip,
+    onClick  = function(_, button)
+        if button == "LeftButton" then ToggleStatsPanel() end
     end,
 })

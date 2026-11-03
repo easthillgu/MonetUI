@@ -57,6 +57,9 @@ docs/*
 *.log
 luac.out
 Assets/Textures.bak/
+# 参考仓库：Gethe/wow-ui-source forever 分支只读克隆（4500+ 文件，供
+# tools/extract-templates.js 抓模板）。永远不进库，也不进包。
+framexml-source/
 
 # ---- 编辑器 / 系统 ----
 .codegraph/

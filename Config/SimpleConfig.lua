@@ -30,7 +30,7 @@ local MODULE_ORDER = {
     "UnitFrames", "Cooldown", "BuffFrame",
     "Minimap", "Bags", "QuestTracker", "ActionBars", "Nameplates", "Skins",
     "InfoBar", "Tooltip", "Cursor", "Toast", "Durability",
-    "Atmosphere", "DevTools",
+    "Atmosphere",
 }
 
 local MODULE_LABEL = {
@@ -49,7 +49,6 @@ local MODULE_LABEL = {
     Toast        = "通知横幅 (Toast)",
     Durability   = "耐久警告 (Durability)",
     Atmosphere   = "氛围暗角 (Atmosphere)",
-    DevTools     = "开发工具 (DevTools)",
 }
 
 local function MakeCheckbox(parent, label, yOffset, getter, setter)
@@ -1270,6 +1269,15 @@ function SimpleConfig:Build()
             function() return tooltip:GetSetting("idsByAlt") end,
             function(value)
                 tooltip:Settings().idsByAlt = value and true or false
+                tooltip:Apply()
+            end)
+
+        -- 正文归一只动"通用文字"（白 / 灰 / 纯黄的描述行），品质、职业、套装绿、未达标红
+        -- 这些身份信息一律不碰；标题行不参与（判据见 Modules/Tooltip.lua 的 IsStaticTextColor）。
+        MakeCheckbox(content, "提示框正文统一成主题文字色（保留品质 / 职业色）", row(26),
+            function() return tooltip:GetSetting("neutralText") end,
+            function(value)
+                tooltip:Settings().neutralText = value and true or false
                 tooltip:Apply()
             end)
 

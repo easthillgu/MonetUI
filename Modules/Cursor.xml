@@ -1,4 +1,0 @@
-<Ui xmlns="http://www.blizzard.com/wow/ui/">
-    <!-- MonetUI · Modules/Cursor — 光标拖尾 + 速度星芒（全部 Line 自绘，无贴图）。单文件模块。 -->
-    <Script file="Cursor.lua"/>
-</Ui>

@@ -1,4 +1,4 @@
--- Modules/Cursor.lua
+-- Modules/Tools/Cursor.lua
 -- 光标拖尾 + 速度光 (cursor trail / speed spark): 纯装饰, 与游戏功能无关.
 --
 -- 拖尾是一串 Line 段: 每次采样把光标位置压进队列, 相邻两点连一段, 段宽和 alpha 沿链递减,

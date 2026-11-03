@@ -1,4 +1,0 @@
-<Ui xmlns="http://www.blizzard.com/wow/ui/">
-    <!-- MonetUI · Modules/Atmosphere — A4 氛围暗角：一张压在"世界之上、所有 UI 之下"的压暗层，默认关。单文件模块。 -->
-    <Script file="Atmosphere.lua"/>
-</Ui>

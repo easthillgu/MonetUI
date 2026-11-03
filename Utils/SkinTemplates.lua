@@ -38,10 +38,19 @@ function Skin:LooksLikeItemButton(button)
 end
 
 --- 这个对象是什么控件？
---- @return "money"|"coloredbar"|"scroll"|"slider"|"editbox"|"checkbox"|"radio"|"button"|nil
+--- @return "money"|"coloredbar"|"scroll"|"slider"|"editbox"|"checkbox"|"radio"|"button"|"scrollbox"|"nineslice"|"selectable"|"templatelist"|"moneyinput"|"propertybutton"|nil
 ---         nil = 不认识，或者根本读不出来（forbidden 对象）
 function Skin:Recognize(obj)
     if not obj then return nil end
+    
+    -- 第一层：查模板数据库（TemplateRecognizer.lua 的 Skin:RecognizeEnhanced）
+    -- 数据库覆盖 387 个模板，包括 Aurora 的 26 个 SharedXML 皮肤文件目标
+    if self.RecognizeEnhanced then
+        local enhancedKind = self:RecognizeEnhanced(obj)
+        if enhancedKind then return enhancedKind end
+    end
+    
+    -- 第二层：回退到原有结构指纹
     local okKind, kind = pcall(obj.GetObjectType, obj)
     if not okKind or type(kind) ~= "string" then return nil end
 
@@ -93,6 +102,28 @@ function Skin:SkinControl(obj, kind, opts)
         return self:Money(obj)
     elseif kind == "coloredbar" then
         return self:ColoredBar(obj)
+    -- 新增类型（来自模板数据库）
+    elseif kind == "scrollbox" then
+        -- ScrollBox 框架：暂时回退到 scroll 处理
+        return self:ScrollFrame(obj)
+    elseif kind == "nineslice" then
+        -- NineSlice 面板：由 Skin:Strip 处理，这里只返回对象
+        return obj
+    elseif kind == "selectable" then
+        -- SelectableButton：暂时回退到 button 处理
+        return self:Button(obj, opts)
+    elseif kind == "templatelist" then
+        -- TemplatedList 框架：暂不处理，返回对象
+        return obj
+    elseif kind == "moneyinput" then
+        -- MoneyInputFrame：暂时回退到 editbox 处理
+        return self:EditBox(obj)
+    elseif kind == "propertybutton" then
+        -- PropertyButton（设置 UI 控件）：暂不处理，返回对象
+        return obj
+    elseif kind == "closebutton" then
+        -- 关闭按钮：回退到 button 处理
+        return self:Button(obj, opts)
     end
     return obj
 end
