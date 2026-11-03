@@ -1322,7 +1322,7 @@ function Skin:FindAnonClose(frame)
     return nil
 end
 
---- Restyle a standard close button into the theme, with our own art under it: normal = monet_close_normal, pushed = monet_close_push, highlight = monet_close_hover over the top (its blend mode is untouched, so hover only brightens the art).
+--- Restyle a standard close button into the theme, with our own art under it: normal = monet_close_normal, pushed = monet_close_push, highlight = monet_close_hover over the top (its blend mode is untouched, so hover only brightens the art), disabled = monet_close_push left untinted.
 -- The highlight is left white -- an additive tint would go invisible on the darker border colours.
 function Skin:CloseButton(button)
     if not button then return button end
@@ -1333,6 +1333,11 @@ function Skin:CloseButton(button)
         "monet_close_push")
     self:SwapArt(button.GetHighlightTexture and button:GetHighlightTexture(),
         "monet_close_hover")
+    -- 第 4 张：DisabledTexture。模板自带的 `RedButton-Exit-Disabled` 是一块**实心圆角方板**，
+    -- 不换掉的话按钮一禁用就"多出一个方框"（2026-11-03 玩家报）。换成灰色档
+    -- `monet_close_push`，并且**不跟着主题染色** —— 禁用态就该比常态暗一档。
+    self:SwapArt(button.GetDisabledTexture and button.GetDisabledTexture(),
+        "monet_close_push")
 
     if normal and normal.SetVertexColor then
         local r, g, b = Color:GetBorder()
