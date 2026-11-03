@@ -14,19 +14,19 @@ ns.Scheduler = Scheduler
 
 local masterFrame = nil
 local masterRunning = false
-local subs = {}   -- id -> { intervalMs, fn, acc, active }
+local subs = {}   -- id -> { intervalSec, fn, acc, active }
 local nextSubId = 1
 
 local function MasterTick(elapsed)
     for id, sub in pairs(subs) do
         if sub.active then
             sub.acc = sub.acc + elapsed
-            if sub.intervalMs <= 0 or sub.acc >= sub.intervalMs then
-                if sub.intervalMs <= 0 then
+            if sub.intervalSec <= 0 or sub.acc >= sub.intervalSec then
+                if sub.intervalSec <= 0 then
                     sub.fn(elapsed)
                     sub.acc = 0
                 else
-                    sub.acc = sub.acc - sub.intervalMs
+                    sub.acc = sub.acc - sub.intervalSec
                     sub.fn()
                 end
             end
@@ -50,11 +50,15 @@ local function EnsureRunning()
     f:Show()
 end
 
+--- `intervalMs` 是**毫秒**（调用点都按毫秒写），而 OnUpdate 给的 `elapsed` 是**秒** ——
+--- 所以在这里换算一次存成秒。以前直接把 250 当阈值存进去，和秒级累加器比，
+--- 等于"250 秒一次"：姓名板守卫和鼠标提示兜底扫描都写的是 250，实际几分钟才跑一拍，
+--- 而且不报错、看起来还在工作（AGENTS：单位混用的症状不是"差一点"）。
 function Scheduler:Every(intervalMs, fn)
     if type(fn) ~= "function" then return nil end
     local id = nextSubId
     nextSubId = nextSubId + 1
-    subs[id] = { intervalMs = intervalMs or 0, fn = fn, acc = 0, active = true }
+    subs[id] = { intervalSec = (intervalMs or 0) / 1000, fn = fn, acc = 0, active = true }
     EnsureRunning()
     return id
 end
