@@ -535,24 +535,23 @@ M:RegisterBlock({
 -- 属性来源与 StatsPro_Forever 一致（本客户端所有 Unit*/Get* 都带
 -- SecretWhenUnitStatsRestricted 标记，脱战能读、战斗/副本可能变 nil）。
 
--- classID 常量（1.60 只存在经典九职业，DK/DH/Monk 后续加）。
-local CLASS_WARRIOR, CLASS_MAGE, CLASS_ROGUE, CLASS_DRUID, CLASS_HUNTER = 1, 2, 3, 4, 5
-local CLASS_PRIEST, CLASS_PALADIN, CLASS_WARLOCK, CLASS_SHAMAN          = 6, 7, 9, 11
+-- 坦克 / 法系 / 物理 三档的判定 —— **不写职业表**（2026-11-03 修）。
+--
+-- 这里原本是一张按 classID **数字**排的 SPEC_CATEGORY，而那套编号是照"1.60 只有九职业"
+-- 的**猜测**排的。实机一测就翻车：`UnitClass("player")` 返回 `潜行者 / ROGUE / classID=4`，
+-- 盗贼是 **4** 不是 3 —— 于是盗贼查到了**德鲁伊**那一行（spec 2 = "tank"），
+-- 狂徒贼被显示成坦克。职业 ID 在不同客户端里本来就不是同一套编号，写死必然踩雷；
+-- 专精顺序同样是客户端说了算（德鲁伊在零售有 4 个专精，老表只有 3 格）。
+--
+-- 改成读客户端自己的事实，一张表都不需要：
+--   1. `GetSpecializationInfo(GetSpecialization())` 第 5 个返回值 `role`
+--      = "TANK" / "HEALER" / "DAMAGER" —— 客户端最清楚这个专精是干什么的；
+--   2. 非坦克按**主属性**分法系 / 物理：智力最高 = 法系（治疗也归这里，智力 + 法强，
+--      符合"坦克 / 法系 / 其余"的三分法），否则 = 物理。
+-- role 读不到（受限状态、或客户端没这套数据）就只按主属性判 —— 最坏也是"物理"，
+-- 不会再出现"盗贼 = 坦克"这种把人吓一跳的结论。
 
--- { classID = { [specIndex] = category } }
--- specIndex 来自 C_SpecializationInfo.GetSpecialization()（1..N），比专精名本地化稳。
--- 治疗专精按主属性归入 caster（智力 + 法强），符合用户"其余"的三分法。
-local SPEC_CATEGORY = {
-    [CLASS_WARRIOR] = { "physical", "physical", "tank" },        -- Arms / Fury / Prot
-    [CLASS_MAGE]    = { "caster",   "caster",   "caster" },      -- Arcane / Fire / Frost
-    [CLASS_ROGUE]   = { "physical", "physical", "physical" },
-    [CLASS_DRUID]   = { "caster",   "tank",     "caster" },      -- Balance / Feral / Resto
-    [CLASS_HUNTER]  = { "physical", "physical", "physical" },
-    [CLASS_PRIEST]  = { "caster",   "caster",   "caster" },      -- Disc / Holy / Shadow
-    [CLASS_PALADIN] = { "caster",   "tank",     "physical" },    -- Holy / Prot / Ret
-    [CLASS_WARLOCK] = { "caster",   "caster",   "caster" },
-    [CLASS_SHAMAN]  = { "caster",   "physical", "caster" },      -- Ele / Enhance / Resto
-}
+local LE_UNIT_STAT_STRENGTH, LE_UNIT_STAT_AGILITY, LE_UNIT_STAT_INTELLECT = 1, 2, 4
 
 -- pcall 一个函数，把第 n 个返回值走 Secrets.Number（读不到 → nil）。
 local function ReadNth(fn, n, ...)
@@ -663,15 +662,60 @@ local ROWS = {
 
 local CATEGORY_LABEL = { caster = "法系输出", tank = "坦克", physical = "物理输出" }
 
-local function CurrentCategory()
-    local classID = ClassID()
-    if not classID then return nil end
-    local specIndex = CurrentSpecIndex()
-    if not specIndex then return nil end
-    local list = SPEC_CATEGORY[classID]
-    if not list then return nil end
-    return list[specIndex]
+--- 当前专精的角色（"TANK" / "HEALER" / "DAMAGER"），读不到返回 nil。
+--- 入口取 `C_SpecializationInfo`：1.60 与零售 12.1.5 **都有这个命名空间**（实机两边都验过），
+--- 而 `GetSpecialization` / `GetSpecializationInfo` 那对全局在 1.60 不是全局（api-audit 的
+--- `[moved]` 就是它）—— 所以只走 C_*，不要再加全局兜底。
+--- 返回序：specId, name, description, icon, **role**, ...（两个客户端一致）。
+local function CurrentSpecRole()
+    local index = CurrentSpecIndex()
+    if not index then return nil end
+    local api = _G.C_SpecializationInfo
+    if not api or type(api.GetSpecializationInfo) ~= "function" then return nil end
+    local ok, _, _, _, _, role = pcall(api.GetSpecializationInfo, index, false, false)
+    if not ok or type(role) ~= "string" then return nil end
+    return role
 end
+
+--- 智力是不是主属性（法系 / 治疗 → true）。三样里任何一样读不到 → nil。
+local function IntellectPrimary()
+    local int = ReadNth(_G.UnitStat, 1, "player", LE_UNIT_STAT_INTELLECT)
+    if not int then return nil end
+    local str = ReadNth(_G.UnitStat, 1, "player", LE_UNIT_STAT_STRENGTH)
+    local agi = ReadNth(_G.UnitStat, 1, "player", LE_UNIT_STAT_AGILITY)
+    if not str or not agi then return nil end
+    return int >= str and int >= agi
+end
+
+--- 坦克 / 法系 / 物理 三档（口径见文件头上那段注释）。
+local function ComputeCategory()
+    if CurrentSpecRole() == "TANK" then return "tank" end
+    local intel = IntellectPrimary()
+    if intel == nil then return nil end
+    return intel and "caster" or "physical"
+end
+
+-- 分类**只算两次**：角色进入世界时一次、点开面板时再算一次（2026-11-03 玩家定的时机）。
+-- 别每 2 秒重算 —— 受限状态下 role / 属性都是机密值，重算只会把已经对的结果改错。
+local cachedCategory
+
+local function RefreshCategory()
+    cachedCategory = ComputeCategory()
+    return cachedCategory
+end
+
+local function CurrentCategory()
+    return cachedCategory
+end
+
+-- 职业判定在**角色进入世界**那一刻算一次（玩家定的时机），之后只靠点击触发。
+-- 算完就注销：`PLAYER_ENTERING_WORLD` 每次换地图都会发，重算没有意义。
+local categoryDriver = CreateFrame("Frame")
+categoryDriver:RegisterEvent("PLAYER_ENTERING_WORLD")
+categoryDriver:SetScript("OnEvent", function(self)
+    self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+    RefreshCategory()
+end)
 
 -- 下挂窗口：块本体只画"属性"两个字（入口按钮）；点击才建面板、才读 API，关闭即停表。
 -- 之所以点开才读：本客户端所有属性 API 都带 SecretWhenUnitStatsRestricted，
@@ -811,6 +855,8 @@ end
 
 local function ShowStatsPanel()
     if not BuildStatsPanel() then return end
+    -- 点开 = 重新触发一次判定（玩家定的时机：进入世界一次 + 点击）。
+    RefreshCategory()
     AnchorStatsPanel()
     statsTick = 0
     FillStatsPanel()
