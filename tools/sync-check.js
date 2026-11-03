@@ -58,7 +58,12 @@ const stripInterface = (text) => text.replace(/^## Interface:\s*\d+/m, '## Inter
 // 行尾不算内容差异：本仓混用 CRLF/LF，部署落盘的行尾和源文件不一定一致，
 // 逐字节比会把"刚部署完"的文件报成 STALE（实机误报过 UnitFrames.xml）。
 const stripEol = (text) => text.replace(/\r\n/g, '\n');
-const isText = (name) => /\.(lua|xml|toc|md|txt|js)$/i.test(name);
+// 2026-11-03 又抓到一例同族误报：`LICENSE` 没有扩展名，落到上面那条“逐字节比”的路里，而 git 的
+// 文本归一化让 worktree 里是 CRLF、仓库 blob 与已部署副本是 LF —— 内容完全一致却永久报 STALE
+// （实测 1088 vs 1067 字节 = 21 个 CR；`git hash-object 已部署副本` 等于 HEAD，说明部署副本没变）。
+// ⇒ 无扩展名的已知文本文件名也走 stripEol，别拿字节数当内容。
+const BARE_TEXT_NAMES = /^(LICENSE|NOTICE|COPYING|README|CHANGELOG|AUTHORS|THANKS)$/i;
+const isText = (name) => /\.(lua|xml|toc|md|txt|js)$/i.test(name) || BARE_TEXT_NAMES.test(path.basename(name));
 
 const repoFiles = new Map();
 for (const dir of DIRS) {
@@ -110,7 +115,10 @@ if (!quiet) {
     show('EXTRA in game copy', extra, '-- leftovers from an older deploy (harmless, but they are not in this repo)');
     console.log(sync
         ? '\nin sync: the client loads exactly this repo.'
-        : '\nOUT OF SYNC: run  powershell -File tools/deploy-retail.ps1  then /reload in game.');
+        // 脚本名是历史遗留：tools/deploy-retail.ps1 的默认目标就是上面这行 installed（_forever_，16001）。
+        : '\nOUT OF SYNC: run  powershell -File tools/deploy-retail.ps1'
+            + '   (that name is legacy -- it deploys to the _forever_ path above)'
+            + '   then /reload in game.');
 }
 
 process.exit(sync ? 0 : 1);

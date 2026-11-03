@@ -1,28 +1,37 @@
 <#
 .SYNOPSIS
-  Deploy MonetUI into a retail WoW client's Interface\AddOns folder.
+  Deploy MonetUI into the shipping client's Interface\AddOns folder.
 
 .DESCRIPTION
+  NAME IS HISTORY: this script is the one and only deploy path, and since
+  2026-11-02 its default target is the delivery client -- WOWFOREVER
+  (_forever_, Interface 16001).  Renaming the file would break every doc /
+  tool hint that already points at it (tools/sync-check.js tells you to run
+  exactly this name), so the hint stays and the header says what it does.
+  Only pass -Dest by hand when you really want the retired 12.1.5 install.
+
   Copies the runtime files (toc, Core.lua, Assets, Libs, Utils, Config, Modules)
   into <Dest>\Interface\AddOns\MonetUI, then rewrites the copied toc's
-  `## Interface:` line to the retail client's own number.  The source toc keeps
-  16001 (WoW Forever); retail would otherwise mark the addon out of date and
-  refuse to load it without ticking "Load out of date AddOns".
+  `## Interface:` line.  Default 16001 = same as the source toc, so for the
+  shipping client the patch is a no-op; pass -Interface 120105 only for a
+  retail run, where an unpatched 16001 would show "out of date" and need
+  "Load out of date AddOns" ticked.
 
   Re-run after every code change — the copy is mirrored, so deleted files go
-  away too.  WTF / SavedVariables are never touched.
+  away too.  Only our own MonetUI directory is written: other addons' files are
+  never touched.  WTF / SavedVariables are never touched.
 
 .PARAMETER Dest
-  The _retail_ directory of the retail client.
-  Default: the CN install on this machine.
+  Client root directory holding Wow.exe.
+  Default: the WOWFOREVER install on this machine (_forever_).
 
 .PARAMETER Interface
   Interface number written into the deployed toc.
-  12.1.5 = 120105 (MMmmpp).  Check the client build if it stops loading.
+  16001 = WoW Forever (the shipping target).  12.1.5 retail = 120105 (MMmmpp).
 
 .EXAMPLE
   powershell -File tools/deploy-retail.ps1
-  powershell -File tools/deploy-retail.ps1 -Dest "D:\WoW\_retail_"
+  powershell -File tools/deploy-retail.ps1 -Dest "D:\WoW\_retail_" -Interface 120105
 #>
 [CmdletBinding()]
 # NOTE: this script must stay ASCII-only. Windows PowerShell 5.1 reads BOM-less
@@ -42,7 +51,7 @@ $root = Split-Path -Parent $PSScriptRoot          # repo root
 $target = Join-Path $Dest 'Interface\AddOns\MonetUI'
 
 if (-not (Test-Path (Join-Path $Dest 'Wow.exe'))) {
-    throw "Not a _retail_ folder (no Wow.exe): $Dest"
+    throw "Not a WoW install (no Wow.exe): $Dest"
 }
 if (-not (Test-Path (Join-Path $root 'MonetUI.toc'))) {
     throw "Repo root not found at $root"
@@ -71,4 +80,8 @@ $patched = [regex]::Replace($text, '(?m)^## Interface:\s*\d+', "## Interface: $I
 $line = (Select-String -Path $toc -Pattern '^## Interface:').Line
 $count = (Get-ChildItem $target -Recurse -File | Measure-Object).Count
 Write-Host ("Done: {0} files, {1}" -f $count, $line) -ForegroundColor Green
-Write-Host "In game: tick 'Load out of date AddOns' if it still shows out of date." -ForegroundColor DarkGray
+if ($Interface -ne 16001) {
+    Write-Host "In game: tick 'Load out of date AddOns' if it still shows out of date." -ForegroundColor DarkGray
+} else {
+    Write-Host "Deployed to the shipping client (Interface 16001) -- verify with: node tools/sync-check.js" -ForegroundColor DarkGray
+}
