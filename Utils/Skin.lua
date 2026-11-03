@@ -889,6 +889,66 @@ function Skin:Tab(tab, opts)
     return tab
 end
 
+--- 12.x 的**新式**滚动条步进钮（`MinimalScrollBar` / `WowTrimScrollBar`）：箭头画在**一个**
+--- `button.Texture` region 上，mixin 每次按钮状态变化都 `Texture:SetAtlas(...)` 重设
+--- （`TrimScrollBar.lua` / `MinimalScrollBar.lua` 的 `OnButtonStateChanged`），所以直接换贴图
+--- 会被下一次 hover / 按下 / 禁用盖回去。做法和 ScrollBox 那批 atlas 箭头一致：把原图
+--- **alpha 压 0、自己叠一层** —— mixin 照旧改它那张看不见的图，我们的箭头不受影响
+--- （它只 SetAtlas、不碰 alpha，压一次就稳）。
+---
+--- 方向**不猜几何**，读它自己的图键（`upTexture` / `normalTexture`）—— 键值里明写着
+--- Up/Down/Left/Right；`Back` / `Forward` 这种成员名只表示"退/进"，横向还是纵向看不出来。
+local STEPPER_ATLAS_DIR = {
+    ["UI-ScrollBar-ScrollUpButton-Up"]          = "up",
+    ["UI-ScrollBar-ScrollDownButton-Up"]        = "down",
+    ["UI-ScrollBar-ScrollLeftButton-Up"]        = "left",
+    ["UI-ScrollBar-ScrollRightButton-Up"]       = "right",
+    ["UI-ScrollBar-ClassicScrollUpButton-Up"]   = "up",
+    ["UI-ScrollBar-ClassicScrollDownButton-Up"] = "down",
+    ["minimal-scrollbar-arrow-top"]             = "up",
+    ["minimal-scrollbar-arrow-bottom"]          = "down",
+    ["minimal-scrollbar-arrow-left"]            = "left",
+    ["minimal-scrollbar-arrow-right"]           = "right",
+}
+
+--- 给一只**新式**步进钮换箭头。老式（图在 GetNormalTexture 上的）直接返回 false，交给
+--- `Skin:ScrollBar` 的 SwapArt 那条。幂等：`Marked(button, "scrollArrow")` 去重，
+--- 和 `Skin:ScrollArrowButton` 共用一个标记，谁先到谁做。
+function Skin:Stepper(button)
+    if not button or Marked(button, "scrollArrow") then return false end
+    local tex = button.Texture
+    if not tex or type(tex.SetAlpha) ~= "function" then return false end
+    if self:TexOf(button, "GetNormalTexture") then return false end
+    local key = button.upTexture or button.normalTexture
+    local dir = key and STEPPER_ATLAS_DIR[key]
+    if not dir then return false end
+
+    Mark(button, "scrollArrow", true)
+    -- 压原图 + 它自己的 hover 高亮层（Overlay）：两层都是暴雪的图。
+    self:Fade(tex)
+    if button.Overlay and type(button.Overlay.SetAlpha) == "function" then
+        self:Fade(button.Overlay)
+    end
+
+    -- 步进钮是 18×16 这种非正方形，直接 SetAllPoints 会把 V 形拉宽 —— 取短边摆正方形。
+    local s = math.min(button:GetWidth() or 16, button:GetHeight() or 16)
+    local our = button:CreateTexture(nil, "ARTWORK", nil, 2)
+    our:SetSize(s, s)
+    our:SetPoint("CENTER")
+    our:SetTexture(Media:Texture("monet_chevron_up"))
+    Widget:Arrow(our, dir)
+    local r, g, b = Color:GetBorder()
+    if r then our:SetVertexColor(r, g, b) end
+    if not Marked(button, "arrowTint") then
+        Mark(button, "arrowTint", true)
+        self:OnTheme(function()
+            local nr, ng, nb = Color:GetBorder()
+            if nr then our:SetVertexColor(nr, ng, nb) end
+        end)
+    end
+    return true
+end
+
 --- Restyle a scroll bar (track + arrows + thumb).
 function Skin:ScrollBar(scrollbar)
     if not scrollbar then return scrollbar end
@@ -911,7 +971,10 @@ function Skin:ScrollBar(scrollbar)
     }
     for member, dir in pairs(arrowMap) do
         local button = scrollbar[member]
-        if button then
+        -- 只管**老式**步进钮（图在 GetNormalTexture 上）。新式那批的图在 `button.Texture` 上、
+        -- mixin 每次状态变化都 SetAtlas 重设，走下面的 Skin:Stepper —— 在这里 Strip 会把它的
+        -- 图压掉却没有东西补上（箭头直接消失）。
+        if button and self:TexOf(button, "GetNormalTexture") then
             self:Strip(button, { regions = true })
             -- FadeButtonArt zeros every art; then SwapArt puts our glyph back.
             self:FadeButtonArt(button)
@@ -935,6 +998,13 @@ function Skin:ScrollBar(scrollbar)
                 end
             end
         end
+    end
+
+    -- 新式步进钮：`MinimalScrollBar` / `WowTrimScrollBar` 的 Back / Forward（有的沿用旧成员名）。
+    -- 老式那几只在这里会被 Skin:Stepper 判掉（它们的图在 GetNormalTexture 上）。
+    for _, member in ipairs({ "Back", "Forward", "ScrollUpButton", "ScrollDownButton",
+                              "ScrollLeftButton", "ScrollRightButton" }) do
+        self:Stepper(scrollbar[member])
     end
 
     local thumb = scrollbar.Thumb
@@ -983,6 +1053,16 @@ end
 local SCROLL_ARROW_ATLAS = {
     ["minimal-scrollbar-arrow-top"]    = "up",
     ["minimal-scrollbar-arrow-bottom"] = "down",
+    ["minimal-scrollbar-arrow-left"]   = "left",
+    ["minimal-scrollbar-arrow-right"]  = "right",
+    -- 12.x 的 WowTrimScrollBar 步进钮（Back / Forward）：图也是 atlas，名字里写着方向。
+    -- Skin:Stepper 从按钮的 upTexture 键走同一条路；这里是全量扫描的兜底。
+    ["UI-ScrollBar-ScrollUpButton-Up"]    = "up",
+    ["UI-ScrollBar-ScrollDownButton-Up"]  = "down",
+    ["UI-ScrollBar-ScrollLeftButton-Up"]  = "left",
+    ["UI-ScrollBar-ScrollRightButton-Up"] = "right",
+    ["UI-ScrollBar-ClassicScrollUpButton-Up"]   = "up",
+    ["UI-ScrollBar-ClassicScrollDownButton-Up"] = "down",
 }
 local arrowRegions = setmetatable({}, { __mode = "k" })  -- [blizzardRegion] = true
 local arrowDriver, arrowAcc
@@ -1020,10 +1100,11 @@ function Skin:ScrollArrowButton(button)
                 arrowRegions[reg] = true
                 EnsureArrowDriver()
                 -- ② 我们自己的箭头：独立纹理，压在上层（一张朝上的图 + Widget:Arrow 转向）
-                local w = button:GetWidth() or 16
-                local h = button:GetHeight() or 16
+                -- 步进钮多是 18×16 这种非正方形，SetAllPoints 会把 V 形拉宽 —— 取短边摆正方形。
+                local s = math.min(button:GetWidth() or 16, button:GetHeight() or 16)
                 local our = button:CreateTexture(nil, "ARTWORK", nil, 2)
-                our:SetAllPoints(button)
+                our:SetSize(s, s)
+                our:SetPoint("CENTER")
                 our:SetTexture(Media:Texture("monet_chevron_up"))
                 Widget:Arrow(our, dir)
                 local r, g, b = Color:GetBorder()
