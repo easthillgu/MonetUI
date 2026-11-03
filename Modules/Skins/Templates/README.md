@@ -4,7 +4,15 @@
 
 ## 背景
 
-MonetUI 的模板识别系统（`Utils/SkinTemplates.lua` 的 `Skin:Recognize()`）原本只能通过运行时结构指纹识别 8 种控件类型。本模块通过提取暴雪 FrameXML 的模板定义，建立了包含 **387 个模板**的数据库，其中 **32 个已映射到 skinAs**，覆盖 Aurora 的 26 个 SharedXML 皮肤文件目标。
+MonetUI 的模板识别系统（`Utils/SkinTemplates.lua` 的 `Skin:Recognize()`）原本只能通过运行时结构指纹识别 8 种控件类型。本模块通过提取暴雪 FrameXML 的模板定义，建立了包含 **387 个模板**的数据库。
+
+> **运行时实际加载的只有 32 条**（映射到 skinAs 的那些）；其余 355 条在生成文件里以注释保留。
+> 而且这 32 条里**只有 5 条带 `fingerprints`** —— `Skin:MatchFingerprints` 对没有指纹的条目直接返回
+> false，所以真正能被 `LookupTemplate` 命中的目前是这 5 条（ColoredProgressBar / BasicHybridScrollFrame /
+> SelectableButton / TemplatedList / MoneyDisplayFrame）。想让更多模板参与识别，得给
+> `tools/extract-templates.js` 补指纹规则，而不是只加 skinAs 映射。
+
+覆盖 Aurora 的 26 个 SharedXML 皮肤文件目标。
 
 ## 文件结构
 
@@ -92,18 +100,32 @@ Skin:Recognize(obj)
 
 ### /mui skins templates
 
-显示模板数据库统计：
+显示模板数据库统计（数字取自运行时 `ns.TemplateDB`，所以是 32 条而不是源库的 387）：
 
 ```
-总模板数: 387
-已映射 skinAs: 32
-Camelot 覆盖: 1
-类型分布:
-  Frame: 217
-  Button: 112
-  Slider: 15
-  ...
+模板库（运行时）：32 条，5 条带指纹（能被 LookupTemplate 匹配），32 条映射到 skinAs，Camelot 覆盖 1 条
+  注：27 条没有指纹 —— 只登记了 type/skinAs，识别时不会被命中。
+类型分布：
+  Frame        13
+  Button        8
+  EditBox       3
+  ScrollFrame   3
+  Slider        3
+  CheckButton   2
+skinAs 分布：
+  scroll         4
+  editbox        3
+  money          3
+  button         2
+  checkbox       2
+  nineslice      2
+  slider         2
+  tab            2
+  …另有 12 种
+用法：/mui skins templates <片段> 按模板名 / skinAs 查映射。
 ```
+
+`/mui skins templates money` 会列出名字或 skinAs 含 `money` 的模板及其映射。
 
 ### /mui compat tmpl
 

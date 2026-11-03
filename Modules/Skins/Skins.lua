@@ -929,7 +929,7 @@ function M:PrintTemplates(raw)
         return
     end
 
-    local total, mapped, camelot = 0, 0, 0
+    local total, mapped, camelot, matchable = 0, 0, 0, 0
     local byType, bySkinAs = {}, {}
     for _, entry in pairs(db) do
         total = total + 1
@@ -940,6 +940,8 @@ function M:PrintTemplates(raw)
             bySkinAs[entry.skinAs] = (bySkinAs[entry.skinAs] or 0) + 1
         end
         if entry.camelotOnly then camelot = camelot + 1 end
+        -- 只有带指纹的条目会被 LookupTemplate 真正匹配（MatchFingerprints 对无指纹的条目直接返回 false）。
+        if entry.fingerprints then matchable = matchable + 1 end
     end
 
     --- 按数量降序、同数量按名字升序（结果稳定，不会每次刷新顺序不同）。
@@ -953,8 +955,12 @@ function M:PrintTemplates(raw)
         return list
     end
 
-    ns:Print(("模板库：|cffffd100%d|r 个模板，|cffffd100%d|r 个映射到 skinAs，Camelot 覆盖 |cffffd100%d|r 个")
-        :format(total, mapped, camelot))
+    ns:Print(("模板库（运行时）：|cffffd100%d|r 条，|cffffd100%d|r 条带指纹（能被 LookupTemplate 匹配），|cffffd100%d|r 条映射到 skinAs，Camelot 覆盖 |cffffd100%d|r 条")
+        :format(total, matchable, mapped, camelot))
+    if matchable < total then
+        ns:Print(("  注：%d 条没有指纹 —— 只登记了 type/skinAs，识别时不会被命中（生成文件里无指纹的模板多以注释保留）。")
+            :format(total - matchable))
+    end
 
     local types = ranked(byType)
     ns:Print("类型分布：")
