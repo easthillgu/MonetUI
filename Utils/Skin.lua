@@ -915,8 +915,8 @@ function Skin:ScrollBar(scrollbar)
             self:Strip(button, { regions = true })
             -- FadeButtonArt zeros every art; then SwapArt puts our glyph back.
             self:FadeButtonArt(button)
-            local normal = self:SwapArt(button.GetNormalTexture and button:GetNormalTexture(), "monet_chevron_up")
-            local pushed = self:SwapArt(button.GetPushedTexture and button:GetPushedTexture(), "monet_chevron_up")
+            local normal = self:SwapArt(self:TexOf(button, "GetNormalTexture"), "monet_chevron_up")
+            local pushed = self:SwapArt(self:TexOf(button, "GetPushedTexture"), "monet_chevron_up")
             Widget:Arrow(normal, dir)
             Widget:Arrow(pushed, dir)
             -- Run the same border tint cycle Skin:CloseButton uses -- the glyph sits on a
@@ -1068,8 +1068,8 @@ end
 function Skin:PageArrow(button, dir)
     if not button then return button end
     -- 一张朝上的图 + `Widget:Arrow` 转向（dir 仍是 "left" / "right"，调用点不用改）。
-    local normal = self:SwapArt(button.GetNormalTexture and button:GetNormalTexture(), "monet_chevron_up")
-    local pushed = self:SwapArt(button.GetPushedTexture and button:GetPushedTexture(), "monet_chevron_up")
+    local normal = self:SwapArt(self:TexOf(button, "GetNormalTexture"), "monet_chevron_up")
+    local pushed = self:SwapArt(self:TexOf(button, "GetPushedTexture"), "monet_chevron_up")
     Widget:Arrow(normal, dir)
     Widget:Arrow(pushed, dir)
     if normal and normal.SetVertexColor then
@@ -1267,6 +1267,19 @@ function Skin:EditBox(editBox)
     return editBox
 end
 
+--- 取一张控件的贴图 region：**必须带 self 调用**。
+-- `obj.GetNormalTexture()` 这种点调用在本客户端是 `bad argument #1 to '?' (Usage: local texture
+-- = self:Get...)`（2026-11-03 实机红字），而且不是所有方法都这么响 —— `GetDisabledTexture`
+-- 抛错，另一些只**静默返回 nil**，于是 `SwapArt(nil)` 直接 no-op、整步换肤悄悄没做还不报错。
+-- 统一走这个漏斗：拿不到就返回 nil（调用点的 `SwapArt(nil)` 本来就安全）。
+function Skin:TexOf(obj, getter)
+    if not obj or type(getter) ~= "string" then return nil end
+    local fn = obj[getter]
+    if type(fn) ~= "function" then return nil end
+    local ok, tex = pcall(fn, obj)
+    return ok and tex or nil
+end
+
 --- Swap a texture's art for one of ours and remember how to put the original back (atlas name or path, texcoords and alpha, all recorded for Skin:Rollback).
 -- The texture carries the side-table mark "art" so Skin:Fade leaves it alone.  Idempotent: a texture already carrying our art is returned as is.  @return the same texture, or nil when it cannot be swapped
 function Skin:SwapArt(tex, key)
@@ -1327,17 +1340,13 @@ end
 function Skin:CloseButton(button)
     if not button then return button end
 
-    local normal = self:SwapArt(button.GetNormalTexture and button:GetNormalTexture(),
-        "monet_close_normal")
-    local pushed = self:SwapArt(button.GetPushedTexture and button:GetPushedTexture(),
-        "monet_close_push")
-    self:SwapArt(button.GetHighlightTexture and button:GetHighlightTexture(),
-        "monet_close_hover")
-    -- 第 4 张：DisabledTexture。模板自带的 `RedButton-Exit-Disabled` 是一块**实心圆角方板**，
-    -- 不换掉的话按钮一禁用就"多出一个方框"（2026-11-03 玩家报）。换成灰色档
-    -- `monet_close_push`，并且**不跟着主题染色** —— 禁用态就该比常态暗一档。
-    self:SwapArt(button.GetDisabledTexture and button.GetDisabledTexture(),
-        "monet_close_push")
+    -- 取图一律走 `Skin:TexOf`（带 self + pcall）：点调用会抛错或静默返回 nil，见 TexOf 的头注。
+    -- 四张都要换：disabled 不换就是"多一个方框"（模板的 `RedButton-Exit-Disabled` 是实心方板）。
+    local normal = self:SwapArt(self:TexOf(button, "GetNormalTexture"), "monet_close_normal")
+    local pushed = self:SwapArt(self:TexOf(button, "GetPushedTexture"), "monet_close_push")
+    self:SwapArt(self:TexOf(button, "GetHighlightTexture"), "monet_close_hover")
+    -- Disabled：换成灰色档 `monet_close_push`，并且**不跟着主题染色** —— 禁用态就该比常态暗一档。
+    self:SwapArt(self:TexOf(button, "GetDisabledTexture"), "monet_close_push")
 
     if normal and normal.SetVertexColor then
         local r, g, b = Color:GetBorder()
