@@ -761,7 +761,9 @@ local function BuildStatsPanel()
     title:SetText("属性")
     statsPanelTitle = title
 
-    -- 关闭：模板自带 UIPanelCloseButton 外观，OnClick 覆盖成"只收我们的面板"。
+    -- 关闭：尺寸 / 行为来自 UIPanelCloseButton，✕ 材质由 `Widget:CloseButton` 统一换上
+    -- （monet_close_{normal,hover,push} + 边框色染色）—— 别再在调用点补 `Skin:CloseButton`，
+    -- 那正是以前漏掉一处、面板上留了暴雪红圆钮的原因。OnClick 覆盖成"只收我们的面板"。
     local close = Widget:CloseButton(frame, 20)
     close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 3, 3)
     close:SetScript("OnClick", HideStatsPanel)

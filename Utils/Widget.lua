@@ -1245,9 +1245,20 @@ function Widget:StyleCooldownText(cd, size, key, color, flags, exact)
     end
 end
 
+--- Our close button: UIPanelCloseButton 的尺寸与行为 + **统一的 ✕ 材质**。
+-- 皮肤这一步刻意放在工厂里，不留给调用点：以前每个调用点自己补一句 `Skin:CloseButton(close)`，
+-- 2026-11-03 发现 InfoBar 属性面板漏了这一句 —— 面板上就是暴雪的红色圆钮，和其余窗口的
+-- 细金 ✕ 并排两种画风。忘不掉的做法是把唯一入口（`Skin:CloseButton`）挪进这里。
+-- `Skin:CloseButton` 幂等（`SwapArt` 对已换过 art 的贴图直接返回、主题钩子有 `Mark` 守卫），
+-- 所以 SimpleConfig / Bags 里那两处显式调用重复跑也无害，不必删。
 function Widget:CloseButton(parent, size)
     local btn = CreateFrame("Button", nil, parent, "UIPanelCloseButton")
     Widget:Size(btn, size or 24)
+    -- Skin.lua 在 Utils.xml 里排在本文件**之后**，加载期拿不到；调用发生在运行期，届时它已就位。
+    local Skin = ns.Skin
+    if Skin and type(Skin.CloseButton) == "function" then
+        Skin:CloseButton(btn)
+    end
     return btn
 end
 

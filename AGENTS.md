@@ -293,6 +293,10 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   （2026-10-30 收口）：它内部按固定顺序做"剥原美术 → 挂底衬 → 窗口件 → 深扫 → 可见期补扫"。
   以前这五行在每个文件里手抄一遍、顺序还各写各的（先挂底衬再 Strip 的把自己的底衬剥掉了）。
   只处理单个控件用 `opts.as = "tab|button|scroll|slider|dropdown|editbox|fade"`，窗口件走 `window = true`。
+- **控件工厂造出来的东西自带统一材质，调用点不要再补皮肤**（2026-11-03）：`Widget:CloseButton`
+  内部已经走 `Skin:CloseButton`（✕ 三态 + 边框色染色），而以前是"工厂只造框、调用点自己补一句"，
+  于是 InfoBar 属性面板那一处漏了 —— 面板上是暴雪红圆钮，和其余窗口的细金 ✕ 两种画风。
+  幂等，所以显式再调一次无害；新增控件工厂照此办理（皮肤挪进工厂，别改成"记住补一句"）。
 - **确认对象存在只有一个漏斗 `Skin:Need(path)`**（点路径也认，如 `"CharacterFrame.CloseButton"`）：
   命中/落空都记进账本（`Skin.With(scope, fn)` 定作用域），`/mui skins diagnose` 读的就是这本账。
   不要再自己写 `_G[x]` 或 `ns.ResolvePath`（已删）——名字写错必须是账本里的一行 ✗，不是静默跳过。
