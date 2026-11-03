@@ -320,6 +320,31 @@ function drawX(ctx, cx, cy, size, color, displayPx) {
   ctx.stroke();
 }
 
+// close（X）：参照 Andromeda `ui-close.blp`（_classic_titan_ 那份）重绘。
+// 参考件实测：32px 画布上字形 bbox 4..27（跨度 24/32 = 75%）、笔画 ≈4px（12.5%）、
+// 圆头 + 四边全抗锯齿、质心正好在画布中心。这里按同一比例画：64px 上 bbox 48px、笔画 8px，
+// 用同一公式在 32px 上会得到 bbox 4..27，与参考件逐像素重合。
+const CLOSE_GLYPH_SPAN   = 0.75;   // 字形 bbox / 画布
+const CLOSE_GLYPH_STROKE = 0.125;  // 笔画 / 画布（参考件 4px @32）
+
+function drawCloseX(ctx, size, color) {
+    const c = size / 2;
+    const t = size * CLOSE_GLYPH_STROKE;
+    // 圆头两端各向外多出 t/2，所以端点半径要扣掉一笔；
+    // c 取 size/2（= 像素镜像轴），图形在 x↔size-x、y↔size-y 下严格对称。
+    const s = (size * CLOSE_GLYPH_SPAN - t) / 2;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = t;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(c - s, c - s);
+    ctx.lineTo(c + s, c + s);
+    ctx.moveTo(c + s, c - s);
+    ctx.lineTo(c - s, c + s);
+    ctx.stroke();
+}
+
 function drawCircleBorder(ctx, cx, cy, r, color) {
   ctx.strokeStyle = color;
   ctx.lineWidth = LINE_WIDTH.icon;
@@ -850,6 +875,10 @@ const generators = {
   'monet_barfill_thin':  (ctx, w, h) => drawBarFillThin(ctx, w, h),
   'monet_stripe_weave':  (ctx, w, h) => drawBarStripe(ctx, w),
   'monet_check':         (ctx, w, h) => drawCheck(ctx, w/2, h/2, Math.min(w,h), PALETTE.stencil, 20),
+  // close 三态：同一几何，颜色取当前视觉档的 CLOSE.*（标准档 = 白 / 金 / 灰）。
+  'monet_close_normal':  (ctx, w, h) => drawCloseX(ctx, Math.min(w, h), CLOSE.normal),
+  'monet_close_hover':   (ctx, w, h) => drawCloseX(ctx, Math.min(w, h), CLOSE.hover),
+  'monet_close_push':    (ctx, w, h) => drawCloseX(ctx, Math.min(w, h), CLOSE.push),
   'monet_corner':        (ctx, w, h) => drawCorner(ctx, w),
   'monet_hairline':      (ctx, w, h) => drawHairline(ctx, w, h),
   'monet_radio':         (ctx, w, h) => drawRadio(ctx, w/2, h/2, Math.min(w,h), 20),
@@ -862,9 +891,10 @@ const generators = {
   'monet_vignette_62':     (ctx, w, h) => drawVignette(ctx, w, h, 0.62),
   'monet_vignette_55':     (ctx, w, h) => drawVignette(ctx, w, h, 0.55),
 };
-// 以下 glyph 改由 tools/import-glyphgen.js 从 ../glyphgen 导入（覆盖率+像素对齐）：
-//   monet_chevron_up/down、monet_arrow_left/right、monet_close_normal/hover/push、
-//   monet_win_maximize/minimize。它们**不在**本生成器里 —— 跑了 regen 也不会覆盖导入的像素。
+// close 三态从 2026-11-03 起回到本脚本绘制（同一几何 + 各档 CLOSE 颜色）；
+// 它此前来自仓库外的 glyphgen，源已不在仓库里。
+// 仍由外部导入、**不在** generators 里的只有：
+//   monet_win_maximize/minimize —— 跑 regen 不会覆盖它们。
 
 // 尺寸定义（2 的幂次方）
 const SIZES = {

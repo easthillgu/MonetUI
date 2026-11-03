@@ -2772,6 +2772,29 @@ BTP 甚至**双轨混用**：同一个"是否已装钩"的语义，`NameplateAtt
 3. **新增（组框）**：`Groups.lua:940 MuteOne` 的 `Restricted()` 一刀切改成逐框 `Secrets.Bool(frame:IsProtected(), true)`。
    验收只看一个数：`/mui restrict` 的拦截计数**下降**；持平或上升就是判据用错，回滚。
 
+## 8.26 2026-11-03 close 材质重绘（参照 Andromeda `ui-close.blp`）
+
+**参考件**：`_classic_titan_\Interface\AddOns\Andromeda\assets\textures\ui-close.blp`，
+32×32，字形 bbox `4..27`（跨度 24/32 = **75%**），笔画 ≈**4px（12.5%）**，圆头 + 四边全抗锯齿，
+质心正好落在画布中心（15.50, 15.50）。
+
+**旧 MonetUI close**（64×64，glyphgen 导入）：bbox `16..48`（33px，奇数）、笔画 ≈5px（7.8%）、
+质心偏 +0.5px。显示到 32px 时比参考件细一圈，而且跨度是奇数 —— 翻转/旋转时会差 1px。
+
+**新实现**（`tools/regen-textures.js` 的 `drawCloseX`，三态共用几何）：
+
+- `CLOSE_GLYPH_SPAN = 0.75`、`CLOSE_GLYPH_STROKE = 0.125`，端点半径扣掉一笔给圆头；
+- 64×64 结果：bbox `7..56`（50px，78%）、笔画 8px（12.5%）、质心 `31.49, 31.47`（画布中心 31.5）✅；
+- 用同一公式画 32×32 会得到 bbox `4..27`，与参考件逐像素重合；
+- 颜色仍按视觉档取 `CLOSE.{normal,hover,push}`：standard = 白（染色）/ `#e8c078`（hover，刻意不染）/
+  `#acacac`（push）。
+
+**对照图**：`%TEMP%\opencode\close-compare.png`（三家都按 32px 实际显示尺寸渲染后 8× 放大）。
+**验收**：`node tools/audit-pixels.js` 34 张全 PASS（白色衬底 0 违规、STENCIL 色相 0）。
+
+> 备注：close 此前由仓库外的 `tools/../glyphgen` 导入，源已不在仓库里；现在回到脚本生成，
+> 以后改 close 只改 `drawCloseX` 一处。`AGENTS.md` 里"现役 9 张 SVG"已降为 6 张。
+
 ## 9. 建议的下一步（按价值排序）
 
 1. **实机回归 P0/P1 的改动面**（`docs/HANDOFF.md` 8.6.2 + `TODO.md` 的 9 条清单）：
