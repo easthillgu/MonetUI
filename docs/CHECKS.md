@@ -26,6 +26,27 @@ node tools/api-audit.js
 node tools/audit-pixels.js     # 2 的幂 / 纯白衬底 / 染色模具无色相
 ```
 
+> **能力事实（11-03 审查实测）**：Andromeda 参考件那族贴图是 TGA **type 10（RLE 压缩 32bpp）**
+> （`statusbar-stripes-thin.tga` 头字节逐字节核过：type=10、64×32、32bpp），本仓现有解码链按未压缩
+> 顺序读（只实际吃得下 type 2，遇 type 10 会静默读乱）。以后比对参考件用
+> `tools/compare-andromeda-close.js`（:35 起自带 type 2/10 × 24/32bpp 解码），
+> **不要手改 `tools/audit-pixels.js`**。
+
+改了**品质色**（`Utils/Skin.lua` 的 `Skin:QualityColor` / `QUALITY_FALLBACK`）还要跑：
+
+```powershell
+node tools/quality-color-probe.js   # 品质色单一真值源闸门（源码级 + Lua 探针），退出码 0 才算完
+```
+
+> **这条闸门够不到的东西（11-03 本车道实跑：入口 4 项 + 探针 48 断言全绿）**：它断言的是**接线与形状**
+> （六档字面量只允许在 `Utils/Skin.lua` 出现、Bags 不再有 `QUALITY_COLOR`、色块统一命名字段 `{r,g,b}`、
+> `tipPrev` 机密守卫）。**订正本条早前那句"跑的是 `api_stub.lua` 的假 `GetItemQualityColor`"**（写错了）：
+> 探针头注明写"为什么不 use `tools/harness/api_stub.lua`（那是 harness 道正在改的文件）"，它**自供假 `C_Item`**
+> 并把发行码那段编进 chunk 跑 —— 成功支**是被走到的**，但用的三个数是编的 ⇒ **客户端真返回什么颜色，它一个字节也拿不到**。
+> 另：**走 `api_stub` 的 harness 跑连成功支都进不去**（stub 返回一张表，真实返回三个 number + 字符串）⇒
+> 那条路径看到的品质色**必然是旧兜底六档**，别当"客户端色已比对"（判据与行号证据 HANDOFF 8.29 **判例⑤**）。
+> "1.60 上客户端色 == 旧手调六档"只能实机眼看，判据在 C2 品质色条（账见 HANDOFF 8.29.1 A10 / 判例④⑤）。
+
 ---
 
 ## B. 部署 + 实机（有 wuxian MCP 时）
@@ -39,6 +60,17 @@ tools.wuxian.reload({reason="一句话说明这次改了什么"})   # 弹按钮�
 tools.wuxian.logs({since=0, limit=300})            # 看 ERR / BLOCKED
 tools.wuxian.snap({region={0,0,400,200}})          # 截图核对视觉
 ```
+
+> **sync-check 自身的坑（11-03 集成道修复，"工具字段会骗人"判例，与 `status.addons_dir` 同族）**：
+> `isText()` 原先只认扩展名，**无扩展名的 `LICENSE` 落到逐字节比**那条路，而 git 的 CRLF↔LF 文本归一化
+> 使 worktree 副本与部署副本**字节不同、内容相同** ⇒ **永久假 STALE**（实测 1088 vs 1067 = 21 个 CR；
+> `git hash-object 部署副本` = `HEAD:` blob）。修复 = 无扩展名已知文本名也走 stripEol
+> （`tools/sync-check.js:58-66` 含原始注释与 2026-11-03 案文；`node --check` 过；修后 LICENSE 从 STALE
+> 列消失，**11→10**）。**同族坑仓里注释过一次**（逐字节比把刚部署完的文件报 STALE、实机误报过
+> `UnitFrames.xml`），当时只补扩展名清单、没盖到无扩展名文件。
+> **判据口径**：① 判"部署产物是哪批代码"用**内容比对**（`git hash-object` vs `HEAD:<同路径>`），
+> **mtime 无判据价值**（robocopy 保留源 mtime，11-03 定案不记）；② `_retail_` 里 MonetUI 与 `_forever_`
+> 副本**同版本号 0.12.0**，不能用来判新旧 —— 要判就比内容。
 
 > **新增文件或改了 `.toc`**：本客户端实测 `/reload` **会**重读 `.toc` 并加载新增文件
 > （2026-10-25 18:48 新建的 `CastBar.lua` 里的 nil 报错当晚 18:54 就实机报出来了），
@@ -71,6 +103,10 @@ tools.wuxian.snap({region={0,0,400,200}})          # 截图核对视觉
 
 ## C2. 视觉语言验收（`docs/DESIGN-LANGUAGE.md`）
 
+> **本段验收的判据前提（11-03）**：先确认部署产物是预期的那批代码 —— 用**内容比对**
+> （`git hash-object` 已部署文件 vs `HEAD:<同路径>`），**不看 mtime、不看版本号**（判例见 B 段与
+> HANDOFF 8.29"工具/数据源陷阱判例"第②③条）。
+
 改完美化 / 换主题 / 换客户端后，逐条对：
 
 - [ ] **透明度阶梯**只出现这些值（多了 0.955 之类的散点 = 违规）：
@@ -82,12 +118,108 @@ tools.wuxian.snap({region={0,0,400,200}})          # 截图核对视觉
 - [ ] **字号只有四档** 10 / 12 / 15 / 24；间距只走 2 的倍数，位置全过 `Media:SnapUnit`。
 - [ ] **颜色键只有一张表** `Widget:PaletteColor`；新增一档只改那里（`Skin:ColorText` 用 `Color:Get`
   会静默回退 edge，见 AGENTS「客户端行为细则」）。
+- [ ] **品质色只有一个真值源**（11-03 收口，`Utils/Skin.lua:1526-1616`；账见 HANDOFF 8.29.1 A10）：
+  口径 = **先问客户端** `C_Item.GetItemQualityColor`，问不到（无 `C_Item` / 读不出 / 越界）才落 `QUALITY_FALLBACK`
+  那六个手调数（**逐位等于改动前**）。实机判据（1.60 第一条，也是这次改动的唯一收益所在）：
+  **同一件史诗装（q=3）在 ①背包格品质边 ②商人窗格品质边 ③鼠标提示里的品质文字色 三处是同一个颜色**；
+  灰 / 白（0 / 1）照旧**素边不上色**；商人翻页、交易换物品后 **0.5s 驱动帧内**跟上（不必 `/reload`）。
+  任何一处与其它两处不同 = 那里没走 `Skin:QualityColor`（`grep -rn "QualityColor" Modules Utils` 应只命中
+  `Utils/Skin.lua` 定义 + `Modules/Bags/Bags.lua` 取用）。**离线闸门判不了颜色本身**（A 段那条只断言接线），
+  归因入口：无专用命令，靠截图对比 —— 别拿 `quality-color-probe` 绿灯当"客户端色一致"的证据。
 - [ ] **主菜单**：11 个按钮无暴雪红石头（`128-RedButton-*` 全 alpha 0）、文字 `bright`；
-- [ ] **标题线**：`TimeManagerFrame` + `StopwatchFrame` 已开（`rule = true, ruleTop = 26`）；
-  其余窗口逐个截图确认后再 `rule = true`，标题矩形比字形小的配 `ruleTop`。
+- [ ] **标题线**：已开 **8 个窗口**（2026-11-03 按代码核数，`rule = true` 共 7 个 Dress 位、
+  TimeManager 一位带两窗）：`CollectionsJournal` / `EncounterJournal` / `DressUpFrame` / `FriendsFrame` /
+  `LootFrame` / `TimeManagerFrame` / `StopwatchFrame`（后两位同一 spec，`ruleTop = 26`，线不穿字形）/
+  `HelpFrame`；其余窗口逐个截图确认后再 `rule = true`，标题矩形比字形小的配 `ruleTop`。
+- [ ] **inset**：`inset = true` 已接 **43 个 Dress 位**（`grep -c "inset = true" Modules/Skins/*.lua`）；
+  开着的窗口看内容区内衬是否 Monet 底衬，不再露暴雪原 inset 板。
 - [ ] **血量颜色面板**：两组各一行组名 + `血条` / `空槽（损失部分）` 两个下拉 + 12×12 色块；
   色块颜色 == 条上颜色（`UnitFrames:PreviewColor`）。
 - [ ] **背包**：登录不默认打开；战斗里 `/reload` 后脱战自动补齐图标；暴雪背包 `alpha=0` 不与我们同屏。
+
+---
+
+## C2.1 11-03 批次实机验收（`docs/HANDOFF.md` 8.28，15 个视觉 commit）
+
+> 口径：本批数字均在 12.1.5 测得，属**历史证据**——1.60 上逐条复验后才算数。
+> 证据账与降级清单见 `docs/HANDOFF.md` **8.29**（A 表＝注释口径，B 节＝✕ 比例自校验缺口 +
+> 上线日视觉验收第一优先级 + 无第二样本名单残项 —— 三个残项 11-03 已在主仓 `framexml-source/`
+> forever 分支 FrameXML 离线对账命中（对账源身份与逐名结论见 **8.29.2-B3.1**），上线日只对账
+**运行期存在性**：VanillaStyle 整包载没载、Classic 还是 Mainline 子目录）。
+> 归因入口四个：`/mui skins diagnose`（Need 账本 ✗/✓）、`/mui compat`（客户端差异与 GameRule）、
+> `/mui blocks`（机密布尔/事件失败账本）、`/mui restrict`（六类受限窗口 + 被暂停的轮询框）。
+
+- [ ] **全屏 ✕ 统一**（`5bc814e`）：逐窗打开 账号商店 / 商城 / 频道 / 副本 Journal / 团队信息 / 马厩 /
+  模型预览 / 教程 / StaticPopup1–4 / 秒表 —— 关闭钮全是细金 `monet_close_*`。
+  **基线：12.1.5 全量扫 53 只、21 只已换、32 只仍暴雪原样；通过 = 这 32 只清零。**
+  归因：`/mui skins diagnose`（该框有没有被扫到/读到）。
+- [ ] **最小化钮不换**（`5bc814e`）：`RedButton-MiniCondense`（减号）保持暴雪原样；收起钮变成 ✕ =
+  `CloseButtonByArt` 匹配过宽。归因：截图 + 读 `Utils/Skin.lua` 的排除名单。
+- [ ] **✕ 四态无杂方块**（`5f84a93`）：normal / hover / push / **disabled** 四态都是 monet 材质；
+  任何一态出现深色方块（暴雪 plate）= 有一态没换。重点看"当下不能关"的面板。归因：`/mui skins diagnose`。
+- [ ] **close 字形比例**（`3f2ba5f`）：**11-03 审查收工 · 实物解码实测**。几何四项（bbox `4..27` / 跨度 75% /
+  质心 / 四边对称 + alphaMax 255）在 32px 样本上与参考件重合成立；**笔画不成立** —— 占比 **我们 0.125（常数）
+  vs 参考件 0.177（= 水平 run 8 ÷ √2 ÷ 32）**，即**参考件粗 ≈41%、我们细 ≈29%**（"细 35–40%"作废；
+  **注意比率先有两个口径，别当矛盾**：docs 主口径 = 常数占比 `0.177 ÷ 0.125 = 1.416` ⇒ 41%/29%；
+  `AGENTS.md` / `tools/regen-textures.js` 注释现用的是**出图后实测 run 口径** `8 ÷ 6` ⇒ 粗 33% / 细 25%（旁证，
+  差在抗锯齿 + α≥128 阈值；统一建议已记 HANDOFF 8.26 订正块末条，本道不自改他人文件）。
+  同 32px 画布的 run 实测：参考 8 / 我们交付件 6 / 按常数画的源图 5，`runsMid` 12..19 vs 13..18 —— **run 数只作旁证，
+  比率一律用 0.125↔0.177 那一对**）。账见 HANDOFF 8.26 订正块 / 8.29.1 A8。**六档几何表已判定：12 种显示直径
+  （18/20/22/24/28/32 × 1×/2×）全部高于亚像素临界（我们 <8px、参考件 5.66px；最小那档 18px@1 我们仍 2.25px）
+  ⇒ 对比页判"不存在亚像素线"，"发虚是被插值抹软"这一候选**在几何层排除**，差值是恒定比例**。
+  所以本条实机只剩一个动作：**24px@1 与参考件并排看一眼**（三档遍看降为顺手看）；是否加粗 = PRELAUNCH 拍板第 9 条
+  （该表第 8 条是斜纹周期；早前误写"第 8 条"已订正），**几何算不出的四项**（mip 选择 / 双线性软化 / 圆帽端点 /
+  DXT5 量化，加本仓 ×2 下 1px 描边奇偶先例）只能实机定。翻转/旋转不差 1px 仍要看。归因（离线）：
+  `node tools/audit-pixels.js` + `%TEMP%\opencode\close-compare.png` +
+  `docs/texture-preview/andromeda-close-compare.html`（**收工版含第 3 节"线宽→物理像素"六档表与临界判定；
+  纯几何推算，非实机渲染**）。
+- [ ] **背包总控窗 ✕**（`b0a0ecd` `1d488c6`）：✕ 只在总控窗、点一下关整套、随后**按一次 B 即重开**
+  （按两下 = 停车边沿回归）；物品在分类间移动 ✕ 不跳窗；✕ 材质与其它窗口同款、换主题跟主题染色。
+  归因：`/mui restrict`（战斗里关背包）+ `/mui blocks`。**commit 自述实机未验，本条首跑重点。**
+- [ ] **InfoBar 属性面板 ✕**（`45f5e73`）：点开信息栏"属性"面板，右上角是细金三态、不是暴雪红圆钮。
+  归因：`/mui skins diagnose`。
+- [ ] **箭头单源与方向**（`44f0253` `ff1bd7c`）：商人 / 邮件 / 拾取 / 物品文本翻页箭头与滚动条上下，
+  全部细金 chevron（唯一源 `monet_chevron_up`）；**左右不反**（历史缺陷，`ARROW_ROT` 符号）、
+  **不缺箭头**（Strip 无补=箭头消失）。归因：`/mui skins diagnose`。
+- [ ] **12.x stepper 滚动条**（`28187aa`）：用 `MinimalScrollBar` / `WowTrimScrollBar` 的窗口（编辑模式
+  列表、新版下拉列表）上下钮是 monet 箭头，且**悬停/按下后被暴雪 mixin 的 SetAtlas 顶不回来**；
+  覆盖件无形变（18×16 钮上 V 不拉伸）。归因：`/mui skins diagnose` + `/mui blocks`。
+- [ ] **纹理漏斗无红字**（`ff1bd7c`）：全天日志里不再出现 `Skin.lua: … bad argument … GetDisabledTexture`
+  一类点号调用报错。归因：`/console scriptErrors 1` 或 `wuxian logs`。
+- [ ] **Tooltip 法术层级**（`c58fae9`）：悬停法术图标 = 标题奶油亮（highlight）、正文含"使用:"行灰
+  （neutral）；神器金 (1,0.9,0.41) 类信息色**不被误灰**。归因：`/mui compat`（对照颜色键只有
+  `Widget:PaletteColor` 一张表的口径）。
+- [ ] **信息栏归类**（`cd1f6d7`）：盗贼角色属性面板归 **physical**、不是 tank（12.1.5 历史证据：
+  classID=4）；面板打开后数字跟 2 秒刷新走、归类字样**不**跟着重算。归因：`/mui blocks`（受限窗口里
+  role/属性是机密，重算只会把对的换错）。
+- [ ] **LFG 角色图标**（`4de90ad`）：副本查找面板与排队微钮的角色图形是 `monet_role_*` 灰阶；
+  **滚动列表复用行之后再看一次**（暴雪会重贴 atlas）。整排 ✗ 时先 `/mui compat` 末段查 1.60 GameRule
+  是否禁用副本查找，**别先改名单**。
+- [ ] **排队眼睛一条账**（订正口径，见 HANDOFF 8.28.5 与 8.29.2-B5）：`QueueStatusButton` **可见、可点**
+  （它只过 `Skin:Need` 进账本、不换肤——若 α0/消失 = `Fade` 类回归复发）＋ **`QueueStatusFrame` 面板边框
+  正常**（`System.lua:38/:66` 的 `Dress{panel}` 与 Forever 名单意图重叠，`Strip` 够不到子按钮图标）。
+  这两个半句**归为同一条对账项**：眼睛没了查 `Utils/Skin.lua` 的 fade 分派；面板没变查 diagnose 账本（只登记
+  不换肤属正常）。
+- [ ] **模板账本**（`78c98ab` `23d27d2`）：`/mui skins templates` 四个数 = **387 定义 / 32 运行 /
+  5 带指纹 / Camelot override**（离线 `grep -c '^T\[' TemplateDB.lua` 已复核 32、指纹块 5）；
+  带片段查询能答"这个控件被认成什么型"。此命令只读账本，不开任何框。
+- [ ] **名单一致**（离线，随批复跑）：`node tools/check-frame-list.js` = **385 个名字 / 12 个皮肤文件 /
+  7 个 ALLOW_DYNAMIC**，全部有取用路径（2026-11-03 本车道实跑输出）。
+- [ ] **姓名板探针六条**（`7108581` + 钩子终判，判据全文 HANDOFF **8.26.8**）：① `taintLog=2` 打一整本，
+  `Logs/taint.log` 必须全空（盯 `CompactUnitFrame:1211`/`:668`）；② `ADDON_ACTION_BLOCKED` 计数对比基线
+  （进本 9 条应归零）；③ `/mui nameplates probe cvar`；④ 打印 `base:GetChildren()` 真名+alpha
+  （定 `FadeBlizzardSiblings` 存废）——**关键判据：④ 名单稳定且 ①② 干净才允许重议 BNP 式钩子**；
+  ⑤ 假人切目标 ≤1 拍不回潮 + 关模块后 0.60 距离淡出还原；⑥ `/mui restrict` 暂停清单里姓名板框不常驻。
+- [ ] **光环补扫 ticker 起停（P1，11-03 未提交改动）**：账见 HANDOFF 8.29.1 **A11** + 其 P1 段。口径先立住：
+  **这套机制不在 `_forever_` 现部署态（= `cd1f6d7`）里**，所以"上线日 OnUpdate/ticker 比 12.1.5 少"这类对比
+  **不能拿"P1 已修"当基线**，只有当日 `sync-check` in sync 且这批改动进去了才算数。实机四条：
+  ① 关 BuffFrame 模块（配置里关）→ `/mui perf` 账本里那条 1s 补扫**不再计活**；再开 → 恢复；
+  ② 战斗中把目标换成有 buff 的单位、脱战后换目标：时长字体仍是 Monet 字号（12.1.5 判例"60 个字体串改掉"在 1.60 要重看）；
+  ③ 关掉"显示目标光环"开关 → 两组退场、ticker 应摘（`Auras.lua:835`）；④ 目标框与 BuffFrame **都**关掉后不再有空转记录。
+  归因：`/mui perf`（**唯一**能看起停的现役命令）；`/mui buffframe probe` 只数 `GetChildren` 个数，**覆盖不到这条**。
+- [ ] **运行时表天花板**（`78c98ab` 留档）：`LookupTemplate` 目前最多命中 5 个带指纹模板
+  （ColoredProgressBar / BasicHybridScrollFrame / SelectableButton / TemplatedList / MoneyDisplayFrame）；
+  识别不上不算 bug，扩覆盖的活是 `tools/extract-templates.js` 补指纹规则。
 
 ---
 

@@ -1,20 +1,20 @@
 # MonetUI
 
-> 为**魔兽世界无限（WoW Forever）**打造的一套**莫奈印象派风格**整合 UI —— 界面配色由**当前区域的环境色**实时推导，随区域切换平滑变化。
+> 为**魔兽世界无限（WoW Forever）**打造的一套**莫奈印象派风格**整合 UI —— 界面配色按**区域离线采样的环境色**查表，再由莫奈规则**实时派生**四档主题色，随区域切换平滑变化。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](#-协议)
 ![Interface](https://img.shields.io/badge/Interface-16001-orange.svg)
 ![Version](https://img.shields.io/badge/version-0.12.0-informational.svg)
 ![Lua](https://img.shields.io/badge/Lua-5.1-2C2D72.svg)
-![Status](https://img.shields.io/badge/status-实机验收通过-brightgreen.svg)
+![Status](https://img.shields.io/badge/status-待_1.60_实机复验-yellow.svg)
 
-它不是一个静态配色表，而是随着「你所在的地图」实时推导界面颜色：环境互补色 + 明度曲线钳制 + 色相域细分，输出一组协调、耐看的 Monet 主题色。
+配色的两半各管一段：**环境色离线采样**（游戏截图按区域提取，存成一张 `mapID → 环境 HSL` 的表），**主题色运行期实时派生**（拿你所在的地图 ID 查表 → 莫奈规则算出边缘 / 环境 / 高亮 / 中性四档 → 亮度阶梯定位 → 广播重涂）。运行期**不读任何贴图像素**（这个客户端也没有可用的像素读取 API），所以换区域时既不用等截图分析、也不会卡一下。查不到的区域沿 `C_Map` 的父链继承上一层（大陆 / 世界）的派生色，父链也断时退回中性灰兜底 —— 配置面板的「区域配色」一行会写明当前用的是哪一档。
 
 ---
 
 ## ✨ 特性
 
-- **环境驱动配色** —— 接入 [`LibMonetColor-1.0`](#-依赖) 后颜色由当前区域环境色实时推导，而非静态色表；库缺失时优雅降级为内置默认配色。
+- **区域驱动配色** —— 接入 [`LibMonetColor-1.0`](#-依赖) 后，颜色 = 当前地图 ID 查**离线采样的区域环境色** → 莫奈规则**运行期实时派生**四档 → 亮度阶梯定位。未覆盖的区域沿 `C_Map` 父链继承大陆 / 世界层的派生色，父链也断时退回中性灰兜底（面板「区域配色」一行会写明是哪一档）；库缺失时优雅降级为内置默认配色。
 - **模块松耦合** —— 模块之间只通过 `Utils/EventBus.lua` 通信，互不直接依赖；每个模块都能单独开关，关掉即**完整回退**到暴雪原样。
 - **自绘材质** —— 35 张自绘 UI 贴图（关闭钮三态 / 勾选框 / 状态条 / 图标 / 角饰 / 织纹 / 三角火花），结构性的走脚本（`tools/regen-textures.js`）、可改的走 SVG（`tools/svg/*.svg`）、笔触走 GIMP，不引外部贴图。
 - **无限客户端优先** —— 单位数值一律过保密值查询（`Utils/Secrets.lua`）；`Interface 16001`，Lua 5.1，不使用 5.2+ 特性。
@@ -52,17 +52,18 @@
 ## 🔗 依赖
 
 - **硬依赖：无** —— `LibStub` 已内嵌在 `Libs/` 下，不需要额外安装任何库。
-- **随包**：`LibMonetColor-1.0`、`MonetColorMapData-1.0`（自家仓库 [monetcolors](https://github.com/easthillgu/monetcolors) 的产物）。
+- **随包**：`LibMonetColor-1.0`（配色引擎）、`LibMonetColor-Anim-1.0`（状态染色层）、`MonetColorMapData-1.0`（14 个区域的实测环境色，自家仓库 [monetcolors](https://github.com/easthillgu/monetcolors) 的生成产物，**不要手改**）。
+- **随包的派生数据**：`MonetColorMapEnvOverride.lua`（本仓算出的 3 条大陆 / 世界层父链色，运行时走引擎的 `RegisterMapEnv` override 通道注册）—— 数值由该层成员区的实测色取**圆均值**派生，不是新采的样，所以**不写回生成文件**；`RegisterMapEnv` 自带 `ClearCache + Refresh`，而本文件在 `Libs` 组、`Core.lua` 之前加载 —— 那一刻还没有人订阅引擎回调，所以这几次刷新只重算缓存，不会播一次多余的重涂。
 - **动作条不依赖任何动作条库**：按钮用客户端自己的 `SecureActionButtonTemplate` + `actionpage` 属性自绘，施法、翻页、载具 / 变形 / 覆盖条全部由客户端判定。
 
-> ⚠️ **不要**同时启用独立的 `LibMonetColor-1.0` 插件 —— MonetUI 已内嵌同一版本，同 `MAJOR` 二次注册会直接退出。
+> ⚠️ **不要**同时启用独立的 `LibMonetColor-1.0` 插件。同 `MAJOR` 由 `LibStub` 按 `MINOR` 仲裁（`Libs/LibStub/LibStub.lua:15-18`：先注册且 `MINOR` 不低于对方的一份拿到库表），落选的那份在 `LibMonetColor-1.0.lua:29-33` 的 `if not LMC then return end` 处**静默退出** —— 不报错、不崩，但两份的区域色数据不同步时，真正生效的是哪一份取决于加载顺序。本体已内嵌该引擎，重复启用只会让其中一份白加载。
 
 ## ⌨️ 命令
 
 | 命令 | 作用 |
 |------|------|
 | `/mui status` | 显示模块与主题状态 |
-| `/mui theme` | 重新采样环境色彩 |
+| `/mui theme` | 按当前区域重查环境色、重新派生四档并广播重涂（不做任何像素取样） |
 | `/mui <模块> on\|off` | 单独开关模块（模块名见上表，小写） |
 | `/mui skins diagnose` | 探测本客户端缺失的对象名（`nameplates` / `infobar` 同样支持） |
 | `/mui infobar diagnose` | 信息栏自检 |
@@ -97,7 +98,7 @@ MonetUI/
 
 ## ⚠️ 状态
 
-**2026-10-26 这一轮改动已实机验收通过。**
+**2026-10-26 这一轮改动曾在 12.1.5 上实机验收；交付目标《无限》1.60 的复验待 11-05 上线首趟进行，下述结论均属"12.1.5 实测（历史证据），待 1.60 复验"。**
 
 - 验收过的项：姓名板无光环 + 目标金色/1.1 倍、鼠标提示三摆法 + 1px 主题边框 + 边缘翻转 + Alt 常显 ID、
   施法条三角贴能量条、经验线三角顶在线上沿、连按 B 不出现两套背包、启动 `17/17 个模块`。

@@ -18,9 +18,9 @@
 | 插件安装目录 | `...\WOWFOREVER\World of Warcraft\_forever_\Interface\AddOns\MonetUI`（由 `tools/deploy-retail.ps1` 从仓库拷过去，裸跑就是这里；同目录还装着 Aurora，两者重叠面见 `docs/AURORA-COVERAGE.md`） |
 | 客户端日志 | `...\_forever_\Logs\`（`taint.log` 是污染日志，`EditMode.log` 是编辑模式布局的二进制转储） |
 | 版本 | `MonetUI.toc` 0.12.0，`## Interface: 16001`（部署脚本会按客户端改写） |
-| 当前 HEAD | `4fece67`（2026-10-31），比 `origin/main` 领先 **14** 个提交（含本轮 6 个 bug/视觉提交 + 2 个 make-lane 车道提交） |
+| 当前 HEAD | `cd1f6d7`（2026-11-03），按本地记录的 `origin/main` 领先 **103** 个提交（未 fetch 核过，上线前一律不 push）。**11-03 各道改动全部未提交**：25 个已跟踪文件被改 + 9 个新文件未跟踪，且都在**同一棵 detached HEAD 的 worktree 工作区**里（`git branch` = `* (no branch)`），主目录那份 `main` 是干净旧态 —— 详见 8.29 部署态基线与"先开分支再提交"那条 |
 | 远端 | `origin` = github.com/easthillgu/MonetUI，**私有备份**。**在游戏上线并通过初步测试之前一律不 push**（作者定的，见 `TODO.md` 末尾） |
-| 参考插件（只读） | `../Andromeda`、`../EllesmereUI-v9.4`（Ellesmere 是**这个客户端**的实机皮肤代码，优先级最高） |
+| 参考插件（只读） | `../EllesmereUI-v9.4`（开发根在位，是**这个客户端**的实机皮肤代码，优先级最高）；**Andromeda 不在开发根** —— `../Andromeda` 这个路径不存在（11-03 核实），现存唯一拷贝 = `C:/Users/EastHillGu/Documents/Blizzards/WOWFOREVER/World of Warcraft/_classic_titan_/Interface/AddOns/Andromeda`（`.toc` 38001 / v11.01，旧客户端残留目录）。比对走 `tools/compare-andromeda-close.js`，不手抠字节 |
 
 改完一轮的标准动作：
 
@@ -1151,7 +1151,10 @@ end
 ## 8. 约定（作者定的，别自作主张）
 
 - **不 push 远端**（游戏上线 + 初步测试前）；`origin` 只作私有备份，仓库必须保持 private。
-- **参考插件只读**：`../Andromeda`、`../EllesmereUI-v9.4` 只能读，不能改、不抄大段代码。
+- **参考插件只读**：`../EllesmereUI-v9.4`（开发根在位）与 Andromeda 只能读，不能改、不抄大段代码。
+  **Andromeda 不在开发根**（`../Andromeda` 不存在，别再照它判"参考件缺失"），现存唯一拷贝 =
+  `C:/Users/EastHillGu/Documents/Blizzards/WOWFOREVER/World of Warcraft/_classic_titan_/Interface/AddOns/Andromeda`；
+  比对用 `tools/compare-andromeda-close.js`（自带 TGA type-10 RLE 解码）。
 - **资源全部自绘**，不引外部贴图 / 第三方库（防 GPL 污染）。
 - 小步改动、可回滚；不顺手重构无关代码；每个修复点单独 commit（中文标题，写清"为什么"）。
 - 多行文本替换用 `split(/\r?\n/)` + `splice`，**不要** `string.replace()` 做多行匹配（本仓混用 CRLF/LF）。
@@ -2550,9 +2553,12 @@ Media 键不变（`monet_role_tank/heal/dps`），STENCIL 名单不变（21 张�
 
 1. 再挖 2–3 个插件交叉佐证钩子安全性（Plater / ElvUI / NDui / SilverNamePlates 之类），
    重点看它们有没有对姓名板 `UnitFrame` 挂方法钩子、以及有没有在 1.60 同族客户端上长期运行。
+   —— **已完成（任务 #11，11-03）**：五家写法带行号入档、结论"钩子方案现阶段不可采纳"，见 **8.26.8**。
 2. 安全半步（离线可做、零污染）：去掉每拍 `Show()`、读后写、缓存子框表、0.25s → 0.5s、
    并入 `Utils/Scheduler`。
+   —— **已落地（`7108581`，逐条见 8.27.1）**；0.25s→0.5s 一项经 8.26.8 评估**暂缓**（不是待办可选项）。
 3. 钩子半步：只在交叉佐证通过后做，并配 `taint.log` 实机验收。
+   —— 交叉佐证**未通过**（8.26.8）：现阶段不做；上线日先跑 8.26.8 的六条探针，④ 是关键判据。
 
 ## 8.26 2026-11-03 交叉佐证：hook 到底能不能替掉轮询（三样本，**未改代码**）
 
@@ -2673,7 +2679,7 @@ BTP 甚至**双轨混用**：同一个"是否已装钩"的语义，`NameplateAtt
 ### 8.26.7 待做（覆盖 8.25 的三步，顺序按风险从低到高）
 
 > 2026-11-03 状态：**第 1 条已落地 `7108581`**（逐条见 8.27.1），第 3 条的 `probe cvar` 已建好待实机跑，
-> 第 2、4 条未动。
+> 第 2 条未动；**第 4 条（钩子半步）有终判 —— 交叉佐证五家已跑完（任务 #11），现阶段不采纳，见 8.26.8**。
 
 1. **零风险、离线可做**（把 8.25 第 2 步和 8.26.6 合并）：守卫去掉每拍 `Show()`、改"读后写"、
    无可见牌时整条驱动停摆（现在 `M.active` 只是 OnUpdate 内部早退，帧还每帧醒）、并入 `Utils/Scheduler`；
@@ -2688,6 +2694,61 @@ BTP 甚至**双轨混用**：同一个"是否已装钩"的语义，`NameplateAtt
 4. **钩子半步（只在探针 + `taint.log` 之后）**：若采纳，装的是**暴雪全局更新函数**
    （`CompactUnitFrame_UpdateName` / `_UpdateHealth`），体内只调非受限方法 + 带 8.26.2 的身份收敛；
    **不装在任何"机密载荷会经过的方法"上**（`SetShown` / AuraButton 一类，见 8.26.3）。
+
+### 8.26.8 2026-11-03 任务 #11 终判：五家交叉佐证完毕 —— **钩子方案现阶段不可换，轮询保留**（只记录，未改代码）
+
+**总结论（作者拍板的"先再挖 2–3 家再定"到此回答：证据不够，需实机）**：
+`hooksecurefunc(unitFrame, "SetAlpha")`（BNP 式）**盖不住 base 同级 sibling 的回压** —— sibling 存在是我们
+自己的实机判例（`Modules/Nameplates/Nameplates.lua:513-517`：每块牌 base 上有 1 个匿名 StatusBar+Frame 容器、
+随距离衰减 α0.60 可见，有减益时暴雪还**动态再建** BuffListFrame 一族容器），钩子只装在产物层 `UnitFrame`
+一个对象上，sibling 的回压没有任何东西挡 —— **轮询删不干净**。另一半：**"钩方法槽 = 写过该框"对后续
+CompactUnitFrame 更新是否标脏，离线判不了**（本仓判例：`CompactUnitFrame.lua:1211 maxHealth`、`:668 机密键索引`，
+都是"框被写过"之后暴雪自己的代码以 MonetUI 名义跑出的错）。⇒ **不改代码**，判定材料补齐要等实机（见文末探针）。
+
+**五家样本写法（行号本车道 11-03 全部只读抽查过；两家 frameworks 的驱动钩是"反例旁证"，不是实证）**：
+
+| 样本 | 抑制/驱动写法 | 关键行 | 定性 |
+|---|---|---|---|
+| BetterNamePlates | 钩**产物层** `unitFrame.SetAlpha`、体内读后写回、弱键旁表记原 α；全程不 Show/Hide/SetParent 暴雪框 | `Runtime.lua:2046-2084`（钩+回写 `:2076-2077`）、`:41`（弱表） | suppression 路径可参考；**它另钩了驱动方法** `UpdateNamePlateOptions`（`:2753-2763`，本仓禁用写法）→ **不可照抄** |
+| NDui（oUF 系） | 每块牌 `NAME_PLATE_UNIT_ADDED` 时**饿事件**（`UnregisterAllEvents`），**零 alpha 写入**；钩驱动方法 `UpdateNamePlateSize`、体内只写自家框 + 战斗门 | 饿事件 `Libs/oUF/blizzard.lua:18-75`、`:152-155`（`handleFrame(frame.UnitFrame)`）；钩 `Modules/UFs/Nameplates.lua:65`、门 `:41`（`InCombatLockdown() then return`） | "饿事件"是第三条路（不改 alpha）；钩驱动**长期存活 = 旁证**：AGENTS"驱动一碰产物全脏"口诀**不是物理定律**，取决于体内写什么 —— 记成旁证，别记成实证 |
+| ElvUI（oUF 系） | **全自绘** + CVar 管暴雪可见性（`nameplateShow*` 全家）；只有驱动级部件才 `Hide()`+饿事件；钩 `SetupClassNameplateBars` 带 `IsForbidden` 门 | CVar 群 `ElvUI/Game/Shared/Modules/Nameplates/Nameplates.lua:179-222`；`HideClassNameplateBar :1016-1021`；钩 `:1103`（体内 `:1024` 判 Forbidden） | 同旁证；**它 Hide 的只有 class-power 条**（非产物 UnitFrame），与 AGENTS"产物不 Hide"不冲突 |
+| Platynator | 把暴雪 `UnitFrame` **`SetParent` 进常隐框** + `UnregisterAllEvents`；直接 `NamePlateDriverFrame:UnregisterEvent`；体内调**受限** `C_NamePlate.SetNamePlateSize` | `Display/Initialize.lua:880-886`、`:91`、`:684` | **反面样本**（三条全踩本仓红线）；"它还在跑"只能证明拦截进日志不弹窗，不证明干净 —— 口径同 8.26.5 |
+| oUF 系挂回 base | 把 `WidgetContainer` / `SoftTargetFrame` **重挂回 nameplate（base 层）**（暴雪自己的 widget 槽是 UnitFrame 的子件） | NDui `Libs/oUF/ouf.lua:1075-1077`；ElvUI `…Shared/oUF/ouf.lua:981-983` 邻段（`SetParent(self.blizzPlate)` 在 `ElvUI/…/Nameplates.lua:872-877`） | 反例：动暴雪框的**父子拓扑**比动 alpha 更重；我们不做 |
+| 五家共同点 | **无人对 nameplate `SetName` 改名**（全仓 grep 零命中） | — | 改名这条红线没有先例背书 |
+
+**新线索① hit-test API —— 本车道已离线核过一半（1.60 快照在，判据可先行）**：NDui `Libs/oUF/private.lua:83`
+只是 **Forever 分支的判定行**（`Forever = interface >= 16000 and interface < 20000`，调用点不在那，交办行号订正）；
+真正的用法：NDui `Libs/oUF/ouf.lua:1090-1091`（裸调）、ElvUI fork `ouf.lua:981-983`（`if nameplate.SetAllHitTestPoints
+then` **存在性守卫**）、Platynator `Initialize.lua:555`。
+**离线核对结果（主仓 `docs/api` 快照，客户端 1.60.1.70634）**：`ClearAllHitTestPoints` / `SetAllHitTestPoints` /
+`SetHitTestPoints` / `GetHitTestPoints` / `CanChangeHitTestPoints` 全在 `frameapinameplatedocumentation.lua`
+（文档原文："Clears the anchor points that determine where the mouse interacts with the nameplate"）——
+**1.60 存在这条不用赌**；配套 `C_NamePlateManager.GetNamePlateHitTestInsets` / `SetNamePlateHitTestInsets`
+（后者标 **[受限]**，只能在非受限窗口调）。若实机验证成立，这可能是我们"**不敢 `Hide` 又要不误选**"的正解
+（AGENTS：C++ 命中区锚在暴雪血条上，`SetAlpha(0)` 不影响命中 —— hit-test 点恰好就是那条 C++ 机制的正规接口）。
+**上线日验证**：①假人牌被我们接管后 `nameplate:GetHitTestPoints()` 能否读到、②`ClearAllHitTestPoints` +
+`SetAllHitTestPoints(自家框)` 之后点原血条位置是否不再选中、③整程 `taint.log` 是否仍空。
+**新线索② sibling 名单无第二样本 —— "grep 零命中"要订正**：五家目录 grep `BuffListFrame` 并非零命中 ——
+BTP `NativeCCFallback.lua:132` 有 1 处，但那是它压暴雪**原生 CC 列表**时枚举 `AurasFrame` 的槽名
+（`CrowdControlListFrame/LossOfControlFrame/DebuffListFrame/BuffListFrame`），**不是姓名板 base 同级容器**的样本。
+⇒ 结论不变：**姓名板 sibling 名单五家都没碰过**（BNP 明确不 fade sibling，NDui/ElvUI 饿事件绕开），
+名单只能靠我们自己实机打印（探针④）。
+
+**先确认、不当待办**：8.25"待做第 2 条"与 TODO 第 15 条里"零污染半步"的**删每拍 `Show()` / 读后写 /
+迁 `Utils/Scheduler` 已落地 `7108581`**（本车道核过：commit 存在、是 `cd1f6d7` 祖先、标题
+*"nameplates: 落实 8.26.7 第 1 档（零风险那半步），未动钩子方案"*，逐项明细在 8.27.1 表）。
+**只剩 0.25s→0.5s 一项，且调研会话建议暂不动**：`PLAYER_TARGET_CHANGED` 已即时补刀
+（`Nameplates.lua:1090-1096`，切目标当拍 `KeepBlizzardHidden`），放宽间隔只省读次数、代价是最多多 0.25s 的
+回潮窗 ⇒ **等账本证明常态零写再议**，不排上线前待办。两处旧文（8.25 待做第 2 条、TODO 15）已按此订正。
+
+**上线日姓名板探针（归验证清单，CHECKS C2.1 同名条目）**：
+① `taintLog=2` 打一整本，`Logs/taint.log` **必须全空**（盯 `CompactUnitFrame:1211`/`:668` 两判例位）；
+② `ADDON_ACTION_BLOCKED` 计数对比基线（进本那 9 条应归零 —— `7108581` 删 `Show()` 的预期收益）；
+③ `/mui nameplates probe cvar`（8 个 `nameplateShow*`/`maxDistance` 谁被 `isSecure` 锁）；
+④ 打印 `base:GetChildren()` **真名+alpha**（定 `FadeBlizzardSiblings` 存废）——**关键判据**：只有给出
+稳定名单且 ①② 干净，才允许考虑试 BNP 式钩子分支；
+⑤ 假人切目标 **≤1 拍不回潮**（验 8.26.8 的"sibling 回压钩子盖不住"判定）+ 关模块后 0.60 距离淡出还原；
+⑥ `/mui restrict` 暂停框清单（姓名板框不应常驻其上）。
 
 ## 8.27 2026-11-03 第 1 档落地（`7108581`）+ 第四样本：EnhanceQoLUnitFrames 怎么藏暴雪队伍框
 
@@ -2775,8 +2836,10 @@ BTP 甚至**双轨混用**：同一个"是否已装钩"的语义，`NameplateAtt
 ## 8.26 2026-11-03 close 材质重绘（参照 Andromeda `ui-close.blp`）
 
 **参考件**：`_classic_titan_\Interface\AddOns\Andromeda\assets\textures\ui-close.blp`，
-32×32，字形 bbox `4..27`（跨度 24/32 = **75%**），笔画 ≈**4px（12.5%）**，圆头 + 四边全抗锯齿，
-质心正好落在画布中心（15.50, 15.50）。
+32×32，字形 bbox `4..27`（跨度 24/32 = **75%**），笔画水平 run = **8px** ⇒ 垂向厚 `8÷√2÷32` = **占比 0.177**
+（旧记"≈5.7px = 17.8%"是同数四舍五入，以后一律用 0.177；
+11-03 审查逐像素实测订正，**本行原文写的是"笔画 ≈4px（12.5%）"，记错了，见本节末订正块**），
+圆头 + 四边全抗锯齿，质心正好落在画布中心（15.50, 15.50）。
 
 **旧 MonetUI close**（64×64，glyphgen 导入）：bbox `16..48`（33px，奇数）、笔画 ≈5px（7.8%）、
 质心偏 +0.5px。显示到 32px 时比参考件细一圈，而且跨度是奇数 —— 翻转/旋转时会差 1px。
@@ -2785,7 +2848,8 @@ BTP 甚至**双轨混用**：同一个"是否已装钩"的语义，`NameplateAtt
 
 - `CLOSE_GLYPH_SPAN = 0.75`、`CLOSE_GLYPH_STROKE = 0.125`，端点半径扣掉一笔给圆头；
 - 64×64 结果：bbox `7..56`（50px，78%）、笔画 8px（12.5%）、质心 `31.49, 31.47`（画布中心 31.5）✅；
-- 用同一公式画 32×32 会得到 bbox `4..27`，与参考件逐像素重合；
+- 用同一公式画 32×32 会得到 bbox `4..27`，与参考件逐像素重合 —— **订正（11-03）：这句只对前四项
+  （bbox / 跨度 24÷32=75% / 质心 (15.50,15.50) / 四边对称）+ alphaMax 255 成立**；笔画不重合（见下订正块）。
 - 颜色仍按视觉档取 `CLOSE.{normal,hover,push}`：standard = 白（染色）/ `#e8c078`（hover，刻意不染）/
   `#acacac`（push）。
 
@@ -2794,6 +2858,606 @@ BTP 甚至**双轨混用**：同一个"是否已装钩"的语义，`NameplateAtt
 
 > 备注：close 此前由仓库外的 `tools/../glyphgen` 导入，源已不在仓库里；现在回到脚本生成，
 > 以后改 close 只改 `drawCloseX` 一处。`AGENTS.md` 里"现役 9 张 SVG"已降为 6 张。
+
+**11-03 审查逐像素实测订正（会话 `4b077830`；本节的"参考件数字"被外部对比推翻）**：
+
+- **参考件笔画（审查收工后的最终口径）**：同一口径"α≥128 手臂行连续段"实测 `ui-close.blp`（32×32）水平 run =
+  **8px** ⇒ 垂向笔画厚 = `8 ÷ √2 ÷ 32` = **0.177**（对比页 `andromeda-close-compare.html` 记 0.177；本节早先
+  先记的"≈5.7px = 17.8%"是同一个数的四舍五入，**以后一律用 0.177 / 0.125 这两个占比算比率**）。
+  **不是本节原文写的"≈4px（12.5%）"**。
+- **比率方向（口径写死，免得来回翻）**：`0.177 ÷ 0.125 = 1.416` ⇒ **参考件比我们粗 ≈41%**（集成道口径 41%，
+  取整；严格按比值是 41.6%）；等价 `1 − 0.125 ÷ 0.177 = 0.706` ⇒ **我们比参考件细 ≈29%**。**撤回**：11-03 集成道转发过"细 35–40%"，
+  那是口径不准的数，按本条订正。**11-03 收工 grep 实测（订正本节先前那句"0 命中"，它写早了）**：docs 三本里
+  "细 35–40%" 的 **as-fact 形态 0 处**；`grep -rn "35[-–~]40" docs/*.md` 共 **5 处命中** = 本节这一条、
+  8.29.1 A8、8.29.2-B1 结果段、CHECKS C2.1 close 条、PRELAUNCH 拍板第 9 条，**全部是本轮写的"作废/撤回"标注本身**
+  （行号会随编辑漂，故按节位记）。
+- **"旧 4px"是怎么进正文的（来源链，审查已收工、结论落定）**：① **更早的一处 = 生成脚本自己的注释**
+  `tools/regen-textures.js:222`（2026-10-28 那批图标重定的头注）就把 `ui-checkbox-tick` / `ui-close` / `ui-arrow-up`
+  三个字形合并写成"笔画 ≈ 4px（画布的 12.5%）、字形撑到 ≈ 28/32（87%）"，`AGENTS.md:395` 是它的转写（同句、同三个字形），
+  close 那一格**从未单独测过**；close 专属块 `:324` 又重复了一遍"参考件实测…笔画 ≈4px（12.5%）"，
+  直到 `:328` 才有 11-03 的质疑注释；② 加上我们自己常数 `CLOSE_GLYPH_STROKE = 0.125` 在 32px 上正好 = 4px，
+  两边数字"对得上"就再没人去量；③ 唯一"验收"是本仓自产的 `audit-pixels`，它管格式纪律（2 的幂 / 白衬底 / 色相），
+  **从不比对参考件笔画** ⇒ 自校验闭环（8.29.2-B1 点名的正是这一型）。实物解码推翻后，`tools/regen-textures.js` 的
+  close 注释块（本道原记 `:329-336`，**该文件今日在飞改、行号已漂 ⇒ 一律按锚定位**）已按实测写注释
+  （常数 `0.125` **仍未动**，"拍板前别动常数"）。**旧口径今日残留的确切处数只写在 PRELAUNCH 第 9 条 ④ 末条**
+  （11-03 傍晚二次 grep，含"worktree 已被别道改为订正形态"这条变化），本处不重复列数，免得两处各一套。
+  **AGENTS.md 本道禁改、也从未改。**
+- **我们侧（三个 run 数分清，别混用）**：同一"α≥128 手臂/中心行连续段"口径下，**按常数画的 32px 源图 run = 5**；
+  **交付件（64px TGA 降到 32 显示）run = 6**（对比页 `runsMid`：参考 `12..19` = 8 格，我们 `13..18` = 6 格）；
+  64px mip0 上 run = 12（= 占比 0.125 × √2 × 64 的抗锯齿取整）。中心行交叠段 **8 vs 6** 是**交付件 vs 参考件**的对比。
+- **比率口径分叉（如实记，避免日后再出一个第三种数）**：① **常数/占比口径** `0.177 ÷ 0.125 = 1.416` ⇒ 粗 ≈41% /
+  细 ≈29% ——**比率一律用这一对**（交办口径，也是 PRELAUNCH 第 9 条写死的）；② **交付件实测 run 口径** `8 ÷ 6`
+  ⇒ 粗 33% / 细 25%。两数差来自抗锯齿 + α≥128 阈值取整，**run 数只作旁证**，不许与占比混算成第三个数。
+- **"与参考件逐像素重合"只对 bbox / 跨度 75% / 质心 / 四边对称 / alphaMax 255 成立，不成立的是
+  笔画已贴合 —— 旧毛病"比参考件细一圈"没修掉，只是对齐了 bbox。**（另记：跨度 75% 是 32px 样本上的数，
+  64px mip0 上我们是 `7..56` = **78.1%**，对比页两栏都有，别把 78.1 当"跨度也重合"的证据。）
+- 这正是 8.29.2-B1 点名的"自校验闭环不算外部验证"被抓现行：`audit-pixels` 管格式纪律，
+  从不比对参考件笔画。已按同类项入 **8.29.1 A 表 A8**。
+- **审查收工 · 六档几何表已落地（不再是"将追加"）**：`andromeda-close-compare.html` 第 3 节给了
+  "垂直笔画厚 = 占比 × 显示物理直径"的 6 档 × 2 缩放 = **12 种显示直径**推算（钮径 18/20/22/24/28/32 UI px，
+  @1x/@2x；我们 / 参考两列：18@1 = **2.25** vs 3.18、24@1 = **3.00** vs 4.24、32@2 = **8.00** vs 11.31，全部 12 档
+  见对比页）。**临界**：我们笔画进亚像素的条件是显示物理直径 **< 8px**（= 1 ÷ 0.125），参考件同判据 **5.66px**；
+  实际最小那档 18px@1 的显示物理直径是 **18px**（笔画 2.25px），**12 种全部高于临界** ⇒ 对比页判 **不存在亚像素线**，"发虚是插值把细线抹软了"
+  这一候选**在几何层被排除**，粗细差是**恒定比例**（任何一档都是 0.125∶0.177），不是"某档破线"。
+- **几何算不出、只能实机看的那一列（对比页原文口径）**：mip 选择、双线性软化、圆帽端点、DXT5 量化 ——
+  外加本仓**先例项**"×2 缩放下 1px 描边的奇偶/软化"（同型判例见 8.26 的 `AbsRectUnits` 吸附那条 11-02 实机案）。
+  ⇒ 上线日动作压到最小：**24px@1 并排看一眼**（判据与三档判定进 PRELAUNCH 拍板第 9 条）。
+- **并发改动入账 + 新冲突（11-03 傍晚本道复核时发现，禁改区已被别人改过）**：`AGENTS.md`（旧 `:395` → **现 `:405`**，
+  该文件在飞改）与 `tools/regen-textures.js:218-229` / `:330-345` / 常数行 `:347` 已被**改写为"引旧口径＋订正"形态**
+  （旧"笔画 ≈ 4px（12.5%）"现在都带"记错了 / 那是我们自己的设计常数"的限定）⇒ **本道上一轮回报的"禁改区 3 处 as-fact"已作废，
+  现值见 PRELAUNCH 第 9 条 ④ 末条实测计数**。**但改写带来一个新冲突，必须拍板前钉掉**：
+  ① 他们写的 headline 比率是 **run 口径**（"参考件粗约 **33%**、我们细约 **25%**" = `8 ÷ 6`，交付件实测），
+  而 docs（8.26 订正块 / CHECKS C2.1 / PRELAUNCH 第 9 条）写死的是 **常数占比口径**（`0.177 ÷ 0.125 = 1.416` ⇒ **41% / 29%**，
+  交办口径）。两个数**都对，但对象不同**：41/29 = 设计常数之比（拍板"要不要把常数提到 0.177"用的就是它），
+  33/25 = 出图后实测 run 之比（抗锯齿 + α≥128 阈值让它比常数差小一档）。⇒ **建议措词（改 AGENTS/regen 归集成道）**：
+  把那两句 headline 后各加半句"**（run 口径旁证；常数占比口径 = 粗 41% / 细 29%，账见 `docs/HANDOFF.md` 8.26 订正块）**"，
+  别让上线日出现"两个官方比率"。
+  ② 同一个"占比"在他们文里被用了两次（水平 run/画布 = 参考件 25% / 交付件 18.8%，与垂向/画布 = 17.7% / 13.3%）
+  ⇒ 本账一律写**垂向占比**（0.177 / 0.125），水平 run/画布一律叫"run 占比"，不叫"笔画占比"。
+  ③ `17.8%`（regen `:347` 注释）与 `17.7%`（AGENTS `:406`）是同一个数 `8÷√2÷32 = 0.1768` 的两种舍入 ⇒ **本账统一写 0.177**。
+  ④ **对 ④ 几何表的影响（已核，结论不变）**：若按交付件实测垂向占比 **0.133** 而非常数 0.125 重算，
+  临界从"显示物理直径 <8px"变 **<7.5px**、18px@1 笔画从 2.25px 变 **2.4px** ⇒ **12 档仍全部高于临界**，
+  "发虚被排除 / 差值恒定比例 / 三档可不管"三条判定**一条都不动**（两种口径都算过）。
+
+## 8.28 2026-11-03 补档：11-03 的 15 个视觉 commit（判据从 commit message 入档）
+
+**为什么补这一节**：`4de90ad → cd1f6d7` 这 15 个 commit 全部落在 8.27 之后，此前只有 commit
+message 里有验收判据，HANDOFF 一字未提 —— 换道/换机就只剩 git log 可挖。本节按主题归五组，
+每条记「做了什么 / 为什么 / 涉及窗口 / **实机判据**」；**实机打勾清单在 `docs/CHECKS.md` C2.1**，
+两处同源，改判据要一起改。
+
+**客户端口径（统一声明）**：本批的"实机测得"数字（✕ 全量 53/21/32、`RedButton-Exit*` 四态是
+"深底plate+X"、四个 `Get*Texture` 方法拒绝点号调用、`UnitClass` 盗贼 classID=4 等）按项目口径
+一律记 **12.1.5 实测 / 历史证据，1.60 待复验**；TemplateDB 的 387/32/5 是**离线抽取**计数
+（Gethe `forever` 分支 FrameXML，1.60 同族），不关客户端。commit 自述"实机未验"的条目
+（`b0a0ecd` 明写）不冒充历史证据，以实机跑过为准。
+
+### 8.28.1 ✕ / close 材质线（`3f2ba5f` `5f84a93` `5bc814e` `1d488c6` `b0a0ecd` `45f5e73`）
+
+- **`3f2ba5f`** close 三态参照 Andromeda `ui-close.blp` 重绘（跨度 75%、笔画 12.5%〔**12.5% 是我们的常数
+  `CLOSE_GLYPH_STROKE`；参考件实测占比 0.177，两者不同，见 8.26 订正块**〕、圆头全抗锯齿，
+  唯一源 `tools/regen-textures.js` 的 `drawCloseX`）。**完整过程与测量在本文件第二节标题撞号的
+  "8.26 close 材质重绘"那节**（该节即记此 commit，判据：32px 实显笔画不再比参考件细、翻转/旋转不
+  差 1px —— 旧版 33px 奇跨度会差；`audit-pixels` 34 张 PASS）。**订正（11-03 `4b077830` 实测）：
+  前半句不过关 —— 我们 run 5 vs 参考件 run 8，"细一圈"没修掉（只对齐了 bbox）；后半句（1px）
+  按 bbox 对齐成立、待实机确认。判据本身按 8.26 订正块 + 拍板清单第 8 条走。**
+- **`5f84a93`** 换第四态（DisabledTexture → `monet_close_push`，刻意不染）：症状"一些关闭按钮多了
+  个方块"。12.1.5 实测 `RedButton-Exit` / `-Disabled` / `-exit-pressed` 全是"深色圆底 plate 上坐 X"，
+  四态漏任何一态就是 plate 挨着我们的裸字形。**判据：任何面板的 ✕ 在禁用瞬间不出现深色方块。**
+- **`5bc814e`** 全量统一 ✕：按**字形签名**（`RedButton-Exit*` atlas）识别关闭按钮（`Skin:CloseButtonByArt`，
+  并入 5 步全量扫描），不靠名字表 —— 12.x 有匿名框、有名字不带 CloseButton 的框，名单永远追不上。
+  12.1.5 实测基线：**53 只 ✕、21 只已换、32 只暴雪原样**（账号商店 / 商城 / 频道 / PVE / 团队信息 /
+  马厩 / 模型预览 / 教程 / StaticPopup1–4 / 秒表 等未换皮窗口）。幂等免费获得：换完后 atlas 消失，
+  下一拍自动跳过；`SwapArt` 对已换纹理早退。**`RedButton-MiniCondense`（最小化减号）刻意不匹配** ——
+  换掉它等于把"收起"变"关闭"。**判据：上面那 32 只全部变细金 ✕；减号钮保持原样。**
+- **`1d488c6`** 背包总控窗 ✕ 改走 `Skin:CloseButton`（`monet_close_{normal,hover,push}`，描边色随主题、
+  OnTheme 重染）。**判据：`MonetUIBagWindow_<分类>` 的 ✕ 与其它已美化窗口右上角同一种东西，换主题跟着变。**
+- **`b0a0ecd`** 总控窗加 ✕ = `CloseAllBags`（作者拍板：只总控窗有）：黏性选总控（当前总控还显示就继续当，
+  物品在分类间移动 ✕ 不跳；空了才顺延，「剩余空间」补位窗不当总控）；关整套前先把仍 `IsShown` 的暴雪
+  背包 `Hide` 一次 —— 停车只压 alpha 从不 Hide，不收这一刀守卫边沿停在"开"，玩家要**按两下 B** 才重开。
+  战斗中不碰暴雪框，只收我们的窗。**判据：点 ✕ 整套关闭；随后按一次 B 即重开；✕ 不跳窗。**
+  **commit 自述实机未验**（观感 + 边沿），待集成道部署后复核。
+- **`45f5e73`** InfoBar 属性面板保持暴雪红圆钮的根因：工厂只造框、皮肤留给调用点 —— 两处调用点记得补
+  （SimpleConfig / Bags），InfoBar 没补。修类别不修实例：`Widget:CloseButton` 内嵌 `Skin:CloseButton`
+  （幂等：`SwapArt` 早退 + 主题钩 `Mark` 守卫，显式调用点可留）。AGENTS 已记"控件工厂自带皮肤"。
+  **判据：InfoBar 属性面板（标题"属性"）的 ✕ 是细金三态。**
+
+### 8.28.2 箭头与滚动条线（`44f0253` `ff1bd7c` `28187aa`）
+
+- **`44f0253`** 四张箭头贴图（`monet_chevron_{up,down}`、`monet_arrow_{left,right}`）本是同一个 V 画了
+  四遍 → 唯一源 `monet_chevron_up` + `Widget:Arrow(tex, dir)` 代码转向：上下 = 4 参 `SetTexCoord` 双镜像
+  180°（逐像素无重采样）；左右 = `Texture:SetRotation(±π/2)`（本客户端没有 8 参 SetTexCoord，两客户端
+  都有 SetRotation）。删除的三张退出 Media / `audit-pixels` / 预览工具 / `import-glyphgen` 映射。**文件名
+  不改名**的原因进了 AGENTS「客户端行为细则」：文件索引是客户端启动时建的，改名后 `GetFileIDFromPath`
+  对新名返回 nil —— 当前会话里等于贴图丢失。`ARROW_ROT` 的符号约定当时照抄 Ellesmere（它的基准字形
+  朝左），**方向在下一条才修正**。**判据：所有箭头来源只有一张朝上的图；改名试验已回滚，现名不变。**
+- **`ff1bd7c`** 日志症状：`Skin.lua:1339: bad argument #1 to '?' (Usage: local texture =
+  self:GetDisabledTexture())` 刷屏。12.1.5 实测 `Get{Normal,Pushed,Highlight,Disabled}Texture` **四个方法
+  都拒绝点号调用**（`CharacterFrameCloseButton` 与新造的 `UIPanelCloseButton` 各验一遍），所以旧的三处
+  点号写法本来就是错的 —— 两种结局都坏：要么抛，要么 `x.M and x.M()` 守卫把整个换图静默吞掉。新唯一
+  漏斗 `Skin:TexOf(obj, getter)`（解析方法 + self 调 + pcall，取不到返回 nil），`Skin:CloseButton` /
+  `Skin:ScrollBar` / `Skin:PageArrow` 统一走它。同条修左右箭头反向：Ellesmere 基准朝左、我们朝上，**两套
+  符号是镜像**（朝左图 -π/2 得 up、+π/2 得 down；朝上图相反）。**判据：红字里不再有 `bad argument ...
+  GetDisabledTexture`；页签/翻页箭头左右不反。**
+- **`28187aa`** 12.x 两族新滚动条家族从未被换过：`MinimalScrollBar`（stepper 用
+  `MinimalScrollBarStepperScriptsMixin`，atlas `minimal-scrollbar-arrow-{top,bottom}`）与 `WowTrimScrollBar`
+  （stepper 是 `scrollbar.Back/Forward`，atlas `UI-ScrollBar-Scroll{Up,Down,Left,Right}Button-*`）。两族的
+  箭头都画在**单一 region `button.Texture`** 上，mixin 每次按钮状态变化都 `SetAtlas` 重设 —— 换纹理无效。
+  做法沿用 ScrollBox 那一套：原 region 压 alpha 0 + 我们自己的箭头盖上去（mixin 只 SetAtlas 从不碰 alpha，
+  压一次就住）。方向**不从几何猜**（Back/Forward 只表示减/增，不说明轴向），读按钮自己的 art key
+  （`upTexture`/`normalTexture` 的值拼出 Up/Down/Left/Right，对照 `Blizzard_SharedXML/Shared/Scroll/*.xml`
+  全键集核过）。同趟两个顺手修：①旧 `Skin:ScrollBar` 箭头循环跳过没有 normal 纹理的按钮（原来 Strip 完
+  `SwapArt(nil)` = 把箭头弄丢）；②覆盖件按按钮**短边**定尺寸并居中（stepper 18×16，V 拉伸 12% 肉眼可见）。
+  `SCROLL_ARROW_ATLAS` 补 trim 与左右名（全量扫描兜底）；`Skin:Stepper` 与 `Skin:ScrollArrowButton` 共用
+  `scrollArrow` 标记，一个按钮只画一次。**判据：任意滚动条四向箭头是细金 chevron、悬停/按下后不被
+  atlas 顶回暴雪原样、不缺失。**
+
+### 8.28.3 模板数据库与诊断命令线（`3b12ba7` `23d27d2` `78c98ab`）
+
+- **`3b12ba7`** 补 `Modules/Skins/Templates/README.md`：给 `6925adf` 已落地的数据库子系统写使用文档
+  （387 模板、32 条 skinAs 映射、指纹匹配顺序 = 增强查找优先再结构指纹、唯一 Camelot override
+  `ColoredProgressBarTemplate` 在 1.60 是带 `.Fill/.Mask` 的 Frame 不是 StatusBar、再生流程
+  `tools/extract-templates.js` + `test-template-db.js`）。**当时描述的 `/mui skins templates` 并不存在**
+  （`Skins:HandleCommand` 只认 diagnose/layers），文档先记了目标接口。
+- **`23d27d2`** 把命令接上：无参 = 总数 / 映射数 / Camelot override 数 + 类型与 skinAs 分布（排序稳定）；
+  带片段 = 模板名或 skinAs 匹配（"这个控件会被认成什么型"聊天里直接问）；两条路径**都只读
+  `ns.TemplateDB`，不碰任何框、不改任何识别**，数据库缺失时（加载序回归）只提示。`/mui` help 补一行。
+  另一头：被 gitignore 的 framexml-source 检出目录正在被 `audit-locals` / `audit-taint` 扫（2931 文件 /
+  50 BLOCKER 全是暴雪自己的代码），两个闸门像 `api-audit` 一样跳过它 —— 回到 59 lua、0 BLOCKER。
+- **`78c98ab`** 统计修正（这条决定识别覆盖率天花板）：**387 条定义、只有 32 条进运行表**（其余在生成
+  文件里注释保留），而 32 条里**只有 5 条带 `fingerprints`** —— `Skin:MatchFingerprints` 对无指纹条目
+  直接返回 false，所以 `LookupTemplate` 现在最多命中 `ColoredProgressBar` / `BasicHybridScrollFrame` /
+  `SelectableButton` / `TemplatedList` / `MoneyDisplayFrame` 这 5 个。命令输出改为「总数 / 带指纹 / 已映射 /
+  Camelot override」四个数 + 存在不可匹配条目时告警；README 样例改成实测分布（Frame 13 / Button 8 /
+  EditBox、ScrollFrame、Slider 各 3 / CheckButton 2；skinAs：scroll 4、editbox、money 3…）。
+  **扩大覆盖的正路是给 `tools/extract-templates.js` 补指纹规则，不是加 skinAs 映射。**
+  （2026-11-03 本车道 `grep -c '^T\[' TemplateDB.lua` = 32、`fingerprints` 块 = 5，与 commit 口径一致。）
+
+### 8.28.4 颜色纪律与信息栏归类（`c58fae9` `cd1f6d7`）
+
+- **`c58fae9`** 提示框法术层级反了（正文比标题亮）。两个独立原因：①`RecolorSpellTitle` 原来取
+  `Color:GetNeutral()` —— 和正文归一同一个灰，标题永远压不过正文；改取 `Color:GetHighlight()`
+  （0.95/0.93/0.84）并**显式传 alpha 1**（GetHighlight 自带的 a=0.50 是冲刷强度，三参 `SetTextColor`
+  会把它强顶成 1）。②正文灰度归一漏了普通说明文：「静态黄」判定带（`|r-g| < 0.08` 且 `r,g≥0.75`、
+  `b≤0.45`）只命中 `YELLOW_FONT_COLOR`，而 12.1.5 实测 `NORMAL_FONT_COLOR` = (1, 0.82, 0)（r-g=0.18 出带）、
+  `LIGHTYELLOW_FONT_COLOR` = (1, 1, 0.6)（b 超帽）—— "使用:"类说明行正是这两个颜色画的。**判定带刻意
+  不放宽**：更松的"暖黄"测试会连神器金 (1, 0.9, 0.41) 这类有信息量的颜色一起压平。**判据：悬停法术图标
+  = 标题奶油亮、正文（含"使用:"行）灰；金色/神器色行不被误灰。**
+- **`cd1f6d7`** 信息栏统计块把盗贼归成 tank。根因是 `SPEC_CATEGORY` 手抄表的 classID 是**假设不是实测**：
+  注释写"1.60 只有经典九职业"、把潜行者记成 3；12.1.5 实测 `UnitClass("player")` → 潜行者/ROGUE/**classID 4**，
+  于是查到德鲁伊行、spec 2 = "tank"（ outlaw 恰是 spec 2）。classID 跨客户端不共享、专精顺序也不共享，
+  任何手抄表都会再错过一次 → **表删掉**，归类改由客户端自己报：`GetSpecializationInfo` 第 5 返回是 `role`
+  （TANK→防御行），其余按主属性分 caster/physical（int 为 str/agi/int 最高 → 施法者，治疗落这里，符合
+  作者要的"防御 / 施法 / 其余"三分）；role 读不到主属性照样判，**最坏 "physical"，不会再出 "盗贼=tank"**。
+  查询只走 `C_SpecializationInfo`（1.60 与 12.1.5 都有该命名空间；全局 `GetSpecialization(Info)` 在 1.60
+  不存在，`api-audit` 的 [moved] 说的）。时机按作者要求：进世界算一次 + 点开面板时再算一次，**不跟 2 秒
+  刷新重算**（受限窗口里 role 与属性都是机密值，重算只会把对的换成错的）。实测：role=DAMAGER、
+  agi 140 > int 54 → physical。**判据：盗贼属性面板归类为 physical；`/mui blocks` 无新增机密布尔拦截。**
+
+### 8.28.5 LFG 面板登记与角色 atlas 换图（`4de90ad`）
+
+按 LFG 研究清单落地，**只做登记和换图，点击 / 右键 / 事件全部留空**：
+
+- 实名清单 `LFG_TOP_TABS` / `LFG_DROPDOWNS` / `LFG_QUEUE` 新增，`LFG_BUTTONS` 补刷新 / 选项 / 父框关闭
+  三颗；都走 `M:Dress(as=tab|dropdown|button|fade)`，`Skin:Need` 记账，`/mui skins diagnose` 可复核。
+- 角色 atlas 换图：`groupfinder-icon-role-large-{tank,heal,dps}` 与 `micro-*` 换成 `monet_role_*` 灰阶文件图。
+  `LFGBROWSE_GROUPDATA_ATLASES` 是 Browse.lua 的 local（外面拿不到），ScrollBox 复用行会重新贴 atlas，
+  不是一次换完永久生效 → 做法 = `Widget:PollWatch(LFGParentFrame, 2)` 每秒扫子树，`GetAtlas` 命中就
+  `SetTexture` + `SetTexCoord` 归位；`SetTexture` 之后 `GetAtlas` 返回 nil，下一拍自动跳过。全程 pcall、
+  不 `hooksecurefunc`、不 `HookScript`、不往暴雪贴图写字段（AGENTS：写过 = 这个框之后全归 MonetUI）。
+- `QueueStatusButton`（排队眼睛的宿主，属 `Blizzard_QueueStatusFrame`）**登记口径已订正**：原 `4de90ad`
+  写"只登记 `as=fade`"——独立审查发现 `DRESSERS.fade` 实际调 `Skin:Fade` **把框压成 α0**，排队眼睛直接
+  消失，与注释意图正好相反。现实现 = **只过 `Skin:Need` 进账本、不换肤**
+  （`Modules/Skins/Forever.lua:138-146`，实现会话已交，五道闸门全绿：api-audit no hard / audit-locals
+  55 文件全过 / audit-taint 0/0/0 / test-skin-lua + test-mult 全绿 / check-frame-list 385 一致）。
+  该处注释原写"2026-11-05 独立审查必改项"系**日期笔误**，集成道 11-03 当天已直接改成 11-03（记一笔：
+  这是集成道改的，不是并发改动；入档一律按 11-03）。
+
+**判据：副本查找面板的角色图标（列表滚动复用行之后再看一次）是我们的灰阶三枚；该面板各帧在
+`/mui skins diagnose` 里 ✗/✓ 有账。** 注意框名两客户端都从未实机验过（§9 第 8 条原话）—— 若整排 ✗，
+**1.60 先查 GameRule 有没有禁用副本查找，再动名单**（AGENTS 换客户端口径）。
+
+### 8.28.6 文档配套：DESIGN-LANGUAGE 防丢与 git 归属
+
+- **权威副本与拷贝现状**：`docs/DESIGN-LANGUAGE.md`（180 行，2026-11-02 定稿：透明度阶梯 / 颜色槽纪律 /
+  字号四档 / 点缀四语法）**未被 git 跟踪**（`.gitignore:45` 的 `docs/*` 排除，`git check-ignore` 可复核）；
+  **权威副本在集成道** `C:/Users/EastHillGu/Documents/wowaddonsdev/MonetUI/docs/DESIGN-LANGUAGE.md`，
+  各车道靠**手工拷贝**带文件。本车道 2026-11-03 与权威副本 `diff` 一致（180 行零差异）。换机/换平台
+  把它连同 `docs/` 整目录一起拷，否则随车道丢。
+- **待作者拍板（本车道不拍板）**：DESIGN-LANGUAGE.md 要不要进 git。现状纠正一句：本仓并非"docs 全不入
+  git"—— `git ls-files docs/` 显示 HANDOFF / CHECKS / CODEX-SETUP / MULTI-HARNESS / 两份 PLAN / REVIEW 共
+  7 份已经靠 .gitignore 例外名单在跟踪，**漏网的只有 DESIGN-LANGUAGE（与 AURORA-COVERAGE、
+  TEMPLATE-DB-IMPLEMENTATION）**。**利**：判据进版本控制、随 commit 走车道，不再手工拷、不再怕丢；
+  **弊**：docs 不入库的本意是文档 churn 不污染插件源码史（AGENTS"git 只跟踪插件源码"），例外名单再加
+  名字等于把这条线往回挪。**最小方案 = 例外名单补一行**；不通过则维持手工拷贝并接受丢失风险。
+  **（2026-11-03 已收敛：三份文档的白名单补丁与取舍见 8.28.8，本段留作过程记录。）**
+  另 AGENTS.md 第 16 行"本仓 docs/、tools/、*.md 被 .gitignore 排除"与上述 git 事实不符（7 份已跟踪），
+  口径修订归作者 / 集成道，不由各车道自行改；`.gitignore:36` 注释写"四份交接文档"、实际例外是 **7 行**，
+  同一族措辞落后于事实。
+- **交接口径（给项目经理）**：新建的 `docs/PRELAUNCH-RUN-1105.md` 同样落在 `docs/*` 排除里（例外名单没有
+  它），`git add docs/` 收不到 —— 入档要么补例外行（与上面拍板项 5 一并处理），要么 `git add -f`，要么
+  并入 HANDOFF / CHECKS 已跟踪文件。本车道按纪律未动 `.gitignore`、未做任何 git 写。
+- **编号撞车提醒**：本节所在文件里有**两个"8.26"**——交叉佐证钩子线（带 8.26.1–8.26.7 小节）与
+  close 材质重绘（无小节，AGENTS.md 第 408 行"见 HANDOFF 8.26"指的是**后者**，其余 `8.26.x` 引用都指
+  前者）。未重编号（动了会互指错），请项目经理合并本档时一并处理：建议 close 材质节改挂 8.28.1 的
+  材料或改号，AGENTS 408 行的指向随之核对。
+
+### 8.28.7 环境事实：开发根的 Andromeda 参考件已缺席（2026-11-03 逐路径核实）
+
+**核实结果（修正交办时的说法）**：
+
+- `C:/Users/EastHillGu/Documents/wowaddonsdev/Andromeda`（即各处写的 `../Andromeda`）**确实不在了**：
+  AGENTS.md 第 109 行"参考插件 Andromeda / EllesmereUI 只读（opencode.json 已 deny edit）"、
+  `docs/MULTI-HARNESS.md:63`、主仓 `opencode.json:5` 与 `:57` 的权限项，现在都指向不存在的路径。
+  开发根现存：`EllesmereUI-v9.4` / `BetterNamePlates` / `BlizzThreatPlates-Forever` / `Elvui` / `NDui` /
+  `FreeUI` / `Platynator` / `AishCore` / `monetcolors` / `wow-forever-api`。
+- **但 Andromeda 本体还活着**，残存于旧客户端目录
+  `…\WOWFOREVER\World of Warcraft\_classic_titan_\Interface\AddOns\Andromeda`（`.toc` = `Interface: 38001`），
+  `assets/textures/ui-close.blp` 与 `statusbar-stripes-thin.tga` 均在位。`3f2ba5f` 当年的测量就是从这条
+  游戏路径取的 —— 所以这两批判据**今日仍可离线复核**，丢的不是"复测源"，只是"开发根那份拷贝"。
+
+**受影响的批判据（数字本身都已入档，不怕丢）**：
+
+1. **close 三态比例**（`3f2ba5f`，照 `ui-close.blp`）：bbox `4..27` / 跨度 75% / 笔画 12.5% / 圆头全抗锯齿 /
+   质心居中 —— 已记在本文件"8.26 close 材质重绘"节与 AGENTS「图标字形按画布比例」。
+   **11-03 实测回话（`4b077830`）：12.5% 是**我们**的笔画比；参考件水平 run = 8px（垂向占比 **0.177**，旧记 17.8% 同数），
+   "笔画贴合/逐像素重合"对笔画不成立 —— 详见 8.26 订正块与 8.29.1 A8。**
+2. **45° 斜纹剖面**（2026-10-28，照 `statusbar-stripes-thin`）：亮纹 2 纹素 → 垂直厚度 2/√2、α 加权占空
+   27.3%（旧版 50.3% 读成雾）、参考件周期 ≈6 在 64 图上实测断 43 像素 —— 已记在 AGENTS「45° 斜纹必须带
+   半像素过渡」。
+   **11-03 实测订正（`4b077830`，口径混用）：27.3% / 周期 6.3 那组数 = 2026-10-31 对零售版截图的测量，
+   不是本机实物 —— 本机 `statusbar-stripes-thin.tga`（64×32，type 10 RLE，现有解码链不收、审查在只读
+   工具里补了解码）实测周期 4、剖面 [255,129,0,129]、占空 50.3%（与 `regen-textures.js:744` 注释里
+   "我们（周期 4）50.3%"逐位相同）；`thick.tga`（256×32）占空 42.3%、无硬剖面。现设计 S1（周期 8 /
+   37.5%）方向上背离本机实物 —— 是否回到周期 4 = **待作者拍板**（PRELAUNCH 拍板清单第 8 条），入档见 8.29.1 A9。**
+
+**风险定级**：`_classic_titan_` 属旧客户端残留，按项目"12.1.5 不保留"口径随时可能在某次磁盘清理被删；
+一旦删掉，这两条材质判据就成**单一来源且离线不可复核**（现役生成参数 `CLOSE_GLYPH_SPAN/STROKE` 虽在
+`tools/regen-textures.js` 里，但"为什么是这两个数"的证据没了）。标记：**复测源在位但悬（挂旧客户端），
+上线日实机看材质兜底**；原"取回 vs 自定案"的待拍板写法已被下方集成道最终订正收敛为
+**必做 = 改路径指向、可选 = 取回/自定案**（PRELAUNCH 待拍板第 7 条随之改）。
+
+**11-03 集成道最终订正（性质 = 路径指错，不是"参考件已丢 / 不可复核"）**：独立审查会话"ANDROMEDA 不在
+本机、离线不可复核"的那一条被正式推翻 —— `../Andromeda` 只是**相对开发根不存在**，实物一直在这台机器上：
+`C:/Users/EastHillGu/Documents/Blizzards/WOWFOREVER/World of Warcraft/_classic_titan_/Interface/AddOns/Andromeda`
+（`.toc` 逐行实测：`## Interface: 38001` / `## Author: fafaraway (adapted for 3.80.1)` / `## Version: 11.01`；
+资产注册锚点 `core/media.lua:9` = `statusbar-stripes-thin`、`:26` = `ui-close`，与 `3f2ba5f` close 重绘和
+2026-10-28 斜纹两条批判据的测量来源对得上）。于是：
+
+- 材质比例类判据（close 跨度 75% / 笔画 12.5% / 质心 31.5；斜纹剖面）**现在可离线复核**，不再归"不可复核"；
+  参考件对交付贴图的**像素对比由审查会话 `4b077830` 做完并收工**（**11-03 已落地**：8.29.2-B1 的"自校验"结论
+  据此升级为**外部验证**，几何表见 8.26 订正块末条与 PRELAUNCH 拍板第 9 条 ④）。
+  **收工回话推翻的恰恰是手边记的两个"参考件数字"**（close 笔画、斜纹 27.3%），
+  见 8.26 订正块、8.28.7 两条订正与 8.29.1 A8/A9；其余项（bbox / 跨度 / 质心 / 四边对称 / alphaMax）对比成立。
+- 残余风险只剩**单一来源**：实物挂在旧客户端目录，`_classic_titan_` 一次清理即断证据链。
+- 处置收敛为两档：**必做** = 把 `AGENTS.md:109`、`docs/MULTI-HARNESS.md:63`、主仓 `opencode.json:5`/`:57`
+  三处（四个行位）`../Andromeda` 指向改成上面的绝对路径（`:109` 最终措词见 8.28.8-B 第 2 条）；
+  **可选** = 取回开发根拷贝、或把两条比例写进 `docs/DESIGN-LANGUAGE.md` 自定案后删除外部指向。
+
+**建议改法（AGENTS.md 按纪律由集成道维护，本车道一字未动）**：
+`AGENTS.md:109` 补一句"`../Andromeda` 开发根缺席，现存唯一拷贝 = `_classic_titan_…AddOns/Andromeda`（只读）"
+或删指；`:381` 与 `:394` 两处"照 Andromeda X 重画"各补现存绝对路径；`opencode.json:5` / `:57` 删除或改指
+现存路径；`docs/MULTI-HARNESS.md:63` 同步（该文件不在本车道交付清单，未动）。
+
+**docs 拷贝核对（本轮）**：`docs/DESIGN-LANGUAGE.md`（180 行）、`docs/AURORA-COVERAGE.md`（261 行）、
+`docs/TEMPLATE-DB-IMPLEMENTATION.md`（195 行）与本车道从主仓拷入版本 `diff -q` 实测**零差异**（2026-11-03）。
+后两份同样不在 .gitignore 例外名单 —— 与 DESIGN-LANGUAGE 共命运，拍板见 8.28.6。
+
+### 8.28.8 文档入库白名单最小补丁 + AGENTS.md 待订正（11-03 按集成道实测事实收敛）
+
+**事实基座（集成道 11-03 实测，与本车道前两轮 `git ls-files docs/` / `git check-ignore -v` 结果一致）**：
+`docs/*` 是"整目录排除 + 逐文件 `!` 白名单"而非 docs 全不进库；已入库 7 份（CHECKS / CODEX-SETUP /
+HANDOFF / MULTI-HARNESS / PLAN-refactor×2 / REVIEW-2026-10-29）；`.gitignore:44` 注释写明结构原因
+（"不能写成整目录 `docs/`——那会让下面的 `!` 全部失效"）；`tools/*` 同构（闸门脚本 `!tools/**/*.js`
+自 2026-10-30 入库）；`*.md` 全局排除另有 4 个例外（README、两份 NOTICE、.qoder/rules）。
+被 `docs/*` 吃掉的三份判据文档（DESIGN-LANGUAGE / AURORA-COVERAGE / TEMPLATE-DB-IMPLEMENTATION）
+连 `--untracked-files=all` 都不显示 —— 只能靠例外名单或 `git add -f` 入档。
+
+**A. 白名单最小补丁提案（不动 `.gitignore`，交集成道落）**：在 `.gitignore` 的 docs 例外段（`:46-52` 之后）追加
+
+    !docs/DESIGN-LANGUAGE.md
+    !docs/AURORA-COVERAGE.md
+    !docs/TEMPLATE-DB-IMPLEMENTATION.md
+
+理由：三份都是**上线后维护要用的判据/素材来源**，不是过程产物 —— C2/C2.1 视觉验收以
+DESIGN-LANGUAGE 为依据；8.28.3 模板账本（387/32/5 与扩指纹路线）以 TEMPLATE-DB-IMPLEMENTATION 为底稿；
+Aurora 移植覆盖面（26 个 SharedXML 目标）以 AURORA-COVERAGE 为对照。api 快照、texture-preview 产物、
+评审表维持排除不动。**若作者收窄，最小闭环 = 只放 DESIGN-LANGUAGE**（CHECKS 直接引用的那份）。
+附带效果：本文件（HANDOFF 8.28.6 末段）与 PRELAUNCH 提到的"`docs/PRELAUNCH-RUN-1105.md` 也被 `docs/*`
+吃掉"同属这一族，是否入档随本条一并拍板（它是单周执行单，过程属性更强，本车道倾向不入）。
+
+**B. AGENTS.md 待订正记录（本车道未动一字，行号按当前 11-03 版文）**：
+
+1. **`AGENTS.md:16`**：现文"本仓 `docs/`、`tools/`、`*.md` 被 `.gitignore` 排除（git 只跟踪插件源码），
+   换机/换平台要整目录拷贝"**与 git 事实不符**（7 份 docs、`tools/**/*.js` 闸门脚本、README/NOTICE 均已
+   跟踪）。建议改为："`docs/*` 与 `tools/*` 采用整目录排除 + 逐文件 `!` 白名单，已入库清单见
+   `.gitignore:36-52`；未入白名单的 docs 内容（api 快照、texture-preview、判据文档等）换机仍需整目录拷贝。"
+2. **`AGENTS.md:109`**：现文把 `../Andromeda` 当在位参考件 —— 开发根该目录已缺席（同失效的还有
+   `docs/MULTI-HARNESS.md:63` 与 `opencode.json:5`/`:57` 的指向；`EllesmereUI-v9.4` 仍在、跨目录可读正常）。
+   **11-03 集成道定性质：参考件路径不存在（路径指错），不是丢件** —— 实物一直在
+   `_classic_titan_…AddOns/Andromeda`（toc 38001 / v11.01 / fafaraway classic-titan 适配套），
+   `core/media.lua:9`=斜纹、`:26`=close 就是两条批判据的原始测量来源；材质比例类判据**据此拷贝可离线复核**，
+   像素对比已由审查会话 `4b077830` 收工落地（close 笔画与斜纹剖面两处旧记录被实物推翻，见 8.26 / 8.28.7 订正）。**最终措词**（交集成道改 `:109`，一行方案）：
+   "参考插件 EllesmereUI-v9.4（开发根）与 Andromeda 均只读；`../Andromeda` 路径不存在，实物 =
+   `C:/Users/EastHillGu/Documents/Blizzards/WOWFOREVER/World of Warcraft/_classic_titan_/Interface/AddOns/Andromeda`
+   （Interface 38001 / v11.01 / classic-titan 适配套，只读），材质比例类判据（close 跨度/笔画/质心、45° 斜纹剖面）
+   可据此拷贝离线复核"。同步改指（必做）：`docs/MULTI-HARNESS.md:63`、主仓 `opencode.json:5` 与 `:57` 的
+   `../Andromeda` 全部换成同一绝对路径。**已撤回的审查表述**：①"Andromeda 不在本机 / 离线不可复核"；
+   ②close 比例归因 `cd1f6d7`/`5bc814e`（来源 commit 实为 `3f2ba5f` 重绘；`cd1f6d7`/`5bc814e` 是换图与
+   全量统一一族、其判据不引用 Andromeda）。**可选**：取回开发根拷贝，或把两条比例写进
+   `docs/DESIGN-LANGUAGE.md` 自定案后删除外部指向（PRELAUNCH 待拍板第 7 条已按此降级）。
+
+## 8.29 2026-11-03 上线前证据台账：哪些结论没有 1.60 实机支撑
+
+**背景**：独立审查（会话 4b077830）+ 集成道交办合并的产物。前提事实：本批 15 个 commit（`4de90ad`→`cd1f6d7`）
+**零次在 1.60 上跑过**（交付客户端 11-05 才开服），而代码注释与文档里大量"实测/实机"字样没带客户端标签 ——
+按 AGENTS 口径（12.1.5 = 历史证据、新结论只标 1.60）逐条降级入账。**A 表的代码注释修改全部由集成道执行**
+（多位同事正在并发改 `Utils/Skin.lua` / `Utils/Widget.lua` / `Modules/InfoBar/Blocks.lua` /
+`Modules/Tooltip/Tooltip.lua`，本车道一字不碰源码，只出这本账）。
+
+**先钉死一个真相，防止一刀切改成"离线推断"**：`c58fae9` 的 commit 自述明写 *"Verification is visual --
+the game is up on retail"* —— 11-03 当晚 **12.1.5 是开着的**，`ff1bd7c` / `5bc814e` / `44f0253` 的测量都发生在
+在线 12.1.5 上。所以 A 表的应改口径统一是 **"12.1.5 实测 / 历史证据，待 1.60 复验"**，不是"离线推断"；
+反过来，把 1.60 上从没跑过的事写成"两边都验过"才是本表要抓的那类错（A5）。commit 自述"实机未验"的条目
+（`b0a0ecd` 观感/边沿）入"未验"账（C2.1 已列首跑重点），不冒充历史证据。
+**结论一句（11-03 集成道定稿）**：这 15 个视觉 commit 不是"完全未验"，而是**"在已停用的客户端上验过"** ——
+风险类型从"没见过效果"变成**"跨客户端行为差异"**：1.60 上第一趟要防的是"同一行代码在另一个构建里表现不同"
+（字形尺寸感、atlas 缺席、GameRule 关框），而不是"效果未知不敢开"。这决定上线日验收的组织方式：
+按"12.1.5 已验判据 → 1.60 复验"成对打勾（A 表新列就是这本账），不是从零盲验。
+
+**零实机证据与工具/数据源陷阱判例（11-03，集成道三个只读工具实测入账；同日定案：每条带可复核锚）**：
+本车道 8.29 此前**没有**这张证据表（`grep 铁证|零实机` 全档 0 命中）——"第四条"沿用集成道车道的编号，
+**他账本的前三条原文不在本档**，要合成完整四条请集成道发来。本道落地的是（锚注规则：仓内文件给
+`文件:行`；外部工具实演记录无仓内锚，标注出处；跨档行号以"原话锚"抗位移）：
+
+- **④（新入账，两条互证）**：`wuxian.errors` 返回 `available:false`（原话 *"no SavedVariables of
+  !WuxianWorkshop yet —— the client writes them at logout or /reload"*）+ `doctor` 的唯一 unknown =
+  `WTF\Account` 无 AddOns.txt（角色登录后才写）—— 两者都只能由"**该客户端从未登录过角色**"产生。
+  锚：工具输出无仓内文件，出处 = 集成道 11-03 实演记录；同族落盘机制仓内锚 `Core.lua:1090`
+  （"探针全量落盘比 /reload 晚 1–2 分钟"）。
+- **上线日防误读警告**：第一趟**必须跑过 `/reload` 或正常退出游戏**，否则 `errors`/`logs` 拿不到东西 ——
+  **"工具没数据"不等于"没报错"**。
+- **陷阱判例①（工具字段会骗人）**：`status.addons_dir` 在游戏未运行时写 `_retail_` 是**陈旧回退字段**
+  （同屏实测 `game.found:false` / `link.state:offline`）；权威是 `doctor`（`game_dir` = `_forever_`、
+  1.60.1.70753 cn/wowf、Interface 16001 按版本号推算；Workshop 4 文件 + WoWBridge 27 文件均装在
+  `_forever_`、版本一致、字体信箱 4096 槽 + proc.ttf 在位、无旧残留）与 `addons`（列目录即
+  `_forever_\Interface\AddOns`，MonetUI 0.12.0 current:true、history 30 版）⇒ **验路径跑 `doctor`，
+  别拿 `status.addons_dir` 当真**；计划"阶段 1 前置"已满足。锚：`docs/PRELAUNCH-RUN-1105.md`
+  D-1 第 5 项（原话锚"必做·开机跑一次 wuxian.doctor"）与"已解除（11-03，曾列阻塞）"段。
+- **陷阱判例②（数据源分不清新旧）**：`_retail_\Interface\AddOns\MonetUI` 存在且与 `_forever_` 副本
+  **版本号同为 0.12.0** ⇒ 版本号判不了新旧；**11-03 定案：mtime 也不记**（robocopy 保留源 mtime，
+  对"产物是哪批代码"没有判据价值）—— 硬方法 = `git hash-object <已部署文件>` 对 `HEAD:<同路径>` 比内容。
+  本道 11-03 复核命中：LICENSE / MonetUI.toc / Core.lua / `Modules/Skins/Skins.lua` / `Utils/Scheduler.lua`
+  **五采样点全部 SAME-as-HEAD ⇒ `_forever_` 现存副本 = `cd1f6d7` 的部署态**（已部署 LICENSE 1067 字节 =
+  仓库 blob；worktree 1088 = 多 21 个 CR 的文本归一化、非内容差）。另 `status.content.packs.api =
+  2026.10.27.1`（bundled；在线更新超时失败）可作 **API 快照心日期**。锚：`docs/PRELAUNCH-RUN-1105.md`
+  §2"部署态基线"块（原话锚"上线日部署产物 = cd1f6d7 + 今日各线改动"）。
+- **陷阱判例③（比对逻辑自身的坑，集成道 11-03 修复）**：`tools/sync-check.js` 的 `isText()` 只认扩展名，
+  **无扩展名的 `LICENSE` 落到"逐字节比"分支** —— git 的 CRLF↔LF 归一化让 worktree 副本与部署副本
+  **字节不同、内容相同** ⇒ **永久假 STALE**（1088 vs 1067 = 21 CR；实跑输出里 LICENSE 在列，修后 11→10）。
+  同族坑仓里**注释过一次**（逐字节比把刚部署完的文件报 STALE、实机误报过 `UnitFrames.xml`），当时只补了
+  扩展名清单、没盖到无扩展名文件。修复在 `tools/sync-check.js:58-66`（含案文注释；`node --check` 过，
+  本道复核）。与判例①同族：**都是"看起来一致、其实口径不同"**。
+- **陷阱判例④（11-03 下午，两条离线闸门各自够不到的东西）**：① `node tools/quality-color-probe.js` 全绿
+  （本轮实跑：源码级 4 项 + Lua 探针 48 断言，0 失败）**不等于客户端给的品质色和旧手调六档一致** —— 该闸门
+  断言的是"形状/接线/单一真值源"，`tools/` 在它的 SKIP_DIRS 里、也从不真调用 `C_Item`，拿不到返回值；
+  **（本句"从不真调用 `C_Item`"措词不准 —— 探针自供假 API 并真走那条分支，准确口径见判例⑤②，11-03 傍晚订正）**
+  数值对不对只有实机眼看（判据 = CHECKS C2 品质色条）。② `tools/test-aura-fit-external.js` [5] 报
+  `monetTargetBuffs` / `monetTargetDebuffs` / `变量:owner` 三条 FAIL，**是镜像扫描范围的限制不是代码缺口** ——
+  它的销账点扫描只过 `BuffFrame.lua` + `UnitFrames.lua`（test `:210-211`），没扫 `Auras.lua` 内部，而目标框
+  两组的 false 就在 `Modules/UnitFrames/Auras.lua:835`（owner 省略 = 那两组）。⇒ **闸门红/绿都要先读它在断言什么**。
+- **陷阱判例⑤（11-03 傍晚，harness 与探针各测什么 —— 集成道交办 + 本道按行号复核，含对本道上一条的订正）**：
+  ① **`tools/harness/api_stub.lua` 的 `C_Item.GetItemQualityColor` 形状是错的**（锚 = `GetItemQualityColor = function(q) return { r = 0.55`；
+  本轮两次读取间该块从 `:2180` 漂到 `:2185` ⇒ **`tools/harness/` 正被 harness 道在飞改（`?? tools/harness/`），行号一律不可靠，按锚定位**）：
+  stub **返回一张表**，真实签名是 `→ colorRGBR, colorRGBG, colorRGBB, qualityString`（**三个 number + 一个字符串**，主仓 `docs/api/FUNCTIONS.md:2700`）。
+  发行码那侧解的是 `Utils/Skin.lua` 的 `local ok, r, g, b = pcall(C_Item.GetItemQualityColor, q)`（现 `:1569`，该文件在 M 列会漂）
+  + 其后三个 `type(...) == "number"` 判定（现 `:1577`）
+  ⇒ 拿到表时 `r` 是表、`g`/`b` 是 nil，判定不通过，**必然落到 `QUALITY_FALLBACK`**。⇒ **凡经 `tools/harness/run.lua`
+  （锚 = `dofile(join(root, "tools/harness/api_stub.lua"))`）加载模块的离线冒烟跑，品质色永远只见旧兜底六档**；
+  从这条路径得到的"颜色看起来对"**不构成"客户端色已比对"的任何证据。** 修 stub 形状归 harness 道（本道一字不碰 `tools/`）。
+  ② **但"断言全绿是假象"这句要分对象**：`tools/harness/quality-color-probe.lua` **不加载 api_stub**（探针头注 `:24`
+  写明"为什么不 use api_stub.lua：那是 harness 道正在改的文件"），它自己塞假 `C_Item` 并把发行码那段编进
+  chunk 跑（`:92`，成功支用 `return 0.2, 0.4, 0.6` 这类**三个数**的假值，`:187`/`:192`；`:155` 还专门把"返回一张表"
+  当成兜底用例断言）⇒ 成功支在探针里**是被走到的**，探针的绿证明"接线 + 形状 + 兜底路径"，**不证明客户端数值**
+  （假数本来就是编的）。**订正判例④ ①里本道写的"从不真调用 `C_Item`"**：准确说法是"调用的是自供假 API，拿不到客户端返回值"。
+  ③ **harness 能测 / 不能测的边界（上线日口径，写死）**：能测 = 模块能否加载、接线是否只走一个出口、答不上来时是否落兜底；
+  不能测 = 客户端返回的实际 RGB、memo 引用稳定性在真机是否被别的写入破坏、以及"客户端色 == 旧手调六档"这一条本轮改动的全部收益所在。
+  ④ **交叉引用边界（新记）**：本 worktree **没有 `docs/api/`**（`ls docs/api` 报 No such file；该目录被 `.gitignore:45 docs/*`
+  排除、不在 6 个白名单例外里）⇒ 凡引用 `docs/api/FUNCTIONS.md:行号` 的行（含 A10、判例⑤）**只在主仓侧可核**，
+  换机/换 worktree 需整目录拷贝才能复现。
+
+### 8.29.1 A 表：宣称"11-03 实测/实机"的扫描清单（.lua 注释与 docs 同账）
+
+扫法：`git log -p --format="@@%h" 4de90ad~1..cd1f6d7 -- '*.lua'` 的新增行过
+`实测|实机|踩过|红字|测量`，再映射当前工作树行号。**行数以当前 worktree 为准，并发修改会位移 ——
+定位以"原话锚"为准。**
+
+| # | 文件:行 | 原话（锚） | 应改口径 | **真在 12.1.5 验过？（证据，不猜）** | 证据类型 |
+|---|---|---|---|---|---|
+| A1 | `Utils/Skin.lua:1142` | "2026-11-03 实测 53 只里 32 只还是暴雪原样" | 标 **12.1.5 实测（历史证据）**；"待 1.60 复验"就是这个数要重新数 —— C2.1"32 只清零"硬账的基线 | **验过** —— `5bc814e` 正文首行 *"Measured on the live client: 53 close buttons, 21 carrying our monet_close_*"* | **commit 自述**（`5bc814e` 正文，逐字在） |
+| A2 | `Utils/Skin.lua:1375` | "…= self:Get…)`（2026-11-03 实机红字）" | 标 12.1.5 历史证据；`TexOf` 漏斗本身两客户端都无害（取不到返回 nil），但"四个方法都拒点号"这一**事实**要在 1.60 重测一次才算 | **验过** —— `ff1bd7c` 正文 *"…this client rejects a nil self on widget methods. Measured on a live…"* | **commit 自述**（`ff1bd7c` 正文） |
+| A3 | `Utils/Widget.lua:1272` | "2026-11-03 实机踩过一次"（Ellesmere 数值照抄致左右反） | 标 12.1.5 历史证据；`SetRotation` 方向约定在 1.60 待复验（两客户端都有该方法，符号未验） | **验过（间接证据）** —— 注释自述 + 同晚 `c58fae9` *"the game is up on retail"*；该 commit 正文没有独立 Measured 句，`44f0253` 正文反而是条件句 *"If the live arrows ever come out mirrored, flip…"*（1.60 侧待验） | **commit 自述（间接）** —— 事件本体只有注释自供，硬证据是同晚 `c58fae9` 的在线自述，非该测量本身的记录 |
+| A4 | `Modules/InfoBar/Blocks.lua:541` | "实机一测就翻车：`UnitClass("player")` → 潜行者/ROGUE/**classID=4**" | 标 12.1.5 实测（`c58fae9` 自述当晚 retail 在线）；classID 跨客户端**不共享**（AGENTS 原话），1.60 上盗贼归类必须重测一次 | **验过** —— `cd1f6d7` 正文 *"Measured on the live client: … rogue as …"* + *"Verified live: role=DAMAGER, agi 140 >"* | **commit 自述**（`cd1f6d7` 正文两句都在） |
+| A5 | `Modules/InfoBar/Blocks.lua:671` | "1.60 与零售 12.1.5 都有这个命名空间（**实机两边都验过**）" | **本表唯一的口径错误行**：1.60 未开过服，"两边都验过"应降级为"12.1.5 实机验过 + 1.60 文档（`docs/api` 快照有该命名空间）"，上线日随 `/mui compat` 补验 | **12.1.5 侧验过（同日 `cd1f6d7` 证据）；1.60 侧 = 纯离线推断**（只有 `docs/api` 快照）—— 全表唯一带"离线"半句的行，错在把它写成"验过" | 12.1.5 侧 **commit 自述**（`cd1f6d7`）；"两边都验过"这半句 = **仅注释宣称**（正是本列要抓的） |
+| A5b | `Modules/InfoBar/Blocks.lua:674`（A5 同段第二句） | "返回序：specId, name, description, icon, **role**, …（**两个客户端一致**）" | 与 A5 同类：跨客户端一致性目前只有 12.1.5 侧证据 ⇒ 改标"12.1.5 实测序，1.60 待 `/mui compat` 一并核"。**11-03 傍晚补行**：该句不含 `实测/实机/踩过/红字/测量` 任一关键词，**被本表原扫描正则漏掉**（补扫 = 窗口新增行过 `两个客户端 / 两边都 / 1\.60 与零售 / 跨客户端`，命中 2 行 = A5 + 本行，全仓 `.lua` 唯一） | **12.1.5 侧验过**（同 `cd1f6d7`）；"两个客户端一致" = 跨客户端外推 | **commit 自述**（12.1.5 侧 `cd1f6d7`）+ **仅注释宣称**（一致性那半句） |
+| A6 | `Modules/Tooltip/Tooltip.lua:465` | "2026-11-03 前这里写的是 `Color:GetNeutral()` —— 实机读成…" | 标 12.1.5 历史证据 | **验过** —— `c58fae9` 正文 *"Verification is visual -- the game is up on retail, so /reload and hover a spell"* | **commit 自述**（`c58fae9` 正文） |
+| A7 | `Modules/Tooltip/Tooltip.lua:523` | "（**本客户端**全局常量实测）：`NORMAL_FONT_COLOR` (1, 0.82, 0)…" | "本客户端"是 8.13.5 要退役的写法，改标 **12.1.5 实测**；这两个常量的**数值**在 1.60 可能不同 → 直接决定黄带容差匹配命中不命中，上线日第一趟重测 | **验过** —— `c58fae9` 正文 *"Measured global constants on this client"* | **commit 自述**（`c58fae9` 正文） |
+| A8† | `docs/HANDOFF.md 8.26`（参考件行 + "逐像素重合"行） | "笔画 ≈4px（12.5%）… 与参考件逐像素重合" | **被外部实测推翻**：参考件 run = **8px**（垂向 ≈5.7px / **17.8%**）；我们按常数画的 32px 源图 run = 5、**交付件（TGA 降到 32）run = 6**（`runsMid` 12..19 vs 13..18），中心行交叠 8 vs 6 —— "细一圈"没修掉、只对齐了 bbox。"逐像素重合"只对 bbox/跨度/质心/四边对称（+alphaMax 255）成立。已就地订正 8.26 / 8.28.1 / 8.28.7。**11-03 审查收工**：占比定数 **我们 0.125 / 参考件 0.177**（= 8÷√2÷32；比率方向 粗≈41% / 细≈29%，"细 35–40%"作废），六档×两缩放 12 种显示直径全高于亚像素临界（我们 <8px、参考件 5.66px）⇒ 判**不存在亚像素线**，三档判定 = **按几何可不管**，实机只剩 24px@1 并排看一眼 | 错在**自校验闭环**（`audit-pixels` 从不比对参考件笔画）；推翻证据 = 审查 `4b077830` 逐像素实测（外部、已落地） | —（非客户端宣称，三类口径不适用；推翻源 = 离线逐像素实测） |
+| A9† | `docs/HANDOFF.md 8.28.7` 第 2 条 + `tools/regen-textures.js:744/:746` 注释 | "α 加权占空 **参考件 27.3%** / 周期 ≈6.3" | **同一数字、错的对象**：27.3% / 6.3 = **2026-10-31 对零售版截图的测量**，不是本机实物。本机 `statusbar-stripes-thin.tga`（64×32，type 10 RLE）实测周期 4、剖面 [255,129,0,129]、占空 **50.3%**（与注释"我们（周期 4）50.3%"逐位相同）；`thick.tga` 42.3% 无硬剖面 ⇒ S1（周期 8 / 37.5%）**背离本机实物**。注释修改由集成道执行（本车道一字不碰 tools/）；回不回周期 4 = **待作者拍板**（PRELAUNCH 第 8 条） | 错在**口径混用**（截图测量写成参考件测量）；推翻证据 = `4b077830` 本机实物实测（自带 RLE 解码，`tools/compare-andromeda-close.js`） | —（非客户端宣称，三类口径不适用；推翻源 = 本机实物逐字节/逐像素实测） |
+| A10‡ | `Utils/Skin.lua:1526-1537`（口径块）+ `:1543` `QUALITY_FALLBACK` + `:1568-1569` `pcall(C_Item.GetItemQualityColor, q)` + `:1604` `Skin:QualityColor` + `:1621-1624`（`QualityOf` 头注）+ `Modules/Bags/Bags.lua:369-371` | "先问客户端要色" / "**实机探针全 nil**…`C_Item.GetItemQualityByID` … **实机验证 q=2 直接解出**" / "Bags.lua:369 那一份自己的手调表**已删掉**" | 标 **12.1.5 实机判例**（`QualityOf` 头注明写"本客户端（WOWFOREVER 12.1.5）"）。1.60 侧要验的**不是 API 在不在**（`docs/api/FUNCTIONS.md:2700` 离线已确认 `C_Item.GetItemQualityColor(quality) → colorRGBR/G/B/qualityString` 在 1.60 索引里；全局那三个同样缺席，但 `docs/api` 是 API 文档索引、**缺席≠不存在**，见 8.29.2 口径），而是**客户端给的颜色与旧手调六档是否一致**——这次改动的全部收益就压在这一条上。**⚠ 反驳交办口径**：交接说色彩道"将把 Bags.lua:369 改走同一访问器"，工作树现状是**已经改完**（Bags 手调表已删、`Bags.lua:380 return Skin:QualityColor(...)`）——**未提交**，属今日在飞改动，别当未来时记账。验收子项（三处同色）落 CHECKS C2 | **半验**：`C_Item.*` 可用性 = 注释自述的 12.1.5 实机；"客户端色 == 旧手调值"**从未比对过**（旧写法各算各的，本来也无可比性）⇒ 1.60 第一趟必须眼看 | **仅注释宣称** + 离线闸门（`node tools/quality-color-probe.js` 本轮实跑 48 断言 / 入口 4 项全过，见判例④订正后口径：它自供假 `C_Item` 能走到成功支、但数值是编的；**判例⑤**：走 `api_stub` 的 harness 跑连成功支都进不去，只见兜底六档）；未提交 ⇒ **无 commit 自述可用**。**11-03 集成道确认**：品质色**全仓只剩一处真值源 = `Skin:QualityColor`**（交办结论，与本道 grep 一致）。 |
+| A11‡ | `Modules/UnitFrames/Auras.lua:565`/`:693`/`:696`（三条 11-01 实机判例）+ `:580-603` `SyncAuraFitTicker`/`SetFitGroupMounted` + `:713-718` 导出契约 + `Modules/BuffFrame/BuffFrame.lua:249-263`（`SetExternalAuraFit` 注释）+ 调用点 `:462/:470/:668/:683` | "实机 2026-11-01：60 个字体串就是这么改掉的" / "实机 2026-11-01：目标框 8 个 buff 的时长一直是 ARKai_T@17 默认字体" / "实测一次刷出 40 多条「轮询读不到可见性」" | 三条标 **12.1.5 历史证据**；旧写法（每按钮 PollWatch）已被中央 1s ticker 取代，1.60 上"遍历子件 + `SetFont` 都读得动"这条**前提本身要重验**（依赖 pcall 在 1.60 也成功）。**⚠ 反驳交办口径**："目前没有任何人调 `ns.AuraFitMounted(false,'external')`"在工作树里**已不成立** —— BuffFrame 自建 helper 并在四条生命周期边界上成对销/建（:462 建容器失败支销、:470 成功支建、:668 模块开启建、:683 模块关闭销），`tools/test-aura-fit-external.js` [3] 全绿、[5] 里 `external` 组判"可停"。**真实边界见下方 P1 段** | **12.1.5 侧验过（日期式注释自述，无同日 commit 正文可挂）**；1.60 侧 0 证据，且机制**整体未提交** | **仅注释宣称**（三条 11-01 判例）+ 离线测试（`node tools/test-aura-fit-external.js` 本轮实跑 23 过 / 3 失，3 失为镜像范围限制，判例④②）；未提交 ⇒ 无 commit 自述 |
+
+**新列小结（11-03，证据逐条从 commit 正文取）**：**A1–A7 共 7/7 行都在 12.1.5 真验过，纯离线推断的行为 0**；
+唯一"离线"半句藏在 A5 的 1.60 侧（写成了"验过"，正是本表要抓的错）。所以 A 表整体是**跨客户端复验账**，
+不是"补做验证"账 —— 上线日每行只需"对着 12.1.5 结论看一眼 1.60 是否一致"。
+**11-03 傍晚补行 A5b**（同段"两个客户端一致"，因无关键词被原正则漏抓）⇒ `.lua` 侧共 **8 行**，判级与 A5 同型；
+可执行改写见本节末**返工单**。
+**† A8/A9 为 11-03 审查逐像素实测后补的同类行**：对象是本车道自己的 docs 记录（非 .lua 注释、与客户端无关），
+末列记"错误来源 + 推翻证据"而非"12.1.5 验过？"；两行共同的错型是**把自校验/别处口径的数字当成参考件实测**，
+不进上线日复验账，进的是拍板账（PRELAUNCH 第 8 条）。
+
+**证据类型列口径（11-03 定稿，逐行按硬证据填、拿不到留空）**：只认 `commit 自述` / `日志时间戳` /
+`仅注释宣称` 三种；**"12.1.5 实测"这个结论只允许从前两种推，不许从注释自供推**（注释正是本表要审的对象）。
+本轮没有对过游戏 Logs ⇒ **`日志时间戳` 0 行**；A1/A2/A4/A5(1.60 侧除外)/A5b(12.1.5 侧)/A6/A7 = commit 自述（正文原句本轮
+`git log -1 --format=%b` 逐条复核在）；**A3 特殊**：事件本体只有注释自供，同晚 `c58fae9` 在线自述算**间接**
+⇒ 严格口径为 **7 直接（含补行 A5b）+ 1 间接、0 行"仅注释宣称"成立的行**；A5 的"两边都验过"与 A5b 的"两个客户端一致"
+= 仅注释宣称（记在行内，这正是它们的错）。A8/A9 非客户端宣称，标 —。
+
+**‡ A10/A11 与本表其余行的来源不同**：本表扫法只看**已提交**范围（`4de90ad~1..cd1f6d7`），这两行来自
+**11-03 下午的工作树未提交改动**（`git status` 里 `Utils/Skin.lua`、`Modules/Bags/Bags.lua`、
+`Modules/UnitFrames/Auras.lua`、`Modules/BuffFrame/BuffFrame.lua` 均在 M 列；新闸门 `tools/quality-color-probe.js`、
+`tools/test-aura-fit-external.js` 在 ?? 列）⇒ 证据类型**最高只能到"仅注释宣称 + 离线闸门"**，不许写 commit 自述；
+提交后由集成道按实际 hash 补挂。**A11 的 P1 覆盖边界（上线日性能对比口径，必读）**：
+① **`_forever_` 现存部署态 = `cd1f6d7`，里面根本没有这套账本机制**（`git show HEAD:Modules/UnitFrames/Auras.lua`
+无 `AuraFitMounted` 符号、`HEAD:Modules/BuffFrame/BuffFrame.lua` 无 `SetExternalAuraFit`）⇒ **"P1 已修"目前只是
+工作树事实**，上线日的 OnUpdate/ticker 对比**不能拿它做基线**，除非这批改动当日部署进去（判据：`sync-check` in sync）。
+② 目标框两组（`monetTargetBuffs`/`monetTargetDebuffs`）的销账在 `Auras.lua:835`（`showTargetAuras` 关）+
+`Modules/UnitFrames/UnitFrames.lua:1172`（模块开关），"external"组四处边界见 A11 行 —— 但**这几条路径实机是否真被走到、
+`C_Timer ticker` 的 `Cancel()` 是否成功，全部离线不可证**（`tools/test-aura-fit-external.js` [6] 自己列了这份名单）。
+③ 复核方法只有两条现役命令：`/mui perf`（调度器总账：逐路耗时 / 失败计数 / 被暂停的轮询框）与
+`/mui buffframe probe` —— **后者只数 `GetChildren` 个数，覆盖不到 ticker 起停**（test :240 原话），别拿它当"P1 已生效"的证据。
+④ 关闭 BuffFrame 后若目标框两组仍在场，ticker 继续跑**是设计不是漏**（test [6] 第 3 条）；对比时先确认模块开关状态。
+
+**PLAN 侧欠的一笔**（本车道不代笔，`docs/PLAN-refactor*.md` 归集成道）：品质色"单一真值源收口"属架构整合成果，
+应在 PLAN 的成果条里记一行（`Skin:QualityColor` 为唯一出口、Bags 手调表已删、色块形状统一为命名字段 `{r,g,b}`）；
+本车道已在 A10 与 CHECKS C2 落账，**避免两处各写一份数字**。
+
+**不入账的相邻行**（核查过，非实测宣称）：`Utils/Widget.lua` 的"实机若发现左右反了…"（条件句 ——
+**11-03 傍晚复核：这行现已不在树上**，`git show HEAD:Utils/Widget.lua` 与本道工作树都查无此句；
+它是 `44f0253` 加入、同窗口 `ff1bd7c` 又删掉的 ⇒ 不列为待返工行，只作扫描过程记录）；
+`Modules/Bags/Bags.lua`、`Modules/Skins/Forever.lua` 该批新增行里无实测式表述。docs 侧本账只命中
+HANDOFF 8.28.8 一句"`diff -q` 实测（2026-11-03）"—— 那是**离线文件比对**，不是游戏实机，口径无需降级。
+文档车道自己写的 8.28/C2.1 已全部带"12.1.5 历史证据"标签，本表对它们无返工。
+
+**A 表原话返工单（11-03 傍晚 · 交集成道执行；本道一字不碰 `.lua`，只出文本）**
+
+> **定稿口径句 = "12.1.5 实测（历史证据），待 1.60 复验"**。用法：每行**只替换那一行**（多数原行是长注释的
+> 中间行，上下行接续别动、缩进照原行）；**"原话锚"是定位主键**（`grep -n "锚" <文件>` 全仓唯一命中，行号会随并发漂）。
+> 本单**不改任何技术结论**，只给证据补上"是在哪个客户端验的"。**A5/A5b 是降级**（把跨客户端外推写成待验）。
+
+| # | 文件:行（现工作树） | 原话锚（grep 主键） | 建议改写（整句，可直接粘） | 一句话理由 |
+|---|---|---|---|---|
+| A1 | `Utils/Skin.lua:1142` | `53 只里 32 只` | `-- 12.1.5 实测 53 只里 32 只还是暴雪原样（历史证据，`5bc814e` 正文）；1.60 上这个数要重数才算，待 1.60 复验。见 Skin:CloseButtonByArt。` | 这个数是 C2.1"32 只清零"的**基线**，不标客户端就分不清 1.60 上"还剩几只"是跟谁比 |
+| A2 | `Utils/Skin.lua:1375` | `2026-11-03 实机红字` | `-- = self:Get...)`（12.1.5 实机红字 = 历史证据，`ff1bd7c` 正文；1.60 是否同样拒点号待复验），而且不是所有方法都这么响 —— `GetDisabledTexture`` | 漏斗本身两客户端都无害，但"点号被拒"这条**事实**只在 12.1.5 观测过 |
+| A3 | `Utils/Widget.lua:1272` | `2026-11-03 实机踩过一次` | `-- 12.1.5 实机踩过一次（历史证据；硬证据只是同晚 `c58fae9` 自述 retail 在线 = **间接**）：最初把 Ellesmere 那组数值（它是**基图朝左**）原样抄过来，` | 事件本体只有注释自供，标"间接"防止 1.60 侧被当成已验 |
+| A4 | `Modules/InfoBar/Blocks.lua:541` | `实机一测就翻车` | `-- 的**猜测**排的。12.1.5 实机一测就翻车（历史证据，`cd1f6d7` 正文；classID 跨客户端不共享，1.60 上盗贼归类待复验）：`UnitClass("player")` 返回 `潜行者 / ROGUE / classID=4`，` | 盗贼验收项（CHECKS A4）就锚在这句上，1.60 的 classID 必须重测 |
+| A5 | `Modules/InfoBar/Blocks.lua:671` | `实机两边都验过` | `--- 入口取 `C_SpecializationInfo`：12.1.5 实机验过这个命名空间（`cd1f6d7` 正文），1.60 侧目前只有离线依据（`docs/api` 快照收录该命名空间）—— **待 1.60 复验，上线日随 `/mui compat` 补**，` | **全表唯一把"离线推断"写成"验过"的行**：1.60 从未开过服 |
+| A5b | `Modules/InfoBar/Blocks.lua:674` | `两个客户端一致` | `--- 返回序：specId, name, description, icon, **role**, ...（12.1.5 实测序；1.60 与上一句一并 `/mui compat` 核）。` | 同段第二句的跨客户端断言，因无关键词被原扫描正则漏抓（本轮补行） |
+| A6 | `Modules/Tooltip/Tooltip.lua:465` | `和正文同一个灰，实机读成` | `--- 2026-11-03 前这里写的是 `Color:GetNeutral()` —— 和正文同一个灰，12.1.5 实机读成` | 视觉结论来自 retail 在线（`c58fae9`），1.60 要重看标题/正文层级 |
+| A7 | `Modules/Tooltip/Tooltip.lua:523` | `本客户端全局常量实测` | `-- （12.1.5 实测的全局常量 = 历史证据；1.60 上这两个数值要重测，黄带容差是否命中取决于它）：`NORMAL_FONT_COLOR` (1, 0.82, 0) —— r-g = 0.18，掉出窄带；` | "本客户端"正是 8.13.5 要退役的写法，且这两个数直接决定容差匹配命中 |
+
+**可选随动（同段同类裸日期 / "本客户端"写法，改不改由集成道定；均在 A 表扫描窗口外，本道不并入硬账）**：
+`Blocks.lua:538` 锚 `**不写职业表**（2026-11-03 修）` → 补"在 12.1.5 上修"；`Tooltip.lua:469` 锚
+`（实机 2026-11-01：` → `（12.1.5 实机 2026-11-01：`（`08d9c582`）；`Blocks.lua:535` 锚 `本客户端所有 Unit*/Get*`
+→ `12.1.5 客户端所有 Unit*/Get*`（`6925adf5`）；`Utils/Widget.lua:176` 锚 `实机 2026-11-01：`（`66226eb8`）同型。
+
+**范围边界（先说清，免得被当成"全仓统一改口径"）**：本单硬账 = 上面 **8 行**。`本客户端` 这个写法在发行 `.lua`
+里实测共 **116 处**（其中 **20 处**同句含"实测/实机/测量"，`grep -rn 本客户端 --include=*.lua Modules Utils Core.lua`
+本轮实跑），那是 8.13.5 的退役工程、要单开一道，**不并进上线前这趟**；A10/A11 两行的注释也随未提交改动在动，
+返工单不覆盖它们，避免与色彩道/P1 道双写。
+
+**扫描口径补记（为什么是 8 行而不是 7 行）**：原扫法 = 窗口 `4de90ad~1..cd1f6d7`（15 个 commit，`git log --format=%h`
+逐条复核全在 11-03）新增行过 `实测|实机|踩过|红字|测量`，命中 8 句 = A1–A7 + 一句条件句；条件句"实机若发现左右反了…"
+已于同窗口 `ff1bd7c` 删除（`git show HEAD:Utils/Widget.lua` 与工作树均查无此句），故不构成返工行。
+**第二轮补扫**换关键词 `两个客户端|两边都|1\.60 与零售|跨客户端`，全仓 `.lua` 新增行只多命中 A5b 一句 ⇒ 总数 **8**。
+
+### 8.29.2 B 节：单一来源的材质判据 + 上线日视觉验收第一优先级
+
+**B1 复测源现状（订正审查前提）**：开发根 `../Andromeda` 确已缺席；但 2026-11-03 本车道复核，
+`_classic_titan_…AddOns/Andromeda/assets/textures/ui-close.blp` 与 `statusbar-stripes-thin.tga` **仍在位**
+（`3f2ba5f` 当年就是从这条路径测的）。所以准确说法是"**单一来源且悬**（挂旧客户端目录，一次磁盘清理即断）"，
+不是"已断"。而审查的**知识论判定成立且要点名**：现有唯一"验收"是本仓自产的 `audit-pixels`（管 2 的幂 /
+白衬底 / 色相 —— 格式纪律），✕ 的几何比例（跨度 75% / 笔画 12.5% / 质心 31.5 / "32×32 与参考件逐像素重合"）
+属**自校验闭环，不算外部验证**。**11-03 审查收工后本条已闭环**：该"逐像素重合"事后只对 bbox / 跨度 / 质心 /
+四边对称 / alphaMax 成立，**笔画那一半被实物推翻**（我们 0.125 vs 参考件 0.177），几何表与比率口径见 8.26 订正块。
+**11-03 补（收工口径）**：参考件对交付贴图的逐像素对比已由审查会话 `4b077830` **做完并收工** —— 本条"自校验"
+判定**已升级为外部验证**，且外部验证的结果正是推翻笔画那一半（见上）；上线日视觉验收（B2）不因此取消。
+**11-03 结果（审查会话收工，两笔已回 + 几何表落地）**：对比回话推翻了手边记的两个"参考件数字"——
+✕ 笔画（8.26 订正块 / A8）与斜纹剖面（8.28.7 第 2 条 / A9），两个都是记错口径、被实物实测推翻；几何四项
+（bbox / 跨度 / 质心 / 四边对称）重合成立。**收工新增**：① 占比定数 **我们 0.125 / 参考件 0.177**（比率方向
+按 8.26 订正块写死：参考件粗 ≈41%、我们细 ≈29%；**"细 35–40%"作废**）；② 六档 × 两缩放的 12 种显示直径
+**全部高于亚像素临界**（我们临界 = 显示物理直径 <8px，参考件 5.66px）⇒ 对比页判"不存在亚像素线"，
+**粗细差是恒定比例**，不是某一档破线；③ 因此 8.29.2-B1 的"自校验"判定**已升级为外部验证**（对比源 =
+参考件实物解码，本仓自产闸门不再是唯一证据）。B2 上线日视觉验收**不取消**，但动作可以压小：**24px@1
+并排看一眼**即可（mip 选择 / 双线性软化 / 圆帽端点 / DXT5 量化 + 本仓 ×2 下 1px 描边奇偶先例，几何算不出，
+只能实机看）。
+
+**B2 上线日视觉验收第一优先级（可操作条）**：`5bc814e` 把这套自校验过的字形推给了全屏 53+ 只暴雪 ✕，
+比例一旦偏（18–24px 钮上过大/过小、染色后发虚）就满屏可见。开服第一趟按三档尺寸各看一处：
+InfoBar 属性面板（自建钮）/ 背包总控窗 / 原 32 只暴雪 ✕ 任取两件（StaticPopup、秒表、商城）。
+**通过 = 字形一眼认 ✕、不吃满点击区、染主题色后不虚**。
+**11-03 审查收工补（本条动作压小，判据不变）**：上面括号里"18–24px 钮上…染色后发虚"这一候选解释**已被几何层排除**
+—— 六档钮径 × 两缩放共 12 种显示直径全部高于临界（我们笔画进亚像素要显示物理直径 <8px，最小那档 18px@1 也有
+2.25px），差的是**恒定比例**（0.125 vs 0.177），不是某一档破线。⇒ 上线日第一趟压成**一个动作：24px@1 与参考件
+并排看一眼**；三档遍看降为"顺手看"。仍要实机才定的四项：mip 选择、双线性软化、圆帽端点、DXT5 量化（加本仓
+"×2 缩放下 1px 描边奇偶/软化"先例项）。**hotfix 归因树与"一眼不对即 hotfix"的门槛不变**。不过时归因树：
+
+- **比例不对**（偏大/偏小/偏细偏粗）→ **只改贴图**：`tools/regen-textures.js` 的 `drawCloseX` 两个常数
+  （`CLOSE_GLYPH_SPAN` / `CLOSE_GLYPH_STROKE`）→ `node tools/regen-textures.js standard` 同名重出
+  TGA+BLP → `audit-pixels` → 部署（**同名重出**不触"改名要重启"的文件索引坑，AGENTS 客户端行为细则）
+  —— 全量扫描保留，不动；
+- **误伤**（非关闭对象被换、最小化减号变 ✕、页签被当关闭钮）→ **收 `5bc814e`**：摘掉 5 步全量扫描里的
+  `Skin:CloseButtonByArt` 调用（一行），退回"只穿我们自己的窗"，32 只暴雪原样暂与细金 ✕ 并存 —— 两画风
+  并存是作者不要的观感，但比误伤可控；
+- **两者皆有** → 先收全量扫描保平安，再慢调比例，调完重新放开。
+
+**B3 无第二样本名单残项**（缺席 = **静默 no-op**，不报错、不红字，只能对账；1.60 找不到真名用
+`/mui compat find <片段>` 扫，别改代码猜）：
+
+| 残项 | 出处 | 上线日动作 |
+|---|---|---|
+| `groupfinder-icon-role-large-{tank,heal,dps}` atlas 名 | `4de90ad`（只在 12.1.5 侧验过命中） | LFG 面板开一次 + `/mui skins diagnose` 看该帧账 |
+| Stepper 的 `UI-ScrollBar-Scroll*Button-*` atlas 与 `button.upTexture`/`normalTexture` art key | `28187aa`（方向判定的全部依据 = key 名拼出 Up/Down/Left/Right） | 任意 12.x 滚动条看方向；key 不存在 = 方向拿不到 = 静默不画 |
+| `LFGParentFrameTab3` | `4de90ad` 的 `LFG_TOP_TABS` 实名清单 | diagnose 账本该行 ✗/✓；整排 ✗ 先查 GameRule（AGENTS 换客户端口径） |
+
+**B3.1 正式离线对账源：主仓 `framexml-source`（11-03 建账，三个残项逐名核完）**
+
+**入库声明用得上身份信息（本车道实测）**：绝对路径
+`C:/Users/EastHillGu/Documents/wowaddonsdev/MonetUI/framexml-source`（**主仓目录里，worktree 不带**——
+已核 `02efb0` worktree 无此目录）；它自己是一份独立的 `git clone https://github.com/Gethe/wow-ui-source.git`，
+**分支 `forever`**、HEAD `aff0d8c`（提交说明 *"1.60.1 (70707)"*，2026-11-02）、`version.txt = 1.60.1.70707`、
+`Interface/AddOns` 共 **349 个包**。主仓 `.gitignore:62` 把 `framexml-source/` 整目录排除、**git 跟踪 0 个文件** ——
+它**不会随 worktree 清理消失**（本就不在 worktree 里），会被清掉的唯一场景是**主仓**跑 `git clean -fdx`
+（`-x` 连 ignored 一起删）。重建成本低：一条 clone + checkout forever。
+**版本口径**：转储 build **70707**，我们 `docs/api` 快照抓自 **70634** —— 差 3 个 build 的同分支转储，
+FrameXML 名/模板这种慢变量够用，但**"两边都有"的结论仍以 70634 快照为准、以实机为终判**。
+
+| 残项 | 结论 | 证据（文件:行，均在上述 `Interface/AddOns` 之下） |
+|---|---|---|
+| `groupfinder-icon-role-large-{tank,heal,dps}` | **确在，双处** | ① `Blizzard_GroupFinder_VanillaStyle/Blizzard_LFGVanilla_Browse.lua:14-16`（`TANK/HEALER/DAMAGER` 三映射）；② **`Blizzard_UIPanelTemplates/Camelot/UIPanelTemplatesOverrides.xml:8/:19/:30`**（`TankIcon/HealerIcon/DamagerIcon` 三只 `atlas=` —— **这正是 `4de90ad` 换图的对象**，Camelot 覆盖层，不依赖 VanillaStyle 包） |
+| Stepper 的 `UI-ScrollBar-Scroll*Button-*` 与 `button.upTexture` art key | **确在，四方向全** | `Blizzard_SharedXML/Shared/Scroll/TrimScrollBar.xml:123/144`（竖排 `upTexture`/`downTexture` = `ScrollUp/DownButton-Up/-Down`）、`:263/:284`（横排 `ScrollLeft/RightButton-*` 同键）；`MinimalScrollBar.xml:107-110/:123-125`（`minimal-scrollbar-arrow-{top,bottom}{,-over,-down}` 三态齐）；`returntobottom` 一支在 `Blizzard_ChatFrameBase/Mainline/FloatingChatFrame.xml:530/:550-552`（聊天框滚到底钮，**不在 MinimalScrollBar 本体**） |
+| `LFGParentFrameTab3` | **确在但限定**（字面名找不到、同物在） | 定义 = `Blizzard_GroupFinder_VanillaStyle/Mainline/Blizzard_LFGVanilla_ParentFrame.xml:68`：`<Button name="$parentTab3" parentKey="Tab3" id="3">`，`$parent` = 同包 `Classic/…ParentFrame.xml:22` 的 `LFGParentFrame` ⇒ 运行期全局名正是 `LFGParentFrameTab3`；处理函数 `Blizzard_LFGVanilla_ParentFrame.lua:162`。**Tab1/Tab2 定义在 Classic xml:36/:66，Tab3 只在 Mainline** —— 子目录二选一（见下行） |
+| （抽查副产品）`LFG_DROPDOWNS` 两个下拉 | **确在，字面 grep 0 命中是假阴性** | `Classic/Blizzard_LFGVanilla_Browse.xml:414/:422` 写作 `name="$parentCategoryDropdown"` / `"$parentActivityDropdown"`（`$parent`=`LFGBrowseFrame`，同文件有定义）⇒ 拼出的全局名与 `Forever.lua:45` 名单一致。**教训入档：FrameXML 用 `$parent` 拼接全局名，字面名 grep 不中 ≠ 缺席，要反查 `$parent` 宿主**（`/mui compat find` 的离线版同理） |
+
+**离线判不了、必须实机的名单**（转储只证"名字被 Blizzard 代码使用"，不证"运行期存在"）：
+① `Blizzard_GroupFinder_VanillaStyle` **整包**是否在 1.60 的加载清单里（349 包在转储 ≠ 客户端都加载，
+GameRule/配置可关）；② 加载的话取 **Classic 还是 Mainline** 子目录（`LFGParentFrameTab3` 的定义只在
+Mainline —— 若跑 Classic，Tab3 整排缺席是**正常行为**，别当换肤 bug 查）；③ 转储里找不到的**动态拼名**
+（`$parent..i` 循环造出的行/按钮）本来就无静态字面量可核 —— 只能 `/mui compat find <片段>`；
+④ 材质 atlas 名确在 ≠ **纹理内容**一致（build 70707 vs 70634、以及暴雪随时可改图集）—— 观感仍要实机。
+**⇒ B3 三行的"上线日动作"从"核名字"收窄为"核对账①②"**：名字这半截已经不用赌了。
+
+**TemplateDB 抽核（13 个模板名，本车道按"凭记忆风险"挑选）**：`ColoredProgressBarTemplate`（
+`Blizzard_SharedXML/Camelot/ProgressBars/ColoredProgressBar.xml`）/ `BasicHybridScrollFrameTemplate`
+（`Blizzard_SharedXML/HybridScrollFrame.xml`）/ `UIPanelScrollBarTemplate`（`SecureScrollTemplates.xml`）/
+`SelectableButtonTemplate` / `TemplatedListTemplate` / `PagedListTemplate` / `SpinnerTemplate` /
+`SearchBoxTemplate`（`Shared/InputBox/InputBoxTemplates.xml`）/ `CharacterFrameTabButtonTemplate`
+（`Blizzard_FrameXML/Cata/CharacterFrameTemplates.xml`）/ `UIPanelDialogTemplate` / `MoneyDisplayFrameTemplate`
++ `LargeMoneyInputBoxTemplate`（`Blizzard_MoneyFrame/Shared/`）/ `LFGBrowseFrame` —— **13/13 确在**，
+五个带指纹模板的名字全部对得上；`CharacterFrameTabButtonTemplate` 在 **Cata/** 子目录这一条记下来
+（子目录二选一的又一实例）。全量核对没做（要求就是抽查）。
+
+**B4** AGENTS.md 两处待订正（`:16` gitignore 口径、`:109` Andromeda 存在性）的**最终措词**已给在 **8.28.8-B**，
+此处不重复；审查的"Andromeda 不在本机"表述经集成道 11-03 定性质为**参考件路径不存在（路径指错）**——
+实物在 `_classic_titan_…AddOns/Andromeda`，材质比例判据可离线复核（详见 8.28.7 最终订正段）。
+
+**B5 排队状态对账的重叠风险（11-03 新增，配 8.28.5 的 QueueStatusButton 订正）**：
+`Modules/Skins/System.lua:38` 与 `:66` 对 `QueueStatusFrame` 做 `Dress{panel}`，而 `Modules/Skins/Forever.lua`
+的 `QueueStatus*` 清单是"只过 `Skin:Need` 进账本、不换肤"（订正后口径）—— 两条线的意图重叠且覆盖面
+**不等价**：panel 换肤走的 `Strip` 只淡**框自身**的 region，够不到子按钮里的图标纹理。上线日实机把
+"**排队眼睛（`QueueStatusButton`）可见、可点 + `QueueStatusFrame` 面板边框正常**"归为**同一条对账项**
+（CHECKS C2.1 已并入一条）。归因口径：眼睛消失 = `Skin:Fade` 类回归（8.28.5 判例复发）；
+面板边框没变化 = `Need` 账本只登记不换肤、属正常，对照 `/mui skins diagnose` 账本即可分开这两种。
 
 ## 9. 建议的下一步（按价值排序）
 
@@ -2812,6 +3476,7 @@ BTP 甚至**双轨混用**：同一个"是否已装钩"的语义，`NameplateAtt
 6. 未动模块的实机过一遍（Bags、InfoBar、Tooltip、Cursor、Toast、Durability）。
 7. 想降噪的话：宠物条每次重载 10 条 `PetActionButton*:SetShown` BLOCKED（不改更稳，见 AGENTS）。
 8. **Forever 1.60 首趟（只记不改，见 8.13.4）**：先在 12.1.5 上跑 `/mui compat` 存基线，再部署到
-   `_cn_beta_`（`-Interface 16001`）跑第二次，两份差集 = 适配清单；三条 Forever 专属窗口（LFG / 传承 / 微菜单）
+   `_forever_`（16001；2026-11-03 按 AGENTS 更正——`_cn_beta_` 是旧交付目标、这台机器上已不存在）跑第二次，
+   两份差集 = 适配清单；三条 Forever 专属窗口（LFG / 传承 / 微菜单）
    的名字在两个客户端上都还没验过。
 9. 上线前：push 到 origin，README 里的 `status` 徽章改成正式版。

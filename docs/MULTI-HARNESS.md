@@ -60,7 +60,7 @@ junction 只读共享件（`docs\api`、`node_modules`、`Assets\Textures.bak`�
    开工先读 AGENTS.md 和 docs/HANDOFF.md。
 2) 只做离线验证：node tools/api-audit.js（HARD 清零）；改材质另跑 node tools/audit-pixels.js。
 3) 不部署、不进游戏、不 push：不跑 deploy-retail.ps1，不碰 Interface\AddOns，不用 wuxian MCP。
-4) 参考插件 ../Andromeda、../EllesmereUI-v9.4 只读。
+4) 参考插件只读：../EllesmereUI-v9.4 在开发根；Andromeda 不在开发根（../Andromeda 不存在），实物 = _classic_titan_/Interface/AddOns/Andromeda。
 5) 完成 = 本地 commit 到 lane 分支 + commit message 写清验证结果；
    根因级结论留给集成道写入 AGENTS.md/HANDOFF.md，不要写进你的用户级 MEMORY.md。
 ```

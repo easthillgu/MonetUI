@@ -64,7 +64,9 @@ startup_timeout_sec = 60
 - **`hated-wow` 只作补充**（正式服数据）；**本客户端 API 一律以 `docs/api/` 快照为准**
   （`node tools/api-lookup.js <名字>`，正文 `docs/api/MANUAL.md`）。
 - opencode 的 `opencode.json` 里还有两条"编辑参考插件 = deny"的权限；Codex 没有等价项，
-  靠 `writable_roots`（参考插件不在可写根里）+ 自觉：**`../Andromeda`、`../EllesmereUI-v9.4` 只读**。
+  靠 `writable_roots`（参考插件不在可写根里）+ 自觉：**`../EllesmereUI-v9.4`（开发根）与 Andromeda 只读**
+  —— Andromeda 实物在 `_classic_titan_/Interface/AddOns/Andromeda`，`../Andromeda` 这个路径不存在（11-03 核实），
+  `opencode.json` 的 `references.andromeda.path` 已改指该绝对路径并加了一条 deny。
 - **不要给 Codex 开"自动 push"**：本仓规定游戏上线前不推远端（见 `TODO.md` 末尾）。
 
 ---
