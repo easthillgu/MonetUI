@@ -567,6 +567,12 @@ local windows = {}   -- key -> window frame
 --- 而真正的赋值语句在文件后半「暴雪背包框」那一节 —— 声明写在它后面，Lua 在编译期就把它
 --- 当**全局 nil**（AGENTS：静态闸门抓不到"引用了还没声明的 local"），那条补扫永远不触发。
 local shown
+--- 当前带 ✕ 的「总控分类窗」键。黏性：它只要还显示就继续当总控，物品在不同分类之间挪动
+--- 时 ✕ 不会到处跳；它消失了才顺延到下一扇（见 DesignateMaster）。
+local masterKey
+--- ✕ 的实际动作。**前向声明**在这里（EnsureWindow 的 OnClick 闭包要引用它），函数体排在
+--- BlizzardBagFrames 之后 —— 那函数依赖它，写在依赖之前会变成全局 nil（AGENTS）。
+local CloseAllBags
 
 local function WindowPosition(key)
     return (ns:DB().bags and ns:DB().bags.positions or {})[key]
@@ -600,6 +606,15 @@ local function EnsureWindow(key)
     Widget:Shadow(win, { size = 6, alpha = 0.5 })
     Widget:Corners(win)
     Widget:Rule(win, win.title)
+
+    -- 总控窗的 ✕：模板自带 UIPanelCloseButton 外观，OnClick 覆盖成"收整套分类背包"
+    -- （等同再按一次 B）。默认隐藏 —— DesignateMaster 只让当前总控窗亮它，屏幕上一个 ✕
+    -- 都不多，也不会因为某扇窗临时有货就自己冒出来。
+    local close = Widget:CloseButton(win, 18)
+    close:SetPoint("TOPRIGHT", win, "TOPRIGHT", -3, 3)
+    close:SetScript("OnClick", function() CloseAllBags() end)
+    close:Hide()
+    win.close = close
 
     win.buttons = {}
     win.slots   = {}   -- 「剩余空间」那行的空格子池（只有 free 窗用得到）
@@ -731,6 +746,29 @@ local function RestoreDragged()
     end
 end
 
+--- 选总控窗并只显示它那一个 ✕。**黏性**：当前总控窗只要还显示就继续当，避免物品在分类间移动
+--- 时 ✕ 跳到别的窗上；它空了（该分类没货被 FillWindow 收掉）才顺延到 ORDERED 里第一个还显示的
+--- 分类窗。「剩余空间」窗永远不当总控 —— 它是补位的那一行空格子，不是装东西的窗。
+--- 在 Rebuild 末尾调用（LayoutWindows / RestoreDragged 之后，此刻各窗显隐已定）。
+local function DesignateMaster()
+    local keep = masterKey and windows[masterKey]
+    if not (keep and keep:IsShown()) then
+        masterKey = nil
+        for _, cat in ipairs(ORDERED) do
+            local win = windows[cat.key]
+            if cat.key ~= FREE_CAT.key and win and win:IsShown() then
+                masterKey = cat.key
+                break
+            end
+        end
+    end
+    for key, win in pairs(windows) do
+        if win.close then
+            if key == masterKey then win.close:Show() else win.close:Hide() end
+        end
+    end
+end
+
 --- Tile the visible, not-yet-dragged windows in category order from the anchor.
 --- 首选布局：side="right" —— 分类背包的 RIGHT 对齐 QuestTracker 的 LEFT，
 --- 间隔 anchor.x（负数 = QuestTracker 左边），垂直从 anchor.y 起一列堆下来。
@@ -815,6 +853,7 @@ local function Rebuild(bagType)
 
     LayoutWindows()
     RestoreDragged()
+    DesignateMaster()
 end
 
 -- ---- 暴雪背包框：预停车（2026-10-28 定案）---------------------------------------
@@ -847,6 +886,19 @@ local function BlizzardBagFrames()
     local tokens = _G.BackpackTokenFrame
     if tokens then frames[#frames + 1] = tokens end
     return frames
+end
+
+--- ✕ 的实际动作：收整套。先把还显示着的暴雪框 Hide 一次 —— 停车只压 alpha、从不 Hide，
+--- 此刻暴雪框仍 IsShown；不先收它，守卫的边沿会停在"开"，玩家要按两下 B 才能重新打开。
+--- 战斗中不能 Hide 暴雪框（里面有受保护子按钮，会被拦），那就只收我们的窗，
+--- 下一次 B 的边沿自然把整套带回来（我们的窗本来也归 shown 管）。
+CloseAllBags = function()
+    if not InCombat() then
+        for _, frame in ipairs(BlizzardBagFrames()) do
+            if frame and frame.IsShown and frame:IsShown() then pcall(frame.Hide, frame) end
+        end
+    end
+    M:Toggle(false)
 end
 
 --- 收集 frame 及其全部 Frame 子代（ItemButton 等收鼠标事件的东西都在里面；
@@ -1069,6 +1121,8 @@ function M:Toggle(force)
     else
         StopPolling()
         for _, win in pairs(windows) do win:Hide() end
+        -- 关整套后总控窗作废：下一次打开重选（哪一类先有货谁当），不留旧引用。
+        masterKey = nil
         -- 暴雪框的显隐归暴雪管（停车不碰它），关我们的窗就够了。
     end
 end
