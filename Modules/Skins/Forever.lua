@@ -37,8 +37,86 @@ local LFG_VIEWS = {
 local LFG_BUTTONS = {
     "LFGBrowseFrameSendMessageButton", "LFGBrowseFrameGroupInviteButton",
     "LFGListingFrameBackButton", "LFGListingFramePostButton",
+    -- 浏览页的辅助按钮 / 顶栏下拉 / 父框关闭：全部按全局实名登记，写错就在 diagnose 冒 ✗。
+    "LFGBrowseFrameRefreshButton", "LFGBrowseFrameOptionsButton",
+    "LFGParentFrameCloseButton",
 }
+local LFG_TOP_TABS = { "LFGParentFrameTab1", "LFGParentFrameTab2", "LFGParentFrameTab3" }
+local LFG_DROPDOWNS = { "LFGBrowseFrameCategoryDropdown", "LFGBrowseFrameActivityDropdown" }
 local LFG_SIDE_TABS = { "ListingTab", "BrowsingTab", "WhoListingTab" }
+
+-- QueueStatusButton 是排队状态那枚小眼睛的宿主：属于 Blizzard_QueueStatusFrame，不是本面板的
+-- LoD 门管；这里登记只为让 diagnose 能扫到，读不到就落空一行，换肤逻辑对它是 no-op。
+local LFG_QUEUE = { "QueueStatusButton" }
+
+-- 暴雪的角色图标走图集（atlas）：LFGBROWSE_GROUPDATA_ATLASES 那张表是 Browse.lua 的
+-- **local**，外面根本拿不到；行模板又是 ScrollBox 复用的，直接改表 = 下一次滚回来又被
+-- 暴雪的 SetAtlas 顶回去。可行的入口只有"逐贴图看 atlas 名，命中就 SetTexture 换成我们的文件图"。
+--
+-- **不 hooksecurefunc 暴雪方法、不 HookScript 暴雪框**（AGENTS：写过一次 = 这个框之后
+-- 全被记在 MonetUI 名下）。走轮询：`Widget:PollWatch` 只在框可见时按拍跑，隐藏时一秒都不多花。
+-- 换过一次之后贴图 GetAtlas 会返回 nil —— 下次扫描自然跳过；暴雪复用行重新贴 atlas 时命中，
+-- 我们再换回来。所以不需要旁表标记，也不要往贴图写字段。
+local ROLE_ATLASES = {
+    ["groupfinder-icon-role-large-tank"] = "monet_role_tank",
+    ["groupfinder-icon-role-large-heal"] = "monet_role_heal",
+    ["groupfinder-icon-role-large-dps"]  = "monet_role_dps",
+    ["groupfinder-icon-role-micro-tank"] = "monet_role_tank",
+    ["groupfinder-icon-role-micro-heal"] = "monet_role_heal",
+    ["groupfinder-icon-role-micro-dps"]  = "monet_role_dps",
+}
+
+-- 深度上限：LFGParentFrame → LFGBrowseFrame → ScrollBox → row → DataDisplay → Enumerate → IconN
+-- 已经 6 层；再深就到 Tooltip / VoiceChat 那种"我们的手够不着"的子树，收手。
+local LFG_WALK_MAX_DEPTH = 7
+
+local function SwapRoleAtlas(tex)
+    if not tex or type(tex.GetAtlas) ~= "function" then return end
+    if type(tex.SetTexture) ~= "function" then return end
+    local okA, atlas = pcall(tex.GetAtlas, tex)
+    if not okA or type(atlas) ~= "string" then return end
+    local key = ROLE_ATLASES[atlas]
+    if not key then return end
+    local Media = ns.Media
+    if not Media or type(Media.Texture) ~= "function" then return end
+    local path = Media:Texture(key)
+    if type(path) ~= "string" then return end
+    -- SetTexture 会把图集整段清掉，之后 GetAtlas 返回 nil —— 下一次轮询直接跳过；
+    -- 暴雪复用行、重新 SetAtlas 之后我们才再换一次。
+    if pcall(tex.SetTexture, tex, path) then
+        if type(tex.SetTexCoord) == "function" then pcall(tex.SetTexCoord, tex, 0, 1, 0, 1) end
+    end
+end
+
+local function WalkSwapRole(frame, depth)
+    if not frame or depth > LFG_WALK_MAX_DEPTH then return end
+    -- 不可见 / 读不出可见性 = forbidden 对象，整棵子树放手。
+    local okV, visible = pcall(function() return frame:IsVisible() end)
+    if not okV or not visible then return end
+
+    if type(frame.GetRegions) == "function" then
+        local okR, regions = pcall(function() return { frame:GetRegions() } end)
+        if okR and type(regions) == "table" then
+            for i = 1, #regions do SwapRoleAtlas(regions[i]) end
+        end
+    end
+    if type(frame.GetChildren) == "function" then
+        local okC, kids = pcall(function() return { frame:GetChildren() } end)
+        if okC and type(kids) == "table" then
+            for i = 1, #kids do WalkSwapRole(kids[i], depth + 1) end
+        end
+    end
+end
+
+-- 稳定引用 —— PollWatch 用它去重，闭包每次新建 = 每一拍都多挂一条轮询（AGENTS 明写）。
+local function RefreshLfgRoleAtlas()
+    if not M.active then return end
+    -- 轮询不在任何面板 Apply 的作用域里，自己套一层 Skin.With，账本才记在 "lfg" 名下。
+    Skin.With("lfg", function()
+        local parent = Skin:Need("LFGParentFrame")
+        if parent then WalkSwapRole(parent, 0) end
+    end)
+end
 
 local function SkinLFG()
     M:Dress("LFGParentFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 } })
@@ -56,7 +134,20 @@ local function SkinLFG()
         M:SkinButtonsIn(view)
     end)
     M:Dress(LFG_BUTTONS, { as = "button" })
+    M:Dress(LFG_TOP_TABS, { as = "tab" })
+    M:Dress(LFG_DROPDOWNS, { as = "dropdown" })
+    -- 队列眼睛的宿主框：不做换肤（属于 Blizzard_QueueStatusFrame、有自己的动画），
+    -- 只过 Need 让它进账本，方便 `/mui skins diagnose` 一眼看到能不能读到。
+    M:Dress(LFG_QUEUE, { as = "fade" })
     SideTabs("LFGParentFrame", LFG_SIDE_TABS)
+
+    -- Atlas 换图：进面板就先扫一次；之后靠 PollWatch 每 2 秒复检（ScrollBox 复用行 = 暴雪
+    -- 会重新贴 atlas，我们这一遍再把图换回来）。回调稳定引用；PollWatch 内部会去重。
+    RefreshLfgRoleAtlas()
+    local parent = Skin:Need("LFGParentFrame")
+    if parent and ns.Widget and ns.Widget.PollWatch and ns.Widget:Readable(parent) then
+        ns.Widget:PollWatch(parent, RefreshLfgRoleAtlas, 2)
+    end
 end
 
 M:Panel("lfg", {
@@ -68,9 +159,7 @@ M:Panel("lfg", {
     frames = {
         "LFGParentFrame", "LFGParentFramePortrait",
         "LFGParentFrame.ListingTab", "LFGParentFrame.BrowsingTab", "LFGParentFrame.WhoListingTab",
-        "LFGBrowseFrame", "LFGListingFrame", "LFGWhoListFrame",
-        "LFGBrowseFrameSendMessageButton", "LFGBrowseFrameGroupInviteButton",
-        "LFGListingFrameBackButton", "LFGListingFramePostButton",
+        LFG_VIEWS, LFG_BUTTONS, LFG_TOP_TABS, LFG_DROPDOWNS, LFG_QUEUE,
     },
 })
 
