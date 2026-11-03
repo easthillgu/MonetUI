@@ -159,15 +159,20 @@ function Color:GetSource()
     return "fallback"
 end
 
---- Current zone environment info, for /mui status diagnostics.
--- Resolves the player's map through C_Map (pcall-guarded) and asks the engine for its environment colour; nil when the engine is absent, so the caller never has to know whether LibMonetColor shipped.  @return mapID|nil, zoneName|nil, source|nil, h, s, l
+--- Current zone environment info, for /mui status diagnostics and the config panel's zone preview.
+-- Resolves the player's map through C_Map (pcall-guarded) and asks the engine for its environment colour; nil when the engine is absent, so the caller never has to know whether LibMonetColor shipped.
+-- `mapID` 过一道 `Secrets.Number`：本客户端有 Map 类受限窗口（`ns:IsRestricted()` 那六类之一），
+-- 而这个 ID 之后一定要进 `%d` / 表索引（Core 的 /mui status、面板的预览行）。读不出就当"没有区域"，
+-- 调用方的 `if mapID then` 会整段跳过 —— 比拿机密值去格式化后被客户端拦下来好（AGENTS：宁可少显示一行）。
+-- 返回的 `name` 来自我们自己的数据表（MonetColorMapData / override），不是客户端给的字符串，所以不过守卫。
+-- @return mapID|nil, zoneName|nil, source|nil, h, s, l
 function Color:GetZoneInfo()
     if not LMC or type(LMC.GetMapEnv) ~= "function" then return nil end
 
     local mapID
     if type(_G.C_Map) == "table" and _G.C_Map.GetBestMapForUnit then
         local ok, id = pcall(_G.C_Map.GetBestMapForUnit, "player")
-        if ok then mapID = id end
+        if ok then mapID = Secrets.Number(id) end
     end
 
     local h, s, l, name, source = LMC:GetMapEnv(mapID)

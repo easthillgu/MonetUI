@@ -1066,7 +1066,7 @@ local function PrintHelp()
     ns:Print("命令：")
     ns:Print("  |cffffd100/mui|r            打开配置面板")
     ns:Print("  |cffffd100/mui status|r     显示模块与主题状态")
-    ns:Print("  |cffffd100/mui theme|r      重新采样环境色彩")
+    ns:Print("  |cffffd100/mui theme|r      重算当前区域配色并重涂（mapID 查表，不采像素）")
     ns:Print("  |cffffd100/mui scale|r      像素网格 / 缩放自检（改完 UI 缩放后再跑一次对比）")
     ns:Print("  |cffffd100/mui blocks|r     机密布尔被拦的调用栈账本（`UNKNOWN()` 归因，加 full 看完整栈）")
     ns:Print("  |cffffd100/mui restrict|r   六类受限窗口自查（战斗只是其中一类）+ 可读性前置是否可用")
@@ -1080,6 +1080,14 @@ local function PrintHelp()
     ns:Print("  |cffffd100/mui skins diagnose bad|r 只看\"命中但不是框体\"那一类（全量几百行，聊天框装不下）")
     ns:Print("  |cffffd100/mui skins layers <窗口名> [片段]|r 这个窗口的底有几层、每层谁能碰（region / 字段可剥 / 要点名；全量存 MonetUIDB.layerReport）")
     ns:Print("  |cffffd100/mui skins templates [片段]|r 模板库账本：多少个模板 / 映射到 skinAs / Camelot 覆盖；带片段查\"这个控件被认成什么\"")
+    -- 上线日验收用的只读探针（一个字节都不写，全量都落 SavedVariables）：
+    ns:Print("  |cffffd100/mui perf|r       调度器总账：订阅数 / 逐路耗时排序 / 失败计数 + Lua 内存 + 当前被暂停的轮询框（账本 MonetUIDB.perfReport）")
+    ns:Print("  |cffffd100/mui skins closes|r 关闭按钮换皮覆盖面：按图集全量扫，已换皮/仍是暴雪原样/读不出三档（closeReport）")
+    ns:Print("  |cffffd100/mui skins inset|r 换皮容器的有效 alpha（父链连乘，不是单点 GetAlpha），α<0.99 全列（insetReport）")
+    ns:Print("  |cffffd100/mui skins arrows|r 滚动条/步进器箭头逐对象：旋转角 + UV 翻转 + stepper 属性，用来定左右方向（arrowReport）")
+    ns:Print("  |cffffd100/mui buffframe probe|r 只数战斗光环容器的子框个数，不读任何 aura 字段（buffProbe）")
+    ns:Print("  |cffffd100/mui nameplates siblings|r 每块牌 base:GetChildren() 的真名 + alpha，判据是名单里有没有 BuffListFrame（nameplateSiblings）")
+    ns:Print("  |cffffd100/mui …|r          以上探针全量只进账本：落盘比 /reload 晚 1–2 分钟，登出后读最稳，聊天框只有前几行")
     ns:Print("  |cffffd100/mui reset|r      恢复默认设置（需 /reload）")
 end
 
@@ -1284,6 +1292,15 @@ local function HandleSlash(message)
             unitFrames:DebugLost()
         else
             ns:Print("单位框模块没加载，读不到血条配色。")
+        end
+
+    elseif command == "perf" then
+        -- 调度器总账 + Lua 内存 + 当前被暂停的轮询框（只读，见 Modules/Tools/DevTools.lua）。
+        local devTools = ns:GetModule("DevTools")
+        if devTools and type(devTools.Perf) == "function" then
+            devTools:Perf()
+        else
+            ns:Print("DevTools 探针模块没加载：检查 Modules/Tools/Tools.xml 里有没有 DevTools.lua。")
         end
 
     elseif command == "compat" then

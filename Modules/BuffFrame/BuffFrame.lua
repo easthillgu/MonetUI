@@ -246,6 +246,22 @@ local function HideContainer(container)
     container:Hide()
 end
 
+--- 光环补扫账本（`Auras.lua` 的 `fitGroups`）里"我们这一组"的开/关。
+--- 本模块给引擎按钮上样式走的是 `ns.AuraButtonStyle(button, kind, spec)` —— **三个参、
+--- 不传 owner**，按 `FitGroup` 里 `owner or "external"` 的约定全部记在 `"external"` 这一组。
+--- 那一组的 `mounted` 默认就是 true（第一次登记按钮时 `FitGroup` 建组即置真），没人销账的话
+--- `HasAuraFitWork()` 永远为真 → 那条 1 秒补扫 ticker 在按完任何一个按钮之后**永不可取消**，
+--- 屏幕上一个光环都没有也照跑。所以必须在本模块自己的生命周期边界上成对销/建。
+--- 注意不要接进 `HideContainer`：它只收 procContainer/debuffContainer（我们脱战自绘那两行，
+--- 战斗开始时才藏），而 `"external"` 的按钮属于常显的战斗引擎容器 —— 在那里销账恰好把
+--- 补扫在"按钮正要显示"的那一刻关掉。
+--- 调用前置判类型 + pcall：Auras 未加载/未导出时不能报错。只动我们自己的表，
+--- 不碰暴雪对象、不吃战斗锁定。
+local function SetExternalAuraFit(on)
+    if type(ns.AuraFitMounted) ~= "function" then return end
+    pcall(ns.AuraFitMounted, on and true or false, "external")
+end
+
 --- 把玩家的 buff 拆成"光环类"和"触发类"两组。
 --- 判据照抄暴雪 BuffFrame 的 hideUnlessExpanded（BuffFrame.lua:640）：
 ---   duration == 0（永久光环）/ expirationTime == 0 / 剩余 > BUFF_DURATION_WARNING_TIME(=90s)
@@ -440,12 +456,18 @@ local function EnsureCombatAuras()
         end
         if buffs then pcall(buffs.Hide, buffs) end
         if debuffs then pcall(debuffs.Hide, debuffs) end
+        -- 这两个容器就此没人再引用，但它们身上的按钮已经上过样式、已经记进 `"external"`：
+        -- 战斗显示退回暴雪原生框，这一组不再干活 —— 当场销账，别留一条空转的 ticker。
+        -- 下一次脱战 `EnsureCombatAuras` 重试成功时再建回来。
+        SetExternalAuraFit(false)
         return false
     end
 
     combatBuffs, combatDebuffs = buffs, debuffs
     combatBuffs:SetPoint("TOPLEFT", UIParent, "TOPLEFT", AURA_GAP, -AURA_GAP)
     combatDebuffs:SetPoint("TOPLEFT", combatBuffs, "BOTTOMLEFT", 0, -8)
+    -- 回场：这两个容器上的按钮才是真正要给补扫干活的那一批。
+    SetExternalAuraFit(true)
     return true
 end
 
@@ -641,6 +663,9 @@ end
 
 function M:SetEnabled(enabled)
     if enabled then
+        -- 引擎容器可能早就建好了（`EnsureCombatAuras` 命中 :426 那句直接 return true），
+        -- 这一路不会再走到装载处的销/建，所以开模块时自己把这一组建回来。
+        SetExternalAuraFit(true)
         self:Update()
     else
         -- buffContainer 也藏起来的话，QueueUpdate 的 OnUpdate 驱动就停了，所以只清按钮。
@@ -652,7 +677,80 @@ function M:SetEnabled(enabled)
         for _, button in ipairs(buffButtons) do button:Hide() end
         for _, button in ipairs(procButtons) do button:Hide() end
         for _, button in ipairs(debuffButtons) do button:Hide() end
+        -- 屏幕上一个我们的光环都不剩：`"external"` 这一组当场停账。条目不能删
+        -- （引擎按钮的 initializeFrame 一个按钮只进来一次），只把组标成不干活，
+        -- 目标框那两组不受影响；重新开启模块时再挂回去。
+        SetExternalAuraFit(false)
     end
+end
+
+-- 只读探针（2026-11-03，上线日验收用）：`/mui buffframe probe`
+-- **只数子框个数，一个 aura 字段都不读**。战斗里读光环数据是硬禁读
+-- （`Auras cannot be accessed when secret while tainted by 'MonetUI'`），
+-- 但 GetChildren 拿的是"容器里有几个框"，不碰 aura API，所以战斗里跑也安全。
+-- 判据：我们的容器有子框 = 引擎在喂数据；0 或读不出 = 这一趟战斗显示是空的。
+local function CountKids(frame)
+    if type(frame) ~= "table" then return nil end
+    local ok, kids = pcall(frame.GetChildren, frame)
+    if not ok or type(kids) ~= "table" then return nil end
+    return #kids
+end
+
+function M:HandleCommand(rest)
+    local raw = string.lower(rest or "")
+    if raw ~= "probe" and raw ~= "diag" and raw ~= "diagnose"
+        and not string.find(raw, "^probe") then
+        return false
+    end
+
+    local inLockdown = type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown()
+    local rows = {
+        { key = "ourCombatBuffs",   frame = combatBuffs },
+        { key = "ourCombatDebuffs", frame = combatDebuffs },
+        { key = "BuffFrame",        frame = _G.BuffFrame },
+        { key = "DebuffFrame",      frame = _G.DebuffFrame },
+        { key = "TempEnchantFrame", frame = _G.TempEnchantFrame },
+    }
+    local out = {}
+    for _, r in ipairs(rows) do
+        local exists = type(r.frame) == "table"
+        local kids = exists and CountKids(r.frame) or nil
+        r.exists = exists
+        r.children = kids
+        out[#out + 1] = { key = r.key, exists = exists, children = kids }
+    end
+
+    local _, moduleEnabled = pcall(function() return ns.IsModuleEnabled and ns:IsModuleEnabled("BuffFrame") end)
+    local report = {
+        when = (type(_G.date) == "function") and (select(2, pcall(_G.date, "%Y-%m-%d %H:%M:%S"))) or nil,
+        moduleEnabled = moduleEnabled and true or false,
+        lockdown = inLockdown and true or false,
+        inCombat = (type(ns.InCombat) == "function" and ns:InCombat()) and true or false,
+        frames = out,
+        note = "只数 GetChildren 的个数，不读 aura 字段；children=nil 表示帧不存在或读不出。",
+    }
+    local saved = false
+    if type(ns.DB) == "function" then
+        local okDb, db = pcall(function() return ns:DB() end)
+        if okDb and type(db) == "table" then
+            pcall(function() db.buffProbe = report end)
+            saved = true
+        end
+    end
+
+    for _, r in ipairs(out) do
+        local state = (not r.exists) and "未创建"
+            or (r.children == nil and "读不出（容器不可访问）")
+            or (r.children == 0 and "空（0 个子框）")
+            or ("子框 " .. tostring(r.children))
+        ns:Print(string.format("buffframe probe %-17s %s", r.key, state))
+    end
+    ns:Print(string.format("战斗标志 lockdown=%s ns:InCombat=%s",
+        tostring(report.lockdown), tostring(report.inCombat)))
+    ns:Print(saved
+        and "全量已存 MonetUIDB.buffProbe —— 写入比 /reload 晚 1–2 分钟，别立刻读（登出后再读最稳）。"
+        or "账本没打开，只有聊天框这几行。")
+    return true
 end
 
 ns:Register("BuffFrame", M)

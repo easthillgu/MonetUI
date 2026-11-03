@@ -1010,6 +1010,17 @@ function M:HandleCommand(rest)
         end
         return true
     end
+    -- 只读探针（2026-11-03，上线日验收用）：换皮覆盖面三档清点，实现在 DevTools，
+    -- 这里只开一个入口，皮肤层本身一个字节都不写。
+    if sub == "closes" or sub == "inset" or sub == "arrows" then
+        local DevTools = ns.GetModule and ns:GetModule("DevTools")
+        if DevTools and type(DevTools.SkinsProbe) == "function" then
+            DevTools:SkinsProbe(sub)
+            return true
+        end
+        ns:Print("DevTools 探针模块没加载（检查 Modules/Tools/Tools.xml）。")
+        return true
+    end
     return false
 end
 

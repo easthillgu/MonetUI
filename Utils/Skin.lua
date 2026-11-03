@@ -1139,7 +1139,8 @@ function Skin:ScanScrollArrows()
                 if kind == "Button" then
                     self:ScrollArrowButton(frame)
                     -- 关闭按钮按**美术签名**兜底：名字不可靠（12.x 有匿名的、也有不叫 CloseButton 的），
-                    -- 2026-11-03 实测 53 只里 32 只还是暴雪原样。见 Skin:CloseButtonByArt。
+                    -- 12.1.5 实测 53 只里 32 只还是暴雪原样（历史证据，5bc814e 正文）；
+                    -- 1.60 上这个数要重数才算，待 1.60 复验。见 Skin:CloseButtonByArt。
                     self:CloseButtonByArt(frame)
                 end
             end)
@@ -1372,7 +1373,7 @@ end
 
 --- 取一张控件的贴图 region：**必须带 self 调用**。
 -- `obj.GetNormalTexture()` 这种点调用在本客户端是 `bad argument #1 to '?' (Usage: local texture
--- = self:Get...)`（2026-11-03 实机红字），而且不是所有方法都这么响 —— `GetDisabledTexture`
+-- = self:Get...)`（12.1.5 实机红字 = 历史证据，ff1bd7c 正文；1.60 是否同样拒点号待复验），而且不是所有方法都这么响 —— `GetDisabledTexture`
 -- 抛错，另一些只**静默返回 nil**，于是 `SwapArt(nil)` 直接 no-op、整步换肤悄悄没做还不报错。
 -- 统一走这个漏斗：拿不到就返回 nil（调用点的 `SwapArt(nil)` 本来就安全）。
 function Skin:TexOf(obj, getter)
@@ -1523,20 +1524,97 @@ end
 
 -- ---------------------------------------------------------------------------
 --  品质色边（Bags 案共享版）：FlattenSlotArt 压掉了原生 IconBorder（品质色圈），
---  品质色由我们自绘 —— 色表与 Bags 一致；灰/白品质（0/1）不上色，保持素边
---  （引擎的中性 1px 边兜底）。品质不是静态属性（商人翻页 / 交易换物品都会变），
---  走 CropIcon 同款驱动帧：每 0.5s 重读一次品质、变了才动边（GetItemInfo 走缓存，
---  未缓存时先素边、缓存落地后自动上色）。
+--  品质色由我们自绘。2026-11-03 改口径：**先问客户端要色** —— `C_Item.GetItemQualityColor`
+--  是这个构建里品质色的唯一真值来源（物品链接、鼠标提示里的品质文字色都出自它），我们那
+--  六个手调的数只是"接近"，同一件史诗装在提示里是一个色、在我们的边上是另一个色。
+--  客户端没给答案（没有 C_Item / 返回读不出 / 数字越界）才落回手调表 —— 缺 API 时逐位
+--  等于改动前，所以这是一次"能问到就对齐，问不到不变"的改动。
+--  灰 / 白品质（0 / 1）照旧**不上色**，保持素边（引擎的中性 1px 边兜底）。
+--  品质不是静态属性（商人翻页 / 交易换物品都会变），走 CropIcon 同款驱动帧：每 0.5s
+--  重读一次品质、变了才动边（GetItemInfo 走缓存，未缓存时先素边、缓存落地后自动上色）。
+--  唯一出口是 **`Skin:QualityColor(q)`**（2026-11-03 收口）：`Modules/Bags/Bags.lua:369` 那一份
+--  自己的手调表已删掉，背包 ring 和格子的品质边现在吃同一个答案。色块形状统一成**命名字段**
+--  `{ r =, g =, b = }`（Bags 的 hover 闭包本来就按 `.r/.g/.b` 读），本文件驱动帧同样读 `.r/.g/.b`。
 -- ---------------------------------------------------------------------------
 
-local QUALITY_COLOR = {
-    [2] = { 0.20, 0.80, 0.20 },   -- Uncommon 绿
-    [3] = { 0.20, 0.55, 1.00 },   -- Rare    蓝
-    [4] = { 0.65, 0.30, 0.95 },   -- Epic    紫
-    [5] = { 1.00, 0.55, 0.00 },   -- Legendary 橙
-    [6] = { 0.90, 0.80, 0.40 },   -- Artifact
-    [7] = { 0.90, 0.80, 0.40 },   -- Heirloom
+local Secrets = ns.Secrets   -- Utils/Secrets.lua 在本文件之前加载（Utils.xml）
+
+-- 客户端问不到色时的兜底：就是改动前那张表，六个数值一个都没动（只是形状从位置表
+-- `{ r, g, b }` 改成命名字段 —— 全仓品质色从此只有一种形状）。
+local QUALITY_FALLBACK = {
+    [2] = { r = 0.20, g = 0.80, b = 0.20 },   -- Uncommon 绿
+    [3] = { r = 0.20, g = 0.55, b = 1.00 },   -- Rare    蓝
+    [4] = { r = 0.65, g = 0.30, b = 0.95 },   -- Epic    紫
+    [5] = { r = 1.00, g = 0.55, b = 0.00 },   -- Legendary 橙
+    [6] = { r = 0.90, g = 0.80, b = 0.40 },   -- Artifact
+    [7] = { r = 0.90, g = 0.80, b = 0.40 },   -- Heirloom
 }
+
+-- 只给这六档上色（0 灰 / 1 白 与 8 以上都不画边，保持素边）。
+local QUALITY_PAINTED = { [2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true }
+
+--- 单个品质的色块：问一次、算一次。
+--- **必须返回同一个表引用**：驱动帧拿 `color ~= entry.last` 判"品质变了没有"，
+--- 每次现造一张新表会让它每 0.5 秒重涂一遍所有边框。
+--- @return { r = number, g = number, b = number } | nil
+local function QualitySwatch(q)
+    if not QUALITY_PAINTED[q] then return nil end
+
+    -- 离线 dump 核实（wow-forever-api/Blizzard_APIDocumentationGenerated/ItemDocumentation.lua:921-937）：
+    --   C_Item.GetItemQualityColor(quality: ItemQuality 不可 nil)
+    --     -> colorRGBR, colorRGBG, colorRGBB, qualityString
+    --   SecretArguments = "AllowedWhenUntainted"，返回值没标机密；旧的**全局** GetItemQualityColor
+    --   不在这个客户端的文档里（见下面 QualityOf 的实机判例），所以只走 C_Item.*。
+    -- 数字之后要进比较和 SetBackdropBorderColor，仍过一次 Secrets.Number（读不出 = 没有色）。
+    if C_Item and type(C_Item.GetItemQualityColor) == "function" then
+        local ok, r, g, b = pcall(C_Item.GetItemQualityColor, q)
+        if ok then
+            local cr, cg, cb
+            if Secrets and Secrets.Number then
+                cr, cg, cb = Secrets.Number(r), Secrets.Number(g), Secrets.Number(b)
+            else
+                cr, cg, cb = r, g, b   -- 离线 tooling（没有 Secrets 层）：值本身已是普通数字
+            end
+            if type(cr) == "number" and type(cg) == "number" and type(cb) == "number"
+                and cr >= 0 and cr <= 1 and cg >= 0 and cg <= 1 and cb >= 0 and cb <= 1 then
+                return { r = cr, g = cg, b = cb }
+            end
+        end
+    end
+
+    local fb = QUALITY_FALLBACK[q]
+    return fb   -- 表引用稳定，和旧行为一致
+end
+
+-- 惰性色表：第一次查某个品质才问客户端，问过就 rawset 存下来 —— **同一个品质永远拿到同一张表**，
+-- 这正是调用方按引用判"品质变没变"的前提（下面的驱动帧、Bags 的 hover 闭包都靠它）。
+-- 上界 = 六个品质 × 至多一次 API 调用，一帧之内也不会重复问。
+local QUALITY_COLOR = setmetatable({}, {
+    __index = function(t, q)
+        local c = QualitySwatch(q)
+        if c then rawset(t, q, c) end
+        return c
+    end,
+})
+
+--- 品质色在本仓的**唯一出口**：格子品质边和 Modules/Bags 的 ring 都走这里，别处不要再自己算。
+--- 返回值是 memo 里那张表（引用稳定），调用方可以直接 `c ~= 上次那张` 判变化；
+--- 每次现造新表 = 每 0.5 秒把所有边框重涂一遍。
+--- @param q number|nil 品质（0 灰 / 1 白 / 8 以上一律 nil = 素边）
+--- @return { r = number, g = number, b = number } | nil
+function Skin:QualityColor(q)
+    if q == nil then return nil end
+    -- 品质值来自暴雪（容器 / 事件载荷），可能是机密值：机密既不能当表键也不能比较，
+    -- 读不出就按"没有色"处理（= 素边），绝不抛。
+    local n
+    if Secrets and Secrets.Number then
+        n = Secrets.Number(q)
+    else
+        n = tonumber(q)   -- 离线 tooling（没有 Secrets 层）：拿到的本来就是普通数字
+    end
+    if type(n) ~= "number" then return nil end
+    return QUALITY_COLOR[n]
+end
 
 local qualityBorders = setmetatable({}, { __mode = "k" })   -- btn -> { frame, last }
 local qualityDriver, qualityAcc
@@ -1645,11 +1723,11 @@ local function EnsureQualityDriver()
             if border and border.GetAlpha then
                 SnapQualityBorder(btn, border)
                 local q = ResolveQuality(btn)
-                local color = q and QUALITY_COLOR[q] or nil
+                local color = Skin:QualityColor(q)
                 if color ~= entry.last then
                     entry.last = color
                     if color then
-                        Widget:SetBorderState(border, color[1], color[2], color[3], 1)
+                        Widget:SetBorderState(border, color.r, color.g, color.b, 1)
                     else
                         Widget:SetBorderState(border, nil)
                     end

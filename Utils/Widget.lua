@@ -377,8 +377,14 @@ end
 --- 通用轮询：默认每 0.2 秒对登记的框体调一次 fn(frame)；第三个参数可给每个回调
 --- **自己的间隔**（秒）—— 以前这里是全局 0.2 秒，调用处写的 "2 秒" 其实没生效。
 --- 用在"暴雪改了状态但没有任何 Lua 钩子"的场合（按钮 enabled、皮肤需要复检的东西…）。
-local pollWatch, pollDriver = {}, nil
+local pollWatch, pollDriver, pollAcc = {}, nil, 0
 local POLL_INTERVAL = 0.2
+--- 驱动帧自己的门。以前它**每帧**走一遍 pollWatch，而每拍对每个框都要问两次
+--- `CanBeAccessedInContext` + `IsVisible`（各带一次 pcall）——21 处登记、30 个 deep=true
+--- 面板挂在账上时，这就是几十次/帧的 pcall，可回调最快也只 0.2 秒跑一次。
+--- 门槛 0.1 秒是仓内最小登记间隔（0.2）的一半，精度不受影响；
+--- 真要挂比 0.1 更密的轮询，把这里一起调小，不然会被量化成 0.1。
+local POLL_TICK = 0.1
 
 --- 一个框体可以挂**多个**回调：早先这里是 `pollWatch[frame] = fn`（一个框只能一个回调），
 --- 而四个模块都拿 UIParent 当锚点（Skins/System、Nameplates、Cooldown、QuestTracker）——
@@ -406,6 +412,10 @@ function Widget:PollWatch(frame, fn, interval)
     pollDriver = CreateFrame("Frame")
     pollDriver:SetScript("OnUpdate", function(_, elapsed)
         elapsed = elapsed or 0
+        pollAcc = pollAcc + elapsed
+        if pollAcc < POLL_TICK then return end
+        local tick = pollAcc
+        pollAcc = 0
         for f, cbs in pairs(pollWatch) do
             -- 隐藏的框不累加时间：等它显示时再从 0 开始算，不会"一显示就补执行一堆"。
             local shown, readable
@@ -413,7 +423,7 @@ function Widget:PollWatch(frame, fn, interval)
             if shown and readable then
                 for i = 1, #cbs do
                     local cb = cbs[i]
-                    cb.acc = cb.acc + elapsed
+                    cb.acc = cb.acc + tick
                     if cb.acc >= cb.interval then
                         cb.acc = 0
                         pcall(cb.fn, f)
@@ -1259,7 +1269,7 @@ end
 -- 「升序 ▲ / 降序 ▼」与折叠箭头「展开 ▼ / 收起 ►」两个用例只在这一种约定下同时成立）。
 --
 -- **基图朝上**时推出来的符号是：θ=+π/2 → 朝左、θ=-π/2 → 朝右。
--- 2026-11-03 实机踩过一次：最初把 Ellesmere 那组数值（它是**基图朝左**）原样抄过来，
+-- 12.1.5 实机踩过一次（历史证据；硬证据只是同晚 c58fae9 正文自述 retail 在线 = 间接）：最初把 Ellesmere 那组数值（它是**基图朝左**）原样抄过来，
 -- 左右正好反了。**换基图方向就要重新推一遍**，别照抄别的插件的符号。
 local ARROW_ROT = { left = math.pi / 2, right = -math.pi / 2 }
 local ARROW_UV = {
@@ -1526,8 +1536,21 @@ function Widget:IsMouseOver(frame)
     return value and true or false
 end
 
+--- 呼吸订阅只在**账上真有为悬停而呼吸的框**时存在（照 Nameplates:SyncGuard /
+--- Tooltip:SyncJobs 的写法：计数归零就摘订阅）。
+--- 以前两条都是错的：
+---   * `Widget:Pulse` 每被调一次就 `pulseSubId = Scheduler:EveryFrame(PulseTick)`，
+---     老 id 被覆盖、永不摘 —— 鼠标扫过一排背包格子（`Widget:Highlight` 的 OnEnter
+---     每次都调 Pulse）就等于永久多挂 N 条每帧回调；
+---   * `Widget:UnPulse` 反过来无条件摘整条订阅，两个格子同时呼吸时先离开的那个
+---     会把还悬停着的那个的动画和收尾一起带走（边框永久停在半透明，而且没人再复位）。
+--- tick 与 SyncPulse 互相引用（tick 清账要摘订阅、装订阅要拿 tick 当回调），
+--- 所以先前置声明、再各写实现。写反了其中一个是**全局 nil**：静态闸门全绿，
+--- 第一次悬停才炸（AGENTS「新增 helper 一律放在依赖之后」）。
+local PulseTick, SyncPulse
+
 --- Border breath tick, driven by the unified scheduler (batch B).
-local function PulseTick(elapsed)
+PulseTick = function(elapsed)
     for frame, st in pairs(pulsing) do
         if not frame:IsShown() or not Widget:IsMouseOver(frame) then
             -- lost the leave event (hidden / teleported) -- close out by hand
@@ -1541,6 +1564,19 @@ local function PulseTick(elapsed)
                 st.amax * (0.4 + 0.6 * wave))
         end
     end
+    -- 账被自己清空了（框藏了 / 传送了，没收到 OnLeave）：这一拍起没有活，把订阅摘掉。
+    SyncPulse()
+end
+
+SyncPulse = function()
+    if next(pulsing) == nil then
+        if pulseSubId then
+            Scheduler:Unregister(pulseSubId)
+            pulseSubId = nil
+        end
+    elseif not pulseSubId then
+        pulseSubId = Scheduler:EveryFrame(PulseTick)
+    end
 end
 
 --- Start the border breath on a frame.  Public so hand-written hover scripts (the bag slots also drive a tooltip) can breathe exactly like Widget:Highlight -- one driver, one look.
@@ -1549,17 +1585,15 @@ function Widget:Pulse(frame, r, g, b, amax)
     if not frame or not frame.SetBackdropBorderColor then return end
     pulsing[frame] = { r = r, g = g, b = b, amax = amax or 1, t = 0 }
     frame:SetBackdropBorderColor(r, g, b, amax or 1)
-    pulseSubId = Scheduler:EveryFrame(PulseTick)
+    SyncPulse()
 end
 
 --- Stop the breath and put the border back (dynamic state first).
+--- 只摘**这一个框**：还有别的框在呼吸时订阅必须留着（见 SyncPulse）。
 function Widget:UnPulse(frame)
     if not frame then return end
     pulsing[frame] = nil
-    if pulseSubId then
-        Scheduler:Unregister(pulseSubId)
-        pulseSubId = nil
-    end
+    SyncPulse()
     RestoreBorder(frame)
 end
 

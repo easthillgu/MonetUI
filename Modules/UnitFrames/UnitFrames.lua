@@ -105,7 +105,8 @@ end
 -- 显隐本身仍归 visibility 状态驱动（SecureUnitButton 战斗里不能 Show/Hide），这里只动 alpha：
 -- alpha 0 的帧在客户端眼里照样是"显示着"的，鼠标进得来，所以"移上去才浮现"不会把自己锁死。
 -- "选中" = 宠物是当前目标或焦点 —— 这两件事不会给我们任何脚本回调，只能轮询。
--- 判定一律走轮询（Widget:HoverWatch / PollWatch）：绝不往受保护的单位按钮上挂脚本。
+-- 判定一律走轮询：绝不往受保护的单位按钮上挂脚本。这个框只在 PollWatch 里登记**一条**
+-- 稳定回调（悬停和选中同一个算式，0.1 秒一拍），不再叠一条 HoverWatch 挨两遍问。
 -- ---------------------------------------------------------------------------
 local PET_IDLE_ALPHA = 0
 
@@ -135,6 +136,59 @@ local function SetPetAlpha(frame, shown)
     if pcall(frame.SetAlpha, frame, value) then Mark(frame, "petAlpha", value) end
 end
 
+--- 宠物框的"悬停 / 选中才显示"只有**一个回调、一个驱动**。
+--- 以前同一个安全框登记了**两遍**轮询：HoverWatch 的 enter/leave 只管 alpha，PollWatch 每拍
+--- 又把 over 和选中一起算完 —— 后者已经覆盖前者的全部职责，于是这个框在两个驱动里各挨一次
+--- 可见性问、各读一次 IsMouseOver。现在合成一条，间隔取 0.1 秒（和原悬停驱动同拍，
+--- 浮现照样跟手；选中本来就没有事件可挂）。
+--- 回调必须是**模块级稳定引用**（AGENTS：在 Apply 里现造闭包 = 每触发一次多挂一条轮询；
+--- PollWatch 的登记按函数身份去重，现造的闭包每回都不相等，去重形同虚设）。
+--- 宠物框是 SecureUnitButton：一个字段都不写，状态全走旁表（Mark / Marked）。
+local PET_HOVER_TICK = 0.1
+local petWatchPending = false    -- 登记那一刻读不出来，等限制换边再补装
+
+local function PetHoverPoll(frame)
+    if not Marked(frame, "petHoverOn") then return end
+    local over = false
+    local ok, inside = pcall(frame.IsMouseOver, frame)
+    if ok then over = Secrets.Bool(inside, false) end
+    SetPetAlpha(frame, over or PetSelected())
+end
+
+--- 把宠物框装进轮询（一个框只装一次）。读不出来就**先不挂**：AGENTS 的口径是"根本读不出来
+--- 的框不要挂进轮询"（实机一个 `ScrollFrame（无名）` 全程占着账本、5 秒复检一次永远检不回来）。
+--- 不抛错也不记错，降级就是原来那条：下面的"立刻定一次"照做（SetAlpha 自己 pcall，被拒就按
+--- 失败处理），等限制换边那一拍再补装。
+local function InstallPetWatch(frame)
+    if Marked(frame, "petHoverWatched") then
+        petWatchPending = false
+        return true
+    end
+    local readable = true
+    if Widget and type(Widget.Readable) == "function" then
+        readable = Widget:Readable(frame) and true or false
+    end
+    if not readable then
+        petWatchPending = true
+        return false
+    end
+    petWatchPending = false
+    Mark(frame, "petHoverWatched", true)
+    Widget:PollWatch(frame, PetHoverPoll, PET_HOVER_TICK)
+    return true
+end
+
+--- 受限窗口换边（脱战 / 出地图 / 解聊天锁…）时补装一次：登记那一刻读不出来不等于永远读不出来。
+--- 走 Core 在 `ADDON_RESTRICTION_STATE_CHANGED` 里推的内部事件（和 Utils/Widget.lua 那本
+--- "被暂停的框"账同一个入口，见 AGENTS）；pending 旗不落时一个表都不查。
+EventBus:Register("MONETUI_RESTRICTION_CHANGED", function()
+    if not petWatchPending then return end
+    local frame = frames.pet
+    if frame and frame.unit == "pet" and Marked(frame, "petHoverOn") then
+        InstallPetWatch(frame)
+    end
+end)
+
 --- 开关只改标记（回调是常驻登记的，轮询里自己看标记，关掉后不会再被拉回 0）。
 local function ApplyPetHover(frame, enabled)
     if not frame or frame.unit ~= "pet" then return end
@@ -144,22 +198,7 @@ local function ApplyPetHover(frame, enabled)
         return
     end
 
-    if not Marked(frame, "petHoverWatched") then
-        Mark(frame, "petHoverWatched", true)
-        -- 悬停 0.1 秒一次（浮现要跟手）；选中 / 取消选中 0.2 秒一次（没有事件可挂）。
-        Widget:HoverWatch(frame,
-            function(f) if Marked(f, "petHoverOn") then SetPetAlpha(f, true) end end,
-            function(f)
-                if Marked(f, "petHoverOn") and not PetSelected() then SetPetAlpha(f, false) end
-            end)
-        Widget:PollWatch(frame, function(f)
-            if not Marked(f, "petHoverOn") then return end
-            local over = false
-            local ok, inside = pcall(f.IsMouseOver, f)
-            if ok then over = Secrets.Bool(inside, false) end
-            SetPetAlpha(f, over or PetSelected())
-        end)
-    end
+    InstallPetWatch(frame)
 
     -- 立刻定一次：鼠标本来就停在框上时不会触发 OnEnter，否则开局是隐形的。
     local over = false
@@ -1126,6 +1165,11 @@ function M:SetEnabled(enabled)
     -- 显隐本身是受保护操作：不在战斗当场做，在战斗排队到脱战（ns:AfterCombat）。
     ns:AfterCombat("unitframes-enabled", function()
         ApplyEnabled(enabled)
+        -- 容器随模块一起没了 = 光环补扫这一组没有活可干：让账本退场，ticker 该摘就摘
+        -- （和上面 monetBorder 那句同一个道理：藏掉的模块不许留着自己的秒级 tick）。
+        -- 条目不删（引擎按钮的 initializeFrame 只进来一次），重新打开时 EnsureTargetAuras
+        -- 会把这一组标回在场。
+        if M.auras and M.auras.SetFitMounted then M.auras.SetFitMounted(enabled and true or false) end
         -- 重新开启时 UpdateAll -> RefreshUnit -> EnsureTargetAuras 会把容器显示回来。
         if enabled then self:UpdateAll() end
     end)

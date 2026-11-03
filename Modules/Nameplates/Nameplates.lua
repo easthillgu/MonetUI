@@ -1248,12 +1248,129 @@ function M:ProbeCVars()
     end
 end
 
+-- 只读探针（2026-11-03，上线日验收用）：`/mui nameplates siblings`
+-- 把每块牌的 `base:GetChildren()` **真名 + alpha** 落进账本：五家参考件的名单里都没有
+-- `BuffListFrame`，本仓没有第二样本，"暴雪到底在同一块牌上画了哪些同级容器"只能实机读出来。
+-- 纪律：一个属性都不写、不 Hide、不 SetAlpha、不挂脚本；名字过 `Text()`（机密串进
+-- concat 会抛）、alpha 走 `AlphaOf()`（读不出记 nil，不猜 1）。
+local SIBLING_ROW_CAP = 400
+local SIBLING_PRINT   = 8
+
+function M:ProbeSiblings()
+    local stamp
+    if type(_G.date) == "function" then
+        local okDate, s = pcall(_G.date, "%Y-%m-%d %H:%M:%S")
+        if okDate then stamp = s end
+    end
+
+    local rows = {}
+    local plateCount, unreadable, buffListHits = 0, 0, 0
+
+    for unit, plate in pairs(plates) do
+        local base = plate and plate.base
+        if type(base) == "table" then
+            plateCount = plateCount + 1
+            local baseName
+            if type(base.GetName) == "function" then
+                local okN, raw = pcall(base.GetName, base)
+                if okN then baseName = Text(raw) end
+            end
+            local uf = BlizzardUnitFrame(base)
+            local okKids, kids = pcall(base.GetChildren, base)
+            if okKids and type(kids) == "table" and #kids > 0 then
+                for i = 1, #kids do
+                    if #rows >= SIBLING_ROW_CAP then break end
+                    local c = kids[i]
+                    local name
+                    if type(c.GetName) == "function" then
+                        local okC, raw = pcall(c.GetName, c)
+                        if okC then name = Text(raw) end
+                    end
+                    if name == nil or name == "-" or name == "nil" then name = "（匿名）" end
+                    if string.find(string.lower(name), "bufflist") then buffListHits = buffListHits + 1 end
+                    rows[#rows + 1] = {
+                        unit      = Text(unit),
+                        base      = baseName,
+                        index     = i,
+                        name      = name,
+                        alpha     = AlphaOf(c),
+                        ours      = (c == plate) or nil,
+                        unitFrame = (c == uf) or nil,
+                        fadedByUs = siblingFaded[c] or nil,
+                        priorAlpha = siblingAlpha[c],
+                    }
+                end
+            elseif okKids and type(kids) == "table" then
+                -- 有 base、一个子框都没有：要么牌刚出生还没装配，要么这一路的 alpha 全靠 base 继承
+                rows[#rows + 1] = { unit = Text(unit), base = baseName, name = "（无子框）" }
+            else
+                unreadable = unreadable + 1
+                rows[#rows + 1] = { unit = Text(unit), name = "（base 子树读不出）" }
+            end
+        end
+    end
+
+    local lockdown = false
+    if type(InCombatLockdown) == "function" then
+        local okL, v = pcall(InCombatLockdown)
+        lockdown = (okL and v) and true or false
+    end
+
+    local report = {
+        when           = stamp,
+        plates         = plateCount,
+        unreadableBases = unreadable,
+        buffListHits   = buffListHits,
+        lockdown       = lockdown,
+        truncated      = (#rows >= SIBLING_ROW_CAP) or nil,
+        rows           = rows,
+        note           = "只读：GetName 过 Text() 防机密串，alpha 走 AlphaOf（nil=读不出）。"
+            .. "buffListHits>0 就是 BlizzardBasePlate 下确有同级光环容器，FadeBlizzardSiblings 的覆盖面判据。",
+    }
+
+    local saved = false
+    if type(ns.DB) == "function" then
+        local okDb, db = pcall(function() return ns:DB() end)
+        if okDb and type(db) == "table" then
+            local okSet = pcall(function() db.nameplateSiblings = report end)
+            saved = okSet and true or false
+        end
+    end
+
+    if plateCount == 0 then
+        ns:Print("姓名板 siblings：当前没有牌（不在战斗中/没姓名板可见）——空转，账本已写 plates=0。")
+    end
+    for i = 1, math.min(#rows, SIBLING_PRINT) do
+        local r = rows[i]
+        local tag = r.ours and "（我们自绘）" or (r.unitFrame and "（暴雪 UnitFrame）") or ""
+        ns:Print(string.format("  #%d %-28s α=%-6s%s%s",
+            i, r.name, (r.alpha and string.format("%.2f", r.alpha)) or "读不出",
+            tag, r.fadedByUs and " [我们压过]" or ""))
+    end
+    if #rows > SIBLING_PRINT then
+        ns:Print(string.format("  …另有 %d 行只在账本里。", #rows - SIBLING_PRINT))
+    end
+    ns:Print(string.format("判据：牌 %d 块 / 读不出 %d / buffList 命中 %d —— %s",
+        plateCount, unreadable, buffListHits,
+        (buffListHits > 0) and "有同级光环容器，需确认压暗覆盖到它"
+            or "本趟没出现 BuffListFrame（不等于不存在，战斗里再跑一趟）"))
+    ns:Print(saved
+        and "全量已存 MonetUIDB.nameplateSiblings —— 写入比 /reload 晚 1–2 分钟，别立刻读（登出后再读最稳）。"
+        or "账本没打开，只有聊天框这几行。")
+end
+
 function M:HandleCommand(rest)
     local sub = string.lower(rest or "")
 
     -- `/mui nameplates probe cvar`（也收 `/mui nameplates cvar`，客户端里少敲两个词）
     if sub:find("^probe%s+cvar") or sub:find("^cvar") then
         self:ProbeCVars()
+        return true
+    end
+
+    -- `/mui nameplates siblings`：只读清点 base 下的同级子框（真名 + alpha）→ 账本
+    if sub:find("^siblings") or sub:find("^probe%s+siblings") then
+        self:ProbeSiblings()
         return true
     end
 

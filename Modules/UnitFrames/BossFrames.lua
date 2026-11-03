@@ -45,6 +45,14 @@ local function InCombat()
     return type(InCombatLockdown) == "function" and InCombatLockdown()
 end
 
+--- 受保护写入的唯一门槛：六类受限窗口都算（同 Groups.lua 的 Restricted）。
+--- 守卫判"忙"的窗口与 `ns:AfterCombat` 的"当场能做"判据（也是 ns:IsRestricted）同源，
+--- 二者不一致才会互顶成死循环。
+local function Restricted()
+    if type(ns.IsRestricted) == "function" then return ns.IsRestricted() end
+    return InCombat()
+end
+
 local function FrameHeight(cfg)
     local b = BORDER
     local power = cfg.power or 0
@@ -331,7 +339,7 @@ local function RestyleBoss(cfg)
     --   ADDON_ACTION_BLOCKED MonetUI MonetBossAnchor:SetSize()
     --   ADDON_ACTION_BLOCKED MonetUI MonetBossButton1..5:SetSize()
     -- 主题事件在战斗里照常派发（区域切换 / MonetColor 回调 / 手动 /mui），所以这里必须排队。
-    if InCombat() then
+    if Restricted() then
         if type(ns.AfterCombat) == "function" then
             ns:AfterCombat("bossframes-restyle", function()
                 local c = Config()
@@ -402,10 +410,10 @@ local function SuppressBlizzardBoss()
     local cfg = Config()
     if cfg and cfg.hideBlizzard == false then return end
 
-    -- **战斗里一次都不做**：`BossTargetFrameContainer` / `BossNTargetFrame` 都是
-    -- `protected=true`（实机探针 2026-11-01），战斗中对受保护框的 SetAlpha / SetPoint /
-    -- ClearAllPoints 全部被拒。压制必须在战斗之外做扎实，战斗中补不了。
-    if InCombat() then return end
+    -- **受限窗口里一次都不做**：`BossTargetFrameContainer` / `BossNTargetFrame` 都是
+    -- `protected=true`（实机探针 2026-11-01），受限期对受保护框的 SetAlpha / SetPoint /
+    -- ClearAllPoints 全部被拒。压制必须在受限之外做扎实，受限中补不了。
+    if Restricted() then return end
 
     local f = _G.BossTargetFrameContainer
     if f then
@@ -433,7 +441,7 @@ local function StartSuppressTicker()
     if suppressTicker then return end
     if type(C_Timer) ~= "table" or type(C_Timer.NewTicker) ~= "function" then return end
     suppressTicker = C_Timer.NewTicker(2, function()
-        if InCombat() then return end
+        if Restricted() then return end
         if type(ns.IsModuleEnabled) == "function"
            and ns:IsModuleEnabled("BossFrames") == false then return end
         SuppressBlizzardBoss()
@@ -460,7 +468,7 @@ function M:Apply()
     local cfg = Config()
     if not cfg then return end
 
-    if InCombat() then
+    if Restricted() then
         if type(ns.AfterCombat) == "function" then
             ns:AfterCombat("bossframes-state", DesiredState)
         end
@@ -521,7 +529,7 @@ function M:Initialize()
 end
 
 function M:SetEnabled(enabled)
-    if InCombat() then
+    if Restricted() then
         if type(ns.AfterCombat) == "function" then
             ns:AfterCombat("bossframes-state", DesiredState)
         end

@@ -11,6 +11,7 @@ local Marked = function(o, k) return ns:Marked(o, k) end
 local Widget = ns.Widget
 local Color = ns.Color
 local Media = ns.Media
+local Secrets = ns.Secrets   -- Utils/Secrets.lua 在 Config 组之前加载（Utils.xml）
 
 local SimpleConfig = {}
 ns.Config = SimpleConfig
@@ -18,6 +19,7 @@ ns.Config = SimpleConfig
 local panel
 local moduleCheckboxes = {}
 local refreshStatus
+local refreshZonePreview   -- 区域色预览行（"主题"组里建，开面板 / 主题刷新时各更新一次）
 
 -- The rows live in a scrollable content frame: the panel itself stays a fixed size on
 -- screen (it is clamped to the screen, so an unbounded height would push the last
@@ -50,6 +52,22 @@ local MODULE_LABEL = {
     Durability   = "耐久警告 (Durability)",
     Atmosphere   = "氛围暗角 (Atmosphere)",
 }
+
+--- 当前区域名：只用客户端给的字符串（`C_Map.GetMapInfo`），读不到 / 读不出就退回引擎数据表里的名字，
+--- 再没有就是"未知区域"。为什么不直接用数据表的名字：未覆盖区是按**父链**取色的
+--- （LibMonetColor:563-576），数据表那个 name 是祖先层的（"卡利姆多"），玩家站在新手区看到大陆名会当成 bug。
+--- name 之后要进字符串拼接（SetText），所以必须先过一次可否读 —— 本仓判例：`type()` 判不出机密字符串。
+local function ZoneNameOf(mapID, engineName)
+    if type(mapID) == "number" and type(_G.C_Map) == "table" and _G.C_Map.GetMapInfo then
+        local ok, info = pcall(_G.C_Map.GetMapInfo, mapID)
+        local nm = ok and type(info) == "table" and info.name
+        if type(nm) == "string" and nm ~= "" and Secrets and Secrets.CanRead(nm) then
+            return nm
+        end
+    end
+    if type(engineName) == "string" and engineName ~= "" then return engineName end
+    return "未知区域"
+end
 
 local function MakeCheckbox(parent, label, yOffset, getter, setter)
     local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
@@ -479,8 +497,92 @@ function SimpleConfig:Build()
             colorText = ns:HasMonetColor() and "内置调色板（引擎已关闭）" or "内置调色板（未找到 LibMonetColor）"
         end
         statusText:SetText(colorText)
+        -- 关掉 / 打开 MonetColor 会换掉整本主题，区域预览行跟着重算（它在下面定义，
+        -- 这里只是引用那个 local 单元格：Build 里第一次调 refreshStatus 时它还是 nil，守卫兜住）。
+        if refreshZonePreview then refreshZonePreview() end
     end
     refreshStatus()
+
+    -- 区域色预览（2026-11-03）——玩家唯一能看见"这一区到底采到色没有"的入口。
+    -- 运行期配色 = mapID 查表 → 环境 HSL → 莫奈规则派生四槽 → 亮度阶梯定位（LibMonetColor:619/647-650），
+    -- 全程零像素读取；没采到色的区域落**无彩灰兜底**（:78），而"这一区本来就是灰的"和"没数据"
+    -- 在屏幕上长得一模一样。这一行把两件事分开：左边当前区域名 + 右边阶梯四档实色块，
+    -- 缺数据时另外标一句。纯 UI：数据全走 Color（GetZoneInfo 查表、GetSurface 读阶梯）。
+    local yZone = row(20)
+    local zoneCaption = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
+    zoneCaption:SetPoint("TOPLEFT", content, "TOPLEFT", 24, yZone - 4)
+    zoneCaption:SetWidth(96)
+    zoneCaption:SetWordWrap(false)
+    zoneCaption:SetText("区域配色")
+
+    -- 四档 = Color.lua 的 SURFACE_STEPS 里"画在屏幕上"的那四档
+    -- （panel / hover / lost / fill；weave 是织纹发丝线，不是一块底衬，不进这一行）。
+    -- 色块取 RGB 后按 alpha 1 平涂，和下拉行的 swatch 同一口径（Color:GetSurface 只给 RGB，
+    -- 不透明度归调用点 —— 见该函数注释），玩家看到的就是这一档**最终**的颜色。
+    local ZONE_STEPS = { "panel", "hover", "lost", "fill" }
+    local zoneChips, zoneFills = {}, {}
+    for i = #ZONE_STEPS, 1, -1 do
+        local chip = Widget:CreateFrame(nil, content, 12, 12)
+        Widget:Theme(chip, { thickness = 1, bgAlpha = 1 })
+        if i == #ZONE_STEPS then
+            chip:SetPoint("TOPRIGHT", content, "TOPRIGHT", -24, yZone)
+        else
+            chip:SetPoint("RIGHT", zoneChips[i + 1], "LEFT", -6, 0)
+        end
+        pcall(chip.EnableMouse, chip, false)
+        local fill = chip:CreateTexture(nil, "ARTWORK")
+        fill:SetAllPoints()
+        zoneChips[i] = chip
+        zoneFills[i] = fill
+    end
+
+    local zoneText = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
+    zoneText:SetPoint("LEFT", zoneCaption, "RIGHT", 8, 0)
+    zoneText:SetPoint("RIGHT", zoneChips[1], "LEFT", -8, 0)
+    zoneText:SetWordWrap(false)
+
+    -- 第二行：左边一句状态（缺色时才有字），右边四档的名字，按从暗到亮的阶梯顺序。
+    local yMark = row(16)
+    local zoneMark = Widget:Font(content, 10, "pixel", "edge", "LEFT")
+    zoneMark:SetPoint("TOPLEFT", content, "TOPLEFT", 24, yMark - 2)
+    zoneMark:SetWidth(216)
+    zoneMark:SetWordWrap(false)
+    zoneMark:SetText("")
+
+    local zoneLegend = Widget:Font(content, 10, "pixel", "neutral", "RIGHT")
+    zoneLegend:SetPoint("TOPRIGHT", content, "TOPRIGHT", -24, yMark - 2)
+    zoneLegend:SetWordWrap(false)
+    zoneLegend:SetText("面板 · 悬停 · 空槽 · 填充")
+
+    refreshZonePreview = function()
+        local mapID, engineName, source = Color:GetZoneInfo()
+        if not Color:HasMonetColor() then
+            zoneText:SetText("引擎未接入 · 内置调色板")
+            zoneMark:SetText("")
+        elseif not mapID then
+            zoneText:SetText("区域未知")
+            zoneMark:SetText("读不到当前地图 ID（受限窗口），配色退回兜底灰")
+        elseif source == "fallback" then
+            zoneText:SetText(ZoneNameOf(mapID, engineName))
+            zoneMark:SetText("这个区域没有环境色记录 · 四档走兜底灰")
+        else
+            zoneText:SetText(ZoneNameOf(mapID, engineName))
+            -- 父链继承 / 派生父层：颜色来自更大的一片区域，如实写出来（数据表的 name 就是那一片的名字）
+            local inherited = source == "override"
+                or (type(source) == "string" and string.find(source, "^parent:") ~= nil)
+            zoneMark:SetText(inherited and type(engineName) == "string" and engineName ~= ""
+                and ("环境色取自 " .. engineName) or "")
+        end
+        for i = 1, #ZONE_STEPS do
+            local r, g, b = Color:GetSurface(ZONE_STEPS[i])
+            zoneFills[i]:SetColorTexture(r, g, b, 1)
+        end
+    end
+    refreshZonePreview()
+    -- 区域切换 / 引擎回调 / 关掉 MonetColor 都会广播主题刷新，这一行跟着重算一遍。
+    ns.EventBus:Register("MONETUI_THEME_CHANGED", function()
+        if refreshZonePreview then refreshZonePreview() end
+    end)
 
     -- Border colour source: one row re-tints every border in the addon, because they all draw through Widget:Theme -> Color:GetBorder.
     local BORDER_ITEMS = {

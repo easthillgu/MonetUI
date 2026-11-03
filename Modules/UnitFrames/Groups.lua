@@ -1285,8 +1285,10 @@ function M:Apply()
     local cfg = Config()
     if not cfg then return end
 
-    -- 受保护的框（安全头）在战斗里不能建、不能改属性：排队到脱战，别硬来。
-    if InCombat() then
+    -- 受保护的框（安全头）在受限窗口里不能建、不能改属性：排队，别硬来。
+    -- 门槛用 `Restricted()`（六类），与 `ns:AfterCombat` 的"当场能做"判据同源 —— 守卫判"忙"
+    -- 的窗口，排空侧一定不会同步重跑，二者不一致才会互顶成死循环。
+    if Restricted() then
         ns:AfterCombat("groupframes-state", DesiredState)
         return
     end
@@ -1416,10 +1418,10 @@ function M:Initialize()
 end
 
 function M:SetEnabled(enabled)
-    -- 停用要拆安全头、藏受保护框，同样是战斗受限操作：排队到脱战。
-    -- Apply / SetEnabled 两条入口在战斗里想补做的是同一件事"按开关现状落地"，
+    -- 停用要拆安全头、藏受保护框，同样是受限操作：排队。
+    -- Apply / SetEnabled 两条入口想补做的是同一件事"按开关现状落地"，
     -- 所以共用一个 key（ns:AfterCombat 按 key 去重；DesiredState 读实时状态，任何顺序都对）。
-    if InCombat() then
+    if Restricted() then
         ns:AfterCombat("groupframes-state", DesiredState)
         return
     end

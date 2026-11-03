@@ -46,7 +46,7 @@ local LFG_DROPDOWNS = { "LFGBrowseFrameCategoryDropdown", "LFGBrowseFrameActivit
 local LFG_SIDE_TABS = { "ListingTab", "BrowsingTab", "WhoListingTab" }
 
 -- QueueStatusButton 是排队状态那枚小眼睛的宿主：属于 Blizzard_QueueStatusFrame，不是本面板的
--- LoD 门管；这里登记只为让 diagnose 能扫到，读不到就落空一行，换肤逻辑对它是 no-op。
+-- LoD 门管；这里登记只为让 diagnose 能扫到，读不到就落空一行 —— **只进账本，不换肤**。
 local LFG_QUEUE = { "QueueStatusButton" }
 
 -- 暴雪的角色图标走图集（atlas）：LFGBROWSE_GROUPDATA_ATLASES 那张表是 Browse.lua 的
@@ -138,7 +138,12 @@ local function SkinLFG()
     M:Dress(LFG_DROPDOWNS, { as = "dropdown" })
     -- 队列眼睛的宿主框：不做换肤（属于 Blizzard_QueueStatusFrame、有自己的动画），
     -- 只过 Need 让它进账本，方便 `/mui skins diagnose` 一眼看到能不能读到。
-    M:Dress(LFG_QUEUE, { as = "fade" })
+    -- （2026-11-03 独立审查必改项：原先这里写的是 M:Dress(LFG_QUEUE, { as = "fade" })，
+    --  而 DRESSERS.fade 实际会调 Skin:Fade 把框压成 alpha 0 —— 排队眼睛直接消失，
+    --  与注释正好相反；去掉换肤调用，只保留账本登记。）
+    for i = 1, #LFG_QUEUE do
+        Skin:Need(LFG_QUEUE[i])
+    end
     SideTabs("LFGParentFrame", LFG_SIDE_TABS)
 
     -- Atlas 换图：进面板就先扫一次；之后靠 PollWatch 每 2 秒复检（ScrollBox 复用行 = 暴雪

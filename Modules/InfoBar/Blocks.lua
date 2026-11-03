@@ -538,7 +538,7 @@ M:RegisterBlock({
 -- 坦克 / 法系 / 物理 三档的判定 —— **不写职业表**（2026-11-03 修）。
 --
 -- 这里原本是一张按 classID **数字**排的 SPEC_CATEGORY，而那套编号是照"1.60 只有九职业"
--- 的**猜测**排的。实机一测就翻车：`UnitClass("player")` 返回 `潜行者 / ROGUE / classID=4`，
+-- 的**猜测**排的。12.1.5 实机一测就翻车（历史证据，cd1f6d7 正文；classID 跨客户端不共享，1.60 上盗贼归类待复验）：`UnitClass("player")` 返回 `潜行者 / ROGUE / classID=4`，
 -- 盗贼是 **4** 不是 3 —— 于是盗贼查到了**德鲁伊**那一行（spec 2 = "tank"），
 -- 狂徒贼被显示成坦克。职业 ID 在不同客户端里本来就不是同一套编号，写死必然踩雷；
 -- 专精顺序同样是客户端说了算（德鲁伊在零售有 4 个专精，老表只有 3 格）。
@@ -551,7 +551,12 @@ M:RegisterBlock({
 -- role 读不到（受限状态、或客户端没这套数据）就只按主属性判 —— 最坏也是"物理"，
 -- 不会再出现"盗贼 = 坦克"这种把人吓一跳的结论。
 
-local LE_UNIT_STAT_STRENGTH, LE_UNIT_STAT_AGILITY, LE_UNIT_STAT_INTELLECT = 1, 2, 4
+-- 属性档位枚举：**优先读客户端自己的 LE_UNIT_STAT_* 全局**，读不到才退回下面的硬编码值
+-- （退化值与旧表逐位一致，拿不到全局的客户端行为不变）。手写数字表在枚举序不同的客户端上
+-- 会整排错位（耐力当智力 → 坦克/法系/物理全档错），口径同 `cd1f6d7`（不靠自造表猜档位）。
+local LE_UNIT_STAT_STRENGTH  = _G.LE_UNIT_STAT_STRENGTH or 1
+local LE_UNIT_STAT_AGILITY   = _G.LE_UNIT_STAT_AGILITY or 2
+local LE_UNIT_STAT_INTELLECT = _G.LE_UNIT_STAT_INTELLECT or 4
 
 -- pcall 一个函数，把第 n 个返回值走 Secrets.Number（读不到 → nil）。
 local function ReadNth(fn, n, ...)
@@ -663,10 +668,11 @@ local ROWS = {
 local CATEGORY_LABEL = { caster = "法系输出", tank = "坦克", physical = "物理输出" }
 
 --- 当前专精的角色（"TANK" / "HEALER" / "DAMAGER"），读不到返回 nil。
---- 入口取 `C_SpecializationInfo`：1.60 与零售 12.1.5 **都有这个命名空间**（实机两边都验过），
+--- 入口取 `C_SpecializationInfo`：12.1.5 实机验过这个命名空间（cd1f6d7 正文），1.60 侧目前只有
+--- 离线依据（`docs/api/FUNCTIONS.md` 收录它）—— **待 1.60 复验，上线日随 `/mui compat` 补**；
 --- 而 `GetSpecialization` / `GetSpecializationInfo` 那对全局在 1.60 不是全局（api-audit 的
 --- `[moved]` 就是它）—— 所以只走 C_*，不要再加全局兜底。
---- 返回序：specId, name, description, icon, **role**, ...（两个客户端一致）。
+--- 返回序：specId, name, description, icon, **role**, ...（12.1.5 实测序 = 历史证据；1.60 与上一句一并 `/mui compat` 核）。
 local function CurrentSpecRole()
     local index = CurrentSpecIndex()
     if not index then return nil end

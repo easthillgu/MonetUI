@@ -527,26 +527,104 @@ end
 local fitTargets = setmetatable({}, { __mode = "k" })
 local fitTicker
 
-local function RunAuraFit()
-    for btn, want in pairs(fitTargets) do
-        -- **不能拿 `Widget:Readable` 当门**：这些引擎按钮只是读不到**可见性**（IsVisible 会抛），
-        -- 但遍历子件 / 给字体串 SetFont 都是成功的（实机 2026-11-01：60 个字体串就是这么改掉的）。
-        -- 用它当门等于把补扫整个关掉。真正的噪声来自 PollWatch 每拍问可见性 —— 所以这里
-        -- 用自己的 pcall 遍历，不碰可见性，也就不会告警。
-        pcall(StyleAuraCooldownTexts, btn, want.fontKey, want.basePx, Media.outlineFlags)
+--- 每个光环组一份账，owner = 容器的 group key（BuffFrame 经 `ns.AuraButtonStyle` 进来的
+--- 没有 owner，统一记在 "external"）。ticker 的生死按组算，不算全局：
+---   * **容器藏了不能删条目** —— 引擎按钮的 `initializeFrame` 一个按钮只进来一次，
+---     摘掉条目等于"再勾回 showTargetAuras 时长字体永远回不来"，所以只把这一组标成不干活；
+---   * **容器被扔掉才删**（换主题重建，按钮随容器一起没了）。
+--- key 的集合只有"目标框两组 + external"，不会长。
+local fitGroups = {}
+local TARGET_GROUPS = { "monetTargetDebuffs", "monetTargetBuffs" }
+
+local RunAuraFit, SyncAuraFitTicker    -- 互引：ticker 的回调是 RunAuraFit，它自己又要摘 ticker
+
+local function FitGroup(owner)
+    local key = owner or "external"
+    local g = fitGroups[key]
+    if not g then
+        g = { mounted = true, buttons = setmetatable({}, { __mode = "k" }) }
+        fitGroups[key] = g
+    end
+    return g
+end
+
+--- 还有没有活可干：装着按钮且在场（显示中）的组至少一个。
+local function HasAuraFitWork()
+    for _, g in pairs(fitGroups) do
+        if g.mounted and next(g.buttons) ~= nil then return true end
+    end
+    return false
+end
+
+RunAuraFit = function()
+    for _, g in pairs(fitGroups) do
+        if g.mounted then
+            for btn in pairs(g.buttons) do
+                local want = fitTargets[btn]
+                -- **不能拿 `Widget:Readable` 当门**：这些引擎按钮只是读不到**可见性**（IsVisible 会抛），
+                -- 但遍历子件 / 给字体串 SetFont 都是成功的（实机 2026-11-01：60 个字体串就是这么改掉的）。
+                -- 用它当门等于把补扫整个关掉。真正的噪声来自 PollWatch 每拍问可见性 —— 所以这里
+                -- 用自己的 pcall 遍历，不碰可见性，也就不会告警。
+                if want then
+                    pcall(StyleAuraCooldownTexts, btn, want.fontKey, want.basePx, Media.outlineFlags)
+                end
+            end
+        end
+    end
+    -- 计数归零就摘订阅（Nameplates.lua:897 SyncGuard / Tooltip.lua:807 SyncJobs 同一条口径）。
+    -- 这里是弱键条目被 GC 之后**唯一**的回收点：以前 ticker 一建就永不取消，模块关掉、
+    -- 容器扔掉、账空了它照样一秒醒一次，跑到重载为止。
+    SyncAuraFitTicker()
+end
+
+--- 一个中央 ticker 代替"每个按钮一条 PollWatch"（理由见 RunAuraFit）。建/摘都只看这一处，
+--- 所以同一容器重复建不会攒出多条 ticker（`if not fitTicker` 就是那条门）。
+SyncAuraFitTicker = function()
+    if HasAuraFitWork() then
+        if fitTicker then return end
+        if type(C_Timer) ~= "table" or type(C_Timer.NewTicker) ~= "function" then return end
+        fitTicker = C_Timer.NewTicker(1, RunAuraFit)
+        return
+    end
+    if fitTicker then
+        -- 先置 nil 再 Cancel：回调里自摘（RunAuraFit 末尾那次）时不能依赖 Cancel 的成功与否，
+        -- 摘不成也只是多留一个空转的 ticker，下一次要活不会又建一条出来并存。
+        local stale = fitTicker
+        fitTicker = nil
+        pcall(stale.Cancel, stale)
     end
 end
 
---- 一个中央 ticker 代替"每个按钮一条 PollWatch"（理由见 RunAuraFit）。
-local function EnsureAuraFitTicker()
-    if fitTicker then return end
-    if type(C_Timer) ~= "table" or type(C_Timer.NewTicker) ~= "function" then return end
-    fitTicker = C_Timer.NewTicker(1, RunAuraFit)
+--- 某一组在场/退场（退场留账，见上面注释）。
+local function SetFitGroupMounted(owner, on)
+    local g = FitGroup(owner)
+    g.mounted = on and true or false
+    SyncAuraFitTicker()
+end
+
+--- 容器被扔掉：这一组的按钮跟着没了，条目一起删（下次建容器是全新的一批按钮）。
+local function ReleaseFitGroup(owner)
+    local g = fitGroups[owner]
+    if g then
+        for btn in pairs(g.buttons) do fitTargets[btn] = nil end
+        g.buttons = setmetatable({}, { __mode = "k" })
+    end
+    SetFitGroupMounted(owner, false)
+end
+
+--- owner 省略 = 目标框那两组（UnitFrames 整体禁用时走这条）。
+local function SetAuraFitMounted(on, owner)
+    if owner then
+        SetFitGroupMounted(owner, on)
+        return
+    end
+    for _, key in ipairs(TARGET_GROUPS) do SetFitGroupMounted(key, on) end
 end
 
 -- initializeFrame：一个引擎按钮只进来一次。碰按钮的事必须在这里做完。
 -- spec（可选）：{ width, height, crop } —— BuffFrame 的战斗兜底复用这套样式，但玩家 buff 行是
 -- 方形图标、且不裁边（目标框的 18x14 槽才需要 3:4 裁切）。不传 spec 就等于原来的目标框样子。
+-- owner（可选）：这个按钮属于哪个光环组（补扫账本的分组键），省略 = "external"。
 --
 -- **必需件优先（2026-10-25 修复"战斗中 proc 只有提示没有图标"）**：
 -- 引擎把机密光环数据写进 `SetIcon / SetDurationCooldown / SetApplicationCount` 交给它的那三个
@@ -555,7 +633,7 @@ end
 -- （边框 / 时长文本 / 染色）全部排在注册之后、各自 pcall 隔离：装饰失败最多"不好看"，不会
 -- 让图标消失。机密期不建颜色曲线（`C_CurveUtil` 会被拒），退回冷却自带数字。
 -- （对齐 ArcAuras 的 `initializeFrame` 纪律：`AD_DriverAura.lua:796-883`。）
-local function StyleAuraButton(button, kind, spec)
+local function StyleAuraButton(button, kind, spec, owner)
     if type(button) ~= "table" then return end
 
     local specW = (type(spec) == "table" and spec.width) or TARGET_AURA_ICON_W
@@ -622,14 +700,23 @@ local function StyleAuraButton(button, kind, spec)
     local fitBase = textSize
     if type(fitBase) ~= "number" then fitBase = 8 end
     local fitFontKey = (type(spec) == "table" and spec.fontKey) or "pixel"
-    EnsureAuraFitTicker()
+    local group = FitGroup(owner)
+    group.buttons[button] = true
     fitTargets[button] = { fontKey = fitFontKey, basePx = fitBase }
+    SyncAuraFitTicker()
     pcall(StyleAuraCooldownTexts, button, fitFontKey, fitBase, Media.outlineFlags)
 end
 
 --- 导出给 BuffFrame：战斗里客户端不给插件读光环，玩家 buff 行改由引擎 AuraContainer 显示，
 --- 按钮样式必须和目标框一致，所以共用这一个函数（尺寸/裁切由 spec 覆盖）。
 ns.AuraButtonStyle = StyleAuraButton
+--- 补扫账的开/关（owner 省略 = 目标框那两组）。BuffFrame 那一组记在 "external"：
+--- 它应当在**自己的生命周期边界**上成对调用 —— `M:SetEnabled` 两分支、以及建容器失败
+--- （退回暴雪原生框）那一路销账，容器成型那一路挂回（`BuffFrame.lua` 的 `SetExternalAuraFit`）。
+--- **不要接在 `HideContainer`**：那只收它自己脱战绘制的 proc/debuff 行，而 "external" 的按钮
+--- 属于常显的战斗引擎容器，在那里销账会把补扫正好在按钮要显示的那一刻关掉。
+--- 不销账的后果：那一组的 ticker 只能等按钮被 GC 之后才摘（条目本身不能删，见 fitGroups 上面的注释）。
+ns.AuraFitMounted = SetAuraFitMounted
 --- 曲线必须由**非 securecall** 的调用方先建好：引擎的 initializeFrame 是 securecall 进去跑的，
 --- 在里面首次调 C_CurveUtil.CreateColorCurve 会被拒。
 ns.PrepareAuraStyle = GetDurationColorCurve
@@ -709,7 +796,7 @@ local function CreateAuraContainer(parent, key, filterString, kind)
         -- 整个回调套 pcall：这里是 securecall 进来的引擎生产链，我们的任何异常会把
         -- 整个批次（连同其它 9 个按钮）一起带走（Backdrop.lua:342 / MathUtil.lua:24 波）。
         initializeFrame = function(button)
-            pcall(StyleAuraButton, button, kind)
+            pcall(StyleAuraButton, button, kind, nil, key)
         end,
     }
     -- 这两个是枚举**表**（AuraContainerSortMethod.Default = 0、SortDirection.Normal = 0），
@@ -744,6 +831,8 @@ local function EnsureTargetAuras(frame)
     if not Shared("showTargetAuras") then
         if targetAuraDebuffs then targetAuraDebuffs:Hide() end
         if targetAuraBuffs then targetAuraBuffs:Hide() end
+        -- 容器藏了 = 这一组没有活可干（账留着，勾回来立刻还能扫）；两组都藏了就摘 ticker。
+        SetAuraFitMounted(false)
         return
     end
 
@@ -784,6 +873,8 @@ local function EnsureTargetAuras(frame)
         end
     end
 
+    -- 容器在场：这一组的账重新算活（ticker 关掉过的话在这里重新挂上）。
+    SetAuraFitMounted(true)
     if targetAuraDebuffs then targetAuraDebuffs:Show() end
     if targetAuraBuffs then targetAuraBuffs:Show() end
 
@@ -805,6 +896,9 @@ function RebuildTargetAuras()
         ns:AfterCombat("unitframes-auras", RebuildTargetAuras)
         return
     end
+    -- 旧容器连着它的按钮一起扔掉：补扫账本里的条目跟着删（新容器会带一批全新按钮进来，
+    -- 各走一次 initializeFrame 重新登记）。
+    for _, key in ipairs(TARGET_GROUPS) do ReleaseFitGroup(key) end
     for _, container in ipairs({ targetAuraDebuffs, targetAuraBuffs }) do
         if container then
             pcall(container.ClearAllPoints, container)
@@ -935,8 +1029,11 @@ end
 ]==]
 
 -- P5：供主文件调用的接口面（其余函数保持文件内局部）。
+-- SetFitMounted(on[, owner])：模块整体禁用时传 (false)（= 目标框那两组退场，ticker 该摘就摘）；
+-- BuffFrame 那一组（owner 省略时记在 "external"）由它自己按开关注销。
 M.auras = {
     EnsureTargetAuras = EnsureTargetAuras,
     RebuildTargetAuras = RebuildTargetAuras,
     StyleAuraButton = StyleAuraButton,
+    SetFitMounted = SetAuraFitMounted,
 }

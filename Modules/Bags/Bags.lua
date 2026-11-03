@@ -366,22 +366,18 @@ end
 
 -- Quest items take the amber ring regardless of quality; poor/common keep the plain edge (Andromeda likewise demotes common to black).
 -- Declared above AcquireButton: its hover closure uses QualityBorder as an upvalue.
-local QUALITY_COLOR = {
-    -- [0] poor and [1] common: intentionally absent -- plain edge
-    [2] = { r = 0.20, g = 0.80, b = 0.20 },  -- Uncommon green
-    [3] = { r = 0.20, g = 0.55, b = 1.00 },  -- Rare    blue
-    [4] = { r = 0.65, g = 0.30, b = 0.95 },  -- Epic    purple
-    [5] = { r = 1.00, g = 0.55, b = 0.00 },  -- Legendary orange
-    [6] = { r = 0.90, g = 0.80, b = 0.40 },  -- Artifact
-    [7] = { r = 0.90, g = 0.80, b = 0.40 },  -- Heirloom
-}
-local QUEST_COLOR = { r = 0.80, g = 0.80, b = 0.00 }   -- task amber
+-- 品质色**不在这里算**（2026-11-03 收口）：全仓只留一处真值来源 `Skin:QualityColor(q)`（Utils/Skin.lua）——
+-- 它先问 `C_Item.GetItemQualityColor`，问不到才落那六个手调数，所以背包 ring 与格子的品质边、
+-- 鼠标提示里的品质文字色从此是同一个答案（以前这里另有一张手调表，1.60 上客户端一改就会出现
+-- "背包格一圈绿、商人格一圈另一个绿"）。返回值**按品质是同一张表**，下面的 hover 闭包按引用透传，
+-- 每次现造新表等于每 0.5 秒重涂一遍全部边框。形状 `{ r=, g=, b= }`，0 / 1 品质返回 nil = 素边。
+local QUEST_COLOR = { r = 0.80, g = 0.80, b = 0.00 }   -- task amber（背包自己的语言，不是品质色，留在本文件）
 
 --- Border for an item: quest amber first, then quality hue, else nil (plain edge).
 local function QualityBorder(rec)
     if not rec then return nil end
     if rec.isQuest then return QUEST_COLOR end
-    return QUALITY_COLOR[rec.quality or 0]
+    return Skin:QualityColor(rec.quality or 0)
 end
 
 -- --- 模板槽层压平（收养案 2026-10-25）：模板自带暗色槽底 + IconMask 蒙版 + 默认绘制层，
@@ -460,11 +456,32 @@ local function AcquireButton(parent)
             pcall(tip.SetBagItem, tip, rec.bag, rec.slot)
             pcall(tip.Show, tip)
             if qc and tip.SetBackdropBorderColor then
-                local pr, pg, pb, pa
+                -- 原色**只有四个数全部读得出才存**（2026-11-03 收口）。GameTooltip 是暴雪框，
+                -- 这类 getter 在 1.60 上可能给机密值：`pr or 0` 呸不掉它（本仓判例：type() 判不出
+                -- 机密字符串），一旦把它装进 tipPrev，OnLeave 喂回去就是一次受限调用 —— 最坏结果
+                -- 不是崩而是静默：OnLeave 里那次 pcall（现 :490）兜着，抛完 tipPrev 被清，提示框边框就此卡在
+                -- 我们的品质色上，外加一条 ADDON_ACTION_BLOCKED 历史。
+                -- 读不出 = "我们没改过它"：不存也不还原（宁可不还原，也不拿秘密值进表）。
+                -- 附带好处：拿不到 alpha 时不再存 0 —— 那等于把提示框边框整个抹掉。
+                local prev
                 if tip.GetBackdropBorderColor then
-                    pr, pg, pb, pa = tip:GetBackdropBorderColor()
+                    local okC, r0, g0, b0, a0 = pcall(tip.GetBackdropBorderColor, tip)
+                    local nr, ng, nb, na
+                    if okC then
+                        nr, ng, nb = Secrets.Number(r0), Secrets.Number(g0), Secrets.Number(b0)
+                        na = Secrets.Number(a0)
+                        -- 客户端只给三个值（a0 == nil）时补满 alpha：`Secrets.Number(nil)` 也返回 nil，
+                        -- 不补就会被当成"读不出"整条放弃；旧写法这时存的是 0 = 还原后边框整个消失。
+                        -- 注意只补 `a0 == nil`：false / 机密值仍然算读不出。
+                        if na == nil and a0 == nil then na = 1 end
+                    end
+                    if nr and ng and nb and na then
+                        prev = { nr, ng, nb, na }   -- 旁表里只放普通数字
+                    end
+                else
+                    prev = { 0, 0, 0, 0 }   -- 没有 getter 的老模板：维持改动前的写法（四个纯数字）
                 end
-                Mark(self, "tipPrev", { pr or 0, pg or 0, pb or 0, pa or 0 })
+                Mark(self, "tipPrev", prev)
                 pcall(tip.SetBackdropBorderColor, tip, qc.r, qc.g, qc.b, 0.6)
             end
         end
