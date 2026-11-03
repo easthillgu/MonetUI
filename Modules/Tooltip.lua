@@ -14,13 +14,25 @@
 --   这两行画在**我们自己的小框**里（挂在提示框下沿，1px 主题色边框），不用 tooltip:AddLine ——
 --   本客户端的提示框是数据行驱动的，追加的行会被下一次重填抹掉（HANDOFF 3.18）。
 --
--- 为什么不是钩子：本客户端**没有** TooltipDataProcessor（手册零命中），而 HookScript /
--- hooksecurefunc 写的是暴雪框的脚本槽 / 方法槽，AGENTS 的污染模型明令禁止（GameTooltip
--- 也一样，`SharedTooltip_SetBackdropStyle` 都没敢 hook）。所以用一个**自建驱动帧**每帧看一次：
--- 显示上升沿那一帧就补齐内容，代价只有"多出来的那一行晚 1 帧出现"。
+-- 触发（2026-11-03 改）：**暴雪自己的 tooltip 数据回调** `TooltipDataProcessor.AddTooltipPostCall`
+-- —— 它在 Blizzard 每次填完数据之后叫我们一次，所以内容**不再晚一帧**，也不需要在
+-- 每次重填之间空转。这一层是 FrameXML 的表，不是 `C_*` API：
+-- **以前注释里写的"本客户端没有 TooltipDataProcessor（手册零命中）"是误判** ——
+-- `docs/api` 快照只收 `Blizzard_APIDocumentationGenerated`，FrameXML 层的名字本来就不在里面，
+-- "快照缺席 ≠ 客户端没有"（AGENTS「模板造出来没报错 ≠ 模板存在」同一条口径）。
+-- 实据：本客户端装着五套插件都在用它（`Lueur/NodeScan.lua:1862`、`EnhanceQoLTooltip`、
+-- `DungeonsForever/Core/TipLines.lua:858`、`Polestar/Core/Hooks.lua:229`、`EnhanceQoLVendor`）。
+--
+-- 为什么仍**不是钩子**：`HookScript` / `hooksecurefunc` 写的是暴雪框的脚本槽 / 方法槽，
+-- AGENTS 的污染模型明令禁止（GameTooltip 也一样，`SharedTooltip_SetBackdropStyle` 都没敢 hook）。
+-- post-call 不碰任何方法槽：我们只是被暴雪叫一次。
+--
+-- 退路：那个表或 `AllTypes` 拿不到 / 注册被拒时（`/mui tooltip diagnose` 看状态），
+-- 内容层退回 250ms 兜底扫描 —— 摆位与显隐本来就靠每帧那一路，功能不因缺 API 而死。
 --
 -- 幂等：内容变了（换了目标 / 换了物品 / Shift 比对 / 按下 Alt）才重补一次；补完记签名，
--- 签名没变就不再碰 —— 否则每 0.05 秒往同一个提示框里加一行，会一直长。
+-- 签名没变就不再碰 —— 否则往同一个提示框里反复加一行，会一直长。
+-- Alt 起落走 `MODIFIER_STATE_CHANGED`（按 `idsByAlt` 开关**按需注册**，关掉就摘事件）。
 
 local ADDON_NAME, ns = ...
 
@@ -42,11 +54,28 @@ local MM_GAP = 8
 --- （Shift 对比、我们追加的 ID 行）改变，鼠标停在临界位置就会左右横跳（玩家 2026-10-26 报"位置乱跑"）。
 local EDGE_W = 420
 local EDGE_H = 320
---- 内容扫描间隔（秒）。位置是每帧；内容只在"变了"的时候才动，没必要每帧重算。
-local SCAN = 0.05
+--- 内容兜底扫描间隔（毫秒）。即时那一路是暴雪的 post-call；这里只兜两件事：
+---   ①那个 FrameXML 表在本客户端拿不到（退化为纯轮询）；
+---   ②"目标: 谁"这类**没有重填事件**的状态漂移（悬停期间别人的目标变了，暴雪不会重填提示框）。
+--- 从 0.05s（每帧级别）降到 250ms：即时性已经由回调负责，轮询只是保险。
+local CONTENT_INTERVAL_MS = 250
 
 local mode, enrich, idsByAlt       -- 设置缓存（每帧要读，别去翻 DB）：cursor / minimap / off
-local driver, wasShown, scanAcc, cursorKey, mmKey
+local cursorKey, mmKey
+local placeJob, contentJob         -- Utils/Scheduler 订阅号（本仓不再自建 OnUpdate 帧）
+local wasShown, modDown            -- 提示框显隐上升沿 / Alt 当前状态
+local modFrame                     -- MODIFIER_STATE_CHANGED 事件帧（按 idsByAlt 按需建/摘）
+local processorState = "uninstalled"   -- uninstalled / missing / no-alltypes / registered / rejected:<err>
+
+--- 每次暴雪填完数据给我们的载荷：`{ type =, id =, guid = }`（`data.type` 是 `Enum.TooltipDataType` 的值）。
+--- 按提示框对象记（弱键：暴雪的提示框是池化的，我们不写字段、也不留引用）。
+local lastPayload = setmetatable({}, { __mode = "k" })
+
+--- type → kind 的账本（`/mui tooltip diagnose` 读的就是它）：
+--- 枚举名写错、或本客户端的 type 值对不上，症状都是"ID 行安静地不出现"，
+--- 所以每个见过的 type 都记一笔命中数，让"没命中"看得见。
+local typeLedger = {}
+local typeLedgerN = 0
 
 -- ============================================================================
 -- 设置（键：anchor / enrich / idsByAlt，面板与 /mui 都走这里）
@@ -162,6 +191,8 @@ local function PlaceMinimap(tip)
 end
 
 --- 按当前模式摆位。off 什么都不做（让暴雪的锚点留着）。
+--- **不设 `SetClampedToScreen`**：引擎的夹取会和我们每帧写的锚点是两套写手，
+--- 贴边时位置会互相拉扯（玩家 2026-10-26 报"乱跑"的另一个来源）。夹取在 PlaceCursor 里自己算，结果确定。
 local function ApplyPlacement(tip)
     if mode == "cursor" then
         PlaceCursor(tip)
@@ -336,8 +367,29 @@ local function NPCIdFromGUID(guid)
     return nil
 end
 
+--- Alt 的 ID 行能不能直接从**暴雪给的载荷**拿。`data.id` 对 item / spell / aura 就是那个 ID，
+--- 比我们自己再问一次 `GetItem` / `GetSpell` 好两处：
+---   * 受限时那两个 getter 返回机密串 / 机密数字，每问一次就是一次"要被拦的比较"；
+---   * 载荷是暴雪填完数据之后交出来的普通值，不用我们再猜一次提示框里装的是什么。
+--- 单位的 NPC ID 载荷里没有（`data.id` 对 unit 不是 creature 编号），仍走 GUID 那一条。
+local function IdFromPayload(payload)
+    if type(payload) ~= "table" then return nil, nil end
+    local id = Secrets.Number(payload.id)
+    if not id then return nil, nil end
+    if payload.kind == "item" then return ITEM_ID_LABEL, tostring(id) end
+    if payload.kind == "spell" or payload.kind == "aura" then return SPELL_ID_LABEL, tostring(id) end
+    return nil, nil
+end
+
+--- Alt 有没有按下（`IsAltKeyDown` 不受保护，两个键都算）。
+local function AltDown()
+    if _G.IsAltKeyDown then return Secrets.Bool(_G.IsAltKeyDown(), false) end
+    return false
+end
+
 --- 收集要显示的附加行：目标行（开关 enrich）+ Alt 的 ID 行（开关 idsByAlt）。
-local function CollectLines(tip)
+--- payload = 暴雪回调给的那次填充（没有就退化成问提示框自己）。
+local function CollectLines(tip, payload)
     local lines = {}
     local unit = TooltipUnit(tip)
 
@@ -366,7 +418,7 @@ local function CollectLines(tip)
     end
 
     -- Alt：单位 = NPC ID（GUID 里的 creature/vehicle 编号），物品 = itemID，法术 = spellID
-    if idsByAlt and _G.IsAltKeyDown and _G.IsAltKeyDown() then
+    if idsByAlt and AltDown() then
         local label, id
         if unit then
             local ok, guid = pcall(UnitGUID, unit)
@@ -376,20 +428,24 @@ local function CollectLines(tip)
                 label = NPC_ID_LABEL
             end
         else
-            if type(tip.GetItem) == "function" then
-                local ok, _, link = pcall(tip.GetItem, tip)
-                link = ok and Plain(link) or nil
-                if type(link) == "string" then
-                    local itemID = link:match("item:(%d+)")
-                    if itemID then label, id = ITEM_ID_LABEL, itemID end
+            label, id = IdFromPayload(payload)
+            if not id then
+                -- 没有载荷可用（退化成轮询那一趟、或 type 没命中）：才去问提示框自己
+                if type(tip.GetItem) == "function" then
+                    local ok, _, link = pcall(tip.GetItem, tip)
+                    link = ok and Plain(link) or nil
+                    if type(link) == "string" then
+                        local itemID = link:match("item:(%d+)")
+                        if itemID then label, id = ITEM_ID_LABEL, itemID end
+                    end
                 end
-            end
-            if not id and type(tip.GetSpell) == "function" then
-                local ok, _, spellID = pcall(tip.GetSpell, tip)
-                -- `spellID ~= nil` 不能写在 Secrets.Number 前面：受限时它是机密数字，
-                -- 这一句比较本身就是被拦调用（pcall 的 ok 是普通值，被 pcall 的返回值不是）。
-                local n = ok and Secrets.Number(spellID) or nil
-                if n then label, id = SPELL_ID_LABEL, tostring(n) end
+                if not id and type(tip.GetSpell) == "function" then
+                    local ok, _, spellID = pcall(tip.GetSpell, tip)
+                    -- `spellID ~= nil` 不能写在 Secrets.Number 前面：受限时它是机密数字，
+                    -- 这一句比较本身就是被拦调用（pcall 的 ok 是普通值，被 pcall 的返回值不是）。
+                    local n = ok and Secrets.Number(spellID) or nil
+                    if n then label, id = SPELL_ID_LABEL, tostring(n) end
+                end
             end
         end
         if id then
@@ -437,7 +493,8 @@ local function RecolorSpellTitle(tip)
 end
 
 --- 补一次内容：算签名，没变就只对齐小框；变了（换目标 / 按 Alt / 换物品）才重写文字。
-local function Enrich(tip)
+--- payload 来自暴雪的 post-call（见文件头）；兜底扫描那一路传的是上次缓存的那份。
+local function Enrich(tip, payload)
     -- 标题配色属于"美化"本身，和「显示 ID」「补全描述」两个开关无关，所以放在早退之前
     pcall(RecolorSpellTitle, tip)
 
@@ -446,7 +503,7 @@ local function Enrich(tip)
         return
     end
 
-    local ok, lines = pcall(CollectLines, tip)
+    local ok, lines = pcall(CollectLines, tip, payload)
     if not ok or type(lines) ~= "table" then lines = {} end
 
     local parts = { TooltipUnit(tip) or "" }
@@ -455,7 +512,7 @@ local function Enrich(tip)
 end
 
 -- ============================================================================
--- 驱动：一个自建帧，每帧一次；提示框隐藏时立刻返回（没有轮询开销）
+-- 触发层：暴雪的数据回调（即时）+ 每帧摆位 + 250ms 兜底
 -- ============================================================================
 
 local function Reset(tip)
@@ -463,14 +520,41 @@ local function Reset(tip)
     Mark(tip, "boxSide", nil)
     if box then box:Hide() end
     cursorKey, mmKey = nil, nil
-    scanAcc = 0
+    lastPayload[tip] = nil
 end
 
-local function Tick(_, elapsed)
+--- 提示框此刻可见吗。**不直接 `tip:IsVisible()`**：读不出来（forbidden / 答案是机密）时
+--- 一律当"不可见"，宁可这一拍什么都不做，也不要拿读不懂的东西当判断（AGENTS：读不懂 ≠ 不能访问，
+--- 但**写侧**保守 = 不动）。
+local function TooltipVisible()
     local tip = _G.GameTooltip
+    if not tip or type(tip.IsVisible) ~= "function" then return nil, nil end
+    local ok, visible = pcall(tip.IsVisible, tip)
+    if not ok then return nil, nil end
+    return tip, Secrets.Bool(visible, false)
+end
+
+--- **唯一的"现在就画"入口**：暴雪回调、Alt 起落、开关变化、兜底扫描都走它。
+--- 顺序要紧：暴雪是 `SetOwner → 摆锚点 + Show → 填数据`，所以 post-call 到达时提示框**已经可见**，
+--- 而每帧那路还没来得及置上升沿 —— 若这里只看 `wasShown`，即时那一路在"第一次悬停"上
+--- 永远不生效，又退回到晚一帧。所以这里自己认可见性，自己补摆位。
+local function RedrawNow()
+    local tip, visible = TooltipVisible()
+    if not tip or not visible then return end
+    wasShown = true
+    ApplyPlacement(tip)
+    pcall(Enrich, tip, lastPayload[tip])
+end
+
+--- 每帧那一拍。现在是 `Utils/Scheduler` 的 EveryFrame 订阅，不再是本模块自己的 OnUpdate 帧
+--- （AGENTS/`7108581` 同一条：全仓只留一个驱动帧）。这里只管两件事 ——
+--- 摆位（内部按 key 去重，光标不动就不写布局）与显隐沿（决定我们那块小框在不在）。
+--- 提示框没显示时一次 `IsVisible` 就走。
+local function PlaceTick()
+    local tip, visible = TooltipVisible()
     if not tip then return end
 
-    if not tip:IsVisible() then
+    if not visible then
         if wasShown then
             wasShown = false
             Reset(tip)
@@ -479,22 +563,150 @@ local function Tick(_, elapsed)
     end
 
     if not wasShown then
-        -- 上升沿：当帧摆位 + 补内容（晚一帧的那一行，就是在这一步补的）
-        wasShown = true
-        scanAcc = 0
-        ApplyPlacement(tip)
-        Enrich(tip)
+        RedrawNow()          -- 上升沿：摆位 + 补内容（载荷用暴雪回调给的那份）
         return
     end
 
     -- 每帧都过一遍：光标模式靠 cursorKey 去重、小地图模式靠 mmKey 去重，
     -- 两边都只在"位置或尺寸真的变了"时才写布局。
     ApplyPlacement(tip)
+end
 
-    scanAcc = scanAcc + (elapsed or 0)
-    if scanAcc < SCAN then return end
-    scanAcc = 0
-    Enrich(tip)
+--- type → 我们关心的种类。**数字一律从 `Enum.TooltipDataType` 现取，不硬编码**：
+--- 本客户端（1.60 / camelot）与零售的枚举值不保证一致，写死数字就是"看起来能跑、
+--- 换个构建安静失灵"。命中的键名与没命中的都记账，`/mui tooltip diagnose` 读。
+local kindByType, enumHit, enumMiss
+local function BuildKindMap()
+    local E = _G.Enum and _G.Enum.TooltipDataType
+    if type(E) ~= "table" then
+        enumHit, enumMiss = {}, { "Enum.TooltipDataType（整张表都没有）" }
+        return nil
+    end
+    local want = {
+        Item = "item", Toy = "item",
+        Spell = "spell", Totem = "spell", UnitAura = "aura",
+        Unit = "unit", Corpse = "unit", BattlePet = "unit", CompanionPet = "unit",
+        Currency = "currency", Quest = "quest",
+    }
+    local map, hit, miss = {}, {}, {}
+    for name, kind in pairs(want) do
+        local value = E[name]
+        if type(value) == "number" and not Secrets.IsSecret(value) then
+            map[value] = kind
+            hit[#hit + 1] = name .. "=" .. tostring(value) .. "→" .. kind
+        else
+            miss[#miss + 1] = name
+        end
+    end
+    table.sort(hit)
+    table.sort(miss)
+    enumHit, enumMiss = hit, miss
+    return map
+end
+
+--- 见过的 type 记一笔（诊断）。`data.type` 可能是**机密数字**，所以进字符串 / 当表键之前
+--- 必须先过 `Secrets.Number`（AGENTS 的表键与 concat 两刀都在这一条上）。
+local function RecordType(numericType, kind)
+    local key = tostring(numericType) .. " " .. tostring(kind or "未识别")
+    local n = typeLedger[key] or 0
+    if n == 0 then
+        if typeLedgerN >= 40 then return end   -- 封顶：账本是给人看的，不是给人淹死的
+        typeLedgerN = typeLedgerN + 1
+    end
+    typeLedger[key] = n + 1
+end
+
+--- **暴雪填完数据之后叫我们一次** —— 这就是内容层的新触发点。
+--- 这一层不碰暴雪对象的方法槽、不挂脚本、不写字段：只是被叫，所以我们没把任何东西标脏。
+local function OnTooltipData(tooltip, data)
+    if type(tooltip) ~= "table" or type(data) ~= "table" then return end
+    -- 只做主提示框：对比框（ShoppingTooltip）与内嵌框各自也会被叫，我们那块框只跟着 GameTooltip 走
+    if tooltip ~= _G.GameTooltip then return end
+
+    local rawType = Secrets.Number(data.type)
+    if not rawType then return end            -- 读不出来就不当它是某个类型（宁可少一行）
+
+    local kind = kindByType and kindByType[rawType] or nil
+    RecordType(rawType, kind)
+
+    local payload = { kind = kind or "other", id = Secrets.Number(data.id) }
+    lastPayload[tooltip] = payload
+
+    -- 当场画：暴雪的顺序是 `SetOwner → 摆锚点 + Show → 填数据`，所以这一叫到达时提示框**已经可见**，
+    -- 而每帧那路还没来得及置上升沿 —— 若在这里看 `wasShown`，即时那一路在"第一次悬停"上
+    -- 永远不生效，又退回晚一帧（文件头承诺的就是这一拍不晚）。
+    -- 预填 / 池化回收时它不可见，`RedrawNow` 自己问过可见性就返回；载荷已经记下，
+    -- 等每帧那路的上升沿补画 —— 我们的框不会先于提示框出现，屏幕上挂一块没人要的板子。
+    RedrawNow()
+end
+
+--- 注册一次就够（`TooltipDataProcessor` 没有反注册接口）。落空的状态记在 `processorState`，
+--- 由诊断命令报出来 —— 这一层的全部价值就是"不再靠猜客户端有没有这个东西"。
+local function RegisterProcessor()
+    if processorState == "registered" then return true end
+    local TDP = _G.TooltipDataProcessor
+    if type(TDP) ~= "table" or type(TDP.AddTooltipPostCall) ~= "function" then
+        processorState = "missing"
+        return false
+    end
+    local all = TDP.AllTypes
+    if all == nil or Secrets.IsSecret(all) then
+        processorState = "no-alltypes"
+        return false
+    end
+    local ok, err = pcall(TDP.AddTooltipPostCall, all, OnTooltipData)
+    if ok then
+        processorState = "registered"
+        return true
+    end
+    processorState = "rejected: " .. (Secrets.IsSecret(err) and "?" or tostring(err))
+    return false
+end
+
+--- Alt 起落是"内容没变、显示变"，唯一需要的事件就这一个。
+--- 按 `idsByAlt` 开关**按需注册 / 摘除**（参考件同一手法：开关关掉连事件帧都不留）。
+local function SetModifierWatch(on)
+    if on and not modFrame then
+        modFrame = CreateFrame("Frame")
+        modDown = AltDown()
+        modFrame:SetScript("OnEvent", function()
+            local down = AltDown()
+            if down == modDown then return end    -- 其它修饰键的起落不算我们的事
+            modDown = down
+            RedrawNow()
+        end)
+        modFrame:RegisterEvent("MODIFIER_STATE_CHANGED")
+    elseif not on and modFrame then
+        modFrame:UnregisterAllEvents()
+        modFrame:SetScript("OnEvent", nil)
+        modFrame = nil
+        modDown = nil
+    end
+end
+
+--- 订阅起停（和姓名板的 `SyncGuard` 同一条规矩：无事可做就整条停，
+--- 不给调度器留一条空转订阅；模块关掉了 frame 也一并摘掉）。
+local function SyncJobs()
+    local needFrame   = (mode ~= "off") or enrich or idsByAlt
+    local needContent = enrich or idsByAlt
+
+    if needFrame then
+        if not placeJob then placeJob = ns.Scheduler:EveryFrame(PlaceTick) end
+    elseif placeJob then
+        ns.Scheduler:Unregister(placeJob)
+        placeJob = nil
+        wasShown = false
+        if _G.GameTooltip then Reset(_G.GameTooltip) end
+    end
+
+    if needContent then
+        if not contentJob then contentJob = ns.Scheduler:Every(CONTENT_INTERVAL_MS, RedrawNow) end
+    elseif contentJob then
+        ns.Scheduler:Unregister(contentJob)
+        contentJob = nil
+    end
+
+    SetModifierWatch(needContent)
 end
 
 --- 收掉提示框底部的绿色生命条（GameTooltipStatusBar）。
@@ -513,11 +725,69 @@ end
 
 local function Install()
     SuppressHealthBar(true)
-    if driver then return end
-    driver = CreateFrame("Frame")
-    driver:SetScript("OnUpdate", Tick)
-    -- **不设 SetClampedToScreen**：引擎的夹取会和我们每帧写的锚点是两套写手，
-    -- 贴边时位置会互相拉扯（"乱跑"的另一个来源）。夹取在 PlaceCursor 里自己算，结果确定。
+    if not kindByType then kindByType = BuildKindMap() end
+    RegisterProcessor()
+    SyncJobs()
+end
+
+-- ============================================================================
+-- 自检：`/mui tooltip diagnose`
+-- ============================================================================
+--- 这一趟要回答的是三件事：①那个 FrameXML 表在不在、注册成没成（我们**曾经误判它不存在**，
+--- 依据是 `docs/api` 零命中，而快照只收 `C_*`）；②`Enum.TooltipDataType` 里那些键名在本客户端
+--- 对不对得上（写错就是"ID 行安静地不出现"，没有报错）；③运行期真见过哪些 type。
+function M:Diagnose(verbose)
+    local TDP = _G.TooltipDataProcessor
+    local allTypes = (type(TDP) == "table") and TDP.AllTypes or nil
+    local allText
+    if allTypes == nil then
+        allText = "无"
+    else
+        -- 它是数字还是别的什么，本仓没有实测过：数字就报数字，不是数字只报类型，
+        -- 别拿 tostring(table) 的地址当"值"糊弄看账的人。
+        local n = Secrets.Number(allTypes)
+        allText = n and tostring(n) or ("非数字(" .. type(allTypes) .. ")")
+    end
+
+    ns:Print("---- 鼠标提示自检 ----")
+    ns:Print(("TooltipDataProcessor：表=%s，AddTooltipPostCall=%s，AllTypes=%s｜注册状态=%s"):format(
+        type(TDP),
+        (type(TDP) == "table" and type(TDP.AddTooltipPostCall) == "function") and "有" or "无",
+        allText, processorState))
+    ns:Print(("Enum.TooltipDataType：命中 %d 个，缺席 %d 个"):format(
+        enumHit and #enumHit or 0, enumMiss and #enumMiss or 0))
+    if enumHit and #enumHit > 0 then ns:Print("  认得：" .. table.concat(enumHit, ", ")) end
+    if enumMiss and #enumMiss > 0 then ns:Print("  没这个键名：" .. table.concat(enumMiss, ", ")) end
+
+    local tip = _G.GameTooltip
+    ns:Print(("设置：位置=%s｜补全描述=%s｜Alt 显示 ID=%s"):format(
+        tostring(mode), enrich and "开" or "关", idsByAlt and "开" or "关"))
+    ns:Print(("订阅：每帧摆位=%s｜兜底扫描=%s（%dms）｜Alt 事件帧=%s"):format(
+        placeJob and "在" or "无", contentJob and "在" or "无", CONTENT_INTERVAL_MS,
+        modFrame and "在" or "无"))
+    -- 可见性一律走 `TooltipVisible`（pcall + Secrets.Bool）：GameTooltip 属于可能被引擎
+    -- 临时禁读的框，直接 `tip:IsVisible()` 会抛（AGENTS：三个 Watch 驱动都为此设了这道漏斗）。
+    local _, tipVisible = TooltipVisible()
+    ns:Print(("驱动提示框：GameTooltip=%s，可见性=%s，我们的小框=%s"):format(
+        tip and "有" or "无",
+        tip and (tipVisible and "可见" or "不可见/读不出") or "-",
+        (box and box:IsShown()) and "显示" or "隐藏"))
+
+    local keys = {}
+    for k in pairs(typeLedger) do keys[#keys + 1] = k end
+    table.sort(keys, function(a, b) return (typeLedger[a] or 0) > (typeLedger[b] or 0) end)
+    if #keys == 0 then
+        ns:Print("type 账本：还没被暴雪回调叫过（悬停一个物品/单位再跑一次）。")
+    else
+        local shownCount = verbose and #keys or math.min(8, #keys)
+        ns:Print(("type 账本（共 %d 种，按次数排）："):format(#keys))
+        for i = 1, shownCount do
+            ns:Print(("  %-18s ×%d"):format(keys[i], typeLedger[keys[i]]))
+        end
+        if #keys > shownCount then
+            ns:Print(("  ……另 %d 种：/mui tooltip diagnose all"):format(#keys - shownCount))
+        end
+    end
 end
 
 -- ============================================================================
@@ -528,10 +798,12 @@ function M:Apply()
     mode     = ResolveMode(self)
     enrich   = self:GetSetting("enrich") and true or false
     idsByAlt = self:GetSetting("idsByAlt") and true or false
-    -- 开关变了：记账清零，下一次扫描按新设置重来。
-    -- 注意**不 Hide**（以前的毛病：取消勾选会把正在看的提示框直接收掉）。
-    local tip = _G.GameTooltip
-    if tip then Reset(tip) end
+    -- 开关变了：记账清零，下一拍按新设置重来。
+    -- 注意**不 Hide 提示框**（以前的毛病：取消勾选会把正在看的提示框直接收掉）；
+    -- SyncJobs 只会收掉**我们自己的**那块小框。
+    SuppressHealthBar(true)
+    SyncJobs()
+    RedrawNow()
 end
 
 function M:Initialize()
@@ -541,7 +813,8 @@ function M:Initialize()
     Install()
 end
 
---- 模块开关：关掉只是让跟随与增强失效，驱动本身留着（重开零成本）。
+--- 模块开关：关掉只是让跟随、增强与 Alt 失效；`TooltipDataProcessor` 那层**没有反注册接口**，
+--- 所以回调留着（它第一件事就是看开关），下次打开零成本。
 function M:SetEnabled(value)
     if value then
         self:Apply()
@@ -549,9 +822,22 @@ function M:SetEnabled(value)
     else
         mode, enrich, idsByAlt = "off", false, false
         SuppressHealthBar(false)
-        local tip = _G.GameTooltip
-        if tip then Reset(tip) end
+        SyncJobs()          -- 订阅整条摘掉 + 我们的小框收掉（Reset 在里面）
     end
+end
+
+--- `/mui tooltip diagnose`（另收 `diag`；`all` = 打完整个 type 账本）
+function M:HandleCommand(rest)
+    local sub = string.lower(rest or "")
+    if sub == "diagnose" or sub == "diag" or sub == "" then
+        self:Diagnose(false)
+        return true
+    end
+    if sub == "diagnose all" or sub == "diag all" or sub == "all" then
+        self:Diagnose(true)
+        return true
+    end
+    return false
 end
 
 ns:Register("Tooltip", M)
