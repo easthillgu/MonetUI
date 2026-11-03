@@ -175,11 +175,20 @@ local CATEGORIES = {
 local CATEGORY_BY_KEY = {}
 for _, cat in ipairs(CATEGORIES) do CATEGORY_BY_KEY[cat.key] = cat end
 
+--- 「剩余空间」：一张**伪分类**（玩家 2026-11-03 要的那一行空格子）。
+--- 故意不写进 `CATEGORIES`：那张是**判定表**，`AssignCategory` 会逐条 `match`，
+--- 混进去等于"所有物品都归剩余空间"（而且它没有 match 函数，pcall 直接报错吞掉）。
+--- 它只借窗口机制：有 label 就有一扇窗、`order` 最大就排在最后、`LayoutWindows` 一列堆下来，
+--- 不必为它另写一套建窗/排版/存档的代码。
+local FREE_CAT = { key = "free", label = "剩余空间", order = 100 }
+CATEGORY_BY_KEY[FREE_CAT.key] = FREE_CAT
+
 --- 显示顺序：按 `order` 排，**和分类优先级（rank）无关**。
 --- 排窗口、列标题一律走这张表，不要用 `CATEGORIES` 的数组顺序 ——
 --- 那张是判定表，动它的顺序等于动归属（RealUI 把两件事分开的全部意义就在这）。
 local ORDERED = {}
 for _, cat in ipairs(CATEGORIES) do ORDERED[#ORDERED + 1] = cat end
+ORDERED[#ORDERED + 1] = FREE_CAT
 table.sort(ORDERED, function(a, b) return a.order < b.order end)
 
 --- 装备位三段判定（照 RealUI:Slots.lua:138-151）：容器 / 箭袋 = 容器；
@@ -321,13 +330,15 @@ local function SortItems(list)
     end)
 end
 
---- Scan a set of bag indexes into { categoryKey = { item, ... } }.
+--- Scan a set of bag indexes into { categoryKey = { item, ... } },
+--- plus the number of **empty** slots in that same set (the 「剩余空间」 line reads it).
 local function Scan(bagIndexes)
     local groups = {}
     for _, cat in ipairs(CATEGORIES) do groups[cat.key] = {} end
 
+    local free = 0
     for _, bag in ipairs(bagIndexes) do
-        local num = C_Container.GetContainerNumSlots(bag)
+        local num = Secrets.Number(C_Container.GetContainerNumSlots(bag))
         if num and num > 0 then
             for slot = 1, num do
                 local info = C_Container.GetContainerItemInfo(bag, slot)
@@ -335,6 +346,11 @@ local function Scan(bagIndexes)
                     local it = BuildItem(bag, slot, info)
                     local key = AssignCategory(it)
                     groups[key][#groups[key] + 1] = it
+                else
+                    -- 空槽：`info` 是空表（或 nil）。
+                    -- 注意 `info.itemID` 这里只做**真值测试**（AGENTS：真值测试对机密值稳定），
+                    -- 机密槽会走上面那条分支当"有物品"，不会虚报成空格。
+                    free = free + 1
                 end
             end
         end
@@ -345,7 +361,7 @@ local function Scan(bagIndexes)
         if #list > 1 then SortItems(list) end
     end
 
-    return groups
+    return groups, free
 end
 
 -- Quest items take the amber ring regardless of quality; poor/common keep the plain edge (Andromeda likewise demotes common to black).
@@ -547,6 +563,10 @@ end
 -- Each category with items gets its own framed, movable window holding a grid; windows the user dragged keep their spot, the rest tile from the saved anchor.
 
 local windows = {}   -- key -> window frame
+--- 我们的分类窗口开没开。**前向声明**在这里：`LayoutWindows`（下面）的补扫闭包要读它，
+--- 而真正的赋值语句在文件后半「暴雪背包框」那一节 —— 声明写在它后面，Lua 在编译期就把它
+--- 当**全局 nil**（AGENTS：静态闸门抓不到"引用了还没声明的 local"），那条补扫永远不触发。
+local shown
 
 local function WindowPosition(key)
     return (ns:DB().bags and ns:DB().bags.positions or {})[key]
@@ -582,6 +602,7 @@ local function EnsureWindow(key)
     Widget:Rule(win, win.title)
 
     win.buttons = {}
+    win.slots   = {}   -- 「剩余空间」那行的空格子池（只有 free 窗用得到）
     win:SetMovable(true)
     win:SetClampedToScreen(true)
     win:RegisterForDrag("LeftButton")
@@ -631,6 +652,68 @@ local function FillWindow(win, items)
     local h = TITLE_H + rows * size + (rows - 1) * gap + PAD
     win:SetSize(w, h)
     win:SetShown(#items > 0)
+end
+
+--- 一格"空的"背包格子：只有背板、描边和斜纹，没有图标、不接鼠标。
+--- 衬底走 Widget:ButtonMaterial —— **和动作条空槽是同一份**（`monet_stripe_weave` 平铺在
+--- BACKGROUND、ADD 混合、weaveAlpha 0.25，1 texel = 1 物理像素所以相邻格子相位连续）；
+--- 描边与底色走 Widget:Theme，参数照抄 AcquireButton 给物品壳的那两行，
+--- 这样"剩余空间"那一行的格子和上面装东西的格子看上去是同一种东西。
+--- **不建 ItemButton**：纯装饰，因此没有"模板按钮战斗中不能出生"那条限制，
+--- 战斗中重扫也照样能画（物品窗在战斗里缺格子是已知代价，这一行不该跟着缺）。
+local function AcquireFreeSlot(parent)
+    local shell = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    Widget:Theme(shell, { thickness = 1, bgAlpha = 0.8 })
+    Widget:ButtonMaterial(shell, { alpha = 0, weaveAlpha = 0.25 })
+
+    -- "+N" 写在格子正中（物品计数在右下角，那一档留给数字本身；这里没有图标可让位）。
+    local mark = Widget:Font(shell, 12, "pixel", "neutral", "CENTER", "OVERLAY",
+                             "THICKOUTLINE, MONOCHROME")
+    mark:SetPoint("CENTER", shell, "CENTER", 0, 0)
+    mark:SetText("")
+    Mark(shell, "markF", mark)
+    return shell
+end
+
+--- 画「剩余空间」：free = 这一趟扫描里的空槽总数。
+--- 规则（玩家 2026-11-03 定）：**最多一行**（`columns` 格，尺寸同物品图标）。
+---   free <= columns → 剩几个画几个，一格一个空格；
+---   free >  columns → 前面照画，最后一格写 "+N"，N = 还没被画出来的那几个。
+--- 两种情况合起来是同一个算式：`draw = min(free, columns)`、`extra = free - draw + 1`
+--- （最后一格"代表"几个），`extra > 1` 才写字 —— 所以刚好一行的时候不会看到多余的 "+1"。
+local function FillFreeWindow(win, free)
+    local size    = Setting("iconSize")
+    local gap     = Setting("gap")
+    local columns = Setting("columns")
+
+    free = math.max(tonumber(free) or 0, 0)
+    local draw  = math.min(free, columns)
+    local extra = draw > 0 and (free - draw + 1) or 0
+
+    for i = 1, draw do
+        local shell = win.slots[i]
+        if not shell then
+            shell = AcquireFreeSlot(win)
+            win.slots[i] = shell
+        end
+        shell:ClearAllPoints()
+        shell:SetSize(size, size)
+        shell:SetPoint("TOPLEFT", win, "TOPLEFT", PAD + (i - 1) * (size + gap), -TITLE_H)
+        local mark = Marked(shell, "markF")
+        if mark then
+            -- extra 是我们自己算出来的普通数字，拼接安全（不是从游戏读的值）。
+            mark:SetText((i == draw and extra > 1) and ("+" .. tostring(extra)) or "")
+        end
+        shell:Show()
+    end
+    for i = draw + 1, #win.slots do
+        win.slots[i]:Hide()
+    end
+
+    -- 宽度跟着实际画的格数收（画 3 格就不要留 10 格的空壳）；满一行时和别的分类窗完全等宽。
+    local w = PAD * 2 + draw * size + math.max(0, draw - 1) * gap
+    win:SetSize(w, TITLE_H + size + PAD)
+    win:SetShown(draw > 0)
 end
 
 --- Place windows the user has dragged back where they left them.
@@ -718,7 +801,7 @@ local function Rebuild(bagType)
         indexes = { 0, 1, 2, 3, 4, BAG_REAGENT }
     end
 
-    local groups = Scan(indexes)
+    local groups, free = Scan(indexes)
     for key, items in pairs(groups) do
         if #items > 0 then
             local win = EnsureWindow(key)
@@ -727,6 +810,8 @@ local function Rebuild(bagType)
             FillWindow(windows[key], {})
         end
     end
+    -- 「剩余空间」排在最后（FREE_CAT 在 ORDERED 里 order 最大，LayoutWindows 自然把它堆在末尾）。
+    FillFreeWindow(EnsureWindow(FREE_CAT.key), free)
 
     LayoutWindows()
     RestoreDragged()
@@ -743,7 +828,7 @@ end
 -- 藏暴雪 HUD 的正路），战斗中也可用；不往框上写字段，记账用弱键旁表（ns:Mark 同款）。
 local parked = setmetatable({}, { __mode = "k" })
 local bagsVisualOpen = false    -- 上次扫描：暴雪框是否有任何一个在显示（边沿检测）
-local shown = false             -- 我们的分类窗口开没开（守卫边沿要用，须先声明）
+shown = false                   -- 我们的分类窗口开没开（**local 声明在窗口那一节**，见上文前向声明）
 
 --- 战斗中为真。暴雪背包框里有受保护子按钮，战斗里对它们 EnableMouse 会被拦
 --- （QuestTracker 2026-10-26 实机记录过同类 ×29）；鼠标这一半要跳战斗、脱战补做。
@@ -900,11 +985,15 @@ end
 local POLL_INTERVAL = 0.5
 
 --- 轻量指纹：一组背包槽位的 itemID+数量串。只读数量字段，不碰贴图/链接。
+--- 每个袋子还要记**自己的格数**（`bag<N>=<格数>`）：买了新背包时新格子是空的，
+--- 物品串一个都不变，只靠物品指纹就永远不重扫 —— 而「剩余空间」那一行的数字正是
+--- 由格数决定的，必须让它动一下。
 local function BagSignature(indexes)
     local parts = {}
     for _, bag in ipairs(indexes) do
-        local num = C_Container.GetContainerNumSlots(bag)
+        local num = Secrets.Number(C_Container.GetContainerNumSlots(bag))
         if num and num > 0 then
+            parts[#parts + 1] = "bag" .. tostring(bag) .. "=" .. tostring(num)
             for slot = 1, num do
                 local info = C_Container.GetContainerItemInfo(bag, slot)
                 if info and info.itemID then
