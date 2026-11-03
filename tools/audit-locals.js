@@ -15,7 +15,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
-const SKIP_DIRS = new Set(['Libs', 'node_modules', '.git', 'tools', 'docs', 'Assets', 'Assets-src']);
+const SKIP_DIRS = new Set(['Libs', 'node_modules', '.git', 'tools', 'docs', 'Assets', 'Assets-src', 'framexml-source']);
 const NAMES = ['Mark', 'Marked', 'Media', 'Widget', 'Color', 'Secrets', 'EventBus', 'Mover', 'Skin', 'Math'];
 
 const files = [];

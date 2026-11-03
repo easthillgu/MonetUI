@@ -130,7 +130,7 @@ const RULES = [
 
 function walkLua(dir, out) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (e.name === '.git' || e.name === 'Assets' || e.name === 'node_modules' || e.name === 'tools') continue;
+    if (e.name === '.git' || e.name === 'Assets' || e.name === 'node_modules' || e.name === 'tools' || e.name === 'framexml-source') continue;
     const p = path.join(dir, e.name);
     if (e.isDirectory()) walkLua(p, out);
     else if (e.isFile() && e.name.endsWith('.lua')) out.push(p);

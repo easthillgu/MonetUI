@@ -892,6 +892,90 @@ function M:Diagnose(onlyBad)
     end
 end
 
+--- `/mui skins templates [片段]`（2026-11-03）：模板库账本。
+--- 不带参数：模板总数 / 有 skinAs 的条数 / Camelot 覆盖数 / 类型与 skinAs 分布；
+--- 带片段：按模板名或 skinAs 子串匹配，回答"这个控件会被认成什么"。
+--- 只读 `ns.TemplateDB`，不碰任何框，也不改识别结果。
+function M:PrintTemplates(raw)
+    local db = ns.TemplateDB
+    if type(db) ~= "table" then
+        ns:Print("模板数据库未加载：Templates.xml 必须排在 Skins.xml 之前（见 MonetUI.toc）。")
+        return
+    end
+
+    local filter = string.match(raw or "", "^%s*templates?%s+(%S+)%s*$")
+    if filter then
+        filter = string.lower(filter)
+        local names = {}
+        for name, entry in pairs(db) do
+            local skinAs = type(entry.skinAs) == "string" and entry.skinAs or ""
+            if string.find(string.lower(name), filter, 1, true)
+                or string.find(string.lower(skinAs), filter, 1, true) then
+                names[#names + 1] = name
+            end
+        end
+        table.sort(names)
+        ns:Print(("模板库里匹配 \"%s\" 的：|cffffd100%d|r 条"):format(filter, #names))
+        for i = 1, math.min(#names, 15) do
+            local entry = db[names[i]]
+            ns:Print(("  %s  →  %s%s"):format(
+                names[i],
+                tostring(entry.skinAs or "-"),
+                entry.camelotOnly and "  (Camelot 覆盖)" or ""))
+        end
+        if #names > 15 then
+            ns:Print(("  …另有 %d 条（用更长的片段缩小范围）"):format(#names - 15))
+        end
+        return
+    end
+
+    local total, mapped, camelot = 0, 0, 0
+    local byType, bySkinAs = {}, {}
+    for _, entry in pairs(db) do
+        total = total + 1
+        local t = entry.type or "?"
+        byType[t] = (byType[t] or 0) + 1
+        if entry.skinAs then
+            mapped = mapped + 1
+            bySkinAs[entry.skinAs] = (bySkinAs[entry.skinAs] or 0) + 1
+        end
+        if entry.camelotOnly then camelot = camelot + 1 end
+    end
+
+    --- 按数量降序、同数量按名字升序（结果稳定，不会每次刷新顺序不同）。
+    local function ranked(map)
+        local list = {}
+        for k, n in pairs(map) do list[#list + 1] = { k = k, n = n } end
+        table.sort(list, function(a, b)
+            if a.n ~= b.n then return a.n > b.n end
+            return a.k < b.k
+        end)
+        return list
+    end
+
+    ns:Print(("模板库：|cffffd100%d|r 个模板，|cffffd100%d|r 个映射到 skinAs，Camelot 覆盖 |cffffd100%d|r 个")
+        :format(total, mapped, camelot))
+
+    local types = ranked(byType)
+    ns:Print("类型分布：")
+    for i = 1, math.min(#types, 8) do
+        ns:Print(("  %-12s %d"):format(types[i].k, types[i].n))
+    end
+
+    local mappedList = ranked(bySkinAs)
+    if #mappedList > 0 then
+        ns:Print("skinAs 分布：")
+        for i = 1, math.min(#mappedList, 8) do
+            ns:Print(("  %-14s %d"):format(mappedList[i].k, mappedList[i].n))
+        end
+        if #mappedList > 8 then
+            ns:Print(("  …另有 %d 种"):format(#mappedList - 8))
+        end
+    end
+
+    ns:Print("用法：/mui skins templates <片段> 按模板名 / skinAs 查映射。")
+end
+
 --- `/mui Skins <sub>`.  Returns false when the sub-command is unknown, so the slash handler can fall back to printing the usage line.
 function M:HandleCommand(rest)
     local raw = rest or ""
@@ -902,6 +986,11 @@ function M:HandleCommand(rest)
     end
     if sub == "diagnose" or sub == "diag" or sub == "probe" then
         self:Diagnose()
+        return true
+    end
+    -- 模板库账本（2026-11-03）：不带参数看统计，带片段按名字 / skinAs 查映射。
+    if string.find(sub, "^templates?") then
+        self:PrintTemplates(raw)
         return true
     end
     -- 窗口"底"有几层：参数是窗口名（可再跟一个名字片段做过滤），**帧名大小写敏感**，
