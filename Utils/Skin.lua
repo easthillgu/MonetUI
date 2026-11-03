@@ -1138,11 +1138,33 @@ function Skin:ScanScrollArrows()
                 local kind = frame.GetObjectType and frame:GetObjectType()
                 if kind == "Button" then
                     self:ScrollArrowButton(frame)
+                    -- 关闭按钮按**美术签名**兜底：名字不可靠（12.x 有匿名的、也有不叫 CloseButton 的），
+                    -- 2026-11-03 实测 53 只里 32 只还是暴雪原样。见 Skin:CloseButtonByArt。
+                    self:CloseButtonByArt(frame)
                 end
             end)
         end
         frame = EnumerateFrames(frame)
     end
+end
+
+--- 按**美术签名**找关闭按钮并换肤，给全游戏一个统一的 ✕（2026-11-03 玩家定的口径：
+--- "全部统一成我们的 ✕"，不再只管美化过的窗口）。
+---
+--- 判据只认 `RedButton-Exit*` 这个 atlas —— 和 `Skin:FindAnonClose` 同一条签名。
+--- **`RedButton-MiniCondense` 千万别碰**：那是最小化 / 隐藏按钮（图形是减号，不是 ✕），
+--- 换成 ✕ 会把"收起"变成"关闭"。
+--- 幂等：换过之后 normal 贴图不再有 atlas（`SwapArt` 走的是 SetTexture），
+--- 下一趟扫到就自然跳过；`Skin:SwapArt` 自己也对已换的贴图早退。
+function Skin:CloseButtonByArt(button)
+    if not button then return false end
+    local tex = self:TexOf(button, "GetNormalTexture")
+    if not tex then return false end
+    local ok, atlas = pcall(tex.GetAtlas, tex)
+    if not ok or type(atlas) ~= "string" then return false end
+    if not atlas:lower():find("redbutton%-exit") then return false end
+    self:CloseButton(button)
+    return true
 end
 
 --- 翻页按钮的左右箭头（商人 / 邮件 / 拾取 / 任务文本）：换 Normal/Pushed 贴图 + 主题色。
