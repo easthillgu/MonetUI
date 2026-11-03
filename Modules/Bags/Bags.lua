@@ -615,6 +615,10 @@ local function EnsureWindow(key)
     close:SetScript("OnClick", function() CloseAllBags() end)
     close:Hide()
     win.close = close
+    -- 材质统一：走换皮层同一个入口 `Skin:CloseButton`，把暴雪的 normal/pushed/highlight
+    -- 三态原皮换成我们的 monet_close_{normal,push,hover}（描边色随主题，OnTheme 里跟着重染），
+    -- 和所有被美化的暴雪窗口右上角那枚 ✕ 是同一种东西。我们的框体，不涉及暴雪对象，无污染风险。
+    Skin:CloseButton(close)
 
     win.buttons = {}
     win.slots   = {}   -- 「剩余空间」那行的空格子池（只有 free 窗用得到）
