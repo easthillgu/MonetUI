@@ -860,10 +860,10 @@ end
 --- 间隔 anchor.x（负数 = QuestTracker 左边），垂直从 anchor.y 起一列堆下来。
 --- 如果 anchor.frame 不存在（QuestTracker 模块关了 / 还没初始化），降级到
 --- "屏幕中间 x=屏幕宽度-280，顶部 y=-28 往下堆" —— 保证无论如何都不会跑出屏幕。
-local function LayoutWindows()
+local function LayoutWindows(mode)
     local anchor = Setting("anchor") or {}
     local spacing = 14
-    local mode = activeMode
+    mode = mode or activeMode
 
     --- 背包那一列现在占多宽（取还显示着、且没被玩家拖过的最宽一扇）。
     --- 银行列要贴在它**再往左**一格，所以这个宽度必须在排版当场量，不能写死常数。
@@ -944,6 +944,15 @@ end
 
 --- 最近一次银行重绘的**实际条数**（park 暴雪银行框的唯一前置判据：我们一张都没画出来
 --- 就说明候选索引 / GameRule / LoD 有问题，那一刻绝不收暴雪的框 —— 宁可见两套，不可看不见）。
+--- 两列都重排，**背包在前、银行在后**：银行列的 x 要按"当时背包列的真实宽度"算。
+--- 只重排当前模式是结构性的错：银行开完之后再重排背包（多开一扇窗、或银行关闭回到
+--- 背包模式），背包列变宽就没人重算银行列 ⇒ 两列重叠（11-04 实机报的"银行材料/银行容器
+--- 界面有重叠"就是这个；重叠的不是两扇银行窗彼此，是横向撞上）。
+local function LayoutBothModes()
+    LayoutWindows("bags")
+    LayoutWindows("bank")
+end
+
 local bankDrawn = 0
 local EnsureBankTools, ParkBlizzardBank, LayoutBankTools   -- 前置声明：函数体排在 CloseAllBags 之后（依赖那条链）
 
@@ -996,7 +1005,7 @@ local function Rebuild(bagType)
     -- 「剩余空间」排在最后（FREE_CAT 在 ORDERED 里 order 最大，LayoutWindows 自然把它堆在末尾）。
     FillFreeWindow(EnsureWindow(WinKey(FREE_CAT.key)), free)
 
-    LayoutWindows()
+    LayoutBothModes()
     RestoreDragged()
     DesignateMaster()
 
@@ -1222,7 +1231,11 @@ local function BankToolButton(parent, label, y, onClick)
     button:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, y)
     button:EnableMouse(true)
     button:RegisterForClicks("AnyUp")
-    local text = Widget:Font(button, 10, "pixel", "edge", "CENTER")
+    local text = Widget:Font(button, 10, "pixel", "bright", "CENTER")
+    -- 色键是 bright 不是 edge：`edge` 是边框那一支中调，摆在 bgAlpha 0.9 的深色底板上
+    -- 就是"文字和底色一个亮度"（11-04 实机报的"一键存入按钮看不到"，钮是建出来的，读不出来
+    -- 等于没建）。本仓为这种大按钮文字专门加过 `bright` 档（Utils/Widget.lua:1208 那段注释：
+    -- neutral 摆在大按钮上读成"禁用"，highlight 是职业色不许进通用静态文字）。
     text:SetAllPoints()
     text:SetText(label)
     button:SetScript("OnClick", onClick)
@@ -1698,6 +1711,73 @@ function M:HandleCommand(rest)
                 .. "若写着 接管=true 就是 P0（空框被藏起来），当场 `/mui bags bank off`"
         end
         ns:Print("[bags.probe] 判读：" .. verdict)
+        return true
+    end
+    if rest == "layout" then
+        -- 重叠 / 面板看不见的报告器：几何全部实测，不靠肉眼推断。
+        -- 每扇窗打 `左右上下 + 是否显示 + 是否被拖过`，再两两判横竖重叠；
+        -- 折叠面板单独一行（显示状态 + 矩形 + 子控件数量 —— "按钮看不到"要分清是没建、
+        -- 还是建了但被别的窗压住/在屏外）。
+        local rects = {}
+        for key, win in pairs(windows) do
+            if win:IsShown() then
+                local ok = pcall(function() return win:GetRect() end)
+                if ok then
+                    local l, r, t, b = win:GetRect()
+                    rects[#rects + 1] = { key = key, l = l, r = r, t = t, b = b,
+                        dragged = WindowPosition(key) and true or false,
+                        strata = select(2, pcall(function() return win:GetFrameStrata() end)) }
+                end
+            end
+        end
+        table.sort(rects, function(a, b) return a.key < b.key end)
+        ns:Print(("[bags.layout] mode=%s bankOpen=%s shown=%s · 显示中的窗 %d 扇")
+            :format(tostring(activeMode), tostring(bankOpen), tostring(shown), #rects))
+        for _, a in ipairs(rects) do
+            ns:Print(("  %-16s L%s R%s T%s B%s 拖过=%s strata=%s")
+                :format(a.key,
+                    string.format("%.0f", a.l), string.format("%.0f", a.r),
+                    string.format("%.0f", a.t), string.format("%.0f", a.b),
+                    tostring(a.dragged), tostring(a.strata)))
+        end
+        for i = 1, #rects do
+            for j = i + 1, #rects do
+                local a, b = rects[i], rects[j]
+                local hz = a.l < b.r and b.l < a.r
+                local vt = b.b < a.t and a.b > b.t
+                if hz and vt then
+                    local ox = math.min(a.r, b.r) - math.max(a.l, b.l)
+                    local oy = math.min(a.t, b.t) - math.max(a.b, b.b)
+                    ns:Print(("  ⚠ 重叠 %s × %s：横向 %.0fpx · 纵向 %.0fpx"):format(
+                        a.key, b.key, ox, oy))
+                end
+            end
+        end
+        if bankTools then
+            local vis = bankTools:IsShown()
+            local okR = pcall(bankTools.GetRect, bankTools)
+            local body = bankToolsBody and bankToolsBody:IsShown()
+            local kids = 0
+            if bankToolsBody and bankToolsBody.GetChildren then
+                kids = #bankToolsBody:GetChildren()
+            end
+            ns:Print(("  包裹管理面板：显示=%s · 体显示=%s · 子控件 %d 个 · 矩形=%s")
+                :format(tostring(vis), tostring(body), kids,
+                    okR and (string.format("L%.0f R%.0f T%.0f B%.0f", bankTools:GetRect())) or "读不出"))
+            if vis and kids >= 2 and okR then
+                local l, r, t, b = bankTools:GetRect()
+                for _, a in ipairs(rects) do
+                    local hz = l < a.r and a.l < r
+                    local vt = a.b < t and b > a.t
+                    if hz and vt then
+                        ns:Print(("  ⚠ 面板被 %s 压住（面板自己也在 strata 同层，重叠 %.0fpx）")
+                            :format(a.key, math.min(r, a.r) - math.max(l, a.l)))
+                    end
+                end
+            end
+        else
+            ns:Print("  包裹管理面板：还没创建（bankTools=nil）")
+        end
         return true
     end
     if rest == "refresh" then
