@@ -1822,6 +1822,29 @@ function M:HandleCommand(rest)
                 end
             end
         end
+        -- 「剩余空间」那一行的自检（11-04 作者实测：拾取正常、光标能带物品、落进暴雪框能成，
+        -- 只有我们自己的空位不收货）。三种可能各有各的证据，光看"落不下去"分不出来：
+        --   ① 空位根本没建出来（Scan 没收到坐标 / free 窗没显示）；
+        --   ② 建出来了但身份没喂对（GetBagID / GetID 不是那个 (bag,slot)）；
+        --   ③ 建出来也对了，但模板的 OnReceiveDrag 没挂上（被我们的脚本覆盖掉）。
+        for _, key in ipairs({ FREE_CAT.key, "bank:" .. FREE_CAT.key }) do
+            local fw = windows[key]
+            if fw then
+                local first = fw.buttons and fw.buttons[1]
+                local fb = first and Marked(first, "itemBtn")
+                local bagID = fb and select(2, pcall(function() return fb:GetBagID and fb:GetBagID() end))
+                local slotID = fb and select(2, pcall(function() return fb.GetID and fb:GetID() end))
+                local mouse = fb and select(2, pcall(function() return fb:IsMouseEnabled() end))
+                local shown = fb and select(2, pcall(function() return fb:IsShown() end))
+                local recv = fb and select(2, pcall(function() return fb:GetScript("OnReceiveDrag") end))
+                ns:Print(("  空位窗[%s] 显示=%s · 按钮 %d 个 · 首格 bag=%s slot=%s 鼠标=%s 显示=%s OnReceiveDrag=%s")
+                    :format(key, tostring(fw:IsShown()), (fw.buttons and #fw.buttons) or 0,
+                        tostring(bagID), tostring(slotID), tostring(mouse), tostring(shown),
+                        recv and "挂了" or "无"))
+            else
+                ns:Print(("  空位窗[%s]：没建过（本会话没进过这一侧）"):format(key))
+            end
+        end
         if bankTools then
             local vis = bankTools:IsShown()
             local okR, l2, btm2, w2, h2 = pcall(function() return bankTools:GetRect() end)
