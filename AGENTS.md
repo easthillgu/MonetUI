@@ -107,6 +107,11 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
 ## 安全边界
 
 - 参考插件 Andromeda / EllesmereUI **只读**（opencode.json 已 deny edit），仅作学习素材。
+  **实物路径（11-03 核实）**：`EllesmereUI-v9.4` 在开发根（`../EllesmereUI-v9.4`，在位）；
+  **Andromeda 不在开发根**——`../Andromeda` 这个路径不存在，别再照它判"参考件缺失"。现存唯一拷贝 =
+  `C:/Users/EastHillGu/Documents/Blizzards/WOWFOREVER/World of Warcraft/_classic_titan_/Interface/AddOns/Andromeda`
+  （`.toc` 38001 / v11.01，旧客户端残留目录，一次磁盘清理即断单源）。比对参考件走
+  `tools/compare-andromeda-close.js`（自带 TGA type-10 RLE 解码），不要手抠字节。
 - 资源全部自绘，不引外部贴图与第三方库（防 GPL 污染）。
 - 访问 Blizzard 帧做存在性 / pcall 防护；失败一次性 print 警告，不刷屏。
 - secure 元素（微按钮等）战斗中禁改：`InCombatLockdown()` 防护 + `PLAYER_REGEN_ENABLED` 一次性重试。
@@ -154,6 +159,15 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   正解是"先试 `Secrets.Number`，拿不到再交给客户端"：`Secrets.FormatHealthPercent(fs, unit,
   current, maximum)` 就是这条（`UnitHealthPercent` 返回的机密数字 `SetFormattedText` 吃得下）。
   同一条也适用于其它"查询式"门：**不要相信查询，相信值本身**。
+- **不要调用暴雪的"布局缓存"函数**（11-04 从同机插件 TweaksForever 读到的判例，分析见
+  `docs/ANALYSIS-TWEAKSFOREVER.md`）：`UpdateContainerFrameAnchors` / `GetBagSize` /
+  `ContainerFrameUtil_EnumerateContainerFrames` 会**生成缓存表**给暴雪后续复用，我们一调，那些表就带上
+  我们的痕迹（同"引擎的生产件不要用我们的手去造"）。要槽数直接 `C_Container.GetContainerNumSlots`。
+  同理：**接原生设置树只用 `Settings.RegisterAddOnSetting`**，别用 `Settings.CreateCheckbox` ——
+  它的 tainted 布局会弄坏暴雪自己的设置搜索。
+- **第三方研究的许可边界**：`TweaksForever` 是 GPL-3.0-or-later（只读研究过）。我们 MIT ⇒ 只取机制，
+  **代码不抄、数据文件不搬**（它的 `ClassSpells.lua` 源自 CMaNGOS、`CampBenefits.lua` 抄法术描述文本；
+  `media/*.tga` 违反"资源全部自绘"）。参考插件的**做法**能读，**产物**不能进包。
 
 ## 污染（taint）模型 —— 本客户端最贵的一课
 
@@ -382,19 +396,41 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   每条线都要"满 alpha 核心 + 两侧半 alpha"，不许画硬边单像素。只画"硬边单像素"（最早的
   `monet_stripe_weave`：一个 0.70 alpha 点 / 4px）在 1:1 下会读成若有若无的点阵——45° 的锯齿边缘
   没有任何过渡，越小越糊。这条对任何斜纹/斜线材质都成立。
-- **斜纹"糊不糊"看密度，不看笔画粗细**（2026-10-31 实测，`node tools/regen-textures.js standard monet_stripe_weave`）：
+- **斜纹"糊不糊"看密度，不看笔画粗细**（2026-10-31 量的是**零售 12.1.5 截图**；`node tools/regen-textures.js standard monet_stripe_weave`）：
   现役剖面 = **8px 周期 `[128,255,255,128,0,0,0,0]`**（2px 满核心 + 两侧各 1px 半 alpha，α 加权占空 37.5%）。
-  对两张进度条截图逐列量的结论：参考件亮纹水平截面 2 纹素 → 45° 折算垂直厚度 2/√2 ≈ 1.4 纹素，
-  我们旧的 4px 剖面（1 满 + 2 半）也是 1.4 —— **粗细本来就一样，差别全在占空**（参考件 27.3%、旧版 50.3%，
-  50% 读成一片雾、27% 才读成一根根线）。
-  **周期必须同时满足两条**：① 是 64 的约数（`64 % period == 0`，否则平铺时每个 tile 边界断相位——参考件的
+  ⚠ **两个口径不许混**（2026-11-03 HANDOFF A9 订正，改这段前先读）：
+  ① **截图口径** —— 2026-10-31 对两张 12.1.5 进度条截图逐列量：亮纹水平截面 2 纹素 → 45° 垂向 ≈1.4 纹素
+  （与我们旧的 4px 剖面一样，**粗细本来就一样**），占空 **27.3%**、周期 ≈6；
+  ② **本机实物口径** —— 参考件 `statusbar-stripes-thin.tga`（`_classic_titan_…Andromeda/assets/textures`，64×32，
+  TGA **type 10 RLE**，`tools/compare-andromeda-close.js` 能解）实测 = **周期 4、剖面 [255,129,0,129]、占空 50.3%**
+  （`thick.tga` 42.3%）。⇒ 50.3% 恰好等于"我们旧设计（周期 4）"那个数，**现役 S1（周期 8 / 37.5%）是背离实物、
+  向截图靠拢**。"参考件 27.3%"这种写法是口径混用，别再出现在这里。
+  **周期必须同时满足两条**：① 是 64 的约数（`64 % period == 0`，否则平铺时每个 tile 边界断相位——截图那个
   周期 ≈6 在 64 图上实测断 43 个像素，不许照抄）；② 保住半像素斜坡（硬边两像素版本过 mip 会出毛边）。
   8 是"约数 + 比 4 稀 + 带斜坡"三者唯一的交集。已知代价：4px 血条上会退化成 dashes（亮 4 空 4），
-  13px 施法条从 3.25 条纹变 1.6 条 —— 实机不满意就调 `Widget:BarWeaveDensity`，别改回周期 4。
-- **图标字形按画布比例，不按固定像素**（2026-10-28 照 Andromeda `ui-checkbox-tick` / `ui-close` /
-  `ui-arrow-up` 重画）：那批参考在 32px 画布上是**笔画 ≈ 4px（12.5%）、字形撑到 ≈ 88%、边缘全抗锯齿**。
-  我们原来是固定 2px 笔画 + 55% 字形（3% / 55%），缩到实显 16–22px 时细到几乎看不见，而且没法加粗。
-  现役：`GLYPH_STROKE(size) = size × 0.115`、`GLYPH_SPAN = 0.88`（`tools/regen-textures.js`）。
+  13px 施法条从 3.25 条纹变 1.6 条。⇒ **回不回周期 4 = 已拍板**（11-04 晚，`docs/PRELAUNCH-RUN-1105.md`
+  拍板表第 8 条 = **C**：上线前夜不重出材质，上线日在真机上看过再议）。**在此之前生成器常数不动**，
+  观感微调走 `Widget:BarWeaveDensity`；若明天判走 A，动作 = 改常数 → 重出 TGA→BLP → `audit-pixels` → 实机复看。
+- **图标字形按画布比例，不按固定像素**（2026-10-28 定，2026-11-03 按像素实测订正）：
+  旧文"那批参考在 32px 画布上是笔画 ≈ 4px（12.5%）"**记错了** —— 那是我们自己的设计常数（0.125×32），
+  参考件 `ui-close.blp` 同口径（α≥128 手臂行连续段）实测 = **run 8 / 占比 25% / 垂向 8÷√2≈5.66px = 17.7%**。
+  我们交付件同口径 = 32px 上 **run 6**（18.8%，垂向 ≈13.3%）、64 mip0 上 run 12 且 bbox 7..56 = **跨度 78.1%**
+  （不是 75%）。⇒ 可比结论：**参考件粗约 33%、我们细则约 25%**（恒定比例差，旧说"细 35–40%"作废）；
+  **比率有两个口径，写下来必须标是哪一个**（11-04 定，两套数并存过、读者会当矛盾）：
+  ① **像素口径**（α≥128 连续段实测，可比的是画出来的东西）= run 8 vs run 6 ⇒ 粗 33% / 细 25%；
+  ② **常数口径**（生成器占比 0.177 vs 0.125，可比的是设计意图）⇒ 粗 41% / 细 29%。
+  两者不冲突：交付件的**实测占比大于设计常数**（32px 画 4px 实测 run 6、64 mip0 画 8px 实测 run 12，
+  两侧同为 **1.5×** —— α≥128 的连续段把抗锯齿的半透明边一起吃进来了），按 0.125×1.5 = 0.133 折回常数轴，
+  所以像素口径的差值天然小于常数口径。**拍板表按常数口径出选项（0.125→≈0.177），叙述观感时按像素口径。**
+  "与参考件逐像素重合"只对 32px 样本的 bbox / 跨度 / 质心 / 四边对称 / alphaMax 成立，**笔画与 64 mip0 跨度都不重合**。
+  源头账在 `tools/regen-textures.js` 的两段注释（图标几何段头注 ≈`:218` 起 + close 段 ≈`:335` 起，按标题找别按行号）；
+  比对工具 `tools/compare-andromeda-close.js`
+  （只读，不进发行包），线宽→物理像素六档几何表在 `docs/texture-preview/andromeda-close-compare.html`
+  （**纯几何推算，最终粗细仍需实机看**）。
+  我们 2026-10-28 之前是固定 2px 笔画 + 55% 字形（3% / 55%），缩到实显 16–22px 时细到几乎看不见，而且没法加粗。
+  现役：`GLYPH_STROKE(size) = size × 0.115`、`GLYPH_SPAN = 0.88`（`tools/regen-textures.js`）；
+  close 一族另有 `CLOSE_GLYPH_SPAN 0.75` / `CLOSE_GLYPH_STROKE 0.125`，**是否提到 ≈0.177 = 拍板表第 9 条，已拍板 = B（维持 0.125，
+  按几何"可不管"；两个常数都别动）**，明天 24px@1 并排看着刺眼才走 A（那是一条独立提交：改常数 → 重出三态贴图 → 重对 C2.1）。
   例外是**构成网格的直线段**（窗口控件、加减号、光标杆）：那些仍用 `pxRect/pxHLine` 吸附到像素边界，
   抗锯齿对它们是错的。
 - **role 图标是"实心剪影 + 径向渐变 + 内沿压暗 + 极淡外发光"**，不是细线描边
