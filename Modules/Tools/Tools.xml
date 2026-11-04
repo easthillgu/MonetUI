@@ -8,6 +8,7 @@
     4. Atmosphere.lua - 氛围暗角层
     5. DevTools.lua - 只读探针（perf / skins closes|inset|arrows）
     6. Report.lua - /mui report 诊断包（环境·设置差异·提示历史·美化台账·同机插件；只读）
+    7. WhatsNew.lua - 版本更新后一次性的"本版要点"提示（/mui whatsnew 可重看）
     
     注意：Atmosphere 必须在 InfoBar 之前加载（见 MonetUI.toc 注释）
 -->
@@ -19,4 +20,5 @@
     <Script file="Atmosphere.lua"/>
     <Script file="DevTools.lua"/>
     <Script file="Report.lua"/>
+    <Script file="WhatsNew.lua"/>
 </Ui>

@@ -51,6 +51,7 @@ local MODULE_LABEL = {
     Toast        = "通知横幅 (Toast)",
     Durability   = "耐久警告 (Durability)",
     Atmosphere   = "氛围暗角 (Atmosphere)",
+    WhatsNew     = "更新提示 (WhatsNew)",
 }
 
 --- 当前区域名：只用客户端给的字符串（`C_Map.GetMapInfo`），读不到 / 读不出就退回引擎数据表里的名字，
