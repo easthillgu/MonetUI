@@ -914,6 +914,10 @@ end
 -- A 方案（已停用，保留以便回滚）
 -- ============================================================================
 --[==[
+-- ⚠ 勿照抄（11-04 拍板第 13 条 = C，只加警示不删）：这一段是**已废弃的 A 方案**，里面两处
+-- 都是本仓明令禁止的写法 —— `frame.blizzardAuras = lists` 往暴雪框写字段、`hooksecurefunc`
+-- 挂它的光环子件（AGENTS：写过一次，这个框之后跑的暴雪代码全记在 MonetUI 名下 → 连环
+-- ADDON_ACTION_BLOCKED）。结论与代价见 docs/HANDOFF.md「借用模式必须连事件一起收掉」那条。
 -- Borrow Blizzard's target aura list: aura reads are restricted, but TargetFrame keeps drawing
 -- its own, so its aura children are reparented above our bar (the ForeverUI trick).  Position only.
 
