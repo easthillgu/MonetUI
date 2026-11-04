@@ -3487,6 +3487,28 @@ Mainline —— 若跑 Classic，Tab3 整排缺席是**正常行为**，别当�
 （CHECKS C2.1 已并入一条）。归因口径：眼睛消失 = `Skin:Fade` 类回归（8.28.5 判例复发）；
 面板边框没变化 = `Need` 账本只登记不换肤、属正常，对照 `/mui skins diagnose` 账本即可分开这两种。
 
+## 8.30 已知功能缺口：任务追踪器不画「任务专用物品」可点钮（11-04 作者拍板 = 上线后补）
+
+**现状**：我们的追踪器替代暴雪那套，`Modules/QuestTracker/QuestTracker.lua:340-365` 对
+`ObjectiveTrackerFrame` 走 `Widget:Mute(…, { depth = math.huge })`（alpha 0 + 整棵子树关鼠标，绝不 Hide）。
+自己的行只画文字 + 折叠箭头 —— 全文件搜 `ItemButton|UseItem|PickupItem` **零命中**。
+
+**丢掉的是什么**（证据在本地 1.60 FrameXML，不凭记忆）：
+`Blizzard_ObjectiveTrackerShared.xml:4` 定义 `QuestObjectiveItemButtonTemplate`（`mixin="QuestObjectiveItemButtonMixin"`，
+`<OnClick method="OnClick"/>`）；`Blizzard_ObjectiveTrackerShared.lua:94-104` 的点击体是
+`UseQuestLogSpecialItem(questLogIndex)`，修改键点击 = `ChatFrameUtil.InsertLink(link)`；
+`SetUp(questLogIndex)` 靠 `GetQuestLogSpecialItemInfo` 决定显示；`Blizzard_BonusObjectiveTracker.lua:347`
+和 `ObjectiveTracker.lua:122-136` 说明它参与 SmartNavigation 左右跳格。
+⇒ 带"任务专用物品"的任务，在 MonetUI 下追踪器里**没有**点一下使用的入口，只能去背包点。
+
+**为什么今晚不做**（作者选的 C，不是漏掉）：21 点后重写追踪器行布局（图标进来要把文字右移）= 拿一整块未验面上线；
+这条是局部不便，不是全局坏。明天首趟只要求"遇到一个这种任务时记下任务名与影响面"。
+
+**做的那天要注意**：`UseQuestLogSpecialItem` / `GetQuestLogSpecialItemInfo` 在 1.60 的 **API 文档快照**里查不到
+（快照 1.60.1.70634 且不覆盖这族旧全局），但 1.60 FrameXML 在调 ⇒ 运行时存在；这类旧全局通常**受保护**，
+战斗里调用会被拒 → 必须带战斗门 + `ns:AfterCombat` 重试（判据同源那条另见 §8.29 与本文件"能不能碰"那节）。
+排期与 #25（银行侧真槽位）同一批。
+
 ## 9. 建议的下一步（按价值排序）
 
 1. **实机回归 P0/P1 的改动面**（`docs/HANDOFF.md` 8.6.2 + `TODO.md` 的 9 条清单）：
