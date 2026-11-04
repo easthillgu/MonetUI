@@ -1279,6 +1279,10 @@ end
 
 EnsureBankTools = function()
     if bankTools then
+        -- **必须显式 Show**：`/mui bags bank off` 和关银行都会把它 Hide 掉，而这个早退路径
+        -- 以前只更新内容不显示 ⇒ 一次收起之后再没打开过银行，面板就永远看不见
+        -- （11-04 实机 "一键存入按钮看不到" 的主因；`显示=false · 体显示=true` 是它的指纹）。
+        bankTools:Show()
         UpdateBankToolsInfo()
         ApplyBankToolsFold()
         return bankTools
@@ -1721,10 +1725,13 @@ function M:HandleCommand(rest)
         local rects = {}
         for key, win in pairs(windows) do
             if win:IsShown() then
-                local ok = pcall(function() return win:GetRect() end)
-                if ok then
-                    local l, r, t, b = win:GetRect()
-                    rects[#rects + 1] = { key = key, l = l, r = r, t = t, b = b,
+                -- ⚠ `GetRect()` 返回的是 **left, bottom, width, height**，不是 L/R/T/B。
+                -- 第一版当四角来打，于是"同一列 14 扇窗 left 全等于 1032"看着像 bug、
+                -- 其实那是正常的列 x，而"R"是 bottom —— 报告自己在骗人。这里换算成真四角。
+                local ok, l, btm, w, h = pcall(function() return win:GetRect() end)
+                if ok and type(l) == "number" then
+                    rects[#rects + 1] = { key = key, l = l, r = l + (w or 0),
+                        b = btm, t = btm + (h or 0), w = w, h = h,
                         dragged = WindowPosition(key) and true or false,
                         strata = select(2, pcall(function() return win:GetFrameStrata() end)) }
                 end
@@ -1734,10 +1741,8 @@ function M:HandleCommand(rest)
         ns:Print(("[bags.layout] mode=%s bankOpen=%s shown=%s · 显示中的窗 %d 扇")
             :format(tostring(activeMode), tostring(bankOpen), tostring(shown), #rects))
         for _, a in ipairs(rects) do
-            ns:Print(("  %-16s L%s R%s T%s B%s 拖过=%s strata=%s")
-                :format(a.key,
-                    string.format("%.0f", a.l), string.format("%.0f", a.r),
-                    string.format("%.0f", a.t), string.format("%.0f", a.b),
+            ns:Print(("  %-16s 左%.0f 右%.0f 下%.0f 上%.0f（%.0fx%.0f）拖过=%s strata=%s")
+                :format(a.key, a.l, a.r, a.b, a.t, a.w or 0, a.h or 0,
                     tostring(a.dragged), tostring(a.strata)))
         end
         for i = 1, #rects do
@@ -1755,23 +1760,22 @@ function M:HandleCommand(rest)
         end
         if bankTools then
             local vis = bankTools:IsShown()
-            local okR = pcall(bankTools.GetRect, bankTools)
+            local okR, l2, btm2, w2, h2 = pcall(function() return bankTools:GetRect() end)
             local body = bankToolsBody and bankToolsBody:IsShown()
-            local kids = 0
-            if bankToolsBody and bankToolsBody.GetChildren then
-                kids = #bankToolsBody:GetChildren()
-            end
-            ns:Print(("  包裹管理面板：显示=%s · 体显示=%s · 子控件 %d 个 · 矩形=%s")
-                :format(tostring(vis), tostring(body), kids,
-                    okR and (string.format("L%.0f R%.0f T%.0f B%.0f", bankTools:GetRect())) or "读不出"))
-            if vis and kids >= 2 and okR then
-                local l, r, t, b = bankTools:GetRect()
+            -- `GetChildren()` 是**变长返回**，`#frame:GetChildren()` 取的是第一个子件的长度
+            -- （上一版就这么读出"子控件 0 个"）。数子件要 `select("#", ...)` 或 GetNumChildren。
+            local kids = (bankToolsBody and bankToolsBody.GetNumChildren)
+                and select(2, pcall(bankToolsBody.GetNumChildren, bankToolsBody)) or "?"
+            ns:Print(("  包裹管理面板：显示=%s · 体显示=%s · 子控件 %s 个 · 左%.0f 右%.0f 下%.0f 上%.0f")
+                :format(tostring(vis), tostring(body), tostring(kids),
+                    okR and l2 or 0, okR and (l2 + (w2 or 0)) or 0,
+                    okR and btm2 or 0, okR and (btm2 + (h2 or 0)) or 0))
+            if vis and okR and (tonumber(kids) or 0) >= 2 then
+                local pl, pr, pb, pt = l2, l2 + (w2 or 0), btm2, btm2 + (h2 or 0)
                 for _, a in ipairs(rects) do
-                    local hz = l < a.r and a.l < r
-                    local vt = a.b < t and b > a.t
-                    if hz and vt then
-                        ns:Print(("  ⚠ 面板被 %s 压住（面板自己也在 strata 同层，重叠 %.0fpx）")
-                            :format(a.key, math.min(r, a.r) - math.max(l, a.l)))
+                    if pl < a.r and a.l < pr and a.b < pt and pb > a.t then
+                        ns:Print(("  ⚠ 面板与 %s 压叠（横向 %.0fpx）")
+                            :format(a.key, math.min(pr, a.r) - math.max(pl, a.l)))
                     end
                 end
             end

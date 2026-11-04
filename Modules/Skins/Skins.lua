@@ -387,19 +387,34 @@ function M:Dress(spec, opts)
     -- `Skin:IsScriptObject` 是唯一靠得住的前置（它 pcall `GetObjectType`，真取不到的也一并挡掉，
     -- 那种东西本来一个美化都做不了）。身份留在 Need 台账里（`/mui skins diagnose bad` 能看到
     -- `notObject:mixin 表`），这里只汇总成一行，不再逐次抛。
-    local real, dropped = {}, 0
-    for i = 1, #list do
-        local obj = list[i]
+    -- `AsList` 会把名字解析成对象、名字本身就丢了；跳过时若只有数量，明天分不清
+    -- "这 48 个是本来就不该进来的 Mixin 表"还是"我误伤了真框体"。所以这里自己解一遍，
+    -- 把 (原始名 → 解析结果) 成对拿着。
+    local raw = {}
+    if type(spec) == "string" then
+        raw[1] = spec
+    elseif type(spec) == "table" and spec[1] ~= nil then
+        for i = 1, #spec do raw[i] = spec[i] end
+    else
+        raw[1] = spec
+    end
+
+    local real, skipped = {}, {}
+    for i = 1, #raw do
+        local item = raw[i]
+        local obj = (type(item) == "string") and Skin:Need(item) or item
         if obj ~= nil and Skin:IsScriptObject(obj) then
             real[#real + 1] = obj
         elseif obj ~= nil then
-            dropped = dropped + 1
+            skipped[#skipped + 1] = (type(item) == "string") and item or "?"
         end
     end
-    if dropped > 0 then
+    if #skipped > 0 then
+        table.sort(skipped)
         Skin:WarnOnce("dressDrop:" .. tostring(Skin.scope or "-"),
-            ("档「%s」跳过 %d 个非框体条目（Mixin 表 / 函数 —— /mui skins diagnose bad 读那本账）")
-                :format(tostring(Skin.scope or "-"), dropped))
+            ("档「%s」跳过 %d 个非框体条目（Mixin 表 / 函数 —— 以前它们每个方法调用都静默抛，"
+                .. "一个像素也没涂上）：%s"):format(
+                tostring(Skin.scope or "-"), #skipped, table.concat(skipped, ", ")))
     end
     list = real
 
