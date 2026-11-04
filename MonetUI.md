@@ -12,15 +12,15 @@
 
 MonetUI 是一套**整合 UI 插件**，以**莫奈印象派色彩**为核心设计语言，为 WoW Forever 提供：
 
-- 自适应环境色彩的动态主题系统
+- 区域驱动的主题系统：**环境色离线采样**（按区域从游戏截图提取，存成 `mapID → 环境 HSL` 表）+ **四档主题色运行期实时派生**（莫奈规则 + 亮度阶梯），随区域切换刷新；运行期不读任何贴图像素
 - 模块化 UI 组件（单位框架、冷却、Buff、小地图等）
 - 精简依赖、低复杂度的代码架构
 
 **设计原则**：
-1. **依赖精简** — 仅依赖 LibStub（必需）+ LibMonetColor（可选）；动作条自建，不引入动作条库
+1. **依赖精简** — 无外部必需依赖：`LibStub` 与色彩三件套（引擎 / 状态染色 / 区域色数据）全部内嵌在 `Libs/`；动作条自建，不引入动作条库
 2. **模块松耦合** — 模块间通过 EventBus 通信，不直接依赖
 3. **私有 API** — 公共工具封装在 Utils 中，避免重复代码
-4. **优雅降级** — MonetColor 缺失时使用内置默认配色
+4. **优雅降级** — MonetColor 缺失时使用内置默认配色；区域没有环境色记录时沿 `C_Map` 父链继承大陆 / 世界层的派生色，父链也断时退回中性灰兜底（配置面板「区域配色」一行会写明当前用的是哪一档）
 5. **Lua 5.1 兼容** — 不使用 5.2+ 特性（`//`、`goto`、`bit32`、`table.unpack`）
 
 ---
@@ -140,6 +140,10 @@ MonetUI/
 └── Libs/
     ├── LibStub/                # LibStub 库
     ├── LibMonetColor-1.0/      # 色彩引擎库
+    ├── LibMonetColor-Anim-1.0/ # 状态染色层（战斗 / 低血 / 休息的边框色）
+    ├── MonetColorMapData-1.0/  # 区域环境色数据（实测表 + 派生父层 override）
+    │   ├── MonetColorMapData-1.0.lua       # 14 区实测色（生成物，禁止手改）
+    │   └── MonetColorMapEnvOverride.lua    # 3 条大陆 / 世界层派生行（运行时 override 通道）
     └── NOTICE.md               # 随包库的来源与许可说明
 ```
 
@@ -150,8 +154,9 @@ MonetUI/
 ### 4.1 依赖策略
 
 ```
-必需: LibStub
-可选: LibMonetColor-1.0 (有 fallback)
+必需: LibStub（已内嵌，无外部安装项）
+随包: LibMonetColor-1.0（配色引擎）、LibMonetColor-Anim-1.0（状态染色层）、MonetColorMapData-1.0（区域环境色 + 派生父层）
+      —— 任一缺失只降级为内置默认配色，不报错
 不引入: Ace3, CallbackHandler, Masque, SharedMedia, oUF, cargBags, LibActionButton
 ```
 
@@ -175,9 +180,32 @@ Module A ←→ EventBus ←→ Module B
 -- Utils/Color.lua 封装 MonetColor
 local LMC = LibStub("LibMonetColor-1.0", true)
 
--- 有 MonetColor: 动态获取环境色
+-- 有 MonetColor: 拿当前 mapID 查「离线按区域采样的环境色」表 → 莫奈规则运行期实时派生四档
 -- 无 MonetColor: 使用内置 Andromeda 风格默认配色
 ```
+
+**环境色不是实时取出来的**：本客户端没有任何可用的贴图像素读取 API（`GetTexPixel` 不存在，
+`Region:GetVertexColor` / `FontString:GetTextColor` 全标机密），所以环境色由兄弟仓 monetcolors
+离线从游戏截图按区域提取（39 张截图 / 14 个区域），随包成 `MonetColorMapData-1.0`；**运行期只查表 + 派生**，
+换区域不等分析、也不会卡一下。
+
+引擎解析序（`LibMonetColor-1.0.lua:580-611`），一个区域最终落在哪一档由 `GetMapEnv` 的 `source` 写明：
+
+| 档 | 来源 | 现状 |
+|----|------|------|
+| `override` | `RegisterMapEnv` 运行时注册的派生行 | 3 条：卡利姆多 1414 / 东部王国 1415 / 艾泽拉斯 947，色由该层成员区实测色取**圆均值**算出，不改生成文件本体（`Libs/MonetColorMapData-1.0/MonetColorMapEnvOverride.lua`，在 `Core.lua` 之前加载） |
+| `data` | 随包实测表 | 14 条（`MonetColorMapData-1.0.lua`，AUTO-GENERATED，禁止手改） |
+| `parent:data` / `parent:override` | 沿 `C_Map` 父链继承祖先层（深度上限 5） | 新手区 / 首都多数走这条，落到同大陆调子 |
+| `fallback` | 无彩灰 `{0, 0, 0.5}` | 父链也断时；实机银月城 2393 目前仍在这一档 —— 它的父层归属（是否挂在东部王国 1415 下）离线没有表可查，实机核上父链后就会继承 1415 的派生色 |
+
+覆盖率有数字了，不再靠感觉：`node tools/map-env-coverage.js`（只读脚本，不进发行包）按引擎同一条解析序
+把仓库已记录的 29 个 mapID 分成三档 —— **有色 17 / 走父链 9 / 落兜底 3**。口径注意：这是**已记录清单**，
+不是全量地图表（离线拿不到 1.60 的 UiMap 表），脚本里的父层关系标 `ASSUMED`；全量三档要实机跑
+`C_Map.GetMapChildrenInfo(947, nil, true)` 导出 `{ mapID, name, parentMapID }` 再喂 `--dump`。
+
+配置面板主题组新增**「区域配色」一行**：当前区域名 + `panel / hover / lost / fill` 四档实色块（透明度照
+`SURFACE_STEPS`），落 `fallback` 时在下方写明「这个区域没有环境色记录 · 四档走兜底灰」—— 这是玩家唯一能
+感知「这个区没采到色」的入口；引擎未接入或地图 ID 读不到（受限窗口）也各有一句。
 
 **签名三色（edge / ambient / highlight）+ neutral 全部来自引擎**；health / resource / danger 由 UI 自己管，
 不做「Monet 化」。

@@ -188,10 +188,14 @@ TabardFrame、EncounterJournal、DressUpFrame、GossipFrame、LFGParentFrame、L
     选中描边，说明回退。
 14. **进出战斗提醒已并入 Toast**（`48d9c70`）：进 / 出战斗各弹一条横幅（剑 / 盾 + 着色 + 文字），
     开关在「通知」里。实机确认：图标不糊、颜色对、1.6s 后自动消失、战斗中不弹两条。
-15. **姓名板压制优化（BNP 钩子方案）—— 暂缓，先交叉佐证**（`docs/HANDOFF.md` 8.25）：
-    参考实现用 `hooksecurefunc(unitFrame, "SetAlpha")` 代替 0.25s 轮询；污染风险未定，
-    要再挖 2–3 个插件（Plater / ElvUI / NDui / SilverNamePlates）交叉确认后再动。
-    在此之前可先做"零污染半步"（去掉每拍 `Show()`、读后写、0.5s + 调度器）。
+15. **姓名板压制优化（BNP 钩子方案）—— 交叉佐证已完成，终判：现阶段不换钩子**（`docs/HANDOFF.md` **8.26.8**）：
+    产物层 `hooksecurefunc(unitFrame, "SetAlpha")` 盖不住 base 同级 sibling 的回压（sibling 存在有本仓实机判例
+    `Nameplates.lua:513-517`），"钩方法槽是否标脏 CUF 更新"离线判不了 ⇒ **轮询保留、不改代码**。
+    "零污染半步"里**删每拍 `Show()` / 读后写 / 迁 `Utils/Scheduler` 已落地（`7108581`，逐项见 8.27.1）**——
+    不再是可选项；只剩 0.25s→0.5s 一项**暂缓**（`PLAYER_TARGET_CHANGED` 已即时补刀 `Nameplates.lua:1090-1096`，
+    放宽只省读次数、代价是最多多 0.25s 回潮窗，等账本证明常态零写再议）。
+    上线日跑 8.26.8 末尾六条姓名板探针（CHECKS C2.1 同项），**④ `base:GetChildren()` 名单是关键判据** ——
+    名单稳定且 ①② 干净，才允许再开 BNP 式钩子分支的讨论。
 
 ## 事件派发中的受保护写入（批次 A，2026-11-02）
 
