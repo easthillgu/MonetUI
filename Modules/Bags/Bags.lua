@@ -1012,7 +1012,11 @@ local function Rebuild(bagType)
     if activeMode == "bank" then
         EnsureBankTools()
         LayoutBankTools()
-        ParkBlizzardBank(bankDrawn > 0)
+        -- ⚠ 接管默认**关**（`hideBlizzardBank` 未设 = false）。11-04 实机判例：接管之后
+        -- "背包↔银行拖放失效，能拖不能放"—— 因为我们的"空格子"是占位壳（`Scan` 只把空格
+        -- 统计成一个数，`FillFreeWindow` 画假格子），暴雪银行框才是唯一能落东西的容器槽面。
+        -- 正解是把空格做成真 ItemButton（绑 bag/slot），在那之前收起默认路径。
+        ParkBlizzardBank((Setting("hideBlizzardBank") and true or false) and bankDrawn > 0)
     end
 end
 
@@ -1604,6 +1608,23 @@ function M:Initialize()
 end
 
 function M:HandleCommand(rest)
+    if rest == "hidebliz on" or rest == "hidebliz off" then
+        -- 接管暴雪银行框的开关。默认 off：我们的空格子是占位壳、不是真容器槽，
+        -- 接管掉暴雪框就等于把唯一能落东西的面收走（11-04 拖放失效判例）。
+        -- 想把观感做完整（只留我们的窗）就 on，代价是银行侧只能看不能拖放。
+        local on = (rest == "hidebliz on")
+        SetBankToolsSetting("hideBlizzardBank", on or nil)
+        if on then
+            ParkBlizzardBank(bankDrawn > 0)
+        else
+            ParkBlizzardBank(false)
+        end
+        ns:Print(("[mui bags hidebliz] 接管暴雪银行框 = %s（画出 %d 件）%s")
+            :format(tostring(on), bankDrawn or 0,
+                on and "｜注意：空格子目前是占位壳，接管后**无法拖放进空位**"
+                    or "｜暴雪银行框已放开，拖放可用（观感上两套并存）"))
+        return true
+    end
     if rest == "bank off" then
         -- 放开暴雪银行框（买栏位 / 换包要在它上面做），同时收我们的银行窗。
         CloseAllBags("bank")
@@ -1701,18 +1722,22 @@ function M:HandleCommand(rest)
                     okS and tostring(vis) or "读不出"))
         end
         local verdict
-        -- 第一分叉必须是"银行现在开没开"，不是上一次重绘的计数：11-04 实测就是拿陈旧的
-        -- `bankDrawn>0` 当现状，印出"应当接管"而同一行观测写着 `接管=false` —— 判读和观测
-        -- 自相矛盾的命令没有价值，明天还会把我们带错方向。
-        if not bankOpen then
-            verdict = "银行没开 → **不该接管**：上面每行都该是 接管=false · alpha=1"
-                .. "（IsShown 归暴雪自己，不是判据）。这一档就是 ②A 的放开态，也是出问题时的逃生通道。"
+        -- 第一分叉必须是"接管开关 + 银行现在开没开"，不是上一次重绘的计数：11-04 实测就是
+        -- 拿陈旧的 `bankDrawn>0` 当现状，印出"应当接管"而同一行观测写着 `接管=false`。
+        -- 开关默认 off（空格子是占位壳，接管会拿走唯一能落东西的面），不写出来就会被误读成 bug。
+        if not (Setting("hideBlizzardBank") and true or false) then
+            verdict = "接管开关 off（默认）→ **不该接管**：我们的空格子是占位壳、不是真容器槽，"
+                .. "接管等于拿走唯一能落东西的面（11-04 拖放失效判例）。所以暴雪银行框照旧可见可用，"
+                .. "观感上两套并存。想要单套观感：`/mui bags hidebliz on`（代价 = 拖放落点没了）。"
+        elseif not bankOpen then
+            verdict = "接管开着但银行没开 → 不该接管：每行都该是 接管=false · alpha=1"
+                .. "（IsShown 归暴雪自己，不是判据）"
         elseif (bankDrawn or 0) > 0 then
             verdict = "银行开着且画出物品 → 应当接管（暴雪框 alpha 0 + 关鼠标）；"
                 .. "若我们的窗里没东西 = 索引对了但渲染断了"
         else
             verdict = "银行开着但一件都没画出 → **不该接管**：每行都该是 接管=false · alpha=1；"
-                .. "若写着 接管=true 就是 P0（空框被藏起来），当场 `/mui bags bank off`"
+                .. "若开着 hidebliz 却写着 接管=true 就是 P0（空框被藏起来），当场 `/mui bags hidebliz off`"
         end
         ns:Print("[bags.probe] 判读：" .. verdict)
         return true

@@ -71,10 +71,16 @@ ok(/local num = Secrets\.Number\(C_Container\.GetContainerNumSlots\(bag\)\)/.tes
   'B3 槽数过 Secrets.Number 且 >0 才收（读不出/为 0 绝不画假空页）');
 
 // ---------------------------------------------------------------- C 停车纪律
-ok(/ParkBlizzardBank\(bankDrawn > 0\)/.test(SRC),
-  'C2 停车的唯一前置 = 我们真画出了银行物品（②A）');
-ok(/EnsureBankTools\(\)[\s\S]{0,200}LayoutBankTools\(\)[\s\S]{0,200}ParkBlizzardBank\(bankDrawn > 0\)/.test(SRC),
+// ⚠ 11-04 改判：接管的前置从"画出银行物品"收紧成"**并且** hideBlizzardBank 开着"，默认 off。
+// 原因是玩家实机报的功能回退：我们的空格子是占位壳、不是真容器槽，把暴雪银行框 alpha 0 +
+// 关鼠标收掉 = 拿走唯一能落东西的面 ⇒ 背包↔银行"能拖不能放"。②A 的保险逻辑仍然成立，
+// 但默认路径不再接管（观感代价：两套并存），正解是把空格做成真 ItemButton。
+ok(/ParkBlizzardBank\(\(Setting\("hideBlizzardBank"\).*?and bankDrawn > 0\)/.test(SRC),
+  'C2 停车前置 = hideBlizzardBank（默认 off）且真画出银行物品');
+ok(/EnsureBankTools\(\)[\s\S]{0,260}LayoutBankTools\(\)[\s\S]{0,260}ParkBlizzardBank\(\(Setting\("hideBlizzardBank"\)/.test(SRC),
   'C2b 重绘末尾顺序：面板 → 排版 → 停车');
+ok(/if rest == "hidebliz on" or rest == "hidebliz off" then/.test(SRC),
+  'C2c `/mui bags hidebliz on|off` 在（作者要单套观感时的开关，代价写在输出里）');
 ok(/local bank = Skin:Need\("BankFrame"\)/.test(SRC) && /Skin:Need\("WarbandBankFrame"\)/.test(SRC),
   'C3 银行框名字只过 Skin:Need 一个漏斗（缺席要成为账本里的一行 ✗）');
 const parkFn = (SRC.match(/ParkBlizzardBank = function\(park\)[\s\S]*?\nend/) || [''])[0];
