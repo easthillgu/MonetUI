@@ -278,14 +278,34 @@ local DRESSERS = {
 --- （切标签、翻页、滚进视野），OnShow 那一刻它们还不存在。轮询按可见性计时，隐藏的框不跑。
 --- 登记以帧去重：`M:Apply` 会被 QUEST_LOG_UPDATE / ADDON_LOADED / PLAYER_ENTERING_WORLD 反复触发，
 --- 不去重就是每触发一次多塞一条轮询回调。
+--- forbidden 对象的身份描述：类型 + 父链两级，**全部 pcall**（对这种对象连 `GetName`
+--- 都可能抛）。为什么值得多这一句：以前这行只印"无名框"，读的人分不清两种完全不同的情况
+--- ——`Widget:Readable` 把"没有 IsVisible 方法"也算 forbidden，所以"被引擎接管的安全框"和
+--- "我们其实递进来一个非框体对象"长成同一条红字外的普通警告，处置方式却不一样。
+local function UnreadableDesc(frame)
+    local kind = select(2, pcall(function() return frame:GetObjectType() end)) or "?"
+    if type(frame.IsVisible) ~= "function" then kind = kind .. "(无 IsVisible 方法)" end
+    local parents = {}
+    local node = frame
+    for _ = 1, 2 do
+        local ok, parent = pcall(function() return node:GetParent() end)
+        if not ok or not parent then break end
+        local okName, name = pcall(function() return parent:GetName() end)
+        parents[#parents + 1] = (okName and type(name) == "string" and name ~= "") and name or "?"
+        node = parent
+    end
+    return ("%s · 父链 %s"):format(kind, #parents > 0 and table.concat(parents, " ← ") or "读不出")
+end
+
 function M:SweepDeep(frame, controlOpts, withInfo)
     if not frame or type(frame.GetChildren) ~= "function" then return end
     -- 读不出可见性 = forbidden 对象（被引擎接管的安全框那一类）。给它挂常驻轮询没有任何意义：
     -- 驱动每拍都只能把它暂停掉，5 秒复检一次、永远检不回来，账本里多一条查不下去的"无名框"。
     -- 直接放手：这个框保持暴雪原样，等下一次 Apply 它若能读了再补。
     if not Widget:Readable(frame) then
-        Skin:WarnOnce("sweepSkip:" .. Widget:FrameLabel(frame),
-            ("%s 读不出来（forbidden 对象），跳过子控件补扫，不挂轮询。"):format(Widget:FrameLabel(frame)))
+        local who = ("%s｜%s"):format(Widget:FrameLabel(frame), UnreadableDesc(frame))
+        Skin:WarnOnce("sweepSkip:" .. who,
+            ("%s 读不出来（forbidden 对象），跳过子控件补扫，不挂轮询。"):format(who))
         return
     end
     -- 轮询里的抛错不在任何 Apply 的 pcall 保护下，而且每秒一次 —— 自己吞，并借
