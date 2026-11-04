@@ -178,6 +178,11 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
 - **绝不往暴雪的框体 / 贴图 / 字体串上写字段**（`frame.__monetXxx = ...`）。本客户端按"键"判污染：
   写过一次，这个对象之后跑的暴雪代码全部以我们的名义执行。一律走 `ns:Mark(obj, key, value)` /
   `ns:Marked(obj, key)`（Core.lua，**以对象为弱键的旁表**），我们自己的框体也一样处理，省得判断。
+- **绝不替换暴雪的全局函数**（`_G.GetMerchantNumItems = 我们的包装`，RurutiaSuite 的商人格加宽就是这么做的，
+  11-04 核过：`Modules/ExtraTools/MerchantExpansion.lua:286-300`，且它有配对还原）。**有还原也不许做**：
+  替换期间暴雪所有调用点都在我们的执行环境里跑，任何一次被拒都记到 MonetUI 名下 —— 这比往对象上写字段更重，
+  因为影响面是"全部调用点"而不是一个键。要改行为就改我们自己的渲染路径，或用官方 post-call 注册表
+  （`TooltipDataProcessor` 那一类）。
 - **绝不往受保护按钮写属性**（`SetAttributeNoHandler(button, "statehidden", true)`）：
   按钮会因此卡在"显示"状态，暴雪自己的 `UpdateShownButtons → SetShown` 战斗中被拒，
   而 alpha 0 的按钮**照样收 OnEnter**（`ActionButton.lua:1391 → UpdateAction → SetAttribute`），

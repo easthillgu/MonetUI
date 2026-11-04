@@ -3531,6 +3531,36 @@ Mainline —— 若跑 Classic，Tab3 整排缺席是**正常行为**，别当�
 战斗里调用会被拒 → 必须带战斗门 + `ns:AfterCombat` 重试（判据同源那条另见 §8.29 与本文件"能不能碰"那节）。
 排期与 #25（银行侧真槽位）同一批。
 
+## 8.32 第三方插件研究：RurutiaSuite（工具箱 + 平台层）与 MonetUI 的吸收清单
+
+11-04 深夜第二轮研究，结论在 **`docs/ANALYSIS-RURUTIASUITE.md`**（三个只读子代理分头通读
+293 文件 / 42 459 行 + 集成道逐条核验；对方全程只读，一个字节未写）。
+
+与 TweaksForever 的差别很重要：**它不是整套 UI，是"挂在 ElvUI / NDui / Ellesmere 上做增强"的工具箱**，
+所以值钱的地方在平台层而不是功能清单。三条最该抄思路的：
+
+1. **稀疏默认值 + 存盘剥默认**（`Core/Database.lua:84-118,136-152`）⇒ SavedVariables 只存差异。
+   我们 `Core.lua:288` 的 `MergeDefaults` 是整树深拷进存档 —— 换成稀疏后，本仓反复提的
+   "账本落盘比 /reload 晚 1–2 分钟"整类丢写风险直接降级（丢的只是差异，默认值仍从代码取）。任务 #33。
+2. **能力矩阵按 Interface 区间 + 助手返回行为而非布尔**（`Core/Build.lua:32-139`、
+   `Core/Compat.lua:27-39`：`GetPrimarySecureClickEvents()` 直接给出该用哪套点击事件）
+   ⇒ 把我们"同一句话在 16001 与 12.1.5 相反"的老痛从散落的 `if` 变成一张表。任务 #34。
+3. **让位注册表**（`UI/SkinProvider.lua:88-247`，其中 `EllesmereUI` 那条注册了但 `Apply` 恒 false，
+   注释写"选到不等于真有桥"）⇒ 与 #28 合流，比"alpha 停掉别人的框"体面且可解释。
+
+负面结论一条已升进 AGENTS：**绝不替换暴雪全局函数**（它加宽商人格就是换 `_G.GetMerchantNumItems` +
+`MAPPED_GLOBALS`，`MerchantExpansion.lua:286-300`，虽有配对还原，但替换期间暴雪全部调用点都在我们环境里跑）。
+另外它 `frame.page = ` 往暴雪框写状态、`Hide()` 暴雪框、从 Lua 直调 `AcceptQuest`/`RunMacroText` ——
+全是我们禁的；**它做对的部分**是 `RaidMarker`：全程 `SecureActionButtonTemplate` + `macrotext` 属性 +
+按 `IsInCombat` 门控（`View.lua:112,151`），正是 #26 该走的路。
+
+许可：`X-License: All Rights Reserved`（非 GPL，无任何授予）⇒ 代码/数据/媒体/文案一概不复用；
+它的地图遮罩、区域等级、消耗品目录、手册文案、音效、自带字体都是"内容即功能"，我们要做得自抽 DB2 自写。
+
+排期：#33–#39（默认值模型 / 能力矩阵 / 差异刷新与自装配驱动 / 姓名板 per-token 目标监视 /
+配置导出导入 / 预算任务器 / CVar 面板）。**开服前不落地任何一条**（距开服 <8 小时，这些动的正是
+启动与配置路径 —— 白天每个 P0 的成因形状就是这个）。
+
 ## 9. 建议的下一步（按价值排序）
 
 1. **实机回归 P0/P1 的改动面**（`docs/HANDOFF.md` 8.6.2 + `TODO.md` 的 9 条清单）：
