@@ -3487,7 +3487,29 @@ Mainline —— 若跑 Classic，Tab3 整排缺席是**正常行为**，别当�
 （CHECKS C2.1 已并入一条）。归因口径：眼睛消失 = `Skin:Fade` 类回归（8.28.5 判例复发）；
 面板边框没变化 = `Need` 账本只登记不换肤、属正常，对照 `/mui skins diagnose` 账本即可分开这两种。
 
-## 8.30 已知功能缺口：任务追踪器不画「任务专用物品」可点钮（11-04 作者拍板 = 上线后补）
+## 8.30 第三方插件研究：TweaksForever（QoL 套件）与 MonetUI 的吸收边界
+
+11-04 晚按作者要求做了一轮完整研究，结论文档在 **`docs/ANALYSIS-TWEAKSFOREVER.md`**
+（两个只读子代理通读 73 文件 / 20 945 行 + 集成道对本仓现状逐条核验；它全程只读，一个字节未写）。
+
+三条最值钱的定性判断，写在这里免得以后重新推：
+1. **许可是硬边界**：它 GPL-3.0-or-later，我们 MIT ⇒ 只取机制，代码全自写；
+   `Data/ClassSpells.lua`（CMaNGOS 衍生训练师表）与 `Data/CampBenefits.lua`（抄法术描述文本）
+   **碰不得**；它的 `media/*.tga` 违反我们"资源全部自绘"。
+2. **它踩的正是我们禁止的**：`HookScript` 暴雪框 10+ 处、`hooksecurefunc("ShowUIPanel")` 这种
+   全局面板路径、往暴雪对象 `SetText/SetPoint/SetScale/Hide`、从 Lua 直调
+   `AcceptQuest/CompleteQuest/GetQuestReward/BuyTrainerService/LootSlot`（它自己的注释承认
+   Forever **没有 secure snippets、`loadstring_untainted` 为 nil**，和我们同一环境）——
+   ⇒ 这类"全自动接交任务"迟早爆「界面行为失效」，我们不做。
+3. **它免费送我们两条情报**：① 不要调用 `UpdateContainerFrameAnchors` / `GetBagSize` /
+   `ContainerFrameUtil_EnumerateContainerFrames` —— 它们生成**缓存表**，我们一调整条链被判污染；
+   ② 原生设置树只用 `Settings.RegisterAddOnSetting`，别用 `Settings.CreateCheckbox`
+   （tainted 布局会弄坏暴雪自己的设置搜索）。
+
+已吸收：`/mui report` 诊断包（`a814d9b`，见 §8.32 待写或见文档）+ `Skin:WarnRing`。
+待吸收已建任务 #28–#32（自静默注册表 / XP 速率归因 / 错误按类型静音 / 任务区域预言机 / 版本差提示）。
+
+## 8.31 已知功能缺口：任务追踪器不画「任务专用物品」可点钮（11-04 作者拍板 = 上线后补）
 
 **现状**：我们的追踪器替代暴雪那套，`Modules/QuestTracker/QuestTracker.lua:340-365` 对
 `ObjectiveTrackerFrame` 走 `Widget:Mute(…, { depth = math.huge })`（alpha 0 + 整棵子树关鼠标，绝不 Hide）。
