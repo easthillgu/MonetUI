@@ -1626,6 +1626,26 @@ function M:HandleCommand(rest)
         }
         for _, line in ipairs(groups) do ns:Print("[bags.probe] " .. line) end
 
+        -- 逐索引明细。11-04 在 12.1.5 实测出现不自洽：`标签页 6:98 7:98 …` 每格都报 98 槽，
+        -- 可同一趟里"画出 136 件 · 空格 0"（7×98=686 格，空格该有 ~550）。光看槽数分不清
+        -- `GetContainerNumSlots` 报的是不是这个索引自己的数据 ⇒ 同一趟里再把每个索引
+        -- **实际取到的件数 / 空格数 / 拿不到表的格数**打出来，谁在说谎一眼可见。
+        local detail = {}
+        for _, bag in ipairs({ -1, -2, -3, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 }) do
+            local okN, n = pcall(C_Container.GetContainerNumSlots, bag)
+            local slots = (okN and Secrets.Number(n)) or 0
+            local items, empties, noInfo = 0, 0, 0
+            local cap = slots > 120 and 120 or slots
+            for slot = 1, cap do
+                local okI, info = pcall(C_Container.GetContainerItemInfo, bag, slot)
+                if not okI or type(info) ~= "table" then noInfo = noInfo + 1
+                elseif info.itemID then items = items + 1
+                else empties = empties + 1 end
+            end
+            detail[#detail + 1] = ("%d|槽%d 件%d 空%d 无表%d"):format(bag, slots, items, empties, noInfo)
+        end
+        ns:Print("[bags.probe] 逐索引（各截前 120 格）：" .. table.concat(detail, "  "))
+
         local bt = (Enum and Enum.BankType and Enum.BankType.Character) or 0
         local function num(fn, arg)
             if not (C_Bank and C_Bank[fn]) then return "无API" end

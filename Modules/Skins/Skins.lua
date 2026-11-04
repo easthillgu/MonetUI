@@ -304,6 +304,9 @@ function M:SweepDeep(frame, controlOpts, withInfo)
     -- 直接放手：这个框保持暴雪原样，等下一次 Apply 它若能读了再补。
     if not Widget:Readable(frame) then
         local who = ("%s｜%s"):format(Widget:FrameLabel(frame), UnreadableDesc(frame))
+        -- 带上"是哪个面板把它交进来的"（`Skin.scope` 在 M:Panel 的 Apply 期间就是那档的名字，
+        -- 和 Skin:Need 账本同一个来源）：只有对象身份的话，知道"有个 forbidden 框"也无处下手。
+        who = who .. ("｜来源档 %s"):format(tostring(Skin.scope or "-"))
         Skin:WarnOnce("sweepSkip:" .. who,
             ("%s 读不出来（forbidden 对象），跳过子控件补扫，不挂轮询。"):format(who))
         return
