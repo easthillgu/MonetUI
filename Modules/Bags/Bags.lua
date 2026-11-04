@@ -1836,10 +1836,13 @@ function M:HandleCommand(rest)
         --   ② 建出来了但身份没喂对（GetBagID / GetID 不是那个 (bag,slot)）；
         --   ③ 建出来也对了，但模板的 OnReceiveDrag 没挂上（被我们的脚本覆盖掉）。
         local function try(obj, method)
-            -- 注意取方法要用**点号**（`fb:GetBagID and ...` 是语法错，上一笔就是这么炸的）
+            -- 注意取方法要用**点号**（`fb:GetBagID and ...` 是语法错，上一笔就是这么炸的）。
+            -- 也不能写 `return ok and v or nil`：**v=false 会被吞成 nil**（11-04 第三次同类错，
+            -- 窗明明关着却报"显示=nil"，读的人以为方法没实现）。只有 pcall 失败才返回 nil。
             if not obj or type(obj[method]) ~= "function" then return nil end
             local ok, v = pcall(obj[method], obj)
-            return ok and v or nil
+            if not ok then return nil end
+            return v
         end
         for _, key in ipairs({ FREE_CAT.key, "bank:" .. FREE_CAT.key }) do
             local fw = windows[key]
