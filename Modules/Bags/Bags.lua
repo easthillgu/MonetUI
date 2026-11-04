@@ -1827,19 +1827,26 @@ function M:HandleCommand(rest)
         --   ① 空位根本没建出来（Scan 没收到坐标 / free 窗没显示）；
         --   ② 建出来了但身份没喂对（GetBagID / GetID 不是那个 (bag,slot)）；
         --   ③ 建出来也对了，但模板的 OnReceiveDrag 没挂上（被我们的脚本覆盖掉）。
+        local function try(obj, method)
+            -- 注意取方法要用**点号**（`fb:GetBagID and ...` 是语法错，上一笔就是这么炸的）
+            if not obj or type(obj[method]) ~= "function" then return nil end
+            local ok, v = pcall(obj[method], obj)
+            return ok and v or nil
+        end
         for _, key in ipairs({ FREE_CAT.key, "bank:" .. FREE_CAT.key }) do
             local fw = windows[key]
             if fw then
                 local first = fw.buttons and fw.buttons[1]
                 local fb = first and Marked(first, "itemBtn")
-                local bagID = fb and select(2, pcall(function() return fb:GetBagID and fb:GetBagID() end))
-                local slotID = fb and select(2, pcall(function() return fb.GetID and fb:GetID() end))
-                local mouse = fb and select(2, pcall(function() return fb:IsMouseEnabled() end))
-                local shown = fb and select(2, pcall(function() return fb:IsShown() end))
-                local recv = fb and select(2, pcall(function() return fb:GetScript("OnReceiveDrag") end))
+                local recv
+                if fb and type(fb.GetScript) == "function" then
+                    local okS, f = pcall(fb.GetScript, fb, "OnReceiveDrag")
+                    recv = okS and f or nil
+                end
                 ns:Print(("  空位窗[%s] 显示=%s · 按钮 %d 个 · 首格 bag=%s slot=%s 鼠标=%s 显示=%s OnReceiveDrag=%s")
-                    :format(key, tostring(fw:IsShown()), (fw.buttons and #fw.buttons) or 0,
-                        tostring(bagID), tostring(slotID), tostring(mouse), tostring(shown),
+                    :format(key, tostring(try(fw, "IsShown")), (fw.buttons and #fw.buttons) or 0,
+                        tostring(try(fb, "GetBagID")), tostring(try(fb, "GetID")),
+                        tostring(try(fb, "IsMouseEnabled")), tostring(try(fb, "IsShown")),
                         recv and "挂了" or "无"))
             else
                 ns:Print(("  空位窗[%s]：没建过（本会话没进过这一侧）"):format(key))
