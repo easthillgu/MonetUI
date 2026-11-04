@@ -574,6 +574,14 @@ local function UpdateButton(shell, rec)
     -- 模板点击链的身份：slot 在按钮上，bag 在父壳上（模板 OnClick 的取法）。
     shell:SetID(rec.bag or 0)
     btn:SetID(rec.slot or 0)
+    -- 把身份喂全，照暴雪自己建格子的那套（`ContainerFrameItemButtonMixin:Initialize` 里就是
+    -- `SetBagID(bag)` + `SetID(slot)` + `UpdateExtended()`）：`SetBagID` 写的是 `bagid` **属性**，
+    -- 属性的 OnAttributeChanged 再把 `self.bagID` 填上。我们以前只 `SetID`，
+    -- `GetBagID()` 走的是 `self.bagID or self:GetParent():GetID()` 的后半截兜底 —— 拾取够用，
+    -- 但掉落脚本可能读的是前者。方法不存在就跳过（不同客户端模板齐不齐是常态）。
+    -- 这些按钮是我们自己造的，写属性不涉及"往暴雪对象写字段"那条禁令。
+    if type(btn.SetBagID) == "function" then pcall(btn.SetBagID, btn, rec.bag or 0) end
+    if type(btn.UpdateExtended) == "function" then pcall(btn.UpdateExtended, btn) end
     pcall(SetItemButtonTexture, btn, rec.texture)
     pcall(SetItemButtonCount, btn, (rec.count and rec.count > 1) and rec.count or 0)
     -- 数量：我们自己的白字（模板那条被图标盖住，见 AcquireButton）。1 个不写数字。
@@ -1843,11 +1851,13 @@ function M:HandleCommand(rest)
                     local okS, f = pcall(fb.GetScript, fb, "OnReceiveDrag")
                     recv = okS and f or nil
                 end
-                ns:Print(("  空位窗[%s] 显示=%s · 按钮 %d 个 · 首格 bag=%s slot=%s 鼠标=%s 显示=%s OnReceiveDrag=%s")
+                ns:Print(("  空位窗[%s] 显示=%s · 按钮 %d 个 · 首格 bag=%s slot=%s 鼠标=%s 显示=%s OnReceiveDrag=%s · bagID字段=%s")
                     :format(key, tostring(try(fw, "IsShown")), (fw.buttons and #fw.buttons) or 0,
                         tostring(try(fb, "GetBagID")), tostring(try(fb, "GetID")),
                         tostring(try(fb, "IsMouseEnabled")), tostring(try(fb, "IsShown")),
-                        recv and "挂了" or "无"))
+                        recv and "挂了" or "无",
+                        -- nil = 还在靠 `GetParent():GetID()` 兜底；有值 = SetBagID 的属性链走通了
+                        fb and tostring(rawget(fb, "bagID")) or "无按钮"))
             else
                 ns:Print(("  空位窗[%s]：没建过（本会话没进过这一侧）"):format(key))
             end
