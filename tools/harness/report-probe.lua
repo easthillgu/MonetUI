@@ -125,8 +125,11 @@ C_AddOns = {
     GetAddOnInfo = function(name)
         if name == "TweaksForever" then return name, "Tweaks Forever", "", true, "", nil end
         if name == "SECRET-ADDON-NAME" then return name, "SECRET-ADDON-TITLE", "", false, "SECRET-REASON", nil end
-        return name, "Ellesmere UI", "", true, "", nil
+        return name, "Ellesmere UI", "", true, nil, nil
     end,
+    -- 载入状态与"可载入"是两件事：上一版把 `loadable` 绑错位置（pcall 的 ok 占了第一位），
+    -- 结果真机上 64 个插件全被报成"不载"，连明确打了加载横幅的 QuestEcho/Rurutia 也不例外。
+    IsAddOnLoaded = function(name) return name == "TweaksForever" and true or false end,
 }
 time = function() return 1730000000 end
 
@@ -252,6 +255,13 @@ for nsName, fn in src:gmatch("(C_[A-Za-z0-9]+)%.([A-Za-z0-9]+)") do
 end
 table.sort(names)
 print("  [INFO] 用到的暴雪 API：" .. table.concat(names, ", "))
+
+-- 23/24/25. 同机插件状态必须区分三态（真机上曾因 pcall 返回值错位而全员"不载"）
+ok(has("已载入 · TweaksForever · Tweaks Forever"), "23 已载入的插件报「已载入」并带标题")
+ok(has("可载入·未开 · EllesmereUI · Ellesmere UI"), "24 没载入但可载入的报「可载入·未开」")
+ok(has("同机插件 2 个") and not has("SECRET-ADDON-NAME") and not has("SECRET-ADDON-TITLE")
+   and not has("SECRET-REASON"),
+   "25 名字/标题/理由带密 ⇒ 整行不出现（宁可不报，也不把密值拼进输出与账本）")
 
 print(("report-probe: %d 过 / %d 失"):format(pass, failcount))
 os.exit(failcount == 0 and 0 or 1)

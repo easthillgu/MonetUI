@@ -47,10 +47,15 @@ local function Text(v)
     return v
 end
 
+--- pcall 包装：**完整透传所有返回值**。只截两三个是个真陷阱 —— `C_AddOns.GetAddOnInfo`
+--- 返回 6 个值，被截断后调用方的位置绑定全体错位（把 `notes` 当成了 `loadable`，
+--- 于是 1.60 实测 64 个插件全被报成"不载"）。5.1 用 `unpack`，5.2+ 用 `table.unpack`。
+local unpackf = rawget(_G, "unpack") or (table and table.unpack)
 local function Safe(fn, ...)
-    local ok, a, b, c = pcall(fn, ...)
-    if not ok then return nil end
-    return a, b, c
+    if type(fn) ~= "function" or not unpackf then return nil end
+    local results = { pcall(fn, ...) }
+    if not results[1] then return nil end
+    return unpackf(results, 2)
 end
 
 local function Or(v)
@@ -187,9 +192,19 @@ local function SectionAddons()
     for i = 1, n do
         local name = Text(Safe(C_AddOns.GetAddOnName, i))
         if name and name ~= ADDON_NAME then
-            local _, title, _, loadable, reason, security = Safe(C_AddOns.GetAddOnInfo, name)
-            local state = loadable and "载入" or ("不载" .. (Text(reason) and ("/" .. Text(reason)) or ""))
-            if security then state = state .. "/" .. security end
+            -- ⚠ 按下标取，不数位置：`Safe` 已经把 pcall 的 `ok` 剥掉了（失败返回单个 nil）。
+            -- 上一版把它当"含 ok 的 pcall 返回"来绑，于是 title 拿到 notes、loadable 拿到
+            -- reason ⇒ 1.60 实测把已载入/可载入的插件一律报成"不可载 · 读不出"。
+            -- `C_AddOns.GetAddOnInfo(name)` → name, title, notes, loadable, reason, security
+            local info = { Safe(C_AddOns.GetAddOnInfo, name) }
+            local title, loadable, reason = info[2], info[4], info[5]
+            local loaded = (type(C_AddOns.IsAddOnLoaded) == "function")
+                and select(2, pcall(C_AddOns.IsAddOnLoaded, name)) or nil
+            local state
+            if #info == 0 then state = UNKNOWN
+            elseif loaded then state = "已载入"
+            elseif loadable then state = "可载入·未开"
+            else state = "不可载" .. (Text(reason) and ("/" .. Text(reason)) or "") end
             local line = ("  %s · %s · %s"):format(state, name, Or(Text(title)))
             list[#list + 1] = line
             if #lines < ADDON_CAP then lines[#lines + 1] = line end
