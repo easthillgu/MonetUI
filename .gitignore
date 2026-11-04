@@ -25,8 +25,6 @@ tools/*
 !tools/**/*.svg
 !tools/**/*.html
 !tools/**/*.lua
-# tools 下的说明文档属于验证链的一部分（harness 的用法与"如何新增断言"六步），随脚本一起入库。
-!tools/**/*.md
 node_modules/
 *.json
 # tools/ 的运行前提：npm install 需要它（@napi-rs/canvas / wow-blp-web）
@@ -40,6 +38,9 @@ node_modules/
 !README.md
 !Libs/NOTICE.md
 !Assets/Fonts/NOTICE.md
+# tools 下的说明文档属于验证链（harness 用法 + "如何新增断言"六步），随脚本一起入库。
+# 必须写在 `*.md` 之后：git 以最后匹配的规则为准，写在 tools 段里会被这条压回去。
+!tools/**/*.md
 # Qoder CN 的项目规则（多车道约束，随 worktree 走，必须入库）
 !.qoder/rules/*.md
 # 例外：交接/流程类文档进库（其余 docs/ 内容——api 快照、texture-preview 产物、评审表——只留本地）。
