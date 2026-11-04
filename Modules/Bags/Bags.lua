@@ -40,6 +40,35 @@ local BAGS_CARRIED = { 0, 1, 2, 3, 4 }   -- Backpack + Bag_1..Bag_4
 local BAG_REAGENT  = 5                    -- ReagentBag (present only if crafted)
 local BANK_TABS    = { 6, 7, 8, 9, 10, 11, 12, 13, 14 }    -- CharacterBankTab_1..9
 
+-- 银行**主页那 46 格**的容器索引在本客户端没核过：`Enum.BagIndex` 在这台机器上是
+-- `-1 Keyring / -2 Characterbanktab / -3 Accountbanktab`（正式服的 -1 = Bank 那套写法
+-- 在这里不成立），代码此前只扫 6..14，等于主页一个都没扫。
+-- ⇒ 不猜：把三个候选都交给 Scan，`GetContainerNumSlots` 返 >0 的才算数（返 0 / nil /
+--   机密的一律跳过，绝不会画出个假空页）。`/mui bags probe` 把每个候选的实测槽数、
+--   `C_Bank` 的几项查询和 `WarbandBankFrame` 是否解析得到一次打全，上线日对着账定稿。
+local BANK_PAGE_CANDIDATES = { -1, -2, -3 }
+
+-- ---- 模式（背包 / 银行）：窗口键与存档位置都带模式前缀 --------------------------
+-- 以前银行是**原地替换**背包（同一批 cat.key 的窗），所以"位置不能和背包重叠"这件事
+-- 在结构上做不到。`bank:` 前缀把两套窗、两份位置账、两个总控 ✕ 彻底分开。
+local activeMode = "bags"
+
+local function WinKey(catKey)
+    return (activeMode == "bank") and ("bank:" .. catKey) or catKey
+end
+
+--- 从带前缀的键回到分类（`EnsureWindow` 查 `CATEGORY_BY_KEY` 用）。
+local function BaseKey(key)
+    local k = tostring(key or "")
+    if k:sub(1, 5) == "bank:" then return k:sub(6) end
+    return k
+end
+
+--- 键属于哪一套（关银行时只收银行那几扇，背包窗一张都不动）。
+local function ModeOf(key)
+    return tostring(key or ""):sub(1, 5) == "bank:" and "bank" or "bags"
+end
+
 -- ItemClass (manual).  Local table so a missing Enum global can never bite.
 local IC = {
     Consumable      = 0,
@@ -602,9 +631,9 @@ local windows = {}   -- key -> window frame
 --- 而真正的赋值语句在文件后半「暴雪背包框」那一节 —— 声明写在它后面，Lua 在编译期就把它
 --- 当**全局 nil**（AGENTS：静态闸门抓不到"引用了还没声明的 local"），那条补扫永远不触发。
 local shown
---- 当前带 ✕ 的「总控分类窗」键。黏性：它只要还显示就继续当总控，物品在不同分类之间挪动
---- 时 ✕ 不会到处跳；它消失了才顺延到下一扇（见 DesignateMaster）。
-local masterKey
+--- 当前带 ✕ 的「总控分类窗」键，**按模式各一份**（`bags` / `bank`）。黏性：它只要还显示就继续当
+--- 总控，物品在不同分类之间挪动时 ✕ 不会到处跳；它消失了才顺延到下一扇（见 DesignateMaster）。
+local masterKey = { bags = nil, bank = nil }
 --- ✕ 的实际动作。**前向声明**在这里（EnsureWindow 的 OnClick 闭包要引用它），函数体排在
 --- BlizzardBagFrames 之后 —— 那函数依赖它，写在依赖之前会变成全局 nil（AGENTS）。
 local CloseAllBags
@@ -628,15 +657,18 @@ local function EnsureWindow(key)
     local win = windows[key]
     if win then return win end
 
-    local cat = CATEGORY_BY_KEY[key]
-    local name = "MonetUIBagWindow_" .. key
+    local cat = CATEGORY_BY_KEY[BaseKey(key)]
+    local isBank = ModeOf(key) == "bank"
+    -- 框名里不用冒号（键用 `bank:` 前缀，名字里换成 `bank_`）。
+    local name = "MonetUIBagWindow_" .. tostring(key):gsub("bank:", "bank_")
     win = Widget:CreateFrame(name, UIParent, 120, 60)
     win.catKey = key
     Widget:Theme(win, { thickness = 1, bgAlpha = 0.92 })
 
     win.title = Widget:Font(win, 12, "pixel", "edge", "LEFT")
     win.title:SetPoint("TOPLEFT", win, "TOPLEFT", 18, -5)  -- clear of the TL ornament
-    win.title:SetText(cat and cat.label or key)
+    -- 两套窗同屏，标题必须分得开：银行那几扇挂"银行 · "前缀。
+    win.title:SetText(((isBank and "银行 · ") .. "") .. (cat and cat.label or BaseKey(key)))
 
     Widget:Shadow(win, { size = 6, alpha = 0.5 })
     Widget:Corners(win)
@@ -647,7 +679,7 @@ local function EnsureWindow(key)
     -- 都不多，也不会因为某扇窗临时有货就自己冒出来。
     local close = Widget:CloseButton(win, 18)
     close:SetPoint("TOPRIGHT", win, "TOPRIGHT", -3, 3)
-    close:SetScript("OnClick", function() CloseAllBags() end)
+    close:SetScript("OnClick", function() CloseAllBags(ModeOf(key)) end)
     close:Hide()
     win.close = close
     -- 材质统一：走换皮层同一个入口 `Skin:CloseButton`，把暴雪的 normal/pushed/highlight
@@ -790,20 +822,32 @@ end
 --- 分类窗。「剩余空间」窗永远不当总控 —— 它是补位的那一行空格子，不是装东西的窗。
 --- 在 Rebuild 末尾调用（LayoutWindows / RestoreDragged 之后，此刻各窗显隐已定）。
 local function DesignateMaster()
-    local keep = masterKey and windows[masterKey]
-    if not (keep and keep:IsShown()) then
-        masterKey = nil
-        for _, cat in ipairs(ORDERED) do
-            local win = windows[cat.key]
+    -- 每个模式各选各的总控：背包和银行同屏时屏幕上两个 ✕（各收各的一套），
+    -- 而不是银行一开就把背包那枚 ✕ 抢走。
+    local visible = {}
+    for _, cat in ipairs(ORDERED) do
+        for _, mode in ipairs({ "bags", "bank" }) do
+            local key = (mode == "bank") and ("bank:" .. cat.key) or cat.key
+            local win = windows[key]
             if cat.key ~= FREE_CAT.key and win and win:IsShown() then
-                masterKey = cat.key
-                break
+                visible[key] = mode
+            end
+        end
+    end
+    for _, mode in ipairs({ "bags", "bank" }) do
+        local keep = masterKey[mode] and windows[masterKey[mode]]
+        if not (keep and keep:IsShown()) then
+            masterKey[mode] = nil
+            for _, cat in ipairs(ORDERED) do
+                local key = (mode == "bank") and ("bank:" .. cat.key) or cat.key
+                if visible[key] then masterKey[mode] = key break end
             end
         end
     end
     for key, win in pairs(windows) do
         if win.close then
-            if key == masterKey then win.close:Show() else win.close:Hide() end
+            local m = masterKey[ModeOf(key)]
+            if key == m then win.close:Show() else win.close:Hide() end
         end
     end
 end
@@ -816,6 +860,21 @@ end
 local function LayoutWindows()
     local anchor = Setting("anchor") or {}
     local spacing = 14
+    local mode = activeMode
+
+    --- 背包那一列现在占多宽（取还显示着、且没被玩家拖过的最宽一扇）。
+    --- 银行列要贴在它**再往左**一格，所以这个宽度必须在排版当场量，不能写死常数。
+    local function bagsColumnWidth()
+        local widest = 0
+        for _, cat in ipairs(ORDERED) do
+            local win = windows[cat.key]
+            if win and win:IsShown() then
+                local w = (win:GetWidth() or 0)
+                if w > widest then widest = w end
+            end
+        end
+        return widest
+    end
 
     local base = _G[anchor.frame]
     local sideRight = (anchor.side == "right" and base)
@@ -823,11 +882,15 @@ local function LayoutWindows()
     if sideRight then
         -- 贴 base 左边，垂直一列。
         local x = anchor.x or -18
+        if mode == "bank" then
+            x = x - bagsColumnWidth() - spacing
+        end
         local y = anchor.y or -28
         local rowH = 0
         for _, cat in ipairs(ORDERED) do
-            local win = windows[cat.key]
-            if win and win:IsShown() and not WindowPosition(cat.key) then
+            local key = (mode == "bank") and ("bank:" .. cat.key) or cat.key
+            local win = windows[key]
+            if win and win:IsShown() and not WindowPosition(key) then
                 local w, h = win:GetWidth(), win:GetHeight()
                 win:ClearAllPoints()
                 win:SetPoint("TOPRIGHT", base, "TOPLEFT", x, y - rowH)
@@ -841,11 +904,15 @@ local function LayoutWindows()
     local UIParent = _G.UIParent
     local screenW = UIParent and UIParent.GetWidth and UIParent:GetWidth() or 1920
     local originX = screenW - 300   -- 屏幕右边往里 300px（约 Minimap 列 + 一点）
+    if mode == "bank" then
+        originX = originX - bagsColumnWidth() - spacing
+    end
     local originY  = anchor.y or -28
     local rowH = 0
     for _, cat in ipairs(ORDERED) do
-        local win = windows[cat.key]
-        if win and win:IsShown() and not WindowPosition(cat.key) then
+        local key = (mode == "bank") and ("bank:" .. cat.key) or cat.key
+        local win = windows[key]
+        if win and win:IsShown() and not WindowPosition(key) then
             local w, h = win:GetWidth(), win:GetHeight()
             win:ClearAllPoints()
             win:SetPoint("TOPLEFT", UIParent, "TOPLEFT", originX, originY - rowH)
@@ -872,27 +939,69 @@ local function LayoutWindows()
     end
 end
 
+--- 最近一次银行重绘的**实际条数**（park 暴雪银行框的唯一前置判据：我们一张都没画出来
+--- 就说明候选索引 / GameRule / LoD 有问题，那一刻绝不收暴雪的框 —— 宁可见两套，不可看不见）。
+local bankDrawn = 0
+local EnsureBankTools, ParkBlizzardBank, LayoutBankTools   -- 前置声明：函数体排在 CloseAllBags 之后（依赖那条链）
+
+--- 关掉某一模式的全部窗口（银行关闭只收银行那几扇，背包窗一张都不动）。
+local function HideModeWindows(mode)
+    for key, win in pairs(windows) do
+        if ModeOf(key) == mode then
+            -- 「剩余空间」那扇只吃 FillFreeWindow（它画的是空格子，不是物品），别拿物品路径清它。
+            if BaseKey(key) == FREE_CAT.key then
+                FillFreeWindow(win, 0)
+            else
+                FillWindow(win, {})
+            end
+            win:Hide()
+        end
+    end
+end
+
 local function Rebuild(bagType)
-    local indexes = (bagType == "bank") and BANK_TABS or BAGS_CARRIED
-    if bagType == "bags" and Setting("showReagentBag") then
-        indexes = { 0, 1, 2, 3, 4, BAG_REAGENT }
+    activeMode = (bagType == "bank") and "bank" or "bags"
+    local indexes = nil
+    if activeMode == "bank" then
+        -- 主页候选在前（哪个索引真有货由 Scan 的 `GetContainerNumSlots > 0` 判定），标签页在后。
+        indexes = {}
+        for _, i in ipairs(BANK_PAGE_CANDIDATES) do indexes[#indexes + 1] = i end
+        for _, i in ipairs(BANK_TABS) do indexes[#indexes + 1] = i end
+    else
+        indexes = BAGS_CARRIED
+        if Setting("showReagentBag") then
+            indexes = { 0, 1, 2, 3, 4, BAG_REAGENT }
+        end
     end
 
     local groups, free = Scan(indexes)
+    local drawn = 0
     for key, items in pairs(groups) do
+        drawn = drawn + #items
+        local wkey = WinKey(key)
         if #items > 0 then
-            local win = EnsureWindow(key)
+            local win = EnsureWindow(wkey)
             FillWindow(win, items)
-        elseif windows[key] then
-            FillWindow(windows[key], {})
+        elseif windows[wkey] then
+            FillWindow(windows[wkey], {})
         end
     end
+    if activeMode == "bank" then
+        bankDrawn = drawn
+        bankFree = free
+    end
     -- 「剩余空间」排在最后（FREE_CAT 在 ORDERED 里 order 最大，LayoutWindows 自然把它堆在末尾）。
-    FillFreeWindow(EnsureWindow(FREE_CAT.key), free)
+    FillFreeWindow(EnsureWindow(WinKey(FREE_CAT.key)), free)
 
     LayoutWindows()
     RestoreDragged()
     DesignateMaster()
+
+    if activeMode == "bank" then
+        EnsureBankTools()
+        LayoutBankTools()
+        ParkBlizzardBank(bankDrawn > 0)
+    end
 end
 
 -- ---- 暴雪背包框：预停车（2026-10-28 定案）---------------------------------------
@@ -931,7 +1040,16 @@ end
 --- 此刻暴雪框仍 IsShown；不先收它，守卫的边沿会停在"开"，玩家要按两下 B 才能重新打开。
 --- 战斗中不能 Hide 暴雪框（里面有受保护子按钮，会被拦），那就只收我们的窗，
 --- 下一次 B 的边沿自然把整套带回来（我们的窗本来也归 shown 管）。
-CloseAllBags = function()
+--- mode = "bags"（默认，收背包并关暴雪背包）/ "bank"（只收银行那几扇 + 放开暴雪银行框）。
+CloseAllBags = function(mode)
+    if mode == "bank" then
+        HideModeWindows("bank")
+        if bankTools then bankTools:Hide() end
+        ParkBlizzardBank(false)
+        -- 暴雪银行交互本身交给客户端：`C_Bank.CloseBankFrame` 文档无限制标记。
+        if C_Bank and C_Bank.CloseBankFrame then pcall(C_Bank.CloseBankFrame) end
+        return
+    end
     if not InCombat() then
         for _, frame in ipairs(BlizzardBagFrames()) do
             if frame and frame.IsShown and frame:IsShown() then pcall(frame.Hide, frame) end
@@ -1033,7 +1151,204 @@ local function SweepBlizzardBags(allowMouse)
     return anyShown
 end
 
---- 守卫 = 边沿检测器：暴雪框"从无到有" = 玩家按了 B（开我们的窗），"从有到无" =
+-- ---- 暴雪银行框：条件停车（作者 11-04 拍的 ②A） ----------------------------------
+-- 收的**唯一判据**是我们真画出了银行物品（`bankDrawn > 0`）。候选容器索引在本客户端还没核过
+-- （`Enum.BagIndex` 在这台机器上是 -1 Keyring / -2 Characterbanktab / -3 Accountbanktab，
+-- 正式服"−1 = 银行主页"那套写法在这里不成立），扫不到货就说明索引错 / GameRule 关了银行 /
+-- LoD 没到位 —— 那一刻一个字节都不许动暴雪的框：**宁可屏幕上两套并存，也不能让玩家打不开银行**。
+-- 手法沿用背包：alpha 0 + 整树关鼠标，绝不 `Hide`（Hide 会被暴雪自己的 Show 顶回来，见 AGENTS）。
+-- ⚠ 放开（`park = false`）就是"把暴雪那块管理区还给你"的通道：买栏位与背包↔银行包互换都只能
+--   在那块上做（理由见下面包裹管理面板那段）。
+local function BankFrameCandidates()
+    local out = {}
+    -- 名字只走 Skin:Need 这一个漏斗（取不到 = 账本里的一行 ✗，不静默跳过）；
+    -- WarbandBankFrame 目前是缺席项（还没解析到根），留着它就是为了那一行 ✗ 能被看见。
+    local bank = Skin:Need("BankFrame")
+    if bank then out[#out + 1] = bank end
+    local warband = Skin:Need("WarbandBankFrame")
+    if warband then out[#out + 1] = warband end
+    return out
+end
+
+ParkBlizzardBank = function(park)
+    local frames = BankFrameCandidates()
+    if #frames == 0 then return end
+    -- 战斗中关鼠标这一半做不了（受保护子按钮）—— 排队到脱战补做（同 ParkBlizzardBags）。
+    if park and InCombat() then
+        ns:AfterCombat("bags-park-bank", function() ParkBlizzardBank(true) end)
+        return
+    end
+    for _, frame in ipairs(frames) do
+        if park then
+            Widget:Mute(frame, { depth = 2 })
+        else
+            Widget:Unmute(frame, { depth = 2 })
+        end
+    end
+end
+
+-- ---- 包裹管理折叠面板（作者 11-04 的 ①A：只放没有[受限]标记的动作） --------------
+-- 面板里三样：一键存入（`C_Bank.AutoDepositItemsIntoBank`）、关闭银行（`C_Bank.CloseBankFrame`）、
+-- 一行账（已购栏位 n/max + 银行空格 + 画出的物品数）。
+-- **故意不做**的两件事，理由钉在这儿免得下次有人手滑：
+--   ① 买银行栏位 = `C_Bank.PurchaseBankTab`，快照标 **[受限]** —— 我们的 Lua 点它就是
+--      历史 `UseContainerItem` 那一族越权（拦下并归到 MonetUI 名下）；
+--   ② 背包 ↔ 银行包互换要靠 Pickup 一族，而本客户端 `PickupInventoryItem` /
+--      `PutItemInBackpack` / `BuyBankSlot` / `GetNumBankSlots` **全部不存在**（逐个查过快照）。
+-- ⇒ 这两件事留在暴雪自己那块管理区上，`/mui bags bank off` 或 ✕ 关闭即放开。
+local bankTools, bankToolsBody, bankToolsInfo, bankToolsArrow
+local bankFree = 0   -- 最近一次银行扫描的空格数；物品数用上面那个 bankDrawn
+
+local function BankToolsSetting(key)
+    local db = ns:DB().bags or {}
+    return db[key]
+end
+
+local function SetBankToolsSetting(key, value)
+    local db = ns:DB()
+    db.bags = db.bags or {}
+    db.bags[key] = value
+end
+
+local function BankToolButton(parent, label, y, onClick)
+    local button = Widget:CreateFrame(nil, parent, 88, 20)
+    Widget:Theme(button, { thickness = 1, bgAlpha = 0.9 })
+    Widget:ButtonMaterial(button, { alpha = 0, weaveAlpha = 0.25 })
+    button:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, y)
+    button:EnableMouse(true)
+    button:RegisterForClicks("AnyUp")
+    local text = Widget:Font(button, 10, "pixel", "edge", "CENTER")
+    text:SetAllPoints()
+    text:SetText(label)
+    button:SetScript("OnClick", onClick)
+    return button
+end
+
+--- 一行账：栏位数与空格数都来自 C_Bank / Scan，读不出就写 "-"（绝不猜）。
+local function UpdateBankToolsInfo()
+    if not bankToolsInfo then return end
+    local bt = (Enum and Enum.BankType and Enum.BankType.Character) or 0
+    local got, max
+    if C_Bank and C_Bank.FetchNumPurchasedBankTabs then
+        local ok, v = pcall(C_Bank.FetchNumPurchasedBankTabs, bt)
+        got = ok and Secrets.Number(v) or nil
+    end
+    if C_Bank and C_Bank.FetchMaxNumBankTabs then
+        local ok, v = pcall(C_Bank.FetchMaxNumBankTabs, bt)
+        max = ok and Secrets.Number(v) or nil
+    end
+    bankToolsInfo:SetText(string.format("栏位 %s/%s · 空格 %s · 物品 %s",
+        got and tostring(got) or "-",
+        max and tostring(max) or "-",
+        tostring(bankFree or 0),
+        tostring(bankDrawn or 0)))
+end
+
+local function ApplyBankToolsFold()
+    local minimized = BankToolsSetting("bankToolsMinimized") and true or false
+    if bankToolsBody then
+        if minimized then bankToolsBody:Hide() else bankToolsBody:Show() end
+    end
+    if bankToolsArrow then
+        bankToolsArrow:SetText(minimized and "+" or "-")
+    end
+    if bankTools then
+        -- 折起来只留标题行；展开带按钮 + 账一行。高度变化会让"银行自由格"列重排，
+        -- 所以显式重排一次（拖过的窗不受影响）。
+        bankTools:SetHeight(minimized and 26 or 74)
+    end
+end
+
+EnsureBankTools = function()
+    if bankTools then
+        UpdateBankToolsInfo()
+        ApplyBankToolsFold()
+        return bankTools
+    end
+
+    bankTools = Widget:CreateFrame("MonetUIBankTools", UIParent, 200, 74)
+    bankTools.catKey = "bankTools"   -- 位置账走 SaveWindowPosition / WindowPosition（键不能是 nil）
+    Widget:Theme(bankTools, { thickness = 1, bgAlpha = 0.92 })
+    Widget:Shadow(bankTools, { size = 6, alpha = 0.5 })
+    Widget:Corners(bankTools)
+    bankTools:SetMovable(true)
+    bankTools:SetClampedToScreen(true)
+    bankTools:RegisterForDrag("LeftButton")
+    bankTools:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    bankTools:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        SaveWindowPosition(self)
+    end)
+
+    local header = Widget:Font(bankTools, 12, "pixel", "edge", "LEFT")
+    header:SetPoint("TOPLEFT", bankTools, "TOPLEFT", 26, -5)
+    header:SetText("包裹管理")
+    Widget:Rule(bankTools, header)
+
+    -- 折叠钮：`+` / `-` 像素字（点它整块收起，只留标题行）。
+    bankToolsArrow = Widget:Font(bankTools, 12, "pixel", "bright", "CENTER")
+    bankToolsArrow:SetPoint("TOPLEFT", bankTools, "TOPLEFT", 8, -5)
+    bankToolsArrow:SetWidth(12)
+    local fold = Widget:CreateFrame(nil, bankTools, 18, 18, nil, "Button")
+    fold:SetPoint("LEFT", bankToolsArrow, "CENTER", 0, 0)
+    fold:EnableMouse(true)
+    fold:RegisterForClicks("AnyUp")
+    fold:SetScript("OnClick", function()
+        SetBankToolsSetting("bankToolsMinimized", not (BankToolsSetting("bankToolsMinimized") and true or false))
+        ApplyBankToolsFold()
+    end)
+
+    bankToolsBody = Widget:CreateFrame(nil, bankTools, 200, 48)
+    bankToolsBody:SetPoint("TOPLEFT", bankTools, "TOPLEFT", 0, 24)
+    pcall(bankToolsBody.EnableMouse, bankToolsBody, false)
+
+    BankToolButton(bankToolsBody, "一键存入", 2, function()
+        local bt = (Enum and Enum.BankType and Enum.BankType.Character) or 0
+        if C_Bank and C_Bank.AutoDepositItemsIntoBank then
+            -- 文档无[受限]标记；仍包 pcall —— 真客户端若把它也算受限，报错只提示一次不刷屏。
+            local ok, err = pcall(C_Bank.AutoDepositItemsIntoBank, bt)
+            if not ok then Skin:WarnOnce("bankAutoDeposit", "一键存入失败: " .. tostring(err)) end
+            M:Refresh()
+        end
+    end)
+    BankToolButton(bankToolsBody, "放开暴雪", 2, function()
+        -- 买栏位 / 背包↔银行包互换只能在暴雪那块管理区上做（见上面那段理由），
+        -- 这颗就是"把那块还给你"的开关；再开一次银行（或 /mui bags bank）即收回去。
+        ParkBlizzardBank(false)
+        Skin:WarnOnce("bankToolsRelease",
+            "暴雪银行框已放开：栏位与换包请在那块上操作；重新开银行即恢复接管。")
+    end)
+    local buttons = { bankToolsBody:GetChildren() }
+    if #buttons >= 2 then
+        buttons[2]:ClearAllPoints()
+        buttons[2]:SetPoint("TOPLEFT", buttons[1], "TOPRIGHT", 6, 0)
+    end
+
+    bankToolsInfo = Widget:Font(bankToolsBody, 10, "pixel", "neutral", "LEFT")
+    bankToolsInfo:SetPoint("TOPLEFT", bankToolsBody, "TOPLEFT", 10, 26)
+
+    ApplyBankToolsFold()
+    UpdateBankToolsInfo()
+    return bankTools
+end
+
+-- 折叠面板贴在银行列的最下面一扇（"bank:free"）之下；没有就贴任务追踪左边同一列。
+local function LayoutBankTools()
+    if not bankTools then return end
+    if WindowPosition(bankTools.catKey or "bankTools") then return end
+    local anchorWin = windows["bank:" .. FREE_CAT.key]
+    local anchor = Setting("anchor") or {}
+    bankTools:ClearAllPoints()
+    if anchorWin and anchorWin:IsShown() then
+        bankTools:SetPoint("TOPLEFT", anchorWin, "BOTTOMLEFT", 0, -14)
+    elseif _G[anchor.frame] then
+        bankTools:SetPoint("TOPRIGHT", _G[anchor.frame], "TOPLEFT", (anchor.x or -18) - 340, (anchor.y or -28))
+    else
+        bankTools:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 40, -120)
+    end
+end
+
+
 --- 玩家又按了 B（关我们的窗）。一次开背包暴雪会 Show 好几个框，边沿天然合并成一次；
 --- TOGGLE_DEBOUNCE 挡掉重载瞬间的抖动。**不再 toggle**：开/关都显式，免得"回光返照"
 --- 把我们自己切来切去（2026-10-26 实机 bug 的根）。
@@ -1244,21 +1559,83 @@ function M:Initialize()
     end)
     EventBus:Register("BANKFRAME_CLOSED", function()
         bankOpen = false
-        -- 银行关了就把背包那几扇窗放回去（原来这里一关就再也不回来了）。
+        -- 银行关了：只收银行那几扇 + 折叠面板，并把暴雪框放开（停车是"我们接管"的
+        -- 那半边，接管结束就该还回去 —— 留着 alpha 0 的框下次进银行前没人能看见它）。
+        HideModeWindows("bank")
+        if bankTools then bankTools:Hide() end
+        ParkBlizzardBank(false)
+        -- 背包那几扇窗放回去（原来这里一关就再也不回来了）。
         -- 暴雪框的显隐归暴雪管（停车不碰它），这里只管我们自己的窗口。
         if shown then
             Rebuild("bags")
         else
-            for _, win in pairs(windows) do win:Hide() end
+            for _, win in pairs(windows) do
+                if ModeOf(win.catKey) == "bags" then win:Hide() end
+            end
         end
     end)
 end
 
 function M:HandleCommand(rest)
+    if rest == "bank off" then
+        -- 放开暴雪银行框（买栏位 / 换包要在它上面做），同时收我们的银行窗。
+        CloseAllBags("bank")
+        return true
+    end
     if rest == "bank" then
         shown = true
         Rebuild("bank")
         StartPolling()
+        return true
+    end
+    if rest == "probe" then
+        -- ④：把"银行到底该扫哪个容器索引"这件事变成一条命令能打全的账。
+        -- 逐索引只打**槽数**（读不出 = `-`），一行一个组，别刷长文（聊天框只留十几行）。
+        local function slotsOf(index)
+            local ok, v = pcall(C_Container.GetContainerNumSlots, index)
+            local n = ok and Secrets.Number(v) or nil
+            return n and tostring(n) or "-"
+        end
+        local groups = {
+            "主页候选 " .. table.concat((function()
+                local out = {}
+                for _, i in ipairs(BANK_PAGE_CANDIDATES) do out[#out + 1] = i .. ":" .. slotsOf(i) end
+                return out
+            end)(), " "),
+            "随身包 " .. table.concat((function()
+                local out = {}
+                for _, i in ipairs(BAGS_CARRIED) do out[#out + 1] = i .. ":" .. slotsOf(i) end
+                out[#out + 1] = "5:" .. slotsOf(BAG_REAGENT)
+                return out
+            end)(), " "),
+            "标签页 " .. table.concat((function()
+                local out = {}
+                for _, i in ipairs(BANK_TABS) do out[#out + 1] = i .. ":" .. slotsOf(i) end
+                return out
+            end)(), " "),
+        }
+        for _, line in ipairs(groups) do ns:Print("[bags.probe] " .. line) end
+
+        local bt = (Enum and Enum.BankType and Enum.BankType.Character) or 0
+        local function num(fn, arg)
+            if not (C_Bank and C_Bank[fn]) then return "无API" end
+            local ok, v = pcall(C_Bank[fn], arg)
+            local n = ok and Secrets.Number(v) or nil
+            return n and tostring(n) or "-"
+        end
+        ns:Print(("[bags.probe] C_Bank(Character): 已购 %s / 上限 %s · 能用 %s · 能看 %s")
+            :format(num("FetchNumPurchasedBankTabs", bt), num("FetchMaxNumBankTabs", bt),
+                tostring(C_Bank and C_Bank.CanUseBank and pcall(C_Bank.CanUseBank, bt)),
+                tostring(C_Bank and C_Bank.CanViewBank and pcall(C_Bank.CanViewBank, bt))))
+        ns:Print(("[bags.probe] Enum.BankType=%s · Enum.BagIndex=%s · 暴雪框 BankFrame=%s / Warband=%s")
+            :format(tostring(Enum and Enum.BankType ~= nil), tostring(Enum and Enum.BagIndex ~= nil),
+                Skin:Need("BankFrame") and "有" or "✗",
+                Skin:Need("WarbandBankFrame") and "有" or "✗"))
+        ns:Print(("[bags.probe] 我们这侧：mode=%s · 画出 %d 件 · 空格 %d · bankOpen=%s · shown=%s")
+            :format(tostring(activeMode), bankDrawn or 0, bankFree or 0,
+                tostring(bankOpen), tostring(shown)))
+        ns:Print("[bags.probe] 判读：主页候选里出现 >0 的那个就是本客户端的银行主页；"
+            .. "全是 '-' 就说明银行被 GameRule 关着或 LoD 未到 —— 那一刻 ParkBlizzardBank 不会收暴雪框（②A）。")
         return true
     end
     if rest == "refresh" then
@@ -1282,11 +1659,13 @@ function M:SetEnabled(enabled)
     if not enabled then
         StopPolling()
         for _, win in pairs(windows) do win:Hide() end
+        if bankTools then bankTools:Hide() end
         shown = false
         bagsVisualOpen = false
-        -- 模块关掉：取回停车（alpha 1 + 鼠标还回去），玩家继续用原生背包。
+        -- 模块关掉：取回停车（alpha 1 + 鼠标还回去），玩家继续用原生背包 / 银行。
         -- 守卫这时会因为 IsModuleEnabled 为假而停手。
         ParkBlizzardBags(false)
+        ParkBlizzardBank(false)
     else
         ParkBlizzardBags(true)
         StartBlizzardGuard()
