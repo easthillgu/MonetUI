@@ -89,6 +89,9 @@ node tools/sync-check.js         # 仓库 vs 已安装副本（退出码 0 = 游
 | 闸门入库 | `slot-info-probe` 18/0、`bank-parity-probe` 29→37/0、`report-probe` 30/0（它抓到一个 `table.concat(...,1,6)` 的真崩溃）、`frame-name-existence`（声明层对撞，只给线索） | `5a979e7` `1499f8a` `c773812` |
 | 两轮第三方研究 | TweaksForever（QoL，GPL）与 RurutiaSuite（工具箱，**All Rights Reserved**）⇒ 只取机制；吸收清单 #28–#39；负面做法升进 AGENTS（**绝不替换暴雪全局函数**、别调布局缓存函数） | `101e49a` `f2a2e1d` |
 | 拍板收口 | §5 十五项全部有结论：13=C（死注释块加"勿照抄"）、14=已办（分支+提交）、15=B（共存）、5=C+快照、8=C（不动材质常数）、9=B（✕ 维持 0.125） | `d8b12a7` `2283345` |
+| 同机插件普查 | 开服日**冲突地图**：`EnhanceQoLMover` 目录条目 `defaultEnabled = true` 且 `hooksecurefunc(frame,"SetPoint")` 事后重钉 ⇒"窗口位置改了又跳回去"**先判它**，别当我们的布局 bug；背包/单位框/资源条默认关。许可普查：EQOL 全家 / Lueur / QuestEcho / 163UI **未声明许可** ⇒ 按全权保留，只取机制 | `ad15543`（`docs/ANALYSIS-INSTALLED-ADDONS.md`） |
+| 今晚新能力 | `WhatsNew`（版本更新一次性提示，`/mui whatsnew` 可重看；无记录**不编内容**）+ **N4 运行期能力表 `Compat:Capability`**（三态不塌值 / 受限窗口不造实例 / cache 命中 / `/mui compat caps`） | `7d74bbd` `5d1346b` |
+| 探针家族 | 每条新能力都配**行为**探针（不是只 grep 源码）：report 30/0（抓到一个 `table.concat` 真崩溃）、whatsnew 15/0、capability 16/0、bank-parity 37/0、slot-info 18/0 | 同上 |
 
 **模块数**：18 → **20**（11-04 深夜新增 `Report`、`WhatsNew`），启动行应显示 `已加载 20/20 个模块`——
 **这是第一个判据**：任何"背包没窗、按钮没字"先看这一行（11-04 有过一次我部署了编译不过的
