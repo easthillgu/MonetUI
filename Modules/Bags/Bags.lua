@@ -366,6 +366,8 @@ local function Scan(bagIndexes)
     for _, cat in ipairs(CATEGORIES) do groups[cat.key] = {} end
 
     local free = 0
+    local empties = {}     -- 空格的**真实坐标** { bag=, slot= }：作者 11-04 要求"空格子能落东西"，
+                           -- 只报数量就永远做不出落点（占位壳没有容器/格子身份）。
     for _, bag in ipairs(bagIndexes) do
         local num = Secrets.Number(C_Container.GetContainerNumSlots(bag))
         if num and num > 0 then
@@ -380,6 +382,7 @@ local function Scan(bagIndexes)
                     -- 注意 `info.itemID` 这里只做**真值测试**（AGENTS：真值测试对机密值稳定），
                     -- 机密槽会走上面那条分支当"有物品"，不会虚报成空格。
                     free = free + 1
+                    empties[#empties + 1] = { bag = bag, slot = slot }
                 end
             end
         end
@@ -390,7 +393,7 @@ local function Scan(bagIndexes)
         if #list > 1 then SortItems(list) end
     end
 
-    return groups, free
+    return groups, free, empties
 end
 
 -- Quest items take the amber ring regardless of quality; poor/common keep the plain edge (Andromeda likewise demotes common to black).
@@ -487,6 +490,9 @@ local function AcquireButton(parent)
         Widget:Pulse(self, 1, 1, 1, 0.9)
         local rec = Marked(self, "bagRec")
         if not rec then return end
+        -- 空格子现在也是真按钮（会收到悬停）：`SetBagItem` 对空槽会弹出一个**没有内容的提示框**。
+        -- 真物品的 rec 一定带 itemID，所以拿它当门，空格子上什么都不显示。
+        if not rec.itemID then return end
         local qc = QualityBorder(rec)
         if qc then Widget:Pulse(self, qc.r, qc.g, qc.b, 1) end
         local tip = _G.GameTooltip
@@ -615,6 +621,10 @@ local function UpdateButton(shell, rec)
         else
             cd:Hide()
         end
+    elseif cd then
+        -- 没有 itemID（空格子也走这个函数）时必须显式收：按钮是**复用池**，
+        -- 上一件留下的冷却遮罩不清掉就会画在一个空位上。
+        cd:Hide()
     end
 
     -- 实机父链探针实锤：模板按钮**出生即隐藏**（btn shown=false、icon vis=false 但几何/贴图 ATP 全通
@@ -692,7 +702,6 @@ local function EnsureWindow(key)
     Skin:CloseButton(close)
 
     win.buttons = {}
-    win.slots   = {}   -- 「剩余空间」那行的空格子池（只有 free 窗用得到）
     win:SetMovable(true)
     win:SetClampedToScreen(true)
     win:RegisterForDrag("LeftButton")
@@ -743,65 +752,67 @@ local function FillWindow(win, items)
     win:SetShown(#items > 0)
 end
 
---- 一格"空的"背包格子：只有背板、描边和斜纹，没有图标、不接鼠标。
---- 衬底走 Widget:ButtonMaterial —— **和动作条空槽是同一份**（`monet_stripe_weave` 平铺在
---- BACKGROUND、ADD 混合、weaveAlpha 0.25，1 texel = 1 物理像素所以相邻格子相位连续）；
---- 描边与底色走 Widget:Theme，参数照抄 AcquireButton 给物品壳的那两行，
---- 这样"剩余空间"那一行的格子和上面装东西的格子看上去是同一种东西。
---- **不建 ItemButton**：纯装饰，因此没有"模板按钮战斗中不能出生"那条限制，
---- 战斗中重扫也照样能画（物品窗在战斗里缺格子是已知代价，这一行不该跟着缺）。
-local function AcquireFreeSlot(parent)
-    local shell = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    Widget:Theme(shell, { thickness = 1, bgAlpha = 0.8 })
-    Widget:ButtonMaterial(shell, { alpha = 0, weaveAlpha = 0.25 })
 
-    -- "+N" 写在格子正中（物品计数在右下角，那一档留给数字本身；这里没有图标可让位）。
-    local mark = Widget:Font(shell, 12, "pixel", "neutral", "CENTER", "OVERLAY",
-                             "THICKOUTLINE, MONOCHROME")
-    mark:SetPoint("CENTER", shell, "CENTER", 0, 0)
-    mark:SetText("")
-    Mark(shell, "markF", mark)
-    return shell
-end
+--- 画「剩余空间」。规则改过两次：玩家 2026-11-03 定"最多一行 + `+N`"；
+--- 2026-11-04 作者改判成**真槽位、最多 84 格**（多行），因为占位壳没有容器身份、
+--- 拖放落不到空位上 —— 一行 12 格的老规则连同它的 `+N` 一起作废，溢出提示改挂在最后一格。
+-- 空格子显示上限（作者 11-04 定：84 个足够，再多是浪费框体）。
+local FREE_MAX = 84
 
---- 画「剩余空间」：free = 这一趟扫描里的空槽总数。
---- 规则（玩家 2026-11-03 定）：**最多一行**（`columns` 格，尺寸同物品图标）。
----   free <= columns → 剩几个画几个，一格一个空格；
----   free >  columns → 前面照画，最后一格写 "+N"，N = 还没被画出来的那几个。
---- 两种情况合起来是同一个算式：`draw = min(free, columns)`、`extra = free - draw + 1`
---- （最后一格"代表"几个），`extra > 1` 才写字 —— 所以刚好一行的时候不会看到多余的 "+1"。
-local function FillFreeWindow(win, free)
+--- 「剩余空间」窗：格子里放的是**真 ItemButton**（绑 bag/slot），不是占位壳。
+--- 占位壳没有容器身份 ⇒ 拖放没有落点，玩家"能拖出来、放不进空格"（11-04 实机报的缺陷，
+--- 背包侧自始如此：暴雪自己的框被我们长期 alpha 0 停着，唯一能落东西的面就没了）。
+--- 身份为什么够：1.60 的 `ContainerFrameItemButtonMixin:GetBagID()` 写的是
+--- `return self.bagID or self:GetParent():GetID()` —— 壳就是父级、`UpdateButton` 里
+--- `shell:SetID(rec.bag)` + `btn:SetID(rec.slot)` 正好喂到它读的那两个口。
+--- 兼容旧调用：传数字（`HideModeWindows` 传 0）= 全清。
+local function FillFreeWindow(win, empties)
     local size    = Setting("iconSize")
     local gap     = Setting("gap")
     local columns = Setting("columns")
 
-    free = math.max(tonumber(free) or 0, 0)
-    local draw  = math.min(free, columns)
-    local extra = draw > 0 and (free - draw + 1) or 0
+    local list
+    if type(empties) == "table" then list = empties else list = {} end
+    local total = #list
+    local draw = math.min(total, FREE_MAX)
+    local hidden = total - draw
 
     for i = 1, draw do
-        local shell = win.slots[i]
+        local shell = win.buttons[i]
         if not shell then
-            shell = AcquireFreeSlot(win)
-            win.slots[i] = shell
+            shell = AcquireButton(win)
+            if not shell then           -- 战斗中模板按钮造不出来：本轮少画几格，脱战重排补齐
+                draw = i - 1
+                break
+            end
+            win.buttons[i] = shell
         end
+        local col = (i - 1) % columns
+        local row = math.floor((i - 1) / columns)
         shell:ClearAllPoints()
         shell:SetSize(size, size)
-        shell:SetPoint("TOPLEFT", win, "TOPLEFT", PAD + (i - 1) * (size + gap), -TITLE_H)
-        local mark = Marked(shell, "markF")
-        if mark then
-            -- extra 是我们自己算出来的普通数字，拼接安全（不是从游戏读的值）。
-            mark:SetText((i == draw and extra > 1) and ("+" .. tostring(extra)) or "")
+        shell:SetPoint("TOPLEFT", win, "TOPLEFT",
+            PAD + col * (size + gap), -(TITLE_H + row * (size + gap)))
+        -- 空 rec：只有坐标。texture / count / quality / ilvl 全 nil ⇒ UpdateButton 走"清空那一套"，
+        -- 但壳与按钮都是真的、ID 是对的 ⇒ 它就是一个可落东西的空位。
+        UpdateButton(shell, { bag = list[i].bag, slot = list[i].slot })
+        local count = Marked(shell, "countF")
+        if count then
+            -- 溢出提示写在最后一格正中（我们没有 markF 了，countF 在空格上没人用）。
+            count:SetPoint("CENTER", shell, "CENTER", 0, 0)
+            count:SetText((i == draw and hidden > 0) and ("+" .. tostring(hidden)) or "")
         end
         shell:Show()
     end
-    for i = draw + 1, #win.slots do
-        win.slots[i]:Hide()
+    for i = draw + 1, #win.buttons do
+        UpdateButton(win.buttons[i], nil)
     end
 
-    -- 宽度跟着实际画的格数收（画 3 格就不要留 10 格的空壳）；满一行时和别的分类窗完全等宽。
-    local w = PAD * 2 + draw * size + math.max(0, draw - 1) * gap
-    win:SetSize(w, TITLE_H + size + PAD)
+    local rows = draw > 0 and math.ceil(draw / columns) or 0
+    local perRow = math.min(draw, columns)
+    local w = PAD * 2 + perRow * size + math.max(0, perRow - 1) * gap
+    local h = TITLE_H + rows * size + math.max(0, rows - 1) * gap + PAD
+    win:SetSize(w, h)
     win:SetShown(draw > 0)
 end
 
@@ -986,7 +997,7 @@ local function Rebuild(bagType)
         end
     end
 
-    local groups, free = Scan(indexes)
+    local groups, free, empties = Scan(indexes)
     local drawn = 0
     for key, items in pairs(groups) do
         drawn = drawn + #items
@@ -1003,7 +1014,14 @@ local function Rebuild(bagType)
         bankFree = free
     end
     -- 「剩余空间」排在最后（FREE_CAT 在 ORDERED 里 order 最大，LayoutWindows 自然把它堆在末尾）。
-    FillFreeWindow(EnsureWindow(WinKey(FREE_CAT.key)), free)
+    -- 「剩余空间」排在最后（FREE_CAT 在 ORDERED 里 order 最大，LayoutWindows 自然把它堆在末尾）。
+    -- 传**真实坐标表**而不是数量：那些格子现在得是能落东西的真槽位。
+    -- ⚠ 只对**背包侧**开：作者 11-04 的要求是"修背包侧"，而银行索引的语义还没定性
+    --   （12.1.5 实测 6..12 每个都报 98 槽，同一物理空格极可能在多个索引里重复出现 ⇒
+    --   真槽位会把拖放绑到错槽位，还会刷出一面几百格的假网格）。明天用 `/mui bags probe`
+    --   的逐索引行定完性，再把银行侧接上。银行侧接管本来也默认 off（暴雪框照旧能用）。
+    FillFreeWindow(EnsureWindow(WinKey(FREE_CAT.key)),
+        activeMode == "bags" and empties or {})
 
     LayoutBothModes()
     RestoreDragged()

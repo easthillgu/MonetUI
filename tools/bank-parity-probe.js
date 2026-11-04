@@ -113,5 +113,22 @@ ok(/SetBankToolsSetting\("bankToolsMinimized"/.test(SRC),
 ok(/local button = Widget:CreateFrame\(nil, parent, 88, 20, nil, "Button"\)/.test(SRC),
   'E5 面板钮建成 Button（`Widget:CreateFrame` 不传 kind 默认 Frame，Frame 没有 RegisterForClicks）');
 
+// ---------------------------------------------------------------- F 空格真槽位（#25 背包侧）
+// 玩家 11-04 实机："能拖出来、放不进空格"，背包→背包同样坏 —— 占位壳没有容器身份。
+const FREEFN = (SRC.match(/local function FillFreeWindow\(win, empties\)[\s\S]*?\nend\n/) || [''])[0];
+ok(FREEFN !== '', 'F0 FillFreeWindow 函数体可定位（定位不到则 F3/F4 全是空判）');
+ok(/empties\[#empties \+ 1\] = \{ bag = bag, slot = slot \}/.test(SRC),
+  'F1 Scan 收集空格的真实坐标 (bag,slot)，不再只报数量');
+ok(/local FREE_MAX = 84/.test(SRC) && /math.min\(total, FREE_MAX\)/.test(SRC),
+  'F2 显示上限 84（作者定的数），超出走 +N，不再最多一行');
+ok(/shell = AcquireButton\(win\)/.test(FREEFN) && /UpdateButton\(shell, \{ bag = list\[i\]\.bag, slot = list\[i\]\.slot \}\)/.test(FREEFN),
+  'F3 空格用真 ItemButton + UpdateButton 绑身份（落点靠 GetBagID 的父级 GetID 兜底）');
+ok(FREEFN !== '' && !/AcquireFreeSlot/.test(FREEFN),
+  'F4 占位壳工厂已删（留着就会有第二条"看着像格子但不能落"的路径）');
+ok(/activeMode == "bags" and empties or \{\}/.test(SRC),
+  'F5 银行侧暂时不接（索引语义未定性：6..12 各报 98 槽，重复坐标会把拖放绑错槽位）');
+ok(/elseif cd then/.test(SRC) && /if not rec.itemID then return end/.test(SRC),
+  'F6 空格复用清冷却遮罩 + 空槽悬停不弹空提示框');
+
 console.log(`bank-parity-probe: ${pass} 过 / ${fail} 失`);
 process.exit(fail === 0 ? 0 : 1);
