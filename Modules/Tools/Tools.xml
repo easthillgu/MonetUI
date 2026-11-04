@@ -6,7 +6,6 @@
     2. Durability.lua - 装备耐久度提示
     3. Toast.lua - 通知提示条
     4. Atmosphere.lua - 氛围暗角层
-    6. Report.lua - /mui report 诊断包（环境·设置差异·提示历史·台账·同机插件）
     5. DevTools.lua - 只读探针（perf / skins closes|inset|arrows）
     6. Report.lua - /mui report 诊断包（环境·设置差异·提示历史·美化台账·同机插件；只读）
     
