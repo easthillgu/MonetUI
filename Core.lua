@@ -1342,6 +1342,10 @@ local function HandleSlash(message)
             local arg = string.lower(rest or "")
             if string.find(arg, "^find") then
                 Compat:Find(string.match(arg, "^find%s+(.*)"))
+            elseif arg == "caps" then
+                -- N4：只报"代码已经问过哪些能力、答案是什么"，不造任何实例（报告命令不许改运行期状态）
+                ns:Print("|cffffd100能力表|r（未探测 = 还没人问过；要现探就照常跑 /mui compat）")
+                for _, line in ipairs(Compat:ListCapabilities()) do ns:Print("  " .. line) end
             elseif type(Compat.Print) == "function" then
                 Compat:Print({ bad = string.find(arg, "bad") ~= nil, tmpl = string.find(arg, "tmpl") ~= nil })
             else

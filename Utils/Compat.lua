@@ -193,6 +193,117 @@ local RULES = {
     { "EncounterJournalDisabled", "冒险指南被关" },
 }
 
+-- ============================================================================
+-- N4 · 运行期能力表（给代码用的判断，不是给人看的报告）
+-- ============================================================================
+-- 与上面 WATCH 的分工：WATCH 是"跑一趟 /mui compat 打全表"；这里是**模块想知道
+-- "这台客户端有没有 X"时的唯一出口**。以前这件事散在各文件里靠记忆写 `if`，
+-- 而本仓最硬的一条判例就是：同一句"这台客户端没有 X"在 12.1.5 与 1.60 可以相反
+-- （`SecureHandlerClickTemplate` 前脚测出"无"，后脚在 1.60 整组都有）。
+--
+-- 三条硬规矩（都是学费换来的）：
+--   ① **三态**：true / false / nil（读不出）。**绝不把 nil 塌成 false**，也绝不塌成 0 ——
+--      判例：`Secrets.CanMeasureHealth` 当门，结果血量文字整段空白还不报错；受限窗口里
+--      `ResolveObject` 本来就会读不出，那种"不知道"必须留着下次再问。
+--   ② **会造对象的探针不在运行期随手跑**：只有 `needsFrame = true` 的条目才允许造实例，
+--      且受限窗口里直接返回 nil（不造）。判例：探 `ActionBarButtonTemplate` 会自己跑
+--      OnLoad 报一串参数错；自建 `AuraContainer` 在战斗里 Show 会连环 ADDON_ACTION_BLOCKED。
+--   ③ **只 cache 确定值**：nil 不进 cache（下次重试）；造过实例的条目记 attempted，
+--      绝不重复造框。
+local CAPABILITIES = {
+    secretGate   = { path = "canaccessvalue",   note = "读值前置（Secrets.CanRead 用它）" },
+    secretProbe  = { path = "issecretvalue",    note = "老前置，只当兜底" },
+    restrictionApi = { path = "C_RestrictedActions.IsAddOnRestrictionActive",
+                       note = "六类受限窗口账本（ns:IsRestricted 的来源）" },
+    combatFlagNamespaced = { path = "C_RestrictedActions.InCombatLockdown",
+                       note = "两客户端结论相反的那条：12.1.5 无，1.60 待验" },
+    scriptsAllowed = { path = "RunScript",      note = "被 GameRule 关掉时诊断只能走 /mui" },
+    gameRuleRead   = { path = "C_GameRules.IsGameRuleActive", note = "RULES 那一组的前提" },
+    userWaypoint   = { path = "C_Map.SetUserWaypoint",
+                       note = "普查旁证：同机 OpenMap/Polestar 用它成功" },
+    exploredMapTextures = { path = "C_MapExplorationInfo.GetExploredMapTextures",
+                       note = "地图迷雾主路径（旧的「部分受限」判断要下调）" },
+    nameplateLookup = { path = "C_NamePlate.GetNamePlateForUnit",
+                       note = "softinteract 高亮 / 姓名板能力入口" },
+    auraContainerLoD = { addon = "Blizzard_AuraContainer",
+                       note = "战斗光环顶班的加载前提（模板本身另开一条）" },
+    secureClickHandler = { template = "SecureHandlerClickTemplate", needsFrame = true,
+                       note = "只有真造出来才作数；受限窗口里不造" },
+}
+
+local capCache, capTried = {}, {}
+
+--- 只查名字/函数在不在，不造任何东西。返回 true / false / nil（读不出）。
+local function PathCapability(path)
+    local ok, obj = pcall(ns.ResolveObject, path)
+    if not ok then return nil end            -- 中间一层被拒 = 不知道，不是「没有」
+    if obj == nil then return false end
+    local t = type(obj)
+    if t == "function" or t == "table" or t == "userdata" then return true end
+    return false
+end
+
+--- LoD 插件：加载状态是"能不能用"的第一道门（不加载，模板再真也白搭）。
+local function AddonCapability(name)
+    if type(C_AddOns) ~= "table" then return nil end
+    if type(C_AddOns.IsAddOnLoaded) == "function" then
+        local ok, loaded = pcall(C_AddOns.IsAddOnLoaded, name)
+        if not ok then return nil end
+        if loaded then return true end
+    end
+    if type(C_AddOns.GetAddOnInfo) ~= "function" then return nil end
+    local ok, _, _, loadable = pcall(C_AddOns.GetAddOnInfo, name)
+    if not ok then return nil end
+    return (loadable and true) or false   -- 没加载但可加载 = true（调用方自己会去 LoadAddOn）
+end
+
+--- 求一条能力的真值；可能返回 nil = 现在还不知道（调用方必须能处理「不知道」）。
+local function Evaluate(key, entry)
+    if entry.path then return PathCapability(entry.path) end
+    if entry.addon then return AddonCapability(entry.addon) end
+    if entry.template then
+        if entry.needsFrame then
+            -- 规矩 ②：造实例的探测只在明确不受限的时点做，且一辈子只造一次。
+            if ns.IsRestricted and ns:IsRestricted() then return nil end
+            if capTried[key] then return capCache[key] end
+            capTried[key] = true
+            local found, note = TemplateExists(entry.template, entry.method)
+            if found == nil then return nil end       -- 造不出来分不出「没有」与「被拒」
+            capCache[key .. ":note"] = note
+            return (found and true) or false
+        end
+        return Exists(entry.template)
+    end
+    return nil
+end
+
+--- 模块用这一个入口问能力。三态：true / false / nil（不知道）。第二返回值是附注。
+function Compat:Capability(key)
+    local entry = CAPABILITIES[key]
+    if not entry then return nil, "未知能力名" end
+    local cached = capCache[key]
+    if cached ~= nil then return cached, capCache[key .. ":note"] end
+    local value = Evaluate(key, entry)
+    if value ~= nil then capCache[key] = value end    -- 规矩 ①：nil 不进 cache
+    return value, capCache[key .. ":note"]
+end
+
+--- 列全部能力（`/mui compat caps`）：只报**已经问过**的和"未探测"，
+--- 绝不在这里造任何实例 —— 报告命令不许改变运行期状态。
+function Compat:ListCapabilities()
+    local keys = {}
+    for k in pairs(CAPABILITIES) do keys[#keys + 1] = k end
+    table.sort(keys)
+    local out = {}
+    for _, k in ipairs(keys) do
+        local v = capCache[k]
+        out[#out + 1] = ("%s = %s  （%s）"):format(k,
+            v == true and HAVE or (v == false and HAVE_NOT or "|cffffa940未探测|r"),
+            CAPABILITIES[k].note or "")
+    end
+    return out
+end
+
 --- 读一条 GameRule 的生效状态。返回 state, 附注：
 ---   "active" 生效 / "inactive" 没生效 / "unknown" 读不出（调用被拒或 API 不在）
 ---   "notarule" 这个客户端的枚举里根本没有这条（那是好消息，不算与假设不符）
