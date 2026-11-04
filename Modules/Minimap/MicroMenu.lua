@@ -54,29 +54,36 @@ local ENTRIES = {
     { label = "商店", buttons = { "StoreMicroButton" } },
     { label = "帮助", buttons = { "HelpMicroButton" } },
     { label = "设置", buttons = { "MainMenuMicroButton" },
-      action = function()
+      -- 只有这条允许 Lua 直调：`Settings.OpenToCategory` 是客户端 C 侧 API，不会把暴雪的
+      -- Lua 面板链拉进我们的执行环境（对比：`ToggleGameMenu` 是暴雪 Lua 函数，已撤掉）。
+      luaAction = function()
         local settings = _G.Settings
         if settings and type(settings.OpenToCategory) == "function" and settings.INTERFACE_CATEGORY_ID then
             return settings.OpenToCategory(settings.INTERFACE_CATEGORY_ID)
         end
-        if type(_G.ToggleGameMenu) == "function" then return _G.ToggleGameMenu() end
       end },
 }
 
---- 这一行的动作：优先用微型按钮自己的 OnClick（和点那一排按钮一模一样），
---- 按钮不在（零售 12.x 把背包/地图/日历那几个撤了）就用备用的开关函数。
-local function ActionFor(entry)
+--- 这一行的目标：拿暴雪那颗微型按钮**本身**（不是它的 OnClick 函数！）。
+--- ⚠ 以前这里写成 `pcall(GetScript(button,"OnClick"))` 再在我们的 Lua 里调用那个函数 ——
+--- 11-05 开服实测这是 P0：`TextStatusBar.lua:110 attempt to compare a secret number value
+--- (execution tainted by 'MonetUI')`，栈根在 `MicroMenu.lua:74`。把暴雪的 Lua 代码拉进我们的
+--- 执行环境跑，等于让它的机密值比较记到我们账上，每个点角色/背包的玩家都会看到一条红。
+--- 正解是安全转发：我们的行做成 `SecureActionButtonTemplate`，属性 `type="click"` +
+--- `click=<那颗按钮>`，由客户端在受限环境里替我们点它。
+local function TargetButtonFor(entry)
     for _, name in ipairs(entry.buttons or {}) do
         local button = _G[name]
-        if button and type(button.GetScript) == "function" then
-            local ok, fn = pcall(button.GetScript, button, "OnClick")
-            if ok and type(fn) == "function" then
-                return function() pcall(fn, button) end
-            end
-        end
+        if button and type(button.GetName) == "function" then return button end
     end
-    if type(entry.action) == "function" then return entry.action end
     return nil
+end
+
+--- 只剩"纯 C_* API"可以留在 Lua 里直接调（不牵动暴雪的 Lua 面板链，也不会把机密值比较
+--- 带进我们的环境）。`Settings.OpenToCategory` 属于这类；`ToggleGameMenu` 属于暴雪 Lua 函数，
+--- **不再当备用动作**（以前会走到它，正是那条红字的来源之一）。
+local function SafeActionFor(entry)
+    return (type(entry.luaAction) == "function") and entry.luaAction or nil
 end
 
 --- 菜单贴着地图左上角展开（向左下），比"跟着鼠标跑"稳：地图本来就在屏幕右下角，
@@ -96,9 +103,14 @@ local function Build()
     rows = {}
     local y = -4
     for _, entry in ipairs(ENTRIES) do
-        local action = ActionFor(entry)
-        if action then
-            local row = CreateFrame("Button", nil, frame)
+        local target = TargetButtonFor(entry)
+        local luaAction = target and nil or SafeActionFor(entry)
+        if target or luaAction then
+            -- 有可转发的暴雪按钮 ⇒ SecureActionButtonTemplate（由客户端安全地"代点"）；
+            -- 只有纯 C_* 动作时才用普通按钮。属性只写在我们自己造的按钮上（AGENTS 允许的那条路）。
+            local row = target
+                and CreateFrame("Button", nil, frame, "SecureActionButtonTemplate")
+                or  CreateFrame("Button", nil, frame)
             row:SetPoint("TOPLEFT", frame, "TOPLEFT", 3, y)
             row:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -3, y)
             row:SetHeight(ROW_H)
@@ -109,10 +121,19 @@ local function Build()
             label:SetPoint("RIGHT", row, "RIGHT", -4, 0)
             label:SetText(entry.label)
 
-            row:SetScript("OnClick", function()
-                pcall(action)
-                M:Close()
-            end)
+            if target then
+                row:RegisterForClicks("LeftButtonUp")
+                pcall(row.SetAttribute, row, "type", "click")
+                pcall(row.SetAttribute, row, "click", target)
+                -- PostClick 是我们自己的收尾钩，允许在安全按钮上挂：只关菜单，不碰暴雪的东西。
+                row:SetScript("PostClick", function() M:Close() end)
+            else
+                row:RegisterForClicks("LeftButtonUp")
+                row:SetScript("OnClick", function()
+                    pcall(luaAction)
+                    M:Close()
+                end)
+            end
             row:HookScript("OnEnter", function() Widget:ColorText(label, "highlight") end) -- TAINT-OK: row 是自建微型菜单行
             row:HookScript("OnLeave", function() Widget:ColorText(label, "neutral") end) -- TAINT-OK: 同上
 
