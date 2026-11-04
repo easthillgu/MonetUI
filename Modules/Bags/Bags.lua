@@ -1232,7 +1232,9 @@ local function BankToolButton(parent, label, y, onClick)
     local button = Widget:CreateFrame(nil, parent, 88, 20, nil, "Button")
     Widget:Theme(button, { thickness = 1, bgAlpha = 0.9 })
     Widget:ButtonMaterial(button, { alpha = 0, weaveAlpha = 0.25 })
-    button:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, y)
+    -- y 传进来是"往下多少像素"，所以这里取负：TOP 系锚点的 y 只有负数才向下
+    -- （写成 +y 会把整块内容顶到面板上方，压住上一扇窗 —— 11-04 实机报的那个重叠）。
+    button:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, -y)
     button:EnableMouse(true)
     button:RegisterForClicks("AnyUp")
     local text = Widget:Font(button, 10, "pixel", "bright", "CENTER")
@@ -1325,7 +1327,7 @@ EnsureBankTools = function()
     end)
 
     bankToolsBody = Widget:CreateFrame(nil, bankTools, 200, 48)
-    bankToolsBody:SetPoint("TOPLEFT", bankTools, "TOPLEFT", 0, 24)
+    bankToolsBody:SetPoint("TOPLEFT", bankTools, "TOPLEFT", 0, -24)
     pcall(bankToolsBody.EnableMouse, bankToolsBody, false)
 
     BankToolButton(bankToolsBody, "一键存入", 2, function()
@@ -1367,7 +1369,7 @@ EnsureBankTools = function()
     end
 
     bankToolsInfo = Widget:Font(bankToolsBody, 10, "pixel", "neutral", "LEFT")
-    bankToolsInfo:SetPoint("TOPLEFT", bankToolsBody, "TOPLEFT", 10, 26)
+    bankToolsInfo:SetPoint("TOPLEFT", bankToolsBody, "TOPLEFT", 10, -26)
 
     ApplyBankToolsFold()
     UpdateBankToolsInfo()
