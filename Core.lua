@@ -536,7 +536,7 @@ local function RunAfterCombat(key, fn)
     return ok
 end
 
-local function FlushAfterCombat()
+local function FlushNow()
     -- 动作执行中可能又往队列里加东西：先把整个队列摘走再跑，新排入的落在空表里
     local order, pending = afterCombatOrder, afterCombatPending
     afterCombatOrder, afterCombatPending = {}, {}
@@ -549,18 +549,49 @@ local function FlushAfterCombat()
     end
 end
 
+local flushTickQueued = false
+
+--- 排空**必须挪一拍**：本客户端先派 PLAYER_REGEN_ENABLED、之后才翻 `InCombatLockdown()`
+--- （2026-10-27 实机探针 + harness 断言二 A6 复现：安全头 `SetAttribute`、安全按钮 `SetSize`
+--- 在排空当拍照被拒）。`ns:IsRestricted()` 那一拍已经答"自由"（它读事件记的 combatState），
+--- 所以**判据拦不住这一刀** —— 只有把动作推到标志翻完之后才真写得进去。Bags 的停车同款做法。
+local function FlushAfterCombat()
+    if type(C_Timer) ~= "table" or type(C_Timer.After) ~= "function" then
+        FlushNow()      -- 没有 C_Timer 的客户端：退回原行为（派发当拍做，最多被拒一次）
+        return
+    end
+    if flushTickQueued then return end
+    flushTickQueued = true
+    C_Timer.After(0, function()
+        flushTickQueued = false
+        -- 新的一拍里标志已翻，此时再问一次才算数：仍在别的受限窗口（Map / Chat …）
+        -- 就整队留着，等解禁事件或下次脱战再排，不硬写。
+        if ns.IsRestricted and ns:IsRestricted() then return end
+        FlushNow()
+    end)
+end
+
 -- **在 Core 加载期就注册，不要等第一次排队**：EventBus 按注册序派发，早点注册才能保证
--- 排空一定早于模块自己挂的 PLAYER_REGEN_ENABLED 处理（UnitFrames / BuffFrame 的注释
--- "由 ns:AfterCombat 在更早的统一排空里做掉"依赖的就是这一条；旧写法是惰性注册，谁先
--- 排一次队就决定了顺序，等于随机）。
+-- 排空早于模块自己挂的 PLAYER_REGEN_ENABLED 处理（旧写法是惰性注册，谁先排一次队就决定了
+-- 顺序，等于随机）。注：现在排空本身被推到**下一个 tick**，这条注册序保证的是"队列由 Core
+-- 先摘走"，不再保证模块回调跑之前动作已落地 —— 依赖"更早的统一排空"的模块按新序各做各的，
+-- 最坏多等一拍。
 ns.EventBus:Register("PLAYER_REGEN_ENABLED", FlushAfterCombat)
+-- 那个新 tick 若发现还在别的受限窗口里（Map / Chat 一类）会整队留着 —— 没有下一次脱战就永远
+-- 没人做。换边事件就是那个"下一次"（Core 自己派发，见下面六类限制那本账）。
+ns.EventBus:Register("MONETUI_RESTRICTION_CHANGED", FlushAfterCombat)
 
 function ns:AfterCombat(key, fn, mode)
     if type(key) ~= "string" or type(fn) ~= "function" then return end
 
     -- 当场能做的条件从"不在战斗中"放宽成"不在任何一类受限窗口里"（见下面 6 类限制）：
     -- Map / Chat 这类限制生效时写入同样会被拒，排到队列里等状态清掉。
-    if mode ~= "regen" and not ns:IsRestricted() then
+    -- 再加一道**原生标志**前置：脱战派发当拍 `IsRestricted()` 已答"自由"，但客户端此刻仍
+    -- 锁着（先派事件后翻标志）—— 那一刻当场跑等于替模块写被拒，所以让它排队，由上面
+    -- `FlushAfterCombat` 的新 tick 做掉。两处判据必须同源：谁收紧"能不能写"，这里就得跟着收紧，
+    -- 否则守卫排队、这边同步重跑 = 互顶成死循环（11-04 实测 962 层爆栈那条）。
+    if mode ~= "regen" and not ns:IsRestricted()
+        and not (InCombatLockdown and InCombatLockdown()) then
         RunAfterCombat(key, fn)
         return
     end
