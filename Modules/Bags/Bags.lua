@@ -1661,9 +1661,9 @@ function M:HandleCommand(rest)
             :format(tostring(Enum and Enum.BankType ~= nil), tostring(Enum and Enum.BagIndex ~= nil),
                 Skin:Need("BankFrame") and "有" or "✗",
                 Skin:Need("WarbandBankFrame") and "有" or "✗"))
-        ns:Print(("[bags.probe] 我们这侧：mode=%s · 画出 %d 件 · 空格 %d · bankOpen=%s · shown=%s")
-            :format(tostring(activeMode), bankDrawn or 0, bankFree or 0,
-                tostring(bankOpen), tostring(shown)))
+        ns:Print(("[bags.probe] 我们这侧：mode=%s · bankOpen=%s · shown=%s · 上次银行重绘：画出 %d 件 / 空格 %d")
+            :format(tostring(activeMode), tostring(bankOpen), tostring(shown),
+                bankDrawn or 0, bankFree or 0))
 
         -- P2.4（②A 保险）的**判据**，不看肉眼：我们的决定 + 暴雪框的实际状态。
         -- 决定 = bankDrawn>0 才接管；状态 = 每个框的 muted / alpha / 鼠标三件事。
@@ -1684,11 +1684,18 @@ function M:HandleCommand(rest)
                     okS and tostring(vis) or "读不出"))
         end
         local verdict
-        if (bankDrawn or 0) > 0 then
-            verdict = "画出银行物品 → 应当接管（暴雪框 alpha 0 + 关鼠标）；若我们的窗里没东西 = 索引对了但渲染断了"
+        -- 第一分叉必须是"银行现在开没开"，不是上一次重绘的计数：11-04 实测就是拿陈旧的
+        -- `bankDrawn>0` 当现状，印出"应当接管"而同一行观测写着 `接管=false` —— 判读和观测
+        -- 自相矛盾的命令没有价值，明天还会把我们带错方向。
+        if not bankOpen then
+            verdict = "银行没开 → **不该接管**：上面每行都该是 接管=false · alpha=1"
+                .. "（IsShown 归暴雪自己，不是判据）。这一档就是 ②A 的放开态，也是出问题时的逃生通道。"
+        elseif (bankDrawn or 0) > 0 then
+            verdict = "银行开着且画出物品 → 应当接管（暴雪框 alpha 0 + 关鼠标）；"
+                .. "若我们的窗里没东西 = 索引对了但渲染断了"
         else
-            verdict = "没画出银行物品 → **不该接管**：上面每一行都该是 接管=false · alpha=1 · 鼠标=true，"
-                .. "否则就是 P0（银行被我们藏成空框），立刻 `/mui bags bank off`"
+            verdict = "银行开着但一件都没画出 → **不该接管**：每行都该是 接管=false · alpha=1；"
+                .. "若写着 接管=true 就是 P0（空框被藏起来），当场 `/mui bags bank off`"
         end
         ns:Print("[bags.probe] 判读：" .. verdict)
         return true
