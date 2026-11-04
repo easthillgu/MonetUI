@@ -147,9 +147,26 @@ end
 
 --- 一次性提示（同一 topic 只打一次）：Apply 会被三个事件反复触发，不打一次就是几十条同文案。
 local warned = {}
+-- 提示历史（供 `/mui report` 打包）：`warned` 只有"打没打过"的布尔，出事时最需要的
+-- 是"这一趟到底提示过哪几条"——聊天框早就滚掉了，SavedVariables 里又没有。
+-- 有界环：12 条封顶（再多也没人读），只存字符串，不存对象引用。
+local warnRing, WARN_RING_MAX = {}, 12
+local function rememberWarn(topic, message)
+    warnRing[#warnRing + 1] = { topic = topic, message = message }
+    if #warnRing > WARN_RING_MAX then table.remove(warnRing, 1) end
+end
+
+--- 本会话打过的所有一次性提示（副本，调用方随便读；`/mui report` 用它）。
+function Skin:WarnRing()
+    local out = {}
+    for i = 1, #warnRing do out[i] = { topic = warnRing[i].topic, message = warnRing[i].message } end
+    return out
+end
+
 function Skin:WarnOnce(topic, message)
     if warned[topic] then return end
     warned[topic] = true
+    rememberWarn(topic, message)
     ns:Print(message)
 end
 
