@@ -378,6 +378,31 @@ function M:Dress(spec, opts)
     opts = opts or {}
     local list = Skin:AsList(spec)
 
+    -- **非框体条目在门口就挡掉**。名单里会有"命中但不是框体"的东西（Mixin 表 / 函数 ——
+    -- `TRADE_MONEY_FRAMES` 里的 `TradePlayerInputMoneyFrame` 就是），它们带着共享的方法名，
+    -- 能一层层过掉 `type(x.GetChildren)=="function"` 这类判断，然后在**每一个**真正的方法调用上
+    -- 抛 `calling 'X' on bad self (Attempt to access forbidden object …)`。11-04 实机那行
+    -- 「无名框｜…Skins.lua:286…｜来源档 trade」就是这么长出来的：不是有个神秘禁框，
+    -- 是我们把一张表当成了框体递进去。
+    -- `Skin:IsScriptObject` 是唯一靠得住的前置（它 pcall `GetObjectType`，真取不到的也一并挡掉，
+    -- 那种东西本来一个美化都做不了）。身份留在 Need 台账里（`/mui skins diagnose bad` 能看到
+    -- `notObject:mixin 表`），这里只汇总成一行，不再逐次抛。
+    local real, dropped = {}, 0
+    for i = 1, #list do
+        local obj = list[i]
+        if obj ~= nil and Skin:IsScriptObject(obj) then
+            real[#real + 1] = obj
+        elseif obj ~= nil then
+            dropped = dropped + 1
+        end
+    end
+    if dropped > 0 then
+        Skin:WarnOnce("dressDrop:" .. tostring(Skin.scope or "-"),
+            ("档「%s」跳过 %d 个非框体条目（Mixin 表 / 函数 —— /mui skins diagnose bad 读那本账）")
+                :format(tostring(Skin.scope or "-"), dropped))
+    end
+    list = real
+
     -- **一个控件炸了不能带走整面板**。2026-10-30 实机（12.1.5）：45 个窗口里 11 个整批红字，
     -- 原因只是名单里某个老窗口名在这版客户端已经变成一张表 —— 它被当成 parent 交给 CreateFrame，
     -- 抛 `Usage: CreateFrame(...)`，于是那个窗口一点没美化。逐对象 pcall + 一次性报名字，
