@@ -411,10 +411,17 @@ function M:Dress(spec, opts)
     end
     if #skipped > 0 then
         table.sort(skipped)
+        -- 这一行原来写成"以前它们每个方法调用都静默抛，一个像素也没涂上"—— 那是**说过头了**：
+        -- 这一批里 `InspectFrame` / `CollectionsJournal` / `AchievementFrame` / `EncounterJournal`
+        -- / `PlayerSpellsFrame` / `ClassTrainerFrame` / `CalendarFrame` / `ProfessionsFrame` 在
+        -- 1.60 的 FrameXML 里都是**声明过的窗**，此刻拿到的是 Mixin 表 ⇒ 更可能是"窗还没被造出来，
+        -- 这个名字现在指向 mixin 表"（LoD 时序），不是名字写错。真判定要靠开窗后复查。
         Skin:WarnOnce("dressDrop:" .. tostring(Skin.scope or "-"),
-            ("档「%s」跳过 %d 个非框体条目（Mixin 表 / 函数 —— 以前它们每个方法调用都静默抛，"
-                .. "一个像素也没涂上）：%s"):format(
-                tostring(Skin.scope or "-"), #skipped, table.concat(skipped, ", ")))
+            ("档「%s」此刻跳过 %d 个非框体条目：%s")
+                :format(tostring(Skin.scope or "-"), #skipped, table.concat(skipped, ", ")))
+        Skin:WarnOnce("dressDropHint",
+            "非框体有两种：① 窗还没出生（开了那个窗再跑 /mui skins diagnose，变成「存在」就是时序）"
+                .. "② 这客户端真没这名字（一直「不存在」才要改名，用 /mui compat find <片段> 扫真名）")
     end
     list = real
 

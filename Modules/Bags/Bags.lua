@@ -1748,11 +1748,14 @@ function M:HandleCommand(rest)
         for i = 1, #rects do
             for j = i + 1, #rects do
                 local a, b = rects[i], rects[j]
+                -- 纵向重叠 = "a 的底在 b 的顶之下" **且** "b 的底在 a 的顶之下"。
+                -- 上一版写成 `a.b > b.t`（那是"分离"的条件），于是把 14px 的合法间距
+                -- 全报成重叠，打出来的纵向数是负数 —— 负数就是间隙，一眼该识别出来。
                 local hz = a.l < b.r and b.l < a.r
-                local vt = b.b < a.t and a.b > b.t
-                if hz and vt then
-                    local ox = math.min(a.r, b.r) - math.max(a.l, b.l)
-                    local oy = math.min(a.t, b.t) - math.max(a.b, b.b)
+                local vt = a.b < b.t and b.b < a.t
+                local ox = hz and (math.min(a.r, b.r) - math.max(a.l, b.l)) or 0
+                local oy = vt and (math.min(a.t, b.t) - math.max(a.b, b.b)) or 0
+                if hz and vt and ox > 0 and oy > 0 then
                     ns:Print(("  ⚠ 重叠 %s × %s：横向 %.0fpx · 纵向 %.0fpx"):format(
                         a.key, b.key, ox, oy))
                 end
