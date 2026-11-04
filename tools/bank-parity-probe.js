@@ -43,6 +43,23 @@ ok(/local masterKey = \{ bags = nil, bank = nil \}/.test(SRC),
 ok(/if mode == "bank" then\s*x = x - bagsColumnWidth\(\) - spacing/.test(SRC),
   'A5 银行列贴在背包列**再往左**，宽度当场量（不写死常数）');
 ok(/银行 · /.test(SRC), 'A6 两套窗同屏，标题带"银行 · "前缀');
+// A7/A8：11-04 实机判例 —— masterKey 改成按模式的表之后，`M:Toggle(false)` 里那行
+// 旧的重置还写着 `= nil`，下一次 DesignateMaster 索引 nil 直接抛，症状是"按 B 没反应"。
+ok(!/masterKey\s*=\s*nil\b/.test(SRC),
+  'A7 没有任何地方把 masterKey 赋成 nil（结构已是表，重置也必须写表）');
+ok((SRC.match(/masterKey = \{ bags = nil, bank = nil \}/g) || []).length >= 2,
+  'A8 声明处与 Toggle(false) 的重置处都用同一份表形状');
+// A9/A10/A11：11-04 harness 银行阶段打出来的三个真错，全是本次改动自己引入的。
+ok(!/local function LayoutBankTools/.test(SRC) && /LayoutBankTools = function\(\)/.test(SRC),
+  'A9 LayoutBankTools 用赋值不是 `local function`（前置声明被 local 遮蔽 = Rebuild 里永远 nil）');
+ok(!/\(\(isBank and "银行 · "\) \.\. ""\)/.test(SRC) && /isBank and "银行 · " or ""/.test(SRC),
+  'A10 标题前缀写成 `and ... or ""`（`(x and "串") .. ""` 在 x=false 时是 concat boolean）');
+const ensureWin = (SRC.match(/local function EnsureWindow\(key\)[\s\S]*?\nend/) || [''])[0];
+const iCreate = ensureWin.indexOf('Widget:CreateFrame(name');
+const iReg = ensureWin.indexOf('windows[key] = win');
+const iFirstUse = ensureWin.indexOf('Widget:Theme(win');   // 登记之后才会开始美化
+ok(iCreate >= 0 && iReg >= 0 && iFirstUse >= 0 && iCreate < iReg && iReg < iFirstUse,
+  'A11 EnsureWindow 建框当场就登记 windows[key]（登记排在末尾 = 中间抛错留下"名占表空"，下次必炸 already exists）');
 
 // ---------------------------------------------------------------- B 不猜索引
 ok(/local BANK_PAGE_CANDIDATES = \{ -1, -2, -3 \}/.test(SRC),
@@ -87,6 +104,8 @@ ok(/EventBus:Register\("BANKFRAME_CLOSED"[\s\S]{0,600}HideModeWindows\("bank"\)[
   'E3 银行关闭：只收银行窗 + 放开停车（不会把 alpha 0 的框留到下趟）');
 ok(/SetBankToolsSetting\("bankToolsMinimized"/.test(SRC),
   'E4 折叠状态进 SavedVariables（下次开银行保持玩家的选择）');
+ok(/local button = Widget:CreateFrame\(nil, parent, 88, 20, nil, "Button"\)/.test(SRC),
+  'E5 面板钮建成 Button（`Widget:CreateFrame` 不传 kind 默认 Frame，Frame 没有 RegisterForClicks）');
 
 console.log(`bank-parity-probe: ${pass} 过 / ${fail} 失`);
 process.exit(fail === 0 ? 0 : 1);

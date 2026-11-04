@@ -662,13 +662,17 @@ local function EnsureWindow(key)
     -- 框名里不用冒号（键用 `bank:` 前缀，名字里换成 `bank_`）。
     local name = "MonetUIBagWindow_" .. tostring(key):gsub("bank:", "bank_")
     win = Widget:CreateFrame(name, UIParent, 120, 60)
+    -- **建框当场就登记**：这句原本排在函数末尾，于是中间任何一句抛错都会留下
+    -- "全局名已占、表里没记"的状态，下一次重绘再建同名框 = CreateFrame already exists
+    -- （11-04 harness 银行阶段实测的 ×6 全是这一个错的下游）。
+    windows[key] = win
     win.catKey = key
     Widget:Theme(win, { thickness = 1, bgAlpha = 0.92 })
 
     win.title = Widget:Font(win, 12, "pixel", "edge", "LEFT")
     win.title:SetPoint("TOPLEFT", win, "TOPLEFT", 18, -5)  -- clear of the TL ornament
     -- 两套窗同屏，标题必须分得开：银行那几扇挂"银行 · "前缀。
-    win.title:SetText(((isBank and "银行 · ") .. "") .. (cat and cat.label or BaseKey(key)))
+    win.title:SetText((isBank and "银行 · " or "") .. (cat and cat.label or BaseKey(key)))
 
     Widget:Shadow(win, { size = 6, alpha = 0.5 })
     Widget:Corners(win)
@@ -698,7 +702,6 @@ local function EnsureWindow(key)
         SaveWindowPosition(self)
     end)
 
-    windows[key] = win
     return win
 end
 
@@ -1211,7 +1214,9 @@ local function SetBankToolsSetting(key, value)
 end
 
 local function BankToolButton(parent, label, y, onClick)
-    local button = Widget:CreateFrame(nil, parent, 88, 20)
+    -- kind 必须是 "Button"：`Widget:CreateFrame` 不传 kind 默认建 Frame，
+    -- 而 Frame 没有 RegisterForClicks / OnClick —— 建面板那一刻就会 attempt to call nil。
+    local button = Widget:CreateFrame(nil, parent, 88, 20, nil, "Button")
     Widget:Theme(button, { thickness = 1, bgAlpha = 0.9 })
     Widget:ButtonMaterial(button, { alpha = 0, weaveAlpha = 0.25 })
     button:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, y)
@@ -1332,8 +1337,11 @@ EnsureBankTools = function()
     return bankTools
 end
 
--- 折叠面板贴在银行列的最下面一扇（"bank:free"）之下；没有就贴任务追踪左边同一列。
-local function LayoutBankTools()
+-- LayoutBankTools —— 折叠面板贴在银行列的最下面一扇（"bank:free"）之下；
+-- 那一扇不在（银行没货）就贴任务追踪左边同一列，再不在就退回屏幕左上。
+-- 注意这里**不能**写 `local function`：上面有前置声明 `local EnsureBankTools, ParkBlizzardBank,
+-- LayoutBankTools`，再写 local 就是新建一个同名局部，`Rebuild` 抓住的那个上值永远是 nil。
+LayoutBankTools = function()
     if not bankTools then return end
     if WindowPosition(bankTools.catKey or "bankTools") then return end
     local anchorWin = windows["bank:" .. FREE_CAT.key]
@@ -1475,8 +1483,10 @@ function M:Toggle(force)
     else
         StopPolling()
         for _, win in pairs(windows) do win:Hide() end
-        -- 关整套后总控窗作废：下一次打开重选（哪一类先有货谁当），不留旧引用。
-        masterKey = nil
+        -- 整套关掉后总控作废：下一次打开重选（哪一类先有货谁当）。
+        -- **必须是表**：masterKey 现在按模式各一份，写成 nil 会让下一次
+        -- DesignateMaster 索引 nil 直接抛 —— 症状就是"按 B 没反应"（11-04 实机报的这条）。
+        masterKey = { bags = nil, bank = nil }
         -- 暴雪框的显隐归暴雪管（停车不碰它），关我们的窗就够了。
     end
 end
