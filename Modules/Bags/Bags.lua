@@ -1644,8 +1644,33 @@ function M:HandleCommand(rest)
         ns:Print(("[bags.probe] 我们这侧：mode=%s · 画出 %d 件 · 空格 %d · bankOpen=%s · shown=%s")
             :format(tostring(activeMode), bankDrawn or 0, bankFree or 0,
                 tostring(bankOpen), tostring(shown)))
-        ns:Print("[bags.probe] 判读：主页候选里出现 >0 的那个就是本客户端的银行主页；"
-            .. "全是 '-' 就说明银行被 GameRule 关着或 LoD 未到 —— 那一刻 ParkBlizzardBank 不会收暴雪框（②A）。")
+
+        -- P2.4（②A 保险）的**判据**，不看肉眼：我们的决定 + 暴雪框的实际状态。
+        -- 决定 = bankDrawn>0 才接管；状态 = 每个框的 muted / alpha / 鼠标三件事。
+        -- 真客户端上正确的组合只有两种：
+        --   画出 0 件 → muted=false · alpha=1 · 鼠标开   （暴雪银行照旧能用）
+        --   画出 >0 件 → muted=true · alpha=0 · 鼠标关   （我们的窗顶上，且必须看得见东西）
+        -- 出现「画出 0 件 + muted=true」就是 P0：我们把一个空框藏起来了。
+        for _, frame in ipairs(BankFrameCandidates()) do
+            local label = Widget:FrameLabel(frame)
+            local muted = (type(Widget.IsMuted) == "function") and Widget:IsMuted(frame) or false
+            local okA, alpha = pcall(function() return frame:GetAlpha() end)
+            local okM, mouse = pcall(function() return frame:IsMouseEnabled() end)
+            local okS, vis = pcall(function() return frame:IsShown() end)
+            ns:Print(("[bags.probe]   %s：接管=%s · alpha=%s · 鼠标=%s · IsShown=%s")
+                :format(label, tostring(muted),
+                    okA and tostring(alpha) or "读不出",
+                    okM and tostring(mouse) or "读不出",
+                    okS and tostring(vis) or "读不出"))
+        end
+        local verdict
+        if (bankDrawn or 0) > 0 then
+            verdict = "画出银行物品 → 应当接管（暴雪框 alpha 0 + 关鼠标）；若我们的窗里没东西 = 索引对了但渲染断了"
+        else
+            verdict = "没画出银行物品 → **不该接管**：上面每一行都该是 接管=false · alpha=1 · 鼠标=true，"
+                .. "否则就是 P0（银行被我们藏成空框），立刻 `/mui bags bank off`"
+        end
+        ns:Print("[bags.probe] 判读：" .. verdict)
         return true
     end
     if rest == "refresh" then
