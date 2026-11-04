@@ -678,13 +678,18 @@ local function SkinTimeManager()
     M:Dress({ "TimeManagerFrame", "StopwatchFrame" },
         { window = true, panel = { bgAlpha = 0.96 }, deep = true, rule = true, ruleTop = 26 })
     -- 全局名不带 Frame 后缀，M:SkinWindow 的 name.."CloseButton" 推导够不到，显式接一次。
-    Skin:CloseButton(Skin:Need("TimeManagerCloseButton"))
+    -- 两套名字并存是刻意的：`TimeManagerCloseButton` 是旧客户端写法（12.1.5 实机取到过），
+    -- `StopwatchCloseButton` 是 1.60 FrameXML 声明的那个（`tools/frame-name-existence.js` 对撞出来的）。
+    -- 取不到的那一个只会安静地不落美化的钮，不会抛 —— 所以两条都接，覆盖两个客户端。
+    for _, closeName in ipairs({ "TimeManagerCloseButton", "StopwatchCloseButton" }) do
+        Skin:CloseButton(Skin:Need(closeName))
+    end
 end
 
 M:Panel("timemanager", { label = "时钟 / 秒表", group = "系统", apply = SkinTimeManager,
     addons = { Blizzard_TimeManager = true },
     frames = { "TimeManagerFrame", "TimeManagerFrame.CloseButton",
-        "TimeManagerCloseButton", "StopwatchFrame" } })
+        "TimeManagerCloseButton", "StopwatchCloseButton", "StopwatchFrame" } })
 
 -- 帮助 / 客服：Blizzard_HelpFrame 是 AllowLoad: Game。
 local function SkinHelp()
@@ -695,13 +700,17 @@ M:Panel("help", { label = "帮助", group = "系统", apply = SkinHelp,
     addons = { Blizzard_HelpFrame = true },
     frames = { "HelpFrame", "HelpFrame.CloseButton" } })
 
--- 拾色器：设置面板等处弹出，无门控。12.1.5 正式服按钮是 Footer 成员 + Okay/Cancel 全局名两套并存。
+-- 拾色器：设置面板等处弹出，无门控。按钮名三套并存是刻意的 ——
+-- `ColorPickerFrame.Footer.*`（正式服 Footer 成员）、`ColorPickerFrameOkay/Cancel`（12.1.5 实机取到过
+-- 的全局名）、`ColorPickerOkayButton/CancelButton`（1.60 FrameXML 声明的全局名，
+-- 由 `tools/frame-name-existence.js` 对撞得出）。够不到的那套只是不落美化，不会抛。
 local function SkinColorPicker()
     M:Dress("ColorPickerFrame", {
         window = true,
         panel = { bgAlpha = 0.97 },
         buttons = {
             "ColorPickerFrameOkay", "ColorPickerFrameCancel",
+            "ColorPickerOkayButton", "ColorPickerCancelButton",
             "ColorPickerFrame.Footer.OkayButton", "ColorPickerFrame.Footer.CancelButton",
         },
     })
@@ -709,6 +718,7 @@ end
 
 M:Panel("colorpicker", { label = "拾色器", group = "系统", apply = SkinColorPicker,
     frames = { "ColorPickerFrame", "ColorPickerFrameOkay", "ColorPickerFrameCancel",
+        "ColorPickerOkayButton", "ColorPickerCancelButton",
         "ColorPickerFrame.Footer.OkayButton", "ColorPickerFrame.Footer.CancelButton" } })
 
 -- 呼吸 / 疲劳 / 溺水条：暴雪自建的三条（MirrorTimerContainer.mirrorTimers[1..3]），

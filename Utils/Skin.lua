@@ -251,7 +251,12 @@ function Skin:ReportScope(scope)
         ns:Print(("|cffffb75c⚠|r [%s] %d 个对象存在，其中 %d 个不是框体"):format(scope, found, #odd))
     else
         table.sort(missing)
-        ns:Print(("|cffff6b6b✗|r [%s] %d 存在 / %d 缺失"):format(scope, found, #missing))
+        -- 「缺失」是**两种原因的合计数**，别当缺陷数读：① 本客户端确实没这个名字（要改名或摘掉）
+        -- ② 那个窗属 LoD 包 / 还没被造出来（开窗之后重跑本命令就会变成"存在"）。
+        -- 11-04 实机判例：登录当拍 "225 存在 / 227 缺失" 里，离线对撞 1.60 FrameXML 后有名字能
+        -- 对上的占一半以上 —— 把这条口径写在这儿，免得下一位拿着总数去"改 227 个名字"。
+        ns:Print(("|cffff6b6b✗|r [%s] %d 存在 / %d 缺失（缺失 = 没这名字 **或** LoD/未出生，开窗后重跑再看）")
+            :format(scope, found, #missing))
         local LINE_MAX = 200
         local chunk, count = "", 0
         for i = 1, #missing do
