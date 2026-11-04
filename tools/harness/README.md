@@ -17,9 +17,46 @@ node tools/harness/run.js --max=30     # 每类多列几条明细
 退出码：`0` 没有红 · `1` 有红（产品缺陷）· `2` 假绿自检失败（harness 自己的问题）·
 `3` harness 崩溃（Lua 报错）· `4` 找不到 Lua 解释器（设 `MONETUI_LUA` 或装 5.4）。
 
-当前基线（2026-11-04，Camelot 转储）：红 **0 处 / 0 次**、警告 1955、已放手 0、信息 1497，
-实例化 62280 个暴雪对象（10196 个有全局名），加载 61 份文件；
+当前基线（2026-11-04，Camelot 转储）：红 **4 处 / 9 次**（银行两条产品崩溃，见下节）、
+警告 2148、已放手 0、信息 1702，实例化 62117 个暴雪对象（10072 个有全局名），加载 61 份文件；
 `--selftest` exit 0（每类断言都有坏样例打红，含 A6）。
+
+## 银行路径（11-04 接入）
+
+以前 `BANKFRAME_*` 与 `HandleCommand` 在 harness 里**零命中**，银行那条线一行都没跑过 ——
+那种情况下的 `red=0` 是假绿。现在：
+
+- **桩**：`C_Bank` 共 11 个（新增 9，含要求的 7 个），元数照 `docs/api` 快照逐条对齐；
+  `FetchNumPurchasedBankTabs` / `FetchMaxNumBankTabs` → number，`CanUseBank` / `CanViewBank` /
+  `AreAnyBankTypesViewable` / `DoesBankTypeSupportAutoDeposit` → bool，
+  `AutoDepositItemsIntoBank` / `CloseBankFrame` → 无返回（只记调用次数），
+  `FetchViewableBankTypes` → table。受限环境数值/布尔走机密机制（`api.Secret`），
+  这样 `Secrets.Number/Bool` 的守卫才会真的经过。
+- **有货的银行容器**：`C_Container.GetContainerNumSlots` 对 `-1` 与 `6` 各返 8，
+  `GetContainerItemInfo` 在这些格子里给物品 —— 否则 Scan 全是空格、`bankDrawn=0`、
+  `ParkBlizzardBank` 的判据永不成立，条件停车等于没测。槽数保持普通数字（机密化会让 Scan 直接放弃）。
+- **阶段**：每个受限窗口 + 自由阶段各跑一轮 `bank-open[<tag>]` → `bank-cmd[<tag>]`
+  （公开入口 `HandleCommand("bank")`）→ `bank-close[<tag>]`（`BANKFRAME_CLOSED`）→
+  `bank-off[<tag>]`（`HandleCommand("bank off")`）。报告的 meta 行会打每阶段
+  "银行窗 建/显 + BankFrame α/mouse"，那就是"银行路径跑到哪一步"的实测值。
+- **覆盖面补洞**：`EventBus '<事件>': …` 的失败原先没有任何匹配规则（它只打第一条，之后静默），
+  现在记 `A0p`；否则事件回调里的抛错完全进不了账。
+
+**当前卡住银行覆盖的两条产品崩溃**（harness 只报告，不改发行码）：
+
+1. `Modules/Bags/Bags.lua:671` —— `((isBank and "银行 · ") .. "")`：非银行窗时 `isBank=false`，
+   `false .. ""` 直接抛 `attempt to concatenate a boolean value`。后果不止银行：**背包窗同样建不出来**，
+   而且框已经建出、只是没登记进 `windows[key]`，下一次重建就变成
+   `CreateFrame: MonetUIBagWindow_free already exists`（本次 6 次就是这么来的）。
+   修法：`((isBank and "银行 · ") or "")`。
+2. `Modules/Bags/Bags.lua:1336` —— `local function LayoutBankTools()` 把 :945 的**前置声明遮蔽**成
+   新的 local，于是 `Rebuild` 里 :1002 的 upvalue 永远是 nil（`attempt to call a nil value`）。
+   后果：`Rebuild("bank")` 在建完窗之后必抛，`ParkBlizzardBank` 永远到不了 —— 报告里
+   `H:bank-not-parked`（银行窗有货但 `BankFrame α=1`）就是它。
+   修法：改成 `LayoutBankTools = function()`（与 `EnsureBankTools` / `ParkBlizzardBank` 一致）。
+
+这两条修掉之前，"银行阶段红数"只能说明崩溃本身；修掉之后重跑，自由/受限都应为 **0 红**，
+并且 meta 行应出现 `α=0`（条件停车生效）。
 
 ## 它证明什么 / 不证明什么
 
@@ -83,7 +120,7 @@ mtime 能看出目录里的增删）。源的实体路径在 `build-world.js` / 
 上也会真的经过一次。实测（2026-11-04）：红仍 4 处 / 4 次（同两条 Groups 写入），
 说明机密分支没有把别处打炸 —— 但这是**替身级**结论，`canaccessvalue` 的真实执法仍要实机。
 
-## 当前 0 条红 —— A6 的历史与现状
+## A6 的历史与现状（A6 本身 0 红；当前红在断言一的银行崩溃）
 
 11-04 的产品侧修复（仅 `Core.lua`）：`FlushAfterCombat` 拆成 `FlushNow` + 延迟层（排空用
 `C_Timer.After(0, …)` 挪到新 tick，那一 tick 里再问一次 `ns:IsRestricted()`，仍在别的窗口就

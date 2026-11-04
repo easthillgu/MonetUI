@@ -236,6 +236,9 @@ function Run.Main(opts)
         { "模块 .* 切换失败", "A0p" },
         { "主题刷新失败", "A0p" },
         { "事件处理器失败", "A0p" },
+        -- EventBus 自己的失败口径是 `EventBus '<事件>': <err>`（只打第一条，之后静默）——
+        -- 不认这一条，事件回调里的抛错就完全不进账（银行阶段第一次建窗失败就是这么消失的）。
+        { "EventBus '.*':", "A0p" },
         { "AfterCombat '.*':", "A0p" },
         { "配色引擎.*失败", "A0p" },
         { "读取.*失败", "A0p" },
@@ -577,6 +580,85 @@ function Run.Main(opts)
         return t and tonumber(t[name]) or nil
     end
 
+    -- 银行阶段（Modules/Bags）：事件层只有 BANKFRAME_OPENED / BANKFRAME_CLOSED 两条 ——
+    -- 打开时 Rebuild("bank") 扫银行容器并**条件停车**暴雪 BankFrame（判据是 bankDrawn>0）；
+    -- 关闭时收我们的银行窗、把暴雪框放开。`HandleCommand("bank")` / `("bank off")` 是公开
+    -- 入口，拿来把"强制重建 / 放开"两条路径也真跑一遍（不必碰模块的 local）。
+    -- 为什么非加不可：集成道 11-04 grep 过，BANKFRAME 与 HandleCommand 在 harness 里零命中，
+    -- 银行这条线等于一行没跑，`red=0` 对那次改动是假绿。
+    local function bankWindowsShown()
+        -- 走替身的名字账本（api.byName），不要 pairs(env)：新建框的全局登记由 CreateFrame 写，
+        -- 而这本账是唯一"建过什么名字"的单一来源。
+        local shown, made = 0, 0
+        for name, f in pairs(api.byName or {}) do
+            if type(name) == "string" and name:find("^MonetUIBagWindow_bank_") then
+                made = made + 1
+                if type(f) == "table" and type(f.IsShown) == "function" and f:IsShown() then shown = shown + 1 end
+            end
+        end
+        return shown, made
+    end
+
+    local function bankPass(tag)
+        rep:Phase("bank-open[" .. tag .. "]")
+        api:Dispatch("BANKFRAME_OPENED")
+        api:Pump(1, 0.5)
+        rep:Phase("bank-cmd[" .. tag .. "]")
+        local M = type(ns.GetModule) == "function" and ns:GetModule("Bags") or nil
+        if M and type(M.HandleCommand) == "function" then
+            local ok, err = pcall(M.HandleCommand, M, "bank")
+            if not ok then
+                -- 公开入口直接抛错：根因通常已经被 EventBus 那条 A0p 记过（它只打第一次），
+                -- 这里按阶段留痕，避免"自由阶段到底红没红"因为 EventBus 的静默而看不见。
+                rep:Add("A0p", "warn", "A0p:bank-cmd:" .. tag, {
+                    msg = "Bags:HandleCommand('bank') 在 " .. tag .. " 抛错：" .. tostring(err),
+                    why = "同一条根因在 EventBus 的 A0p 里；这里只是各阶段的入口证据",
+                })
+            end
+            api:Pump(1, 0.5)
+        else
+            rep:Add("H", "warn", "H:bank-cmd-missing:" .. tag, {
+                msg = "拿不到 Bags 模块的 HandleCommand：银行的公开入口没被驱动到",
+            })
+        end
+        -- 收口证据："我们真画出了银行物品"的等价观察是**有 bank_ 窗在显示**；那之后
+        -- ParkBlizzardBank(bankDrawn>0) 才会动暴雪 BankFrame（alpha 0 + 整树关鼠标，绝不 Hide）。
+        -- 受限阶段停车会排队到脱战，所以那时只记数、不判；自由阶段才要求它已经停好。
+        local shown, made = bankWindowsShown()
+        local bank = env.BankFrame
+        local alpha = (bank and api.EffectiveAlpha) and api.EffectiveAlpha(bank) or nil
+        local mouse = (bank and type(bank.IsMouseEnabled) == "function") and bank:IsMouseEnabled() or nil
+        -- 覆盖证据进 meta（报告只印 red/warn 明细，info 行看不见）：每阶段"银行窗建/显 +
+        -- BankFrame 的 alpha/mouse"，就是"银行路径真跑到了哪一步"的实测值。
+        R.bankPasses = R.bankPasses or {}
+        R.bankPasses[tag] = { made = made, shown = shown, alpha = alpha, mouse = mouse }
+        if tag == "plain" then
+            if shown == 0 then
+                rep:Add("H", "warn", "H:bank-empty", {
+                    msg = "银行扫描没造出物品（bankDrawn=0）：条件停车与 bank: 窗等于没覆盖",
+                })
+            elseif alpha and alpha > 0.001 then
+                rep:Add("H", "warn", "H:bank-not-parked", {
+                    msg = "银行窗有货，但暴雪 BankFrame 没被停车（alpha=" .. tostring(alpha) .. "）",
+                })
+            end
+        end
+        rep:Phase("bank-close[" .. tag .. "]")
+        api:Dispatch("BANKFRAME_CLOSED")
+        api:Pump(0.5, 0.5)
+        -- "bank off" 是另一条公开路径（收窗 + 放开暴雪框 + C_Bank.CloseBankFrame），
+        -- 和关闭事件不是同一条代码，单独跑一遍。
+        if M and type(M.HandleCommand) == "function" then
+            local ok, err = pcall(M.HandleCommand, M, "bank off")
+            if not ok then
+                rep:Add("A0p", "warn", "A0p:bank-off:" .. tag, {
+                    msg = "Bags:HandleCommand('bank off') 在 " .. tag .. " 抛错：" .. tostring(err),
+                })
+            end
+            api:Pump(0.5, 0.5)
+        end
+    end
+
     local CLASSES = { "Combat", "Encounter", "ChallengeMode", "PvPMatch", "Map", "Chat" }
 
     -- Core 的 AfterCombat 排空挂在这些派发上（Core.lua:556 regen-enabled / :661-664 限制解除）。
@@ -651,6 +733,9 @@ function Run.Main(opts)
         runRefreshers(label)
         themeSwitches(label)
         onShowPass(label)
+        -- 银行在每一种受限窗口里也要开一次：换窗口后 BankFrame 的停车/放开是条件路径，
+        -- 只在自由阶段跑等于放过"战斗里开银行"这一整类时序问题。
+        bankPass(label)
         alphaAudit(label)
         rep:Phase(label .. ":pump")
         api:Pump(1, 0.5)
@@ -665,6 +750,8 @@ function Run.Main(opts)
     runRefreshers("plain")
     themeSwitches("plain")
     onShowPass("plain")
+    -- 自由阶段的银行：开 → 命令重建 → 关，并核"停车真的发生了"（alpha 0 + 关鼠标）
+    bankPass("plain")
     api:Pump(3, 0.5)
     alphaAudit("plain")
     -- 断言四的红只在这里出（动画收敛之后仍然 α0 的挂背板容器才算"美化白挂"）
@@ -860,6 +947,22 @@ local function cli(args)
         secrets = secrets,
     })
 
+    local bp = R.bankPasses or {}
+    local function bankMeta()
+        if not bp.plain then return nil end
+        local function one(tag, short)
+            local b = bp[tag]
+            if not b then return (short or tag) .. " 未跑" end
+            return string.format("%s 建%d/显%d α=%s mouse=%s",
+                short or tag, b.made, b.shown, tostring(b.alpha), tostring(b.mouse))
+        end
+        local list = {}
+        for _, cls in ipairs({ "Combat", "Encounter", "ChallengeMode", "PvPMatch", "Map", "Chat" }) do
+            list[#list + 1] = one("restricted:" .. cls, cls:sub(1, 4))
+        end
+        return "银行：" .. one("plain", "自由") .. " · 受限 " .. table.concat(list, " ")
+    end
+
     print(rep:Render({
         max = maxRows or 12,
         gaps = R.gaps,
@@ -870,6 +973,7 @@ local function cli(args)
                 #(R.loadedFiles or {}), R.eventDispatches or 0, R.scriptsRun or 0, R.refreshCalls or 0),
             string.format("α 体检：%d 个挂过背板的容器 · Need 台账：命中 %d 条 / 缺席 %d 条",
                 R.alphaChecked or 0, R.ledgerHits or 0, R.ledgerMisses or 0),
+            bankMeta(),
             samples[1] and ("样例：" .. #samples .. " 份（--selftest 用来证明断言确实会红）") or nil,
         },
     }))

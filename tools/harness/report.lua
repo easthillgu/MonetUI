@@ -40,6 +40,9 @@ local CLASS_ASSERT = {
     A5 = 5,
     -- run.lua 自己的账
     L = 1, X = 1,
+    -- H 是"harness 自身"的驱动证据/覆盖缺口（阶段跑了没、扫出东西没），不是产品断言。
+    -- 单独一桶：以前它落在 CLASS_ASSERT 的兜底 0，而渲染用 ipairs 从 1 开始 —— 整桶被静默吞掉。
+    H = 6,
 }
 local ASSERT_TITLE = {
     "断言一：加载与首次 Apply 不得抛错",
@@ -47,6 +50,7 @@ local ASSERT_TITLE = {
     "断言三：不得往暴雪对象写字段 / 挂钩子",
     "断言四：带背板的容器有效 α 必须 > 0",
     "断言五：Skin:Need 命中 / 缺席台账",
+    "harness 自身：覆盖面与驱动证据（不是产品缺陷）",
 }
 
 function Report.New()

@@ -2495,10 +2495,30 @@ function ApiStub.New(config)
         GetItemIcon = function() return nil end,
         GetInventorySlotInfo = function() return 1 end,
     })
+    -- 银行路径要真跑：`-1`（角色银行主页候选）与 `6`（CharacterBankTab_1）各给 8 格、前几格有货。
+    -- 没有这个，Bags 的 Scan 全是空格 → bankDrawn=0 → ParkBlizzardBank 的判据永远不成立，
+    -- `bank:` 窗 / 包裹管理面板 / 条件停车这套代码一行都不会执行（集成道 grep 过：零命中）。
+    -- 槽数保持普通数字：机密化会让 Scan 直接放弃这一包，银行的可见路径反而测不到。
+    local BANK_SLOT_ITEMS = {
+        [-1] = { 6948, 2589, 2592, 4306 },
+        [6]  = { 6948, 2589, 2592 },
+    }
     defC("C_Container", {
-        GetContainerNumSlots = function() return 0 end,
+        GetContainerNumSlots = function(bag)
+            if BANK_SLOT_ITEMS[bag] then return 8 end
+            return 0
+        end,
         GetContainerNumFreeSlots = function() return 0, 0 end,
-        GetContainerItemInfo = function() return nil end,
+        GetContainerItemInfo = function(bag, slot)
+            local list = BANK_SLOT_ITEMS[bag]
+            if not list or not list[slot] then return nil end
+            local id = list[slot]
+            return {
+                itemID = id, iconFileID = 134400, stackCount = 1, quality = 2,
+                isLocked = false, itemName = "测试物品" .. id,
+                hyperlink = "|Hitem:" .. id .. "::::::::|h[测试物品]|h",
+            }
+        end,
         GetContainerItemDurability = function() return nil end,
         GetContainerItemQuestInfo = function() return nil end,
         GetItemCooldown = function() return nil end,
@@ -2507,7 +2527,37 @@ function ApiStub.New(config)
         GetContainerName = function() return "背包" end,
         SortBags = function() end,
     })
-    defC("C_Bank", { GetBankItemInfo = function() return nil end, HasBankTab = function() return false end })
+    -- 银行（Modules/Bags 的 `bank:` 窗、条件停车、包裹管理面板）。元数照 docs/api 快照逐条对齐
+    -- （多返回值桩元数错会静默走兜底 —— 品质色那次就是拿 3 个返回当 4 个用）：
+    --   FetchNumPurchasedBankTabs(bankType) -> number
+    --   FetchMaxNumBankTabs(bankType)       -> number
+    --   CanUseBank / CanViewBank / AreAnyBankTypesViewable / DoesBankTypeSupportAutoDeposit -> bool
+    --   AutoDepositItemsIntoBank(bankType) / CloseBankFrame() -> 无返回
+    --   FetchViewableBankTypes() -> table（BankType 值列表）
+    -- 受限环境把数值/布尔标成机密：产品按 Secrets.Number/Bool 取值，桩不标就永远测不到守卫。
+    local function bankNum(v) if api.world.secrets then return api.Secret("number") end return v end
+    local function bankBool(v) if api.world.secrets then return api.Secret("boolean") end return v end
+    defC("C_Bank", {
+        FetchNumPurchasedBankTabs = function(bankType) return bankNum(1) end,
+        FetchMaxNumBankTabs = function(bankType) return bankNum(6) end,
+        CanUseBank = function(bankType) return bankBool(true) end,
+        CanViewBank = function(bankType) return bankBool(true) end,
+        AreAnyBankTypesViewable = function() return bankBool(true) end,
+        DoesBankTypeSupportAutoDeposit = function(bankType) return bankBool(true) end,
+        FetchViewableBankTypes = function()
+            if api.world.secrets then return api.Secret("table") end
+            return { 0 }
+        end,
+        -- 这两条只记账不判红：harness 用计数确认面板按钮 / 关闭路径真的走到了。
+        AutoDepositItemsIntoBank = function(bankType)
+            api.bankDeposits = (api.bankDeposits or 0) + 1
+        end,
+        CloseBankFrame = function()
+            api.bankClosed = (api.bankClosed or 0) + 1
+        end,
+        GetBankItemInfo = function() return nil end,
+        HasBankTab = function() return false end,
+    })
     defC("C_QuestLog", {
         GetNumQuestLogEntries = function() return 0 end,
         GetInfo = function() return nil end,
