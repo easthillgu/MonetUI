@@ -444,6 +444,16 @@ local function AcquireButton(parent)
     local cd = Widget:Cooldown(btn)
     Mark(shell, "cdF", cd)
 
+    -- 物品等级：左上角 10px 点阵 + 描边，走主题亮色（不是品质色 —— 紫装上的紫字读不出来，
+    -- 而边框已经替品质说过一次话了）。右下已被数量占（-2,2 / OVERLAY 9），等级走左上同层。
+    -- ilvl 只有 `C_Item.GetItemInfo` 第 4 返回有（本客户端**没有** GetInventoryItemLevel 一族），
+    -- 材料/布料的 ilvl 是 0 或 nil ⇒ 一个字都不写，不画"0"。
+    local ilvl = Widget:Font(btn, 10, "pixel", "bright", "LEFT", "OVERLAY",
+                             "THICKOUTLINE, MONOCHROME")
+    ilvl:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -2)
+    ilvl:SetDrawLayer("OVERLAY", 9)
+    Mark(shell, "ilvlF", ilvl)
+
     btn:SetScript("OnEnter", function(self)
         Widget:Pulse(self, 1, 1, 1, 0.9)
         local rec = Marked(self, "bagRec")
@@ -509,6 +519,7 @@ local function UpdateButton(shell, rec)
     local quest = Marked(shell, "questF")
     local count = Marked(shell, "countF")
     local cd = Marked(shell, "cdF")
+    local ilvlFs = Marked(shell, "ilvlF")
 
     if not rec then
         shell:SetID(0)
@@ -517,6 +528,7 @@ local function UpdateButton(shell, rec)
         pcall(SetItemButtonCount, btn, 0)
         if quest then quest:SetText("") end
         if count then count:SetText("") end
+        if ilvlFs then ilvlFs:SetText("") end
         if cd then cd:Hide() end
         Widget:SetBorderState(shell, nil)
         btn:Hide() -- 模板按钮出生即隐藏；空槽连钮带壳一起藏
@@ -538,6 +550,12 @@ local function UpdateButton(shell, rec)
         else
             count:SetText("")
         end
+    end
+    -- 等级：`rec.ilvl` 来自 C_Item.GetItemInfo 第 4 返回，受限环境里可能是机密值 ⇒
+    -- 过 Secrets.Number 再比较（和上面数量同一口径）；读不到或 <=0 就清空，不写 0。
+    if ilvlFs then
+        local lv = Secrets.Number(rec.ilvl)
+        ilvlFs:SetText((lv and lv > 0) and tostring(math.floor(lv)) or "") -- TAINT-OK: Secrets.Number 守卫
     end
     pcall(SetItemButtonDesaturated, btn, rec.locked and true or false)
     -- SetItemButton* 会把蒙版/顶点色/槽底美术重新带上（实机：蒙版回来了就是缺纹理

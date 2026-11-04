@@ -1669,6 +1669,73 @@ local function ResolveQuality(btn)
     return nil
 end
 
+--- 物品键多路解析（与 ResolveQuality 同一套顺序，但返回**键本身**而不是品质）：
+--- 等级数字与冷却都要吃它。返回 link 字符串或 itemID 数字，读不出 = nil。
+--- 只读字段 / pcall 方法，绝不往暴雪按钮写任何东西。
+local function ResolveItemKey(btn)
+    local okLink, link = pcall(function() return btn.link end)
+    if okLink and type(link) == "string" and link ~= "" then return link end
+    local okID, itemID = pcall(function() return btn.itemID end)
+    if okID and type(itemID) == "number" and itemID > 0 then return itemID end
+    if type(btn.GetItemID) == "function" then
+        local ok, v = pcall(btn.GetItemID, btn)
+        if ok and type(v) == "number" and v > 0 then return v end
+    end
+    return nil
+end
+
+--- link → itemID（`C_Item.GetItemID` 只吃 ItemLocation，link 只能自己抠）。
+--- **先过 Secrets.CanRead 再做字符串匹配**：受限环境里 link 本身可能被标机密，
+--- 未守卫的 `string.match` 会直接抛 invalid value（AGENTS 11-02 判例）。
+local function ItemIDOf(key)
+    if type(key) == "number" then return key end
+    if type(key) ~= "string" then return nil end
+    if Secrets and Secrets.CanRead and not Secrets.CanRead(key) then return nil end
+    return tonumber(key:match("item(%d+)"))
+end
+
+--- 等级 + 冷却（人物面板装备格用；背包 / 我们自己的银行格走 Modules/Bags 那条）。
+--- 等级只在 itemKey 变化时取一次（`C_Item.GetItemInfo` 的第 4 返回），冷却每拍重算
+--- ——时长在走，但只在拿得到明文数字时才画（同 Bags 的守卫口径）。
+local function UpdateSlotInfo(btn, entry)
+    local key = ResolveItemKey(btn)
+    if key ~= entry.itemKey then
+        entry.itemKey = key
+        local fs = entry.ilvl
+        if fs then
+            local text = ""
+            if key then
+                local info = (C_Item and C_Item.GetItemInfo) or _G.GetItemInfo
+                if info then
+                    local ok, _, _, lv = pcall(info, key)
+                    local n = ok and Secrets.Number(lv) or nil
+                    if n and n > 0 then text = tostring(math.floor(n)) end -- TAINT-OK: Secrets.Number 守卫
+                end
+            end
+            if text ~= entry.ilvlText then
+                entry.ilvlText = text
+                fs:SetText(text)
+            end
+        end
+    end
+    local cd = entry.cd
+    if cd then
+        local id = ItemIDOf(entry.itemKey)
+        local getter = C_Container and C_Container.GetItemCooldown
+        local start, duration, enable
+        if id and getter then
+            local ok, s, d, e = pcall(getter, id)
+            start, duration, enable = ok and Secrets.Number(s) or nil, Secrets.Number(d), Secrets.Number(e)
+        end
+        if start and duration and duration > 0 and enable ~= 0 then -- TAINT-OK: 三个数全过 Secrets.Number
+            cd:Show()
+            if not pcall(cd.SetCooldown, cd, start, duration) then cd:Hide() end -- TAINT-OK: 三个数全过 Secrets.Number；物品冷却没有 duration-object API（那条只服务 GetActionCooldownDuration 的动作槽），Bags 同款
+        else
+            cd:Hide()
+        end
+    end
+end
+
 --- 把品质边框矩形吸附到物理像素栅格：外扩 1 物理像素（不是 1 UI 单位——有效缩放
 --- 0.6 时 1 单位只有 0.6 物理像素），且四缘各自取整到整数像素。2026-11-02 实机
 --- 判例：商人窗按钮物理坐标是小数（16.2 / 111.0 / 133.2 / 38.4），硬外扩 1 单位
@@ -1733,6 +1800,9 @@ local function EnsureQualityDriver()
                     end
                 end
             end
+            -- 等级 + 冷却只在显式开过格（CharacterFrame 的装备格）上跑：
+            -- 商人 / 邮件那些同走这条扫描的窗口一个字节都不多写。
+            if entry.ilvl or entry.cd then UpdateSlotInfo(btn, entry) end
         end
     end)
 end
@@ -1740,14 +1810,32 @@ end
 --- Draw a quality-coloured 1px border around a flattened item button.  The border starts
 --- as the plain neutral edge and recolours itself (poll driver) once the item's quality is
 --- resolvable; unknown / poor / common keep the plain edge, exactly like Bags.
-function Skin:ItemQualityBorder(btn)
-    if not btn or qualityBorders[btn] then return btn end
-    local border = NewBackdropFrame(btn, 1)
-    Widget:Theme(border, { thickness = 1, bgAlpha = 0 })
-    self:Track(border)
-    qualityBorders[btn] = { frame = border }
-    SnapQualityBorder(btn, border)
-    EnsureQualityDriver()
+--- @param withInfo 给这个格子加"等级数字 + 冷却遮罩"（人物面板装备格点名开；默认不开 ——
+---   商人 / 邮件这些同一条扫描吃到的窗口维持原样）。已登记过的格子也能事后升级，
+---   谁先扫到都不影响结果。两个新对象不入 Track 名单（`ShowAdded` 会把冷却遮罩强 Show 出来）。
+function Skin:ItemQualityBorder(btn, withInfo)
+    if not btn then return btn end
+    local entry = qualityBorders[btn]
+    if not entry then
+        local border = NewBackdropFrame(btn, 1)
+        Widget:Theme(border, { thickness = 1, bgAlpha = 0 })
+        self:Track(border)
+        entry = { frame = border }
+        qualityBorders[btn] = entry
+        SnapQualityBorder(btn, border)
+        EnsureQualityDriver()
+    end
+    if withInfo and not entry.ilvl then
+        local fs = Widget:Font(btn, 10, "pixel", "bright", "LEFT", "OVERLAY",
+                               "THICKOUTLINE, MONOCHROME")
+        fs:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -2)
+        fs:SetDrawLayer("OVERLAY", 9)      -- 图标被抬到 OVERLAY 7，数字要压在它上面
+        entry.ilvl = fs
+        local cd = Widget:Cooldown(btn)
+        cd:SetHideCountdownNumbers(true)   -- 装备格不到 40px：遮罩够了，倒计时数字会挤
+        cd:Hide()
+        entry.cd = cd
+    end
     return btn
 end
 

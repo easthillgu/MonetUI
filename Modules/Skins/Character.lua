@@ -11,8 +11,12 @@ local CHARACTER_TABS = {
 }
 
 local CHARACTER_PANELS = {
-    "PaperDollFrame", "ReputationFrame", "TokenFrame",
+    "ReputationFrame", "TokenFrame",
 }
+
+-- 装备格单独一档：`slotInfo = true` 让扫描在每格上多挂"物品等级数字 + 冷却遮罩"（作者
+-- 11-04 点名只要人物面板这一处）。声望 / 货币 / 检视 / 商人一律不开。
+local PAPERDOLL_PANEL = { panel = { bgAlpha = 0.96 }, deep = true, slotInfo = true }
 
 local INSPECT_TABS = { "InspectFrameTab1", "InspectFrameTab2" }
 
@@ -51,6 +55,7 @@ local function SkinCharacter()
     MakePortraitSquare()
     M:Dress(CHARACTER_TABS, { as = "tab" })
     M:Dress(CHARACTER_PANELS, SUB_PANEL)
+    M:Dress("PaperDollFrame", PAPERDOLL_PANEL)
 end
 
 local function SkinInspect()

@@ -278,7 +278,7 @@ local DRESSERS = {
 --- （切标签、翻页、滚进视野），OnShow 那一刻它们还不存在。轮询按可见性计时，隐藏的框不跑。
 --- 登记以帧去重：`M:Apply` 会被 QUEST_LOG_UPDATE / ADDON_LOADED / PLAYER_ENTERING_WORLD 反复触发，
 --- 不去重就是每触发一次多塞一条轮询回调。
-function M:SweepDeep(frame, controlOpts)
+function M:SweepDeep(frame, controlOpts, withInfo)
     if not frame or type(frame.GetChildren) ~= "function" then return end
     -- 读不出可见性 = forbidden 对象（被引擎接管的安全框那一类）。给它挂常驻轮询没有任何意义：
     -- 驱动每拍都只能把它暂停掉，5 秒复检一次、永远检不回来，账本里多一条查不下去的"无名框"。
@@ -295,7 +295,7 @@ function M:SweepDeep(frame, controlOpts)
             M:SkinButtonsIn(frame, controlOpts)
             M:SkinScrollsIn(frame)
             M:SkinSlidersIn(frame)
-            M:IconWidgetsIn(frame)
+            M:IconWidgetsIn(frame, nil, withInfo)
         end)
         if not ok then
             -- 名字走 Widget 那本账：这个框变 forbidden 之后 GetName 自己也会抛。
@@ -393,12 +393,12 @@ function M:Dress(spec, opts)
 
                 if opts.deep then
                     if opts.lazy ~= false then
-                        M:SweepDeep(frame, opts.control)
+                        M:SweepDeep(frame, opts.control, opts.slotInfo)
                     else
                         M:SkinButtonsIn(frame, opts.control)
                         M:SkinScrollsIn(frame)
                         M:SkinSlidersIn(frame)
-                        M:IconWidgetsIn(frame)
+                        M:IconWidgetsIn(frame, nil, opts.slotInfo)
                     end
                 elseif opts.templates ~= false then
                     -- 模板层默认开（`templates = false` 可关）：只铺金币 / 输入框 /
@@ -413,7 +413,7 @@ function M:Dress(spec, opts)
                 -- 这条只管它们；deep+lazy 的窗口由 SweepDeep 的轮询补扫追新格子，
                 -- 非 lazy 的窗口建格时机覆盖不了的（如运行期才建的列表）单独点名 `icons = true` 再补一遍。
                 if opts.icons ~= false then
-                    M:IconWidgetsIn(frame)
+                    M:IconWidgetsIn(frame, nil, opts.slotInfo)
                 end
             end)
         end
@@ -511,7 +511,9 @@ end
 --- 也不会跟账本抢 texcoord（FlattenSlotArt 会把 texcoord 重置回 0..1，重复调用就是拉锯）。
 --- 模板计数（SetItemButtonCount 写的 .count）抬到 OVERLAY 8——图标在 OVERLAY 7，
 --- 不抬会被整个盖住（Bags 案判例；Bags 自绘白字在 9，不受影响）。
-function M:IconWidgetsIn(frame, depth)
+--- @param withInfo 透传给 Skin:ItemQualityBorder：这些格子额外挂"等级数字 + 冷却遮罩"
+---   （只有人物面板那类点名 `slotInfo = true` 的面板会开）。
+function M:IconWidgetsIn(frame, depth, withInfo)
     if not frame or type(frame.GetChildren) ~= "function" then return end
     depth = depth or 0
     if depth > 4 then return end
@@ -581,7 +583,7 @@ function M:IconWidgetsIn(frame, depth)
                             pcall(Skin.Icon, Skin, tex)
                         end
                     end
-                    pcall(Skin.ItemQualityBorder, Skin, target)
+                    pcall(Skin.ItemQualityBorder, Skin, target, withInfo)
                     -- 模板计数抬层（Bags 案判例：图标 OVERLAY 7 会盖住模板 count）。
                     -- 注意 `.count` 不一定是字体串——商人窗实测是**数字**（本格数量），
                     -- 先验 type(table) 再索引方法，否则 "attempt to index a number" 炸 body。
@@ -594,7 +596,7 @@ function M:IconWidgetsIn(frame, depth)
                     end -- isSlot and not hasAtlas
                 end
             elseif kind == "Frame" then
-                M:IconWidgetsIn(child, depth + 1)
+                M:IconWidgetsIn(child, depth + 1, withInfo)
             end
         end
     end
