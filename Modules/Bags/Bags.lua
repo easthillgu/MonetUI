@@ -1329,13 +1329,29 @@ EnsureBankTools = function()
     pcall(bankToolsBody.EnableMouse, bankToolsBody, false)
 
     BankToolButton(bankToolsBody, "一键存入", 2, function()
+        -- 必须留回执。作者 11-04 实测「点了没反应、也没有报错」——这句话分不出两种完全不同的情况：
+        -- ① OnClick 压根没跑到（钮没接上鼠标）；② 跑到且 API 被接受，但它本身什么都不做
+        -- （正式服语义：只存"打了自动存入标记"的物品，角色一个标记都没打时就是静默无操作，
+        --   既不报错也不动数量）。三种结局各打一行，一眼分辨，别靠猜。
         local bt = (Enum and Enum.BankType and Enum.BankType.Character) or 0
-        if C_Bank and C_Bank.AutoDepositItemsIntoBank then
-            -- 文档无[受限]标记；仍包 pcall —— 真客户端若把它也算受限，报错只提示一次不刷屏。
-            local ok, err = pcall(C_Bank.AutoDepositItemsIntoBank, bt)
-            if not ok then Skin:WarnOnce("bankAutoDeposit", "一键存入失败: " .. tostring(err)) end
-            M:Refresh()
+        local support = "?"
+        if C_Bank and C_Bank.DoesBankTypeSupportAutoDeposit then
+            local okS, v = pcall(C_Bank.DoesBankTypeSupportAutoDeposit, bt)
+            support = okS and tostring(v) or "读不出"
         end
+        if not (C_Bank and C_Bank.AutoDepositItemsIntoBank) then
+            ns:Print("[mui bags] 一键存入：OnClick 收到了，但本客户端没有 C_Bank.AutoDepositItemsIntoBank —— 这颗钮在此无效")
+            return
+        end
+        local before = bankDrawn or 0
+        local ok, err = pcall(C_Bank.AutoDepositItemsIntoBank, bt)
+        M:Refresh()
+        ns:Print(("[mui bags] 一键存入：OnClick 收到 · 调用=%s · 支持自动存入=%s · 画出 %d → %d 件%s")
+            :format(ok and "成功" or ("失败（" .. tostring(err) .. "）"), support,
+                before, bankDrawn or 0,
+                (ok and before == (bankDrawn or 0))
+                    and "｜数量没变 = 客户端只存「打了自动存入标记」的物品，没标记就是这种静默无操作（不是被拦）"
+                    or ""))
     end)
     BankToolButton(bankToolsBody, "放开暴雪", 2, function()
         -- 买栏位 / 背包↔银行包互换只能在暴雪那块管理区上做（见上面那段理由），
