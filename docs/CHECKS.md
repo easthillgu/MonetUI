@@ -37,6 +37,7 @@ node tools/audit-pixels.js     # 2 的幂 / 纯白衬底 / 染色模具无色相
 ```powershell
 node tools/quality-color-probe.js   # 品质色单一真值源闸门（源码级 + Lua 探针），退出码 0 才算完
 node tools/slot-info-probe.js       # 装备格「等级数字 + 冷却遮罩」接线闸门（18 项，退出码 0 才算完）
+node tools/report-probe.js          # /mui report 行为闸门（30 项：段落齐 / 机密值不拼进输出 / 账本落盘 / DB 断、战斗中不崩）
 node tools/bank-parity-probe.js     # 银行与背包并存接线闸门（23 项：命名空间/不猜索引/停车纪律/越权边界）
 
 # 12.1.5（_retail_ / 120105）观感预验趟：docs/PRECHECK-RETAIL-120105.md

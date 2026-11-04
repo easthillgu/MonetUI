@@ -164,9 +164,12 @@ local function SectionNeedLedger()
     out[#out + 1] = ("美化台账：命中 %d · 有缺失的档 %d（缺失 = 没这名字 **或** LoD/窗未出生，开窗后重跑再看）")
         :format(total.hits, missing)
     for _, s in ipairs(perScope) do
+        -- 结束下标必须跟着实际条数：`table.concat(t, sep, 1, 6)` 在不足 6 项时会在第 2 项
+        -- 撞上 nil 直接抛（11-04 report-probe 抓到的真 bug —— 明早第一次 /mui report 就会红在这）。
         out[#out + 1] = ("  [%s] 缺 %d（命中 %d）：%s%s")
-            :format(s.scope, s.miss, s.hits, table.concat(s.names, ", ", 1, 6),
-                s.miss > 6 and " …" or "")
+            :format(s.scope, s.miss, s.hits,
+                table.concat(s.names, ", ", 1, math.min(6, #s.names)),
+                #s.names > 6 and " …" or "")
     end
     return out, perScope
 end
