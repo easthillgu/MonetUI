@@ -773,11 +773,19 @@ function ns:StartModules()
         end
     end
 
-    local count = 0
+    local count, off = 0, 0
     for _, name in ipairs(moduleOrder) do
-        if modules[name]._initialized then count = count + 1 end
+        if modules[name]._initialized then
+            count = count + 1
+        elseif not self:IsModuleEnabled(name) then
+            off = off + 1
+        end
     end
-    self:Print(string.format("已加载 %d/%d 个模块。", count, #moduleOrder))
+    -- 分母只算"开着要加载"的模块。旧写法在玩家于设置里关掉一个模块时打成「已加载 19/20」，
+    -- 看着就像有模块坏了（11-05 开服实测：Atmosphere 被关 → 接手的人第一反应是找故障）。
+    -- 真没初始化起来的模块仍然会让两个数不等，那种才是故障。
+    local tail = off > 0 and string.format("（另 %d 个已在设置中关闭）", off) or ""
+    self:Print(string.format("已加载 %d/%d 个模块%s。", count, #moduleOrder - off, tail))
 end
 
 local function RefreshTheme(reason)

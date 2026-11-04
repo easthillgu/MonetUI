@@ -61,11 +61,14 @@ end
 
 local function SectionEnvironment()
     local version = Text(Safe(C_AddOns.GetAddOnMetadata, ADDON_NAME, "Version"))
-    local iface   = Text(Safe(C_AddOns.GetAddOnMetadata, ADDON_NAME, "Interface"))
-    local prod, ver, build = Safe(GetBuildInfo)
+    -- 客户端身份**必须复用 `ns:ClientIdentity()`**：它按"值"认 Interface 号（12.1.5 实测第 4 个返回值
+    -- 才是 120105、第 5 个是空串），而 `GetBuildInfo()` 的返回值**位置按版本不一样** ——
+    -- 我上一版自己数索引，1.60 上就打成「客户端 1.60.1 70790 构建 读不出 / Interface 读不出」。
+    local identity = (type(ns.ClientIdentity) == "function") and Text(ns:ClientIdentity()) or nil
     return {
-        ("MonetUI %s (Interface %s) · 客户端 %s %s 构建 %s · 语言 %s"):format(
-            Or(version), Or(iface), Or(Text(prod)), Or(Text(ver)), Or(Num(build)),
+        ("MonetUI %s · %s · 语言 %s"):format(
+            Or(version),
+            identity or ("客户端 " .. UNKNOWN),
             Or(Text(Safe(GetLocale)))),
     }
 end

@@ -109,15 +109,31 @@ local function CVarRecord(cvar)
     return rec
 end
 
---- 同一个 CVar 只印一条（AGENTS：失败一次性警告，不刷屏）；细账在 probe 里随时能重看。
+--- 同一个 CVar 只记一条；**打印改聚合**（FlushCVarNotes）：1.60 实测一次登录就印出
+--- `nameplateShowEnemyMinus / nameplateShowEnemyTotems / nameplateMaxDistance` 三条
+--- "空转"，玩家看到的是"这插件一开机就抱怨三件事"。信息要留，但一条说完。
+local cvarNotes = {}
 local function CVarFlag(cvar, note)
     local rec = CVarRecord(cvar)
     rec.note = note
     if not cvarWarned[cvar] then
         cvarWarned[cvar] = true
-        ns:Print(("|cffffa940姓名板设置空转|r：%s —— %s（期望 %s）")
-            :format(cvar, note, Text(rec.want)))
+        cvarNotes[#cvarNotes + 1] = cvar
     end
+end
+
+--- 一轮批量写入结束后统一提示（没有受阻项就一个字都不印）。
+local function FlushCVarNotes()
+    local n = #cvarNotes
+    if n == 0 then return end
+    local names = table.concat(cvarNotes, "、")
+    -- 上限：只列前 3 个名字，其余给数量（聊天框一行装不下 8 个 CVar 名）
+    if n > 3 then
+        names = table.concat(cvarNotes, "、", 1, 3) .. (" 等 %d 项"):format(n)
+    end
+    ns:Print(("|cffffa940姓名板有 %d 项设置客户端不让插件改（isSecure）：%s|r —— "
+        .. "需要生效请在暴雪自己的设置里调；细账 /mui nameplates cvars"):format(n, names))
+    cvarNotes = {}
 end
 
 --- @return boolean 写进去了 / 本来就是那个值
@@ -184,6 +200,7 @@ function M:ApplyCVars()
     WriteCVar("nameplateShowFriendlyTotems", OnOff(Setting("showTotems")))
     WriteCVar("nameplateShowSelf",          Setting("showSelf") and "1" or "0")
     WriteCVar("nameplateMaxDistance",       tostring(Setting("viewDistance") or 60))
+    FlushCVarNotes()
 end
 
 function M:RestoreCVars()
