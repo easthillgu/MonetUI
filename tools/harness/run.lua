@@ -109,6 +109,17 @@ function Run.Main(opts)
     local env = api.env
     R.api = api
 
+    -- --secrets：机密值**常开**跑一遍（默认只在六类受限窗口里开）。普通路径上
+    -- Secrets.Bool/Number 的落回、"保留上次状态"、type() 判不出的机密串都会真的经过一次；
+    -- 只开不关：被夹在中间清掉就退回默认模式，那这趟就白跑了。
+    if opts.secrets then
+        api.world.secrets = true
+        api.world.secretsHeld = true
+        rep:Add("H", "info", "H:secrets-held", {
+            msg = "--secrets：机密值常开（HasSecretRestrictions 恒真、C_* 返回的标量都是机密）",
+        })
+    end
+
     local W = opts.world
     local F = Frames.New({ api = api, W = W, loadedLoD = opts.loadedLoD })
     F.InstantiateAll()
@@ -232,8 +243,15 @@ function Run.Main(opts)
     api.reportLine = function(line, file, l)
         for _, spec in ipairs(FAIL_PATTERNS) do
             if line:find(spec[1]) then
-                rep:Add(spec[2], "red", string.format("A0p:%s:%s:%s", tostring(file), tostring(l), line:sub(1, 80)), {
-                    file = file, line = l, msg = "被 pcall 吞掉、只 print 出来的失败：" .. line,
+                -- 同一刀已经在断言二记过账（A6 红 / A2i 黄）时，这里只留痕迹不再记第二条红：
+                -- 一条写入配两条红会把"真正独立的那几条"埋掉。认的是"这条 print 提到的框
+                -- 就是上一次被拒的那个"，不是随便一个陈旧 lastDeny。
+                local d = api.lastDeny
+                local dup = d and (d.cls == "A6" or d.cls == "A2i")
+                    and d.frame and line:find(tostring(d.frame), 1, true) ~= nil
+                rep:Add(spec[2], dup and "warn" or "red", string.format("A0p:%s:%s:%s", tostring(file), tostring(l), line:sub(1, 80)), {
+                    file = file, line = l, msg = (dup and "（同一条写入已在断言二记" or "被 pcall 吞掉、只 print 出来的失败：") .. line,
+                    why = dup and ("根因 " .. d.cls .. " 已记在断言二，这条只是它被吞掉的痕迹") or nil,
                 })
                 return
             end
@@ -427,6 +445,50 @@ function Run.Main(opts)
         return nil, faint
     end
 
+    --- 人造一次"鼠标进入"：光标指向祖先、沿父链补派 OnEnter，泵一拍让轮询与逐拍逼近跑完，
+    --- 再读有效 α；离开后恢复。离线没有鼠标，而本仓大量条是"静息 α0、悬停才亮"的设计
+    --- （InfoBar 的 mouseover 静息目标就是 0，宠物/姿态条 SetupHoverOnly 同款），
+    --- 只按最终 α 判红会把设计冤枉成缺陷 —— 这条补判让它自证"悬停真能亮"。
+    local function hoverRetest(obj)
+        local chain, node, hops = {}, obj, 0
+        while node and hops < 20 do
+            chain[#chain + 1] = node
+            local s = api.stateOf(node)
+            node = s and s.parent
+            hops = hops + 1
+        end
+        api.cursorOver = chain[#chain] or obj
+        for i = #chain, 1, -1 do
+            local s = api.stateOf(chain[i])
+            local fn = s and s.scripts and s.scripts.OnEnter
+            if fn then api.runScript(fn, "OnEnter[hover]", chain[i]) end
+        end
+        api:Pump(1.5, 0.1)
+        local a = api.EffectiveAlpha(obj)
+        for i = #chain, 1, -1 do
+            local s = api.stateOf(chain[i])
+            local fn = s and s.scripts and s.scripts.OnLeave
+            if fn then api.runScript(fn, "OnLeave[hover]", chain[i]) end
+        end
+        api.cursorOver = nil
+        api:Pump(0.5, 0.1)
+        return a
+    end
+
+    --- 祖先里有没有暴雪对象：有 ⇒ 我们是在**暴雪窗口内部**挂的层，
+    --- 被 Skin:Fade 剥掉的正是暴雪原美术（按设计就该 α0）。
+    local function hasBlizzardAncestor(obj)
+        local node, hops = api.stateOf(obj) and api.stateOf(obj).parent, 0
+        while node and hops < 40 do
+            local s = api.stateOf(node)
+            if not s then break end
+            if s.blizzard then return true end
+            node = s.parent
+            hops = hops + 1
+        end
+        return false
+    end
+
     local function alphaAudit(tag, final)
         rep:Phase("alpha[" .. tag .. "]")
         -- 断言四的口径是"**最终**有效 α > 0"（背板白挂的那种）。动画中间态 —— InfoBar 的
@@ -466,11 +528,32 @@ function Run.Main(opts)
                         elseif cs then
                             who = string.format("%s 自身 α=%s（写入点未记账）", label(cs), tostring(cs.alpha))
                         end
-                        rep:Add(cls, level, string.format("%s:%s:%s", cls, label(st), table.concat(chain, "<")), {
+                        local cls2, level2, note = cls, level, ""
+                        if final then
+                            -- 最终态的 α0 有两种是**按设计**的，各自降级、但都留名可查：
+                            --   A4s 剥的是暴雪窗口内部的原始美术（Skin:Fade 就是干这个的）
+                            --   A4h 人造悬停后能亮（hover-only 条的静息态）
+                            -- 都不放宽"自家窗口挂完背板还是看不见"这一条：那仍然红。
+                            local stripped = culprit and tostring(culprit.file or ""):find("Utils/Skin.lua", 1, true)
+                                and tostring(culprit.op) == "SetAlpha"
+                                and (tonumber(culprit.value) or 1) <= 0.001
+                                and hasBlizzardAncestor(obj)
+                            local hovered = nil
+                            if not stripped then
+                                hovered = hoverRetest(obj)
+                            end
+                            if stripped then
+                                cls2, level2, note = "A4s", "warn", "（判据：Utils/Skin.lua 的 Fade 剥的是暴雪窗口里的原美术，α0 是目的）"
+                            elseif type(hovered) == "number" and hovered > 0.001 then
+                                cls2, level2, note = "A4h", "warn",
+                                    string.format("（人造悬停后有效 α=%s —— 悬停才亮的条，不是白挂）", string.format("%.3f", hovered))
+                            end
+                        end
+                        rep:Add(cls2, level2, string.format("%s:%s:%s", cls2, label(st), table.concat(chain, "<")), {
                             file = f, line = l, frame = label(st),
-                            msg = string.format("挂过背板的容器 %s 有效 α=%s —— 父链：%s；原因：%s",
+                            msg = string.format("挂过背板的容器 %s 有效 α=%s —— 父链：%s；原因：%s%s",
                                 label(st), string.format("%.4f", a),
-                                table.concat(chain, " ← "), who),
+                                table.concat(chain, " ← "), who, note),
                         })
                     end
                 end
@@ -496,6 +579,16 @@ function Run.Main(opts)
 
     local CLASSES = { "Combat", "Encounter", "ChallengeMode", "PvPMatch", "Map", "Chat" }
 
+    -- Core 的 AfterCombat 排空挂在这些派发上（Core.lua:556 regen-enabled / :661-664 限制解除）。
+    -- 排空窗口要标出来，否则"排空里写受保护框"会和"平时缺守卫"混成同一类 A2 —— 两者修法不同：
+    -- 前者要 C_Timer.After(0, …) 挪一拍，后者要补守卫。派发抛错也要把旗子放回去。
+    local function inFlushWindow(fn)
+        api.world.flushWindow = true
+        local ok, err = pcall(fn)
+        api.world.flushWindow = false
+        if not ok then error(err, 0) end
+    end
+
     local function enterClass(cls)
         local tv = typeValue(cls)
         if not tv then
@@ -506,13 +599,17 @@ function Run.Main(opts)
         api:Dispatch("ADDON_RESTRICTION_STATE_CHANGED", tv, ENUM_STATE.Activating)
         api.restrictions[cls] = true
         if cls == "Combat" then
-            api:SetLockdown(true)
-            -- 真客户端 lockdown 与 PLAYER_REGEN_DISABLED 同起同落；只翻 lockdown 不派事件，
-            -- 模块里 `ns:InCombat()`（按 PLAYER_REGEN_* 记状态）就滞留 false，把
-            -- InCombat() 守卫全绕过 —— 那批 restricted:Combat 红全是这一半模拟造出来的。
+            -- 同一枚探针的另一半：PLAYER_REGEN_DISABLED 派发当拍 InCombatLockdown() 还是
+            -- **false**，标志在派发之后才翻。所以先派事件、后置 lockdown ——
+            -- 反过来会把"事件里读实时标志"的写法测成假的可用。
             api:Dispatch("PLAYER_REGEN_DISABLED")
+            -- 开关是**点号**函数（api_stub.lua 的 `function api.SetLockdown(on)`）。
+            -- 写成冒号会把 api 表当 on 传进来 —— 表为真，于是 `SetLockdown(false)` 反而置 true，
+            -- 且 `SetRestricted(any)` 永远 true：解除后整段测试仍停在"受限 + 战斗锁定"里，
+            -- 根因 (b) 那一批红（leave:Combat 里 restricted=true）就是这么被自己造出来的。
+            api.SetLockdown(true)
         end
-        api:SetRestricted(true)
+        api.SetRestricted(true)
         api.world.secrets = true
         api:Dispatch("ADDON_RESTRICTION_STATE_CHANGED", tv, ENUM_STATE.Active)
         return tv
@@ -520,27 +617,46 @@ function Run.Main(opts)
 
     local function leaveClass(cls, tv)
         if not tv then return end
-        api:Dispatch("ADDON_RESTRICTION_STATE_CHANGED", tv, ENUM_STATE.Inactive)
+        -- 解除方向：事件在**解除之后**才发（AGENTS 的 ADDON_RESTRICTION_STATE_CHANGED 口径），
+        -- 所以先把状态拿掉、再派 Inactive 事件 —— 之前是先派事件再清状态，
+        -- 于是挂在 Inactive 上的 Core 排空（Core.lua:661-664）跑在"还不自由"的一拍里。
         api.restrictions[cls] = nil
-        if cls == "Combat" then api:SetLockdown(false) end
         local any = false
         for _ in pairs(api.restrictions) do any = true end
-        api:SetRestricted(any)
-        if not any then api.world.secrets = false end
-        api:Dispatch("PLAYER_REGEN_ENABLED")
+        api.SetRestricted(any)
+        if not any and not api.world.secretsHeld then api.world.secrets = false end
+        -- 这一派发里 Core 也会排空（限制解除那条，Core.lua:661-664），同样算排空窗口
+        inFlushWindow(function() api:Dispatch("ADDON_RESTRICTION_STATE_CHANGED", tv, ENUM_STATE.Inactive) end)
+        if cls == "Combat" then
+            -- 但战斗的**原始标志**不等状态：InCombatLockdown() 在 PLAYER_REGEN_ENABLED 派发
+            -- 之后才翻（Core.lua:505 引的 2026-10-27 实机探针："enabled 里还是 true"）。
+            -- 原来这里先 SetLockdown(false) 再派事件，替身就比客户端宽松：
+            -- FlushAfterCombat 挂在 regen-enabled 上，真客户端那一拍写安全按钮是要被拒的，
+            -- 替身放行 ⇒ 根因 (b) 那批红被这一行藏掉（假绿）。现在照实机排：派完才翻。
+            inFlushWindow(function() api:Dispatch("PLAYER_REGEN_ENABLED") end)
+            api.SetLockdown(false)
+        end
     end
 
     rep:Phase("restricted-sweep")
     for _, cls in ipairs(CLASSES) do
+        -- 阶段名细分到 enter / pump / leave：脱战排空（FlushAfterCombat）跑在
+        -- PLAYER_REGEN_ENABLED 派发当拍，那一拍的 lockdown 是什么值决定红怎么修
+        -- —— 只看"restricted:Combat"这个粗标签分不出"战斗中没守卫"和"脱战排空排早了"。
+        rep:Phase("enter:" .. cls)
         local tv = enterClass(cls)
         local label = "restricted:" .. cls
+        rep:Phase(label)
         eventSweep(label)
         runRefreshers(label)
         themeSwitches(label)
         onShowPass(label)
         alphaAudit(label)
+        rep:Phase(label .. ":pump")
         api:Pump(1, 0.5)
+        rep:Phase("leave:" .. cls)
         leaveClass(cls, tv)
+        rep:Phase(label)
     end
 
     -- 全清之后再跑一遍明文路径：脱战后的 AfterCombat 队列在这里排空
@@ -637,6 +753,57 @@ function Run.Main(opts)
     end
 
     ---------------------------------------------------------------- 收尾统计
+    ---------------------------------------------------------------- 缺席名字分档
+    -- "读了但世界里没有"必须是分档结论，不能是一坨 407：三档的处置完全不同 ——
+    --   lod     ：某个 LoD 插件真会提供这个全局（离线没加载那个包，属预期，不是缺陷）；
+    --   child   ：FrameXML 里只作为 `$parentXxx` 子件出现，客户端运行期按父名算出来 ——
+    --             它不是 XML 的全局声明，转储里当然查不到（`CharacterFrame.CloseButton` 一类）；
+    --   unknown ：两档都不是 —— 拼写错 / GameRule 关掉 / 运行期 CreateFrame 造出来的真实盲区，
+    --             这才是要人眼过一遍的那批。
+    local function tierUnknownGlobals(unknown)
+        local out = { lod = {}, child = {}, unknown = {}, n = { lod = 0, child = 0, unknown = 0 } }
+        local lodNames, childNames = {}, {}
+        for _, list in pairs(W.lod or {}) do
+            for _, idx in ipairs(list) do
+                local r = W.rows[idx]
+                local nm = r and r[2] and W.strings[r[2]]
+                if nm then lodNames[nm] = true end
+            end
+        end
+        -- 子件名要沿宿主链拼：`$parent` 可能套好几层，按行号记忆化解析。
+        local resolved = {}
+        local function resName(idx, depth)
+            local hit = resolved[idx]
+            if hit ~= nil then return hit or nil end
+            if depth > 12 then return nil end
+            local r = W.rows[idx]
+            if not r then return nil end
+            local nm = r[2] and W.strings[r[2]] or nil
+            if not nm then resolved[idx] = false; return nil end
+            local outName = nm
+            if nm:sub(1, 7) == "$parent" then
+                local hostIdx = r[4]
+                local host = hostIdx and hostIdx > 0 and resName(hostIdx, depth + 1) or nil
+                outName = host and (host .. nm:sub(8)) or nil
+            end
+            resolved[idx] = outName or false
+            return outName
+        end
+        for idx = 1, #W.rows do
+            local nm = resName(idx, 0)
+            if nm and nm ~= "" then childNames[nm] = true end
+        end
+        for name in pairs(unknown or {}) do
+            if lodNames[name] then out.lod[name] = true
+            elseif childNames[name] then out.child[name] = true
+            else out.unknown[name] = true end
+        end
+        for _, k in ipairs({ "lod", "child", "unknown" }) do
+            for _ in pairs(out[k]) do out.n[k] = out.n[k] + 1 end
+        end
+        return out
+    end
+
     R.gaps = {
         stubGaps = api.stubGaps,
         gapMethods = api.gapMethods,
@@ -644,6 +811,7 @@ function Run.Main(opts)
         enumGaps = api.enumGaps,
         helperGaps = api.helperGaps,
         unknownGlobals = api.unknownGlobals,
+        unknownTiers = tierUnknownGlobals(api.unknownGlobals),
     }
     R.prints = api.prints
     R.scriptsRun = api.scriptsRun
@@ -654,12 +822,13 @@ end
 ---------------------------------------------------------------- CLI
 -- 直接 `lua tools/harness/run.lua --root=…` 也能跑；run.js 就是这么起的。
 local function cli(args)
-    local root, sampleDir, maxRows, selftest
+    local root, sampleDir, maxRows, selftest, secrets
     for _, a in ipairs(args) do
         root = a:match("^%-%-root=(.+)$") or root
         sampleDir = a:match("^%-%-samples=(.+)$") or sampleDir
         maxRows = tonumber(a:match("^%-%-max=(%d+)$")) or maxRows
         if a == "--selftest" then selftest = true end
+        if a == "--secrets" then secrets = true end
     end
     if not root then
         local here = debug.getinfo(1, "S").source:sub(2)
@@ -678,7 +847,7 @@ local function cli(args)
         -- Lua 标准库没有目录枚举：把已知样例名排进来（新增样例要同步这里）
         local known = {
             "bad-write-blizzard-field.lua", "bad-strip-alpha.lua", "bad-combat-write.lua",
-            "bad-hookscript.lua", "bad-secret-math.lua",
+            "bad-hookscript.lua", "bad-secret-math.lua", "bad-aftercombat-write.lua",
         }
         for _, name in ipairs(known) do
             local abs = join(sampleDir, name)
@@ -688,6 +857,7 @@ local function cli(args)
 
     local R = Run.Main({
         root = root, report = rep, engine = engine, world = world, samples = samples,
+        secrets = secrets,
     })
 
     print(rep:Render({
@@ -716,6 +886,7 @@ local function cli(args)
             { "A2", "bad-combat-write", "断言二：受限窗口未守卫写入" },
             { "A3h", "bad-hookscript", "断言三：HookScript 暴雪框" },
             { "A0", "bad-secret-math", "断言一：机密值裸比较" },
+            { "A6", "bad-aftercombat-write", "断言二：regen 派发当拍直接写受保护框" },
         }
         print("== 假绿自检（样例 -> 期望的红）==")
         local failed = 0
@@ -730,7 +901,7 @@ local function cli(args)
             print(string.format("  %-4s %-28s %s", hit and "OK" or "MISS", want[2], want[3]))
             if not hit then failed = failed + 1 end
         end
-        print(failed == 0 and "自检：五类断言都能被对应的坏样例打红。"
+        print(failed == 0 and "自检：每条断言都有坏样例能打红（含 A6 排空时序）。"
             or string.format("自检：有 %d 类断言打不红 —— harness 本身有问题，先修 harness。", failed))
         os.exit(failed == 0 and 0 or 2)
     end

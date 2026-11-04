@@ -59,6 +59,17 @@ function Frames.New(opts)
     end
 
     local templatesByName = W.templates
+    -- 受保护模板名单交给替身：CreateFrame 判"这个模板出身受不受保护"用它，不再只看名字里有
+    -- 没有 "Secure"（ActionBarButtonTemplate 这类靠 inherits 链继承保护，名字里没有）。
+    do
+        local set = {}
+        for name in pairs(W.secureTemplates or {}) do set[name] = true end
+        for name, rowIdx in pairs(templatesByName or {}) do
+            local r = rows[rowIdx]
+            if r and r[7] == 1 then set[name] = true end
+        end
+        api.secureTemplates = set
+    end
     local globalsByName = W.globals
     local ownerOf = {}                         -- 行号 -> 提供它的 LoD 插件名
     for addonName, list in pairs(W.lod or {}) do
@@ -146,7 +157,13 @@ function Frames.New(opts)
             keyName = strings[row[3]]
         end
 
-        local obj, st = api.NewObject(kind, globalName, hostObj, { blizzard = true })
+        -- prot 位来自 world-data（build-world.js 沿模板 inherits 求闭包）。
+        -- 宿主受保护 ⇒ 子件也算受保护：客户端是引擎在宿主的安全上下文里建整棵树，
+        -- 实机判例都是子件被拒（ActionButton5:SetShown / MultiBar*ButtonContainerN:SetShown）。
+        local obj, st = api.NewObject(kind, globalName, hostObj, {
+            blizzard = true,
+            protected = (row[7] == 1) or (hostSt and hostSt.protected) or false,
+        })
         st.row = rowIdx
         F.objects = F.objects + 1
         rowOfState[st] = rowIdx

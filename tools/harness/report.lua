@@ -15,8 +15,16 @@
 --      A2i 是"保护只从父框继承来的自建子件"：离线没有这条判据的证据，记黄不记红，留给实机。
 --      A2r 是"文档标 fl.r（受限，只能安全代码调）的 C_ 方法被本插件调到"：只有一文档快照一份
 --      证据，够列清单、不够判红，同样留黄给上线首日点名复核。
+--      A2n 是"受保护级写入落在 prot=0 的暴雪框上"：逐对象判据只到 XML 声明，Lua 里造的受保护框
+--      离线看不到 —— 不判红（客户端不会拒这一刀），但留黄，实机复核同一条。
+--      A6 是"regen / 限制解除派发当拍直接写受保护对象"：本客户端先派事件、后翻
+--      InCombatLockdown()（实机探针），那一拍原生标志还是 true，客户端照拒 —— 时序错，
+--      不是缺守卫；修法是把这刀挪进 C_Timer.After(0, …)。Core 11-04 已把**它自己的排空**
+--      挪走，这类断言改由"模块自己在 regen 处理里硬写"守门（samples/bad-aftercombat-write.lua）。
 --   三 往暴雪对象写字段 / 挂钩子         A3 A3h A3s
 --   四 α 继承把带背板的容器打到 0        A4（红=收敛后仍为 0）A4t（动画中间态，只记黄）
+--      A4s 是"Skin:Fade 剥掉暴雪窗口内部的原始美术"（α0 正是目的）；
+--      A4h 是"人造悬停后能亮"（InfoBar / 收养条的静息态就是 0）—— 两者都留名但不算缺陷。
 --   五 Skin:Need 命中 / 缺席             A5（✗ 清单，不算 FAIL，是上线首日目标清单）
 
 local Report = {}
@@ -26,9 +34,9 @@ local LEVELS = { red = 1, warn = 2, guarded = 3, info = 4 }
 -- 类名 -> 断言编号（渲染时按断言分组）
 local CLASS_ASSERT = {
     A0 = 1, A0p = 1, A0b = 1, A1s = 1, A1t = 1,
-    A2 = 2, A2c = 2, A2i = 2, A2r = 2, A1b = 2,
+    A2 = 2, A2c = 2, A2i = 2, A2r = 2, A2n = 2, A6 = 2, A1b = 2,
     A3 = 3, A3h = 3, A3s = 3,
-    A4 = 4, A4t = 4,
+    A4 = 4, A4t = 4, A4s = 4, A4h = 4,
     A5 = 5,
     -- run.lua 自己的账
     L = 1, X = 1,
@@ -180,9 +188,16 @@ function Report.Render(self, opts)
                         local what = tostring(d.frame or d.msg or d.field or d.op or d.path or "")
                         if d.op and d.frame then
                             what = string.format("%s:%s() ← 判据 %s", d.frame, d.op, tostring(d.evidence or "?"))
+                            if d.flags then what = what .. " · " .. tostring(d.flags) end
+                        elseif d.flags then
+                            -- 断言一的抛错行也要能说"被哪一拍打断"（L=lockdown 仍 true / R=受限窗口还开着）
+                            what = string.format("%s · %s", what, tostring(d.flags))
                         end
+                        -- 阶段名要跟着打：同一条写入在 restricted:Combat 里被拒、
+                        -- 和在脱战排空（regen 派发当拍）里被拒，修法完全不同。
                         push("      %-8s %-14s ×%-4d %s  [%s]",
-                            row.cls, want, row.n, where(row), what)
+                            row.cls, want, row.n, where(row),
+                            string.format("%s · 阶段 %s", what, tostring(row.phase or "?")))
                     end
                 end
             end
@@ -216,6 +231,18 @@ function Report.Render(self, opts)
         countDump("Enum 里查不到的类型", gaps.enumGaps)
         countDump("FrameXML 确有此名、替身没给的 helper / 常量（相应分支离线没跑过）", gaps.helperGaps)
         countDump("读了但这个世界里没有的暴雪名字（与断言五的 ✗ 同账）", gaps.unknownGlobals)
+        local tiers = gaps.unknownTiers
+        if tiers and tiers.n then
+            -- 407 个名字不能用一档读：LoD 包与"运行期按父名生成"都是预期内的缺席，
+            -- 混在一起就把真正要人眼过的那批（拼写 / GameRule / 运行期 CreateFrame）淹掉了。
+            push("    分档：LoD 包 %d 项 · 运行期按父名生成 %d 项 · 查不到出身 %d 项",
+                tiers.n.lod or 0, tiers.n.child or 0, tiers.n.unknown or 0)
+            local list = {}
+            for name in pairs(tiers.unknown or {}) do list[#list + 1] = tostring(name) end
+            table.sort(list)
+            for i = 1, math.min(10, #list) do push("      ? %s", list[i]) end
+            if #list > 10 then push("      …另有 %d 个查不到出身", #list - 10) end
+        end
         push("")
     end
 

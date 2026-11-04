@@ -3,6 +3,7 @@
 //
 //   node tools/harness/run.js              跑五类断言，打台账，有红就 exit 1
 //   node tools/harness/run.js --selftest   再加载 samples/ 的坏样例，验证断言**确实会红**
+//   node tools/harness/run.js --secrets    机密值常开（默认只在六类受限窗口里开）
 //   node tools/harness/run.js --max=30     每类断言多列几条明细
 //
 // 为什么要它：11-05 开服前没有实机环境，而现有闸门（api-audit / audit-locals / audit-taint /
@@ -35,6 +36,33 @@ function findLua() {
 }
 
 const selftest = process.argv.includes("--selftest");
+const regen = process.argv.includes("--regen");
+
+// 两份派生表（world-data.lua / engine-api.lua）都**不入库**：源在 framexml-source 与
+// docs/api 里，谁本地残留了旧文件，离线结论就是旧的。所以跑之前自己核一遍新旧：
+// 产物缺失、或比生成器旧 ⇒ 现场重生。证据源自己变了（换了客户端分支、重新抓了快照）
+// 时手工加 --regen，别指望 mtime 能看出目录里的增删。
+function ensureGenerated(name, genScript) {
+  const outPath = path.join(__dirname, name);
+  const genMtime = fs.statSync(genScript).mtimeMs;
+  let outMtime = 0;
+  try { outMtime = fs.statSync(outPath).mtimeMs; } catch (e) { /* 没有 */ }
+  if (!regen && outMtime > 0 && outMtime >= genMtime) return false;
+  const r = spawnSync(process.execPath, [genScript], { encoding: "utf8", cwd: ROOT, maxBuffer: 16 * 1024 * 1024 });
+  process.stdout.write((r.stdout || "").replace(/^/gm, "# "));
+  if (r.status !== 0) {
+    console.error(`生成 ${name} 失败（${path.basename(genScript)} 退出码 ${r.status}）：\n${r.stderr || ""}`);
+    process.exit(3);
+  }
+  return true;
+}
+for (const [name, script] of [
+  ["world-data.lua", path.join(__dirname, "build-world.js")],
+  ["engine-api.lua", path.join(__dirname, "build-engine.js")],
+]) {
+  if (ensureGenerated(name, script)) console.log(`# 已重新生成 ${name}`);
+}
+
 const lua = findLua();
 if (!lua) {
   console.error("找不到 Lua 解释器（试过 MONETUI_LUA / 常见安装路径 / PATH）。装一个 5.4 或用 MONETUI_LUA 指路。");
@@ -47,7 +75,7 @@ if (selftest) {
   args.push(`--samples=${SAMPLES.split(path.sep).join("/")}`);
 }
 for (const a of process.argv.slice(2)) {
-  if (a.startsWith("--max=") || a.startsWith("--root=")) args.push(a);
+  if (a.startsWith("--max=") || a.startsWith("--root=") || a === "--secrets") args.push(a);
 }
 
 console.log(`# lua ${lua.version} · harness ${path.relative(ROOT, RUN_LUA).split(path.sep).join("/")}${selftest ? " · 含坏样例自检" : ""}`);

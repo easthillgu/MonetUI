@@ -211,6 +211,7 @@ function ApiStub.New(config)
         lockdown = false,       -- InCombatLockdown()
         restricted = false,     -- ns:IsRestricted() 的真值来源（六类任一激活）
         secrets = false,        -- C_Secrets.HasSecretRestrictions()
+        flushWindow = false,    -- 正处在 Core.AfterCombat 的排空窗口里（run.lua 在派发 regen / 限制解除时置位）
         editMode = false,       -- PetBattleFrames / EditMode（暂不置）
         inRaid = false,         -- IsInRaid()：团队帧的显隐分支靠它
         inParty = false,        -- IsInGroup() / IsInParty()
@@ -247,10 +248,20 @@ function ApiStub.New(config)
     local KIND_METHODS = {}
     api.KIND_METHODS = KIND_METHODS
 
+    -- "受保护"是**逐对象**的属性，不是"这是暴雪的框"。客户端的真值是 Frame:IsProtected()：
+    -- 只有由安全环境生产的框（XML protected="true" / inherits 链碰到 Secure* 模板）才受保护，
+    -- 普通暴雪框（CharacterFrame 的装饰件、Minimap 那一类）在受限窗口里被我们写点是合法的。
+    -- 出处：world-data.lua 每行的 prot 位（由 build-world.js 沿模板 inherits 求传递闭包），
+    -- 自家框走 CreateFrame 的模板判据。判据宽了会把合法写入报成假红（11-04 run3 的
+    -- CharacterFramePortrait:SetSize ×14 / A0p ×1 就是这么来的），窄了会漏掉收养来的安全按钮。
+    local function isProtectedObj(st)
+        return (st.secure or st.protected) and true or false
+    end
+    api.isProtectedObj = isProtectedObj
+
     local function restrictionBlocks(st)
-        if st.blizzard then return api.world.restricted or api.world.lockdown end
-        if st.secure then return api.world.lockdown or api.world.restricted end
-        return false
+        if not isProtectedObj(st) then return false end
+        return api.world.lockdown or api.world.restricted
     end
 
     local function labelOf(st)
@@ -264,34 +275,58 @@ function ApiStub.New(config)
     -- 定义在 DOC_KIND_CHAIN 之后，这里先拿一个前向引用。
     local docProtectedFor
 
-    -- 红分两档，因为离线证据只撑得起第一档：
-    --   A2  红  ：暴雪对象，或我们自己**按证据**建出来的受保护对象（Secure* 模板 / protected 标志 /
-    --             被安全容器收养）。依据是 AGENTS「安全单位按钮的显隐只能交给 visibility state
-    --             driver …… 战斗中必被拒（ADDON_ACTION_BLOCKED MonetUITargetFrame:Hide()）」，
-    --             以及文档给这些方法挂上的 pm（受保护的方法）标记。
+    -- 红分三档，因为离线证据只撑得起前两档：
+    --   A2  红  ：**受保护**对象 —— 暴雪侧是 world-data prot=1 的那批（Secure* 模板 /
+    --             protected="true" 出身），自家侧是按 Secure 模板造的框。依据是 AGENTS
+    --             「安全单位按钮的显隐只能交给 visibility state driver …… 战斗中必被拒
+    --             （ADDON_ACTION_BLOCKED MonetUITargetFrame:Hide()）」，以及文档给这些方法挂的
+    --             pm（受保护的方法）标记。
     --   A2i 黄 ：**我们自建**的子件，只因为"父框受保护"才算受保护（血条、火花这类匿名子控件）。
     --             客户端文档里没有"保护随父继承"这一条（CreateFrame 根本不在 APIDocumentation 里），
     --             拿它当红就是拿猜测当结论；但它又确实可能是实机那批拦截的来源，所以留黄待实机复核。
+    --   A2n 黄 ：受限窗口里对**普通暴雪框**（prot=0）做受保护级写入。判据只到 XML：
+    --             实机里有些框是 Lua 造的（ Blizzard_<X>.lua 里 CreateFrame 时带上 secure 模板），
+    --             离线看不到 → 不判红，但要留在账上，实机复核同一条。
+    --   A6  红 ：**regen / 限制解除派发当拍**里写受保护对象。本客户端"先派事件、后翻
+    --             InCombatLockdown()"（2026-10-27 实机探针，Core.lua:505），所以那一拍原生
+    --             标志仍是 true，客户端会照拒。这不一定是"缺守卫"，多半是**时序错**：
+    --             这刀要挪进 `C_Timer.After(0, …)`（AGENTS 里 Bags 停车同款）。Core 11-04 已把
+    --             它自己的排空挪走；仍会命中的是"模块自己在 regen 处理里硬写"这类形状。
+    --             单独立一类是因为修法不同（不是补 pcall/补 InCombatLockdown 守卫）。
     local function deny(obj, op, file, line, guarded, swallowedAt, pmDoc)
         local st = STATE[obj]
         local frame = labelOf(st)
         local inherited = (not st.blizzard) and st.inheritedSecure and true or false
-        local cls = inherited and "A2i" or "A2"
+        local cls
+        if inherited then cls = "A2i"
+        elseif api.world.flushWindow then cls = "A6"
+        else cls = "A2" end
         -- 判据要能自查：写成"文档 fl.pm（Frame）"的那一类是客户端文档给的，写成"替身清单"的
         -- 那一类是我们从 AGENTS 判例手抄的。红点如果只来自后者，复核时先怀疑判据而不是先改产品。
         local evidence = pmDoc and ("文档 fl.pm（" .. pmDoc .. "）") or "替身 PROTECTED_OP 清单（文档未标 pm）"
         -- 驱动层（run.lua）要知道手上这个抛错是哪一档带出来的：继承型保护只该记黄，
         -- 它打断的那条刷新路径就不能再升成一条红（一屏红全来自同一条猜测）。
-        api.lastDeny = { cls = cls, frame = frame, op = op, file = file, line = line }
+        -- 去重键里带上"哪一拍拒的"：战斗中未守卫、脱战排空那一拍（lockdown 还没翻）、
+        -- 以及非战斗类限制（只有 restricted），三者修法不同，合成一行就都看不见了（根因 b）。
+        local win = (api.world.lockdown and "L" or "") .. (api.world.restricted and "R" or "")
+        api.lastDeny = { cls = cls, frame = frame, op = op, file = file, line = line, win = win }
         add(cls, inherited and "warn" or (guarded and "guarded" or "red"),
-            string.format("%s:%s:%s:%s:%s", cls, frame, op, tostring(file), tostring(line)), {
+            string.format("%s:%s:%s:%s:%s:%s", cls, frame, op, tostring(file), tostring(line), win), {
                 file = file, line = line, frame = frame, op = op, kind = st.kind,
                 guarded = guarded, swallowedAt = swallowedAt, evidence = evidence,
+                -- 被拒那一拍的世界状态必须一起打：同一条写入发生在"战斗中"还是
+                -- "脱战排空那一拍（lockdown 还没翻）"，修法完全不同（根因 b 就靠这个定位）。
+                flags = string.format("lockdown=%s restricted=%s secrets=%s",
+                    tostring(api.world.lockdown and true or false),
+                    tostring(api.world.restricted and true or false),
+                    tostring(api.world.secrets and true or false)),
                 msg = string.format("ADDON_ACTION_BLOCKED MonetUI %s:%s()", frame, op),
                 why = string.format("%s · 判据：%s",
-                    st.blizzard and "暴雪对象 + 受限状态"
-                        or (inherited and "自建子件、保护只从父框继承（离线无据，待实机）"
-                            or "自家 secure 对象 + 战斗/受限"), evidence),
+                    cls == "A6"
+                        and "regen / 限制解除派发当拍写受保护对象（InCombatLockdown() 还是 true）—— 时序错，这刀要 C_Timer.After(0) 再写"
+                        or (st.blizzard and "受保护暴雪对象（world-data prot=1）+ 受限状态"
+                            or (inherited and "自建子件、保护只从父框继承（离线无据，待实机）"
+                                or "自家 secure 对象 + 战斗/受限")), evidence),
             })
         error(string.format("ADDON_ACTION_BLOCKED MonetUI %s:%s()", frame, op), 0)
     end
@@ -300,10 +335,26 @@ function ApiStub.New(config)
         local st = STATE[obj]
         if not st then error("attempt to use a removed " .. tostring(op) .. " handle", 2) end
         if not (st.blizzard or st.secure) then return st end
-        if not restrictionBlocks(st) then return st end
         local file, line, guarded, swallowedAt = CallSite(3)
         local pmDoc = docProtectedFor(st.kind, op)
-        if PROTECTED_OP[op] or pmDoc then
+        local isProtectedOp = PROTECTED_OP[op] or pmDoc
+        if not restrictionBlocks(st) then
+            -- prot=0 的暴雪框 + 受限窗口：客户端不会拒这一刀，所以不判红；但"受保护级操作"
+            -- 落在它身上只说明离线判据（XML inherits 链）没覆盖到它的出身，留黄等实机复核。
+            if st.blizzard and not st.protected and isProtectedOp
+                and (api.world.lockdown or api.world.restricted) then
+                add("A2n", "warn", string.format("A2n:%s:%s:%s:%s", labelOf(st), op, tostring(file), tostring(line)), {
+                    file = file, line = line, frame = labelOf(st), op = op, kind = st.kind,
+                    guarded = guarded, swallowedAt = swallowedAt,
+                    evidence = (pmDoc and ("文档 fl.pm（" .. pmDoc .. "）") or "替身 PROTECTED_OP 清单（文档未标 pm）"),
+                    msg = string.format("受保护级写入落在非受保护暴雪框：%s:%s()（未拒绝）", labelOf(st), op),
+                    why = "world-data prot=0：XML 声明里它不来自 Secure 模板 / protected=\"true\"；"
+                        .. "实机可能是 Lua 里造的受保护框，留黄待 /mui skins diagnose 复核",
+                })
+            end
+            return st
+        end
+        if isProtectedOp then
             return deny(obj, op, file, line, guarded, swallowedAt, pmDoc)
         end
         if CONTENT_OP[op] then
@@ -560,6 +611,8 @@ function ApiStub.New(config)
         local st = {
             kind = kind, name = name, blizzard = opts.blizzard and true or false,
             secure = opts.secure and true or false, template = opts.template,
+            -- 暴雪侧的受保护出身：world-data 每行的 prot 位（frames.lua 实例化时传进来）
+            protected = opts.protected and true or false,
             parent = parent, children = {}, w = {},
             alpha = opts.alpha or 1, scale = 1, level = opts.level or 1, strata = opts.strata or "MEDIUM",
             shown = opts.shown ~= false, enabled = true, mouse = false,
@@ -604,15 +657,20 @@ function ApiStub.New(config)
     end
     function BASE.IsForbidden(o)
         local st = STATE[o]
-        if st.blizzard then return api.world.restricted and true or false end
+        -- forbidden 只发生在**受保护**对象上（普通暴雪框在战斗里照样能读，
+        -- 把全仓暴雪框都报 forbidden 会让 Widget:Readable 把所有框挂进 5 秒暂停、
+        -- 换皮主循环一行都不跑）
+        if st.blizzard and st.protected then return api.world.restricted and true or false end
         return false
     end
     function BASE.CanBeAccessedInContext(o)
         local st = STATE[o]
-        if st.blizzard then return not (api.world.restricted or api.world.lockdown) end
+        if st.blizzard and st.protected then return not (api.world.restricted or api.world.lockdown) end
         return true
     end
-    function BASE.IsProtected(o) local st = STATE[o]; return (st.blizzard or st.secure) and true or false end
+    -- 逐对象回答，和 world-data 的 prot 位同源；以前这里对一切暴雪对象回 true，
+    -- 于是"IsProtected"在离线世界里没有任何信息量，假红全从它来。
+    function BASE.IsProtected(o) local st = STATE[o]; return isProtectedObj(st) end
     function BASE.CanChangeProtectedState(o) return (not STATE[o].blizzard) and true or false end
 
     function BASE.GetAlpha(o) return STATE[o].alpha end
@@ -742,7 +800,22 @@ function ApiStub.New(config)
     function BASE.GetTop(o) local _, _, t = BASE.GetRect(o); return t end
     function BASE.GetBottom(o) local _, _, _, b = BASE.GetRect(o); return b end
     function BASE.GetCenter(o) return STATE[o].wh.cx or 0, STATE[o].wh.cy or 0 end
-    function BASE.IsMouseOver() return false end
+    -- 人造光标：run.lua 把 api.cursorOver 指到某个框，就当鼠标停在那个框（含其子树）里。
+    -- 断言四需要它：离线没有真鼠标，而本仓大量条是"平时 α0、悬停才亮"的设计
+    -- （InfoBar 的 mouseover 静息目标就是 0、宠物/姿态条 SetupHoverOnly 同款）。
+    -- 只按最终 α 判红会把这些全部冤枉成"美化白挂"。
+    function BASE.IsMouseOver(o)
+        local target = api.cursorOver
+        if not target then return false end
+        local node, hops = o, 0
+        while node and hops < 40 do
+            if node == target then return true end
+            local s = STATE[node]
+            node = s and s.parent
+            hops = hops + 1
+        end
+        return false
+    end
     function BASE.EnableMouse(o, on)
         local st = need(o, "EnableMouse")
         st.mouse = on and true or false
@@ -837,16 +910,19 @@ function ApiStub.New(config)
         end
     end
     function BASE.HookScript(o, name, fn)
-        local st = need(o, "HookScript")
-        if st.blizzard then
+        -- 先记账再拒绝：这条红是"挂脚本"这个动作本身的违规，与"能不能写"无关。
+        -- 顺序反过来时 need() 先抛，样例只会留下一条"加载期抛错"，断言三自己变成假绿。
+        local stHook = STATE[o]
+        if stHook and stHook.blizzard then
             local file, line, guarded, swallowedAt = CallSite(3)
-            add("A3h", "red", string.format("A3h:%s:%s:%s", labelOf(st), name, tostring(line)), {
-                file = file, line = line, frame = labelOf(st), op = "HookScript", script = name,
+            add("A3h", "red", string.format("A3h:%s:%s:%s", labelOf(stHook), name, tostring(line)), {
+                file = file, line = line, frame = labelOf(stHook), op = "HookScript", script = name,
                 guarded = guarded, swallowedAt = swallowedAt,
                 msg = string.format("HookScript 挂到暴雪%s「%s」的 %s 上（AGENTS：改用轮询）",
-                    st.kind, labelOf(st), name),
+                    stHook.kind, labelOf(stHook), name),
             })
         end
+        local st = need(o, "HookScript")
         local old = st.scripts[name]
         st.scripts[name] = function(...)
             if old then old(...) end
@@ -1162,7 +1238,10 @@ function ApiStub.New(config)
     BTN.GetFontString = function(o)
         local st = STATE[o]
         if st.fontString then return st.fontString end
-        local fs = api.NewObject("FontString", nil, o, { blizzard = st.blizzard and true or false })
+        local fs = api.NewObject("FontString", nil, o, {
+            blizzard = st.blizzard and true or false,
+            protected = st.protected and true or false,
+        })
         STATE[fs].text = st.text or ""
         st.fontString = fs
         return fs
@@ -1480,8 +1559,12 @@ function ApiStub.New(config)
                 t[name] = function(...)
                     local self = select(1, ...)
                     local st = type(self) == "table" and STATE[self] or nil
-                    if st and (st.blizzard or st.secure) and restrictionBlocks(st)
-                        and (PROTECTED_OP[name] or docProtectedFor(st.kind, name)) then
+                    -- 判"这一刀是不是受保护级"用两份判据的并集，然后一律交给 need()：
+                    -- 真受保护对象它会拒绝并记 A2 红，prot=0 的暴雪框它只记 A2n 黄。
+                    -- 在这里就按 restrictionBlocks 短路的话，非受保护那一档连黄都不留。
+                    if st and (st.blizzard or st.secure)
+                        and (PROTECTED_OP[name] or docProtectedFor(st.kind, name))
+                        and (api.world.lockdown or api.world.restricted) then
                         need(self, name)          -- 未守卫就 error，账已经记过
                     end
                     return f(...)
@@ -1867,6 +1950,10 @@ function ApiStub.New(config)
     end)
 
     ---------------------------------------------------------------- CreateFrame
+    -- 模板出身判据的第一来源是 world-data 的 secureTemplates（build-world.js 沿 XML
+    -- inherits 求出的传递闭包，311 个模板），手抄名单只当"转储里查不到的模板"兜底：
+    -- ActionBarButtonTemplate 这类**名字里没有 Secure** 但 inherits 链上有 SecureFrameTemplate 的
+    -- 才是要判的对象，光看名字会一路判成"不受保护"。
     local SECURE_TEMPLATE = {
         SecureUnitButtonTemplate = true, SecureActionButtonTemplate = true,
         SecureHandlerStateTemplate = true, SecureHandlerAttributeTemplate = true,
@@ -1882,7 +1969,8 @@ function ApiStub.New(config)
         local secure = false
         local ownReason = false          -- 保护是否来自这一句自己（模板 / protected 标志）
         if type(template) == "string" then
-            if SECURE_TEMPLATE[template] or template:find("Secure") then
+            if (api.secureTemplates and api.secureTemplates[template])
+                or SECURE_TEMPLATE[template] or template:find("Secure") then
                 secure = true
                 ownReason = true
             end
@@ -1890,7 +1978,7 @@ function ApiStub.New(config)
         local p = parent
         if p == nil then p = env.UIParent end
         if p and not STATE[p] then error("CreateFrame: parent is not a widget", 2) end
-        if p and STATE[p].secure then secure = true end
+        if p and (STATE[p].secure or STATE[p].protected) then secure = true end
         local isProtectedFlag = select(1, ...)      -- 第 5 参 protected
         if isProtectedFlag then
             secure = true
@@ -1930,13 +2018,19 @@ function ApiStub.New(config)
             local frame = obj and STATE[obj] and labelOf(STATE[obj]) or nil
             -- 脚本被"受限写入被拒"打断时，同一条写入已经在断言二记过账。继承型保护（A2i）只有黄，
             -- 它带出来的中断也停在黄：否则一条离线没有判据的猜测会同时变成两处红，把真红埋掉。
+            -- A6（排空时序）已记红，同一个中断不必再记第二条红 —— 它的修法是同一个。
             local cls, level = "A0", "red"
             local d = api.lastDeny
-            if type(err) == "string" and err:find("ADDON_ACTION_BLOCKED") and d and d.cls == "A2i" then
+            local blocked = type(err) == "string" and err:find("ADDON_ACTION_BLOCKED")
+            if blocked and d and (d.cls == "A2i" or d.cls == "A6") then
                 cls, level = "A0b", "warn"
             end
             add(cls, level, string.format("%s:%s:%s:%s", cls, label, tostring(site.file), tostring(site.line)), {
                 file = site.file, line = site.line, frame = frame,
+                -- 被哪一拍打断要写出来：L = InCombatLockdown 仍 true（脱战派发当拍就是这样），
+                -- R = 六类受限窗口之一还开着。只看"某框抛错"分不出产品缺守卫还是排空排早了。
+                -- 只在"这条错就是被拒"时给：普通 Lua 报错沿用 lastDeny 会把上一拍的窗口安错地方。
+                flags = (blocked and d) and ("被拒那一拍 " .. tostring(d.win) .. (d.cls and (" · " .. d.cls) or "")),
                 msg = label .. " 抛错: " .. tostring(err),
             })
         end

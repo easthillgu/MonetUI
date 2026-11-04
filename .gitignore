@@ -25,6 +25,8 @@ tools/*
 !tools/**/*.svg
 !tools/**/*.html
 !tools/**/*.lua
+# tools 下的说明文档属于验证链的一部分（harness 的用法与"如何新增断言"六步），随脚本一起入库。
+!tools/**/*.md
 node_modules/
 *.json
 # tools/ 的运行前提：npm install 需要它（@napi-rs/canvas / wow-blp-web）
