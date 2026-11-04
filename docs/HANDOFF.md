@@ -3568,7 +3568,33 @@ Mainline —— 若跑 Classic，Tab3 整排缺席是**正常行为**，别当�
 配置导出导入 / 预算任务器 / CVar 面板）。**开服前不落地任何一条**（距开服 <8 小时，这些动的正是
 启动与配置路径 —— 白天每个 P0 的成因形状就是这个）。
 
+## 8.33 同机插件普查（开服日归因底座）：EnhanceQoL / OpenMap / Lueur / QuestEcho / DungeonsForever / Polestar
+
+结论在 **`docs/ANALYSIS-INSTALLED-ADDONS.md`**（两个只读子代理 + 集成道对高风险结论逐条复核；全程只读）。
+
+**最重要的一条是冲突地图，不是功能清单**：`EnhanceQoLMover` 的目录条目 **`defaultEnabled = true`**
+（`EnhanceQoLMover/frames_Camelot.lua:69,76,88…`），并用 **`hooksecurefunc(frame, "SetPoint", …)`**
+把暴雪窗口事后重钉回它自己存的值（`EnhanceQoLMover/Init.lua:1193-1200`）。
+⇒ 明天任何"我们的窗口位置改了又跳回去"**先判它**，别当 Mover/布局的 bug 查。
+其余默认值也逐个看了：背包/玩家目标框/资源条**默认关**（不冲突），Tooltip 锚点与姓名板颜色按功能开。
+判归属的只读探针全部记在文档 §1 末尾（`type(_G.EnhanceQoL)=="table"`、
+`GetAddOnEnableState("EnhanceQoLMover")`、`EnhanceQoL.Bags.IsEnabled()`、
+`C_Frame.Exists("EQOLUFPlayerFrame")`、`ContainerFrame1:GetParent() ~= UIParent`）
+—— 建议下一步做 M1：把这些接管状态并进 `/mui report`，开服当天一条命令看清"哪块不是我们的"。
+
+**许可普查**（决定能吸收什么）：EnhanceQoL 全家 / Lueur / 163UI_Info / QuestEcho / RurutiaSuite
+**都没声明许可** ⇒ 按默认全权保留处理，只有机制可用；`DungeonsForever` 明文 All Rights Reserved；
+`Polestar` GPL-3.0-only；`OpenMap` MIT（代码，地图美术属暴雪）。数据表一律不搬，要数据自己抽 DB2。
+
+**它替我们证明这台客户端能容什么**（§2，都是可复用的判据）：`pcall(C_Map.SetUserWaypoint,
+UiMapPoint.CreateFromCoordinates(...))` 可用；`C_MapExplorationInfo.GetExploredMapTextures` 返回真数据
+（我们此前"地图 API 部分受限"的判断要下调）；`C_NamePlate.GetNamePlateForUnit("softinteract")` 可用；
+`Minimap:SetUsingSoftCursor` + `C_TooltipInfo.GetMinimapMouseover` 造光标逐格扫小地图可行；
+`issecretvalue` 在读点 gate 是普遍做法（**连 GUID 都可能是密值**）。
+反例也记了：EQOL 自己有处未 gate 的 `UnitHealth/UnitHealthMax` 直接 format（`HealthText.lua:204-219`）。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
+
 
 ### 9.1 明早开服首趟（唯一优先级，别在此之前加任何新功能）
 
