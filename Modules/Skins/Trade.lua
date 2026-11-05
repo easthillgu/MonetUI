@@ -304,14 +304,12 @@ local FADE_PROF_ATLAS = {
     "common%-button%-list$",
 }
 local SWAP_PROF_ATLAS = {
-    -- 金色选中/悬停**行条** → 换成我们的 barfill + 边框色（横向实心条，压在行文字下，不遮图标）
+    -- 金色选中/悬停**行条** + 侧页签选中态 → 换成我们的矩形 barfill（通用方法把盒子压到内容之下，不糊图标）
     "professions%-recipe%-active",
     "professions%-recipe%-hover",
-}
--- 侧页签选中态是一圈高亮框（不是实心条）→ 只染我们的颜色、保留暴雪形状
--- （SwapArt 换实心会盖住页签里的职业图标 → "发白"，11-05 角色窗判例同因）。
-local TINT_PROF_ATLAS = {
     "common%-sidetab%-selected",
+}
+local TINT_PROF_ATLAS = {
 }
 
 -- 模块级稳定引用：PollWatch 按引用去重，在 Apply 里现造闭包会每开一次窗多挂一条。

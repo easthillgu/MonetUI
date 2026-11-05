@@ -482,7 +482,11 @@ function Skin:StyleAtlasBackdrop(frame, fadePatterns, swapPatterns, tintPatterns
                         if low:find(swapPatterns[i]) then
                             handled = true
                             if self:SwapArt(reg, "monet_barfill") and r then
-                                pcall(reg.SetVertexColor, reg, r, g, b, 0.5)
+                                pcall(reg.SetVertexColor, reg, r, g, b, 0.6)
+                                -- 11-05 判例：选中态原本是 OVERLAY 的一圈高亮，换成实心 barfill 后
+                                -- 画在图标(ARTWORK)之上会把图标糊白。把盒子压到内容之下当选中底色，
+                                -- 图标留在上面清晰。重载会恢复原层（SwapArt 的回滚不记 layer）。
+                                pcall(reg.SetDrawLayer, reg, "BACKGROUND", -6)
                             end
                             break
                         end

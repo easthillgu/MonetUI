@@ -55,10 +55,11 @@ local FADE_CHARACTER_ATLAS = {
     "common%-sidetab%-mask",
 }
 local SWAP_CHARACTER_ATLAS = {
-}
--- 选中页签是一圈高亮框（不是实心条）→ 只染我们的颜色、保留暴雪形状（SwapArt 换实心会盖住职业图标发白）。
-local TINT_CHARACTER_ATLAS = {
+    -- 选中页签 → 我们的**矩形** barfill 盒子（通用方法会把它压到图标之下当底色，不糊图标）。
+    -- 作者要"规则方形"：暴雪 sidetab 是斜角框，tint 保留它仍是斜的；换成我们的矩形盒子才方正。
     "common%-sidetab%-selected",
+}
+local TINT_CHARACTER_ATLAS = {
 }
 
 -- 模块级稳定引用：PollWatch 按引用去重。
