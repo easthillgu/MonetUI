@@ -212,7 +212,11 @@ local function SkinQuestFrame()
     -- Show 后再跑一次（暴雪 quest 数据是 Show 后才塞的，面板也可能是那时候才建出来）
     HookQuestBrighten(Skin:Need("QuestFrame"))
 
-    M:Dress("GossipFrame", { window = true, inset = true, panel = { bgAlpha = READ_ALPHA }, deep = true })
+    -- 11-05 作者实测：gossip（NPC 对话）那拍左上角圆头像没藏，切到训练师才藏 ——
+    -- 因为对话显示的是 `GossipFramePortrait`（和 `ClassTrainerFramePortrait` 是两个不同肖像），
+    -- 而 `portrait` 以前只点在 ClassTrainerFrame 上。给 GossipFrame 也补上（SquarePortrait 靠
+    -- `<名>Portrait` 回退命中，GossipFrame 没有 .Portrait 成员）。
+    M:Dress("GossipFrame", { window = true, inset = true, panel = { bgAlpha = READ_ALPHA }, deep = true, portrait = true })
     M:Dress(QUESTFRAME_SCROLLS, { as = "scroll" })
 end
 
