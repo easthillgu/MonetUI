@@ -298,6 +298,27 @@ local function MergeDefaults(dst, src)
     return dst
 end
 
+--- 稀疏落盘（#33，2026-11-05）：把 `dst` 里**等于 `src`（DEFAULTS）默认值**的键就地删掉，只留玩家真正改过的。
+--- 只在 `PLAYER_LOGOUT` 落盘前跑一次 —— 运行期 `ns:DB()` 仍是 `MergeDefaults` 补满的全量，所有读取点不用改。
+--- 收益：① 以后改 `DEFAULTS` 里某个值能传到老玩家（他们的库里没烘死旧默认）；② WTF 文件瘦下来。
+--- 递归只对"默认值也是表"的下钻：默认是空表（`bags.positions` / `mover.locks`）时下钻剥不到任何键，
+--- 玩家写进去的位置/锁自然保留；诊断账本（colorReport / layerReport / perfReport / compatReport）和
+--- `schema` 都不在 DEFAULTS 顶层，本函数只遍历 DEFAULTS 的键，绝不误删它们。
+--- 清空的子表顺手删掉，省得 SavedVariables 里留一堆 `{ }`。
+local function StripDefaults(dst, src)
+    if type(dst) ~= "table" then return end
+    for key, defVal in pairs(src) do
+        if type(defVal) == "table" then
+            if type(dst[key]) == "table" then
+                StripDefaults(dst[key], defVal)
+                if next(dst[key]) == nil then dst[key] = nil end
+            end
+        else
+            if dst[key] == defVal then dst[key] = nil end
+        end
+    end
+end
+
 --- Database schema.  Bumping this re-applies the settings that changed their meaning in the shipped defaults (see Migrate).
 local SCHEMA = 9
 
@@ -1448,6 +1469,15 @@ local loginThemeReported = false
 ns.EventBus:Register("ADDON_LOADED", function(_, addonName)
     if addonName ~= ADDON_NAME then return end
     LoadDatabase()
+end)
+
+-- 稀疏落盘（#33）：客户端在 PLAYER_LOGOUT 之后才序列化 MonetUIDB（/reload 与退出都会走这里），
+-- 所以在这里就地剥掉等于默认值的键 —— 存下来的就只有玩家改过的 + 位置/账本/schema。
+-- 运行期 ns:DB() 已是 MergeDefaults 补满的全量，各模块读取点不受影响；下次登录再 MergeDefaults 补回。
+ns.EventBus:Register("PLAYER_LOGOUT", function()
+    if type(_G.MonetUIDB) == "table" then
+        StripDefaults(_G.MonetUIDB, DEFAULTS)
+    end
 end)
 
 ns.EventBus:Register("PLAYER_LOGIN", function()
