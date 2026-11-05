@@ -3870,6 +3870,18 @@ R1.0/R1.1 ✓；`skins diagnose` ✓ 但**只算预扫**（窗没开，198 条 �
 三条"预期不是缺陷"（首趟已按这个口径判过）：银行**两套并存**（接管默认 off，#25 没做完之前不许开）；
 `WarbandBankFrame` 在台账里是 ✗（本客户端没这框）；`EncounterJournal` / `AeLoot` 两块 ✗ 归 GameRule（1.60 实测生效）。
 
+**开服日上午已收口的三条（每条都有两个以上独立数字，不靠"看着正常"）**：
+
+| 项 | 客观判据（1.60.1 · 70790 实机） |
+|---|---|
+| 微菜单 P0（直调暴雪 Lua 全局） | `logs ERR` 在重载后窗口内**零新增**、`/mui blocks` 账本空 |
+| 信息栏"点一格开面板"下线 | 现场 `MonetUIInfoBar:IsProtected()=false`、9 个子件 **0 个受保护**；`logs BLOCKED` 零新增 |
+| 遮罩被同机收纳器搬走（§8.39） | `MonetUIMinimapOverlay [1842,33 256x190] parent=MonetUIMinimapHolder points=2`（修前 `[0,0 0x0] parent=RurutiaSuiteMinimapCollector`）；`MonetUIMinimapMicroMenu [1778,160 56x65] points=1`（修前 `points=0`） |
+
+**还没做完的（按依赖排）**：#25 要**站到银行 NPC 前**开银行才能取到索引语义；
+#41 B 批要**逐窗开过**（拍卖/收藏/专业/训练师/任务日志/检查/日历/宏/飞行图/幻化/打孔/订单/公会/传承/LFG）；
+#42 `/mui perf` 计时换 `debugprofilestop`；#43 点一格开面板的合法载体；#28 共存声明与自静默。
+
 ### 9.2 开服后第一批（任务板已建，按序）
 
 | 任务 | 内容 | 为什么排这个位置 |
