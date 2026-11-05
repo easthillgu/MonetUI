@@ -4206,6 +4206,26 @@ host=ChatFrame1 | R1 Texture tex=8069102 a=0 | R2 Texture tex=-1627 a=1
   别在皮肤代码上继续叠改动 —— 这条要是没做 A/B，就会去给页签图标加豁免、或把已经正常的代码再改一遍。
 - 已把面板恢复默认（开）。
 
+## 8.52 2026-11-05 #33 配置稀疏落盘（PLAYER_LOGOUT 剥默认值）
+
+**问题**：`LoadDatabase` 里 `MergeDefaults(db, DEFAULTS)` 把每个默认值直接烘进持久化的 `MonetUIDB`
+⇒ ① SavedVariables 存了全量默认；② 以后改 `DEFAULTS` 里某个值**传不到老玩家**（MergeDefaults 只补
+`dst[key]==nil` 的缺失键，老库里已烘死旧值）。
+
+**改法（低风险，读取点零改动）**：内存里 `ns:DB()` 仍是补满的全量（所有 `db.xxx` 读法不变），
+只在 `PLAYER_LOGOUT` 落盘前 `StripDefaults(MonetUIDB, DEFAULTS)` 就地删掉等于默认值的键。
+`StripDefaults` 只对"默认值也是表"的键递归下钻、且只遍历 DEFAULTS 的键：
+- 空默认表（`bags.positions` / `mover.locks`）下钻剥不到任何键 ⇒ 玩家拖出来的位置/锁自动保留；
+- 诊断账本（colorReport / layerReport / perfReport / compatReport）和 `schema` 不在 DEFAULTS 顶层 ⇒ 绝不误删。
+
+**实机验证**（账号 039124100）：部署后连重载两次（第一次载入新代码、第二次 `PLAYER_LOGOUT` 才跑 strip），
+WTF 文件里 `iconSize=34`/`UnitFrames=true`/`snapRange=6`/`alertSeconds=5` 等默认键 grep=0（已剥），
+`schema=9` + 三个 report 仍在；运行期 `ns:DB().bags.iconSize` 照样读到 34（MergeDefaults 补回）。
+**时序坑记牢**：`/reload` 的 `PLAYER_LOGOUT` 由**当前运行的旧代码**触发，所以部署后要看效果得重载两次。
+
+**没解决、也不属于本任务**：文件仍 ~400KB，大头是诊断账本（layerReport 1500 行等），那是故意落盘供
+从 WTF 读的，不是配置默认。要瘦身得单独动账本的落盘策略（另议）。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 
