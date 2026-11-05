@@ -4277,6 +4277,22 @@ Compat.lua 早就有运行期能力表 `CAPABILITIES` + `Compat:Capability`（�
 GetParent、不对就 SetParent 拉回"更糟。注册表只提供归因 + `ContestedBy` 查询，改不改模块状态由模块自己
 有依据地决定，不盲目常驻也不盲目静默。
 
+## 8.56 2026-11-06 #38 Async 协程任务器落地（扫描迁移待办，未擅自动敏感模块）
+
+新 `Utils/Async.lua`（2393c8c）：按帧预算的协程任务器。复用 `Scheduler:EveryFrame` 做帧驱动
+（**不另建 OnUpdate 框**，空闲时订阅号摘掉、主帧随之隐藏），每帧 `BUDGET_MS=12` 毫秒预算
+（`debugprofilestop` 计时，#42 那条），超了 `Checkpoint()` 让协程 yield 到下帧。
+API：`Each(list, perItem, onDone)`（万次扫描最常用形状）、`Run(body, onDone)`（通用协程作业）、
+`Checkpoint()`、`Count()`。perItem 每项 pcall 包住（一项抛错不吞其余）。
+**实机验证**：5000 项纯计数切片 → done=true / acc=5000 / Count=0（跑完自动摘驱动）。
+
+**扫描迁移没做**（作者睡前未点头，敏感模块不擅自动）。下一趟的准确入口：
+- 首选接 `Skin:ScanScrollArrows`（EnumerateFrames 1.5 万全扫，换肤/进世界时同步整扫 = 唯一真常驻掉帧点）。
+  用 `Async:Run` 包一个协程步进 EnumerateFrames、预算内 yield；**必须加"主题中途再触发时防两次切片重叠"的
+  cancel 守卫**（持当前 job 句柄，重触发先 Cancel 再起新的）。切片期间箭头陆续涂好，肉眼无感。
+- 次选 `Bags` 的 `Scan`（只读收集 groups，但"收集→重建"是同步调用流，异步化要重构调用点，动 Bags）。
+- 纪律：切片任务碰游戏来的值先过 Secrets 漏斗（任务器不代判 —— RurutiaSuite 在 UnitAura 值上算术/当表键的坑）。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 
