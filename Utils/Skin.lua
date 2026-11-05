@@ -2038,6 +2038,24 @@ local function probeTag(name, parentName)
 end
 
 --- 一个窗口的"底"有几层、每层谁能碰。`filter` 只影响打印，不影响账本。
+--- 图集/贴图名归成"家族"：`UI-Frame-Metal-EdgeTop` → `ui-frame-metal`，路径取末段去扩展名，
+--- 纯文件 ID 的图标单成一类。600 件的窗子逐行读不完，只能按家族数出"剩下的是哪一坨美术"。
+local function artFamily(art)
+    if type(art) ~= "string" or art == "" or art == "-" then return "无美术" end
+    local s = string.lower(art)
+    if s:find("^id:") or s:find("^atlas:%s*id:") then return "文件ID 图标" end
+    s = s:match("([%w_%-%.:%,]+)$") or s
+    s = s:match("([^/\\]+)$") or s
+    s = s:gsub("%.%w+$", "")
+    s = s:gsub("^[!_]+", "")
+    local parts = {}
+    for seg in s:gmatch("[^%-]+") do parts[#parts + 1] = seg end
+    local fam = table.concat(parts, "-", 1, math.min(3, #parts))
+    if fam == "" then return "无美术" end
+    if #fam > 28 then fam = fam:sub(1, 28) end
+    return fam
+end
+
 function Skin:ProbeLayers(path, filter)
     local root = self:Need(path)
     if not root then
@@ -2075,6 +2093,10 @@ function Skin:ProbeLayers(path, filter)
                 string.rep("  ", indent), tag, label, place, art,
                 probeSize(obj), alphaText, state),
             key = string.lower(label .. " " .. art .. " " .. state),
+            -- 两张汇总表用的字段（600 件的窗子逐行读不完，只能按家族/按宿主数）：
+            state = state,
+            family = artFamily(art),
+            host = (owner and probeLabel(owner)) or label,
         }
         return invisible
     end
@@ -2155,6 +2177,40 @@ function Skin:ProbeLayers(path, filter)
     end
     if matched > printed then
         ns:Print(("  （还有 %d 行没打，全量在 MonetUIDB.layerReport）"):format(matched - printed))
+    end
+
+    -- 两张汇总表：只数**还看得见的暴雪美术**，回答"下一步该剥哪一坨 / 该给哪个容器补美化"。
+    -- 没这两张表时，587 件的窗子只能看到前 20 行，等于没有结论（11-05 实测 SocialUIFrame 就是这样）。
+    local fams, hosts = {}, {}
+    for i = 1, #rows do
+        local r = rows[i]
+        if r.state == "暴雪原样" and (not needle or string.find(r.key, needle, 1, true)) then
+            fams[r.family] = (fams[r.family] or 0) + 1
+            hosts[r.host] = (hosts[r.host] or 0) + 1
+        end
+    end
+    local function topOf(t, n)
+        local list = {}
+        for k, v in pairs(t) do list[#list + 1] = { k, v } end
+        table.sort(list, function(a, b)
+            if a[2] ~= b[2] then return a[2] > b[2] end
+            return a[1] < b[1]
+        end)
+        local out = {}
+        for i = 1, math.min(n, #list) do out[i] = ("%s ×%d"):format(list[i][1], list[i][2]) end
+        return out, #list
+    end
+    local famTop, famN = topOf(fams, 8)
+    local hostTop, hostN = topOf(hosts, 6)
+    if counts.plain > 0 then
+        ns:Print(("  还看得见的美术家族（%d 类，前 8）：%s"):format(famN, table.concat(famTop, "、")))
+        ns:Print(("  这些美术挂在谁身上（%d 个宿主，前 6）：%s"):format(hostN, table.concat(hostTop, "、")))
+        ns:Print("  读法：家族 = 该补哪一类剥离；宿主 = 该给哪个容器开深扫。"
+            .. "宿主名后带 ×N 越大越优先，×1 的零头不用管。")
+    end
+
+    if okDb and type(db) == "table" then
+        db.layerReport.families, db.layerReport.hosts = famTop, hostTop
     end
     ns:Print(("|cffffd100%s 的底层|r：%d 件 —— 还看得见的暴雪美术 %d / 已剥或看不见 %d / 我们自己的 %d%s%s"):format(
         tostring(path), #rows, counts.plain, counts.faded, counts.ours,
