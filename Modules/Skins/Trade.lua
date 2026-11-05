@@ -79,6 +79,39 @@ local MERCHANT_BUTTONS = {
     "MerchantGuildBankRepairButton", "MerchantSellAllJunkButton",
 }
 
+--- 商品格 / 回购格套上我们的格子边框，并压掉回购格那张 20×20 的暴雪小叠加图。
+--- **必须是模块级函数**：`M:HookShow` 按引用去重，在 Apply 里现造闭包会每开一次窗多挂一条。
+--- 也要挂在 Show 上：这些格子是首次显示才创建的（11-05 实测登录 Apply 时它们还不存在）。
+--- 不开 `withInfo`：商人格不是装备格，等级数字会挤进 37px 的格子。
+local function DressMerchantSlots()
+    for i = 1, 12 do
+        local slot = Skin:Need(("MerchantItem%dItemButton"):format(i))
+        if slot then Skin:ItemQualityBorder(slot) end
+    end
+    local bbSlot = Skin:Need("MerchantBuyBackItemItemButton")
+    if not bbSlot then return end
+    Skin:ItemQualityBorder(bbSlot)
+    local icon = bbSlot.icon or bbSlot.Icon
+    local okKids, kids = pcall(function() return { bbSlot:GetChildren() } end)
+    if not okKids then return end
+    for _, child in ipairs(kids) do
+        local okR, regions = pcall(function() return { child:GetRegions() } end)
+        if okR then
+            for _, reg in ipairs(regions) do
+                local layer
+                pcall(function() layer = reg:GetDrawLayer() end)
+                local w, h
+                pcall(function() w, h = reg:GetWidth(), reg:GetHeight() end)
+                -- 只认"小尺寸 + ARTWORK + 不是物品图标本体"这一类叠加图，其余一律不动
+                if reg ~= icon and layer == "ARTWORK" and type(w) == "number" and type(h) == "number"
+                    and w > 0 and w <= 24 and h > 0 and h <= 24 then
+                    Skin:Fade(reg)
+                end
+            end
+        end
+    end
+end
+
 local function SkinMerchant()
     M:Dress("MerchantFrame", {
         window = true,
@@ -139,41 +172,14 @@ local function SkinMerchant()
         Skin:Panel(buyback, { bgSurface = "lost", bgAlpha = 0.965, thickness = 1, borderAlpha = 0, host = root })
     end
 
-    -- **格子边框（11-05 作者报"回购物品的按钮比修理/全修/出售大"）**：量出来根本不是尺寸问题
-    -- （回购格 37×37、三颗按钮 36×36，`GetEffectiveScale` 都是 0.6400 ⇒ 屏幕 23.7 vs 23.0 px，差 3%）。
-    -- 真因是**两种格子都没套我们的边框，而暴雪的槽框又被我们剥成 α0** ⇒ 铺满整格的物品图标
-    -- 没有参照边界，读起来就比"带内边距的符号图形"大一号。
-    -- ⇒ 补边框（复用背包/装备格那套 `Skin:ItemQualityBorder`，不开等级数字——商人格不是装备格），
-    --   并压掉回购格上那张 20×20 的暴雪小叠加图（实测在它名下的子框里，ARTWORK 层，不是物品图标）。
-    for i = 1, 12 do
-        local slot = Skin:Need(("MerchantItem%dItemButton"):format(i))
-        if slot then Skin:ItemQualityBorder(slot) end
-    end
-    local bbSlot = Skin:Need("MerchantBuyBackItemItemButton")
-    if bbSlot then
-        Skin:ItemQualityBorder(bbSlot)
-        local icon = bbSlot.icon or bbSlot.Icon
-        local okKids, kids = pcall(function() return { bbSlot:GetChildren() } end)
-        if okKids then
-            for _, child in ipairs(kids) do
-                local okR, regions = pcall(function() return { child:GetRegions() } end)
-                if okR then
-                    for _, reg in ipairs(regions) do
-                        local isIcon = (reg == icon)
-                        local layer, sub
-                        pcall(function() layer, sub = reg:GetDrawLayer() end)
-                        local w, h
-                        pcall(function() w, h = reg:GetWidth(), reg:GetHeight() end)
-                        -- 只认"小尺寸 + ARTWORK + 不是物品图标"这一类叠加图；其余一律不动
-                        if not isIcon and layer == "ARTWORK" and type(w) == "number" and type(h) == "number"
-                            and w > 0 and w <= 24 and h > 0 and h <= 24 then
-                            Skin:Fade(reg)
-                        end
-                    end
-                end
-            end
-        end
-    end
+    -- **格子边框 + 回购格小图（11-05 作者报"回购物品的按钮比修理/全修/出售大"）**：
+    -- 量出来不是尺寸问题（回购格 37×37、三颗按钮 36×36，`GetEffectiveScale` 都是 0.6400
+    -- ⇒ 屏幕 23.7 vs 23.0 px，差 3%）。真因是**格子没有参照边界**：我们的边框没套上，
+    -- 而暴雪的槽框又被剥成 α0 ⇒ 铺满整格的物品图标读起来就比"带内边距的符号图形"大一号。
+    -- 抽成 `DressMerchantSlots()` 是因为商人格**首次显示才创建**（11-05 实测：登录 Apply 时
+    -- `Skin:Need("MerchantItem1ItemButton")` 拿不到 ⇒ 循环空跑，既不报错也没边框），
+    -- 所以除了 Apply 这一次，还要挂 `M:HookShow(MerchantFrame)` 在每次开窗时补。
+    DressMerchantSlots()
 
     -- 每格的文字衬底（2026-11-02 实机判例）：MerchantItem<N> 格自带两块**圆角**美术
     -- （fileID 130766 / 136423，α1.00 原样），四角不是方形，与凹槽语言不统一。
@@ -192,6 +198,11 @@ local function SkinMerchant()
         Skin:Strip(buyback)
         Skin:Panel(buyback, { bgSurface = "lost", bgAlpha = 0.965, thickness = 1, borderAlpha = 0, host = root })
     end
+
+    -- 商品格是**首次显示才创建**的（11-05 实测：登录 Apply 时 `MerchantItem1ItemButton` 还不存在，
+    -- 边框那趟循环空跑）⇒ 每次开窗补一次。`DressMerchantSlots` 是模块级函数 = 稳定引用，
+    -- `M:HookShow` 自带幂等；在 Apply 里现造闭包会每开一次窗多挂一条（AGENTS 明文）。
+    M:HookShow(root, DressMerchantSlots)
 end
 
 local function SkinTrainer()
