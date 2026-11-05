@@ -45,6 +45,54 @@ local displayed = 0              -- the percentage currently drawn (lags behind 
 local shown = false              -- was the line up on the previous Apply
 local anim                       -- { kind = "gain"|"blink", t, dur, from, to, restEnd, r, g, b }
 
+-- XP 速率（#29）：滚动窗口内"经验增益 / 时间"。xp 是当前级内进度，升级会归零 ⇒ 一换级就清样本，
+-- 否则首尾差值把"升级重置"算成负增益。样本只在 Apply（事件驱动，含 PLAYER_XP_UPDATE）时推，
+-- 所以窗口里存的是"最近一次有增长"的那段，速率 = 末样本 xp − 初样本 xp / 时间差。
+local XP_WINDOW = 300            -- 秒：只统计最近 5 分钟
+local XP_MIN_SPAN = 30           -- 秒：跨度太短不算速率（一次击杀的抖动没意义）
+local xpSamples                  -- { {t=, xp=}, ... } 时间升序
+local xpLevel                    -- 采样时的等级；变了就重置样本
+local xpRate = 0                 -- 每秒经验（0 = 近期无增长）
+local xpRateSpan = 0             -- 速率覆盖的时间跨度（秒），给"预计"用
+
+local function SampleXP(data)
+    if data.level ~= xpLevel then
+        xpLevel = data.level
+        xpSamples = {}
+        xpRate, xpRateSpan = 0, 0
+    end
+    xpSamples = xpSamples or {}
+    local now = GetTime()
+    xpSamples[#xpSamples + 1] = { t = now, xp = data.xp }
+    -- 丢窗口外的旧样本（至少留两个，否则算不出跨度）
+    while #xpSamples > 2 and now - xpSamples[1].t > XP_WINDOW do
+        table.remove(xpSamples, 1)
+    end
+    local first, last = xpSamples[1], xpSamples[#xpSamples]
+    local span = last.t - first.t
+    if span >= XP_MIN_SPAN and last.xp >= first.xp then
+        xpRate = (last.xp - first.xp) / span
+        xpRateSpan = span
+    else
+        xpRate, xpRateSpan = 0, 0
+    end
+end
+
+--- 把"每秒经验"折算成人话：xp/分钟 + 按当前速率还要多久升下一级。
+--- 速率来自实测窗口，不是每怪经验（每怪差异大、不可靠），所以只给时间估计，不给"几只怪"。
+local function FormatRate(data)
+    if xpRate <= 0 then return nil end
+    local perMin = xpRate * 60
+    local remain = (data.max or 0) - (data.xp or 0)
+    local eta
+    if remain > 0 then
+        local secs = remain / xpRate
+        -- 超一天就当"近期速率不足以估"（低速率会算出几百小时的荒谬值）
+        if secs > 86400 then eta = nil else eta = ns.Math and ns.Math:DurationText(secs) or string.format("%d 分钟", math.floor(secs / 60)) end
+    end
+    return string.format("%.0f /分钟", perMin), eta
+end
+
 local function Px(length)
     return length * Media:Mult()
 end
@@ -409,6 +457,9 @@ Apply = function()
     zone:Show()
     Tint(data)
 
+    -- #29：经验模式下按事件采样，滚动窗口算速率（声望模式不采，速率只对经验有意义）。
+    if data.mode == "xp" then SampleXP(data) end
+
     local target = data.percent
     local switched = (data.mode == "rep") and (data.factionID ~= lastFaction)
     lastFaction = data.factionID
@@ -476,6 +527,16 @@ local function Tooltip()
         string.format("%s / %s（%.1f%%）", Format(data.xp), Format(data.max), data.percent * 100),
         1, 1, 1, 1, 1, 1)
     pcall(tip.AddDoubleLine, tip, "还需", Format(data.max - data.xp) .. " 升级", 1, 1, 1, 1, 1, 1)
+
+    -- #29：最近 XP_WINDOW 秒的实测速率 + 按该速率估的升级时间。速率<=0（近期没涨经验）就不显示这两行。
+    local rateText, etaText = FormatRate(data)
+    if rateText then
+        pcall(tip.AddDoubleLine, tip, "速率", rateText .. "（近 " .. math.floor(xpRateSpan / 60) .. " 分钟）",
+            0.45, 0.75, 1, 1, 1, 1)
+        if etaText then
+            pcall(tip.AddDoubleLine, tip, "预计", etaText .. "升下一级", 0.45, 0.75, 1, 1, 1, 1)
+        end
+    end
 
     if data.rest > 0 then
         pcall(tip.AddDoubleLine, tip, "休息经验", Format(data.rest) .. "（双倍剩余）", 0.45, 0.75, 1, 1, 1, 1)
