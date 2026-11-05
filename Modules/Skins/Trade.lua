@@ -4,8 +4,10 @@
 
 local ADDON_NAME, ns = ...
 
-local M    = ns.Skins
-local Skin = ns.Skin
+local M      = ns.Skins
+local Skin   = ns.Skin
+local Widget = ns.Widget
+local Color  = ns.Color
 
 -- 交易窗口 plus the two money frames that pop up beside it.  Both are separate frames that
 -- stay on screen while the trade is open, so they need their own treatment, not the main frame's.
@@ -272,6 +274,60 @@ local function SkinAuction()
     M:Dress(AUCTION_EDITS, { as = "editbox" })
 end
 
+-- **专业窗的暴雪装饰件（11-05 作者选 B：剥水印 + 选中条换我们的颜色）**。
+-- layers 实测这些 atlas 挂在 ScrollBox 回收行的匿名子帧上，deep 够不到：
+local FADE_PROF_ATLAS = {
+    -- 纯面板底图 / 水印 → 压没，露出我们的深色背板
+    "professions%-background%-summarylist",
+    "professions%-qualitywindow%-background",
+    "professions%-qualitypane%-bg",
+    "professions%-minimizedview%-qualitypane%-bg",
+    "professions%-recrafting%-panel",
+    "professions%-qualitybar%-frame",
+}
+local SWAP_PROF_ATLAS = {
+    -- 金色选中态 → 换成我们的 barfill + 边框色（压没会丢选中反馈，所以是换不是剥）
+    "professions%-recipe%-active",
+    "common%-sidetab%-selected",
+}
+
+-- 模块级稳定引用：PollWatch 按引用去重，在 Apply 里现造闭包会每开一次窗多挂一条。
+local function StyleProfessionsArt()
+    local f = Skin:Need("ProfessionsFrame")
+    if not f then return end
+    local r, g, b = Color:GetBorder()
+    local function walk(fr, depth)
+        if depth > 8 then return end
+        local okR, regions = pcall(function() return { fr:GetRegions() } end)
+        if okR then
+            for _, reg in ipairs(regions) do
+                local okA, atlas = pcall(reg.GetAtlas, reg)
+                if okA and type(atlas) == "string" and atlas ~= "" then
+                    local low = string.lower(atlas)
+                    for i = 1, #FADE_PROF_ATLAS do
+                        if low:find(FADE_PROF_ATLAS[i]) then Skin:Fade(reg); break end
+                    end
+                    for i = 1, #SWAP_PROF_ATLAS do
+                        if low:find(SWAP_PROF_ATLAS[i]) then
+                            -- 换过之后 GetAtlas 回 nil（SwapArt 走 SetTexture），下轮不再命中 → 天然幂等；
+                            -- 暴雪滚动重设 atlas 时这里会再命中重换。
+                            if Skin:SwapArt(reg, "monet_barfill") and r then
+                                pcall(reg.SetVertexColor, reg, r, g, b, 0.5)
+                            end
+                            break
+                        end
+                    end
+                end
+            end
+        end
+        local okC, kids = pcall(function() return { fr:GetChildren() } end)
+        if okC then
+            for _, k in ipairs(kids) do walk(k, depth + 1) end
+        end
+    end
+    walk(f, 1)
+end
+
 local function SkinProfessions()
     -- **11-05 实机（专业窗开过）**：`TradeSkillFrame` 与三个页签名（`ProfessionsFrameTab1/2`、
     -- `TradeSkillFrameTab1`）都没有实名 —— 1.60 的页签是 `ProfessionsFrame` 内 `TabSystemTemplate`
@@ -288,6 +344,10 @@ local function SkinProfessions()
         deepRows = 4,
         portrait = true,
     })
+    -- 面板底图 / 水印剥掉 + 金色选中条换我们的颜色（配方行是 ScrollBox 回收的，挂可见期轮询补扫）。
+    StyleProfessionsArt()
+    local pf = Skin:Need("ProfessionsFrame")
+    if pf then Widget:PollWatch(pf, StyleProfessionsArt, 2) end
 end
 
 local function SkinBank()
