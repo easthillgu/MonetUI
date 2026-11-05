@@ -267,7 +267,9 @@ function DevTools:Perf()
         (okKb and type(kb) == "number") and kb or -1, tostring(stalled)))
     for i = 1, math.min(#rows, PRINT_CAP) do
         local row = rows[i]
-        ns:Print(("  #%s %s · 调用 %s · 累计 %.3fs · 峰值 %.3fs · 失败 %s"):format(
+        -- 峰值用六位：单次调用常在几十微秒级，三位小数会全打成 0.000s（11-05 实测），
+        -- 而"找最贵的一路"恰恰要看这个数。
+        ns:Print(("  #%s %s · 调用 %s · 累计 %.4fs · 峰值 %.6fs · 失败 %s"):format(
             tostring(row.id), row.everyFrame and "每帧" or (("%.3fs"):format((row.intervalSec or 0))),
             tostring(row.calls), (row.cost or 0), (row.max or 0), tostring(row.failures)))
     end

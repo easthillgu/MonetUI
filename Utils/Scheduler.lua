@@ -247,7 +247,8 @@ function Scheduler:PrintStats()
         :format(stats.running, stats.pending, stats.calls, stats.cost, stats.failures))
     for i = 1, #rows do
         local row = rows[i]
-        print(("  #%d %s · 调用 %d · 累计 %0.3fs · 峰值 %0.3fs · 失败 %d"):format(
+        -- 峰值六位小数：单次常在几十微秒，三位会全打成 0.000s（11-05 实测）
+        print(("  #%d %s · 调用 %d · 累计 %0.4fs · 峰值 %0.6fs · 失败 %d"):format(
             row.id,
             row.everyFrame and "每帧" or ("%0.3fs"):format(row.intervalSec),
             row.calls, row.cost, row.max, row.failures))
