@@ -3947,6 +3947,31 @@ craftorders 2、calendar 3、colorpicker 4（要开取色窗）、merchant/loot 
 待实机：作者 `/reload` 后重跑 `/mui skins diagnose`，看任务详情窗、技能书面板、传承三页是否真的被涂到
 （legacy 那一处是**第一次**被执行到，观感变化最直接）。
 
+## 8.42 2026-11-05 10:26 那串 `SetCooldown` 报错的归属：**不是我们**（taint.log 全量统计）
+
+作者贴出的那条（`ActionButton.lua:891 bad argument #1 to 'SetCooldown' … Secret values are only allowed
+during untainted execution`，Count 21）发生在 `taint.log` 停止写入之后，所以先重开采集（`taintLog=2`）再统计。
+`_forever_/Logs/taint.log` 今天 10:00 之后的归属分布：
+
+| 归属 | 条数 |
+|---|---|
+| `tainted by RurutiaSuite` | **3898** |
+| `tainted by TweaksForever` | 3 |
+| `tainted by OpenMap` | 2 |
+| 10:2x 之后栈里出现 `MonetUI` 的行 | **0** |
+
+典型一条（10:31:03）完整链：`ChannelFrame:ToggleVoiceSettings → SettingsPanel:Open → LoadAddOn →
+RurutiaSuite/Core/Runtime/Events.lua:38 → …MerchantExpansion.lua:633 OnMerchantUpdate →
+MerchantFrame.lua:406`，客户端写的是「Execution tainted by **RurutiaSuite** while reading global
+MerchantItem19MoneyFrame」—— 它 hook 了暴雪的 `OnMerchantUpdate`（正是 §8.33 负面清单里那条），
+于是商人格子的整段更新以它的名义执行；`SetCooldown` 那一串同一来源。
+**`DungeonsForeverSpell MainActionBar:SetPointBase()` 那批 BLOCKED 也是别家**（聊天框自己就把名字写出来了）。
+
+**这条对发布的意义**：开服日玩家报"技能冷却不转 / 界面行为失效"时，真凶大概率是同机的 QoL 套件。
+所以 #20/#28 那件事现在有硬内容可做：`/mui report` 增加一行"**谁在动受保护框**"
+（读同一份 `taint.log` 或现场 `issecurevariable`，只读、不碰别人的框），让玩家和都能自己看见归属，
+而不是把账算到 MonetUI 头上。等作者点头再做，不塞进今天的收尾。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 
