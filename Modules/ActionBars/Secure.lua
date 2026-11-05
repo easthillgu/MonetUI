@@ -121,11 +121,10 @@ end
 
 --- 在安全环境里把类型 / useOnKeyDown 下发一遍（不经过 Lua 的脏值）。
 local function PushSecureInit(bar, kind)
+    -- 按下/抬起施法：走 Compat 行为助手（#34）。Compat 缺席才退回默认 true；
+    -- 不能用 `X() or true` —— 抬起施法时 X() 返回 false，会被 or 顶成 true 读反。
     local down = true
-    if _G.GetCVarBool then
-        local ok, value = pcall(_G.GetCVarBool, "ActionButtonUseKeyDown")
-        if ok then down = value ~= false end
-    end
+    if ns.Compat then down = ns.Compat:UseOnKeyDown() end
     pcall(bar.frame.Execute, bar.frame,
         ("self:ChildUpdate(%q, %q)"):format(KIND_CHILD, kind or "action"))
     pcall(bar.frame.Execute, bar.frame,
@@ -145,11 +144,9 @@ end
 local function SetUseOnKeyDown(button)
     local barFrame = button and button.bar
     if not barFrame or type(barFrame.Execute) ~= "function" then return end
+    -- 按下/抬起施法：走 Compat 行为助手（#34）。Compat 缺席才退回默认 true（不用 `or true` 防读反）。
     local down = true
-    if _G.GetCVarBool then
-        local ok, value = pcall(_G.GetCVarBool, "ActionButtonUseKeyDown")
-        if ok then down = value ~= false end
-    end
+    if ns.Compat then down = ns.Compat:UseOnKeyDown() end
     pcall(barFrame.Execute, barFrame,
         ("self:ChildUpdate(%q, %q)"):format(KEYDOWN_CHILD, tostring(down)))
 end

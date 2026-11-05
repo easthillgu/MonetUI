@@ -288,6 +288,43 @@ function Compat:Capability(key)
     return value, capCache[key .. ":note"]
 end
 
+--- 普通调用点的唯一出口（#34）：问"这台客户端有没有 X"，**永不返回 nil**。
+--- 不知道(nil) 塌成 `fallback`；知道就返回 true/false。逼每个调用点显式表态
+--- "读不出时走哪条路"—— 而不是把 nil 当假值悄悄走错分支（判例：`Secrets.CanMeasureHealth`
+--- 当门，血量整段空白还不报错）。典型：`if Compat:GetCapability("secureClickHandler", false) then`
+--- 走安全模板，否则走轮询 —— 读不出也安全降级到轮询。
+function Compat:GetCapability(key, fallback)
+    local value = self:Capability(key)
+    if value == nil then return fallback end
+    return value
+end
+
+-- ============================================================================
+-- 行为助手（#34）：返回"这台客户端该怎么用"的值，而不是"有没有"的布尔。
+-- 判例来源：RurutiaSuite Core/Compat.lua 的 GetPrimarySecureClickEvents —— 同一句
+-- "按下施法还是抬起施法"在两客户端会给出不同的点击掩码组合，散落 if 迟早漂移。
+-- ============================================================================
+
+--- 这台客户端的动作按钮是"按下施法"还是"抬起施法"（暴雪 cvar ActionButtonUseKeyDown）。
+--- 读不到时默认 true（和原散落点一致：新版暴雪默认按下施法）。每次现读，不 cache
+--- —— 玩家可在设置里改，CVAR_UPDATE 后必须拿到新值。
+function Compat:UseOnKeyDown()
+    local down = true
+    if type(_G.GetCVarBool) == "function" then
+        local ok, value = pcall(_G.GetCVarBool, "ActionButtonUseKeyDown")
+        if ok then down = value ~= false end
+    end
+    return down
+end
+
+--- 配套：按上面的模式给出安全按钮该注册的两个点击掩码。
+--- 按下施法要收 Down+Up（否则按下去不触发），抬起施法只收 Up。
+--- 调用点：`button:RegisterForClicks(Compat:SecureClickEvents())`。
+function Compat:SecureClickEvents()
+    if self:UseOnKeyDown() then return "AnyDown", "AnyUp" end
+    return "AnyUp"
+end
+
 --- 列全部能力（`/mui compat caps`）：只报**已经问过**的和"未探测"，
 --- 绝不在这里造任何实例 —— 报告命令不许改变运行期状态。
 function Compat:ListCapabilities()
