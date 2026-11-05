@@ -89,9 +89,21 @@ end
 
 -- `CommunitiesFrameTab1..3` 在 1.60 没有实名（页签是 `TabSystemTemplate` 的运行期子件）⇒ 摘掉点名。
 
+-- **A 档覆盖率补（11-05 skin-coverage 实机核对：客户端真存在、没美化）**：社区/公会那一族对话框
+-- （新建/加入/设置/公会日志/新闻筛选/公会文本编辑/成员申请/头像选择）。全走窗口档 + deep。
+local COMMUNITIES_DIALOGS = {
+    "CommunitiesAddDialog", "CommunitiesCreateDialog", "CommunitiesSettingsDialog",
+    "CommunitiesGuildLogFrame", "CommunitiesGuildNewsFiltersFrame",
+    "CommunitiesGuildTextEditFrame", "CommunitiesTicketManagerDialog",
+    "CommunitiesAvatarPickerDialog",
+}
+
 local function SkinCommunities()
     M:Dress("CommunitiesFrame", {
         window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true,
+    })
+    M:Dress(COMMUNITIES_DIALOGS, {
+        window = true, inset = true, panel = { bgAlpha = 0.97 }, deep = true,
     })
 end
 
@@ -234,7 +246,7 @@ M:Panel("communities", {
     label = "社区",
     group = "社交",
     apply = SkinCommunities,
-    frames = { "CommunitiesFrame", "CommunitiesFrameCloseButton" },
+    frames = { "CommunitiesFrame", "CommunitiesFrameCloseButton", COMMUNITIES_DIALOGS },
 })
 
 M:Panel("guild", {
