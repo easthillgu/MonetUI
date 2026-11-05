@@ -64,24 +64,23 @@ local function SkinWho()
     M:Dress(WHO_BUTTONS, { as = "button" })
 end
 
-local COMMUNITIES_TABS = { "CommunitiesFrameTab1", "CommunitiesFrameTab2", "CommunitiesFrameTab3" }
+-- `CommunitiesFrameTab1..3` 在 1.60 没有实名（页签是 `TabSystemTemplate` 的运行期子件）⇒ 摘掉点名。
 
 local function SkinCommunities()
     M:Dress("CommunitiesFrame", {
-        window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true, tabs = COMMUNITIES_TABS,
+        window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true,
     })
 end
 
+-- 1.60 的公会/好友/社区合并进 `SocialUIFrame`（见 A 批）；`GuildFrame` 是零售 12.x 的名字，
+-- 这台机器上没有 ⇒ 在 1.60 的台账里那一行 ✗ 属**预期**（两客户端共用一份名单，不为一个客户端删另一个的名字）。
 local GUILD_FRAMES = { "GuildFrame", "GuildControlUI", "GuildRegistrarFrame", "GuildInviteFrame" }
 
 local function SkinGuild()
-    M:Dress(GUILD_FRAMES, { window = true, inset = true, panel = { bgAlpha = 0.96 } })
-    -- 名单滚动区挂在各窗口自己的成员上，两种命名都见过；逐个窗口短路取第一个存在的。
-    for _, name in ipairs(GUILD_FRAMES) do
-        local scroll = Skin:Need(name .. ".GuildRosterScrollFrame")
-            or Skin:Need(name .. ".RosterScrollFrame")
-        if scroll then Skin:ScrollFrame(scroll) end
-    end
+    M:Dress(GUILD_FRAMES, { window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true })
+    -- **名册滚动区不再点名**（11-05 实机：`<窗口>.GuildRosterScrollFrame` / `<窗口>.RosterScrollFrame`
+    -- 两种拼法都是照参考件猜的，实名一个都没有 ⇒ 9 行假缺失）。名册是 `ScrollBox` + `MinimalScrollBar`，
+    -- 由上面 `M:Dress(GUILD_FRAMES …)` 的 `deep` 接住（§8.40 ②）。
 end
 
 local CALENDAR_FRAMES = { "CalendarFrame", "GameCalendarFrame", "GameCalendarFrameSet" }
@@ -96,10 +95,8 @@ end
 -- Strip already fades Blizzard's blue; the plate replaces it.
 local CHAT_FRAMES = { "ChatFrame1", "ChatFrame2", "ChatFrame3", "ChatFrame4" }
 
-local CHAT_SCROLLS = {
-    "ChatFrame1ScrollFrame", "ChatFrame2ScrollFrame",
-    "ChatFrame3ScrollFrame", "ChatFrame4ScrollFrame",
-}
+-- **11-05 实机**：`ChatFrame1..4ScrollFrame` 没有实名（聊天窗的滚动条是运行期 `ScrollBar` 子件，
+-- 18 个含 chatframe1 的实名里也没有它）⇒ 点名摘掉，滚动条由 `CHAT_FRAMES` 的深扫 / Skin:ScanScrollArrows 接。
 
 -- 聊天窗右下角那两个按钮。原来的 `ChatFrameToggleButton` 是 3.x 时代的旧名，本客户端
 -- 拿不到它存在的任何证据；有实名证据的是 `ChatFrameMenuButton` —— 同机为 Camelot 写的
@@ -168,7 +165,6 @@ local function SkinChat()
 
     MatchChatHeight()
 
-    M:Dress(CHAT_SCROLLS, { as = "scroll" })
     M:Dress(CHAT_BUTTONS, { as = "button" })
     -- 页签走 Skin:Tab：选中态由现成的 0.5 秒轮询跟随（不 hook PanelTemplates_*，
     -- 那条钩子的代价在 Skin.lua:830 记过——全局函数钩会把整条编辑模式链带脏）。
@@ -182,7 +178,7 @@ end
 
 M:Panel("chat", { label = "聊天", group = "社交", apply = SkinChat,
     frames = {
-        CHAT_FRAMES, CHAT_SCROLLS, CHAT_BUTTONS, CHAT_TABS, CHAT_EDITS,
+        CHAT_FRAMES, CHAT_BUTTONS, CHAT_TABS, CHAT_EDITS,
         CHAT_CHANNEL_POPUPS, CHAT_CHANNEL_BUTTONS,
     } })
 
@@ -205,7 +201,7 @@ M:Panel("communities", {
     label = "社区",
     group = "社交",
     apply = SkinCommunities,
-    frames = { "CommunitiesFrame", "CommunitiesFrameCloseButton", COMMUNITIES_TABS },
+    frames = { "CommunitiesFrame", "CommunitiesFrameCloseButton" },
 })
 
 M:Panel("guild", {
@@ -214,7 +210,6 @@ M:Panel("guild", {
     apply = SkinGuild,
     frames = {
         GUILD_FRAMES,
-        "GuildFrame.GuildRosterScrollFrame", "GuildFrame.RosterScrollFrame",
     },
 })
 

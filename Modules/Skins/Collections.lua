@@ -8,26 +8,29 @@ local ADDON_NAME, ns = ...
 local M    = ns.Skins
 local Skin = ns.Skin
 
+-- 1.60 实机（11-05 逐窗开过 + `/mui compat find`，见 HANDOFF §8.40）：只有 1..5，
+-- `CollectionsJournalTab6` 不存在（幻化在 1.60 是 `WardrobeCollectionFrame`，不占第 6 页签）。
 local COLLECTIONS_TABS = {
     "CollectionsJournalTab1", "CollectionsJournalTab2", "CollectionsJournalTab3",
-    "CollectionsJournalTab4", "CollectionsJournalTab5", "CollectionsJournalTab6",
+    "CollectionsJournalTab4", "CollectionsJournalTab5",
 }
 
+-- `CampsitesJournal` 本客户端没有这个名字（营地日志在 1.60 折进了地图侧）。
 local COLLECTIONS_PANELS = {
     "MountJournal", "PetJournal", "ToyBox", "HeirloomsJournal",
-    "WardrobeCollectionFrame", "CampsitesJournal",
+    "WardrobeCollectionFrame",
 }
 
+-- 三个页内搜索框有实名（跟随子面板存在），两个没有：`CollectionsJournalSearchBox` 与
+-- `ToyBoxSearchBox` 在 1.60 不存在（搜索框是 `TabSystem` 侧的运行期子件，由窗口那侧的 deep 扫接）。
 local COLLECTIONS_SEARCH = {
-    "CollectionsJournalSearchBox", "MountJournalSearchBox", "PetJournalSearchBox",
-    "ToyBoxSearchBox", "HeirloomsJournalSearchBox", "WardrobeCollectionFrameSearchBox",
+    "MountJournalSearchBox", "PetJournalSearchBox", "WardrobeCollectionFrameSearchBox",
 }
 
--- 筛选下拉直接挂在主收藏窗和各个子面板上。
-local COLLECTIONS_FILTERS = {
-    "MountJournalFilterButton", "PetJournalFilterButton", "ToyBoxFilterButton",
-    "HeirloomsJournalFilterButton", "CollectionsJournalFilterButton",
-}
+-- **摘掉全部 5 个 `*FilterButton`**（11-05 实机：窗开过仍 ✗，实名不存在）：
+-- 筛选下拉在 1.60 是各面板 `parentKey` 下的运行期控件，没有全局名。
+-- 上面 `M:Dress(COLLECTIONS_PANELS, { deep = true })` 已经覆盖这些子控件，
+-- 留着点名只会让 `/mui skins diagnose` 长期报五行的假"缺失"。
 
 local function SkinCollections()
     M:Dress("CollectionsJournal", {
@@ -43,28 +46,22 @@ local function SkinCollections()
     -- 子面板：剥原美术 + 挂底衬 + 深扫（收藏格子是带图标的按钮，LooksLikeItemButton 会跳过）。
     -- 面板里的行是切页时才建的，deep 的可见期补扫负责之后每次翻页。
     M:Dress(COLLECTIONS_PANELS, { panel = { bgAlpha = 0.96 }, deep = true })
-    M:Dress(COLLECTIONS_FILTERS, { as = "dropdown" })
     M:Dress(COLLECTIONS_SEARCH, { as = "editbox" })
 end
 
--- The talent / spell book.  PlayerSpells is the modern window; SpellBookFrame is its older name and
--- some clients still have it, so both are tried.  Tabs are player-spell categories and the spec list is
--- a ScrollFrame, both handled here.
-local PLAYERSPELLS_TABS = {
-    "PlayerSpellsTab1", "PlayerSpellsTab2", "PlayerSpellsTab3", "PlayerSpellsTab4",
-}
-
-local PLAYERSPELLS_EDITS = { "PlayerSpellsSearchBox", "SpellBookSearchBox" }
-
-local PLAYERSPELLS_BUTTONS = { "AssistedCombatRotationFrame", "PlayerSpellsCloseButton" }
+-- The talent / spell book.  **1.60 实名（11-05 `/mui compat find PlayerSpells` / `find SpellBook`）**：
+-- 只有 `PlayerSpellsFrame` + `PlayerSpellsFrameCloseButton` + `PlayerSpellsFrameClearButton`
+-- （外加 `PlayerSpellsMicroButton`）。旧名 `SpellBookFrame` 在**这台客户端不存在**（只有按钮
+-- `SpellbookMicroButton`），它是零售 12.x 的名字 —— 留着就是一行永远消不掉的 ✗，删。
+-- 页签 `PlayerSpellsTab1..4` 与两个搜索框（`PlayerSpellsSearchBox` / `SpellBookSearchBox`）
+-- 同样没有实名：1.60 的分类页签是 `TabSystem` 的运行期子件、搜索框挂在页签系统里，
+-- 由窗口这侧的 `deep = true` 接住（§8.40 的 ② 档）。
+local PLAYERSPELLS_BUTTONS = { "PlayerSpellsFrameCloseButton", "PlayerSpellsFrameClearButton" }
 
 local function SkinPlayerSpells()
-    M:Dress({ "PlayerSpellsFrame", "SpellBookFrame" }, {
-        window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true, tabs = PLAYERSPELLS_TABS,
+    M:Dress("PlayerSpellsFrame", {
+        window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true,
     })
-    -- 搜索框两种模板（EditBox / SearchBox）都认；另一个名字若是按钮会被 editbox 档跳过，
-    -- 所以两类分开点名，不再在一个循环里判类型。
-    M:Dress(PLAYERSPELLS_EDITS, { as = "editbox" })
     M:Dress(PLAYERSPELLS_BUTTONS, { as = "button" })
 end
 
@@ -74,9 +71,9 @@ local ACHIEVEMENT_PANELS = {
     "AchievementFrameCategories", "AchievementFrameAchievements", "AchievementFrameSummary",
 }
 
-local ACHIEVEMENT_SCROLLS = {
-    "AchievementFrameCategoriesContainer", "AchievementFrameAchievementsContainer",
-}
+-- **摘掉四个点名**（11-05 实机：成就窗开过仍 ✗，实名不存在）：两个 `*Container` 是
+-- `HyperText`/`ScrollBox` 的运行期容器，筛选与搜索框挂在 `TabSystem` 里。
+-- 列表/分类/统计三块已经 `noPanel + deep`，控件该涂的都涂到了。
 
 local function SkinAchievements()
     M:Dress("AchievementFrame", {
@@ -87,9 +84,6 @@ local function SkinAchievements()
     })
     -- 这三块只剥原美术、不另挂底衬：成就列表要贴着窗口自己的背景读，多一层板子会把行距压脏。
     M:Dress(ACHIEVEMENT_PANELS, { noPanel = true, deep = true })
-    M:Dress(ACHIEVEMENT_SCROLLS, { as = "scroll" })
-    M:Dress({ "AchievementFrameSearchBox" }, { as = "editbox" })
-    M:Dress({ "AchievementFrameFilterButton" }, { as = "dropdown" })
 end
 
 local ENCOUNTER_TABS = { "EncounterJournalTab1", "EncounterJournalTab2", "EncounterJournalTab3" }
@@ -110,8 +104,7 @@ M:Panel("playerspells", {
     group = "收藏",
     apply = SkinPlayerSpells,
     frames = {
-        "PlayerSpellsFrame", "SpellBookFrame",
-        PLAYERSPELLS_TABS, PLAYERSPELLS_EDITS, PLAYERSPELLS_BUTTONS,
+        "PlayerSpellsFrame", PLAYERSPELLS_BUTTONS,
     },
 })
 
@@ -121,7 +114,7 @@ M:Panel("collections", {
     apply = SkinCollections,
     frames = {
         "CollectionsJournal", "CollectionsJournalCloseButton",
-        COLLECTIONS_TABS, COLLECTIONS_PANELS, COLLECTIONS_FILTERS, COLLECTIONS_SEARCH,
+        COLLECTIONS_TABS, COLLECTIONS_PANELS, COLLECTIONS_SEARCH,
     },
 })
 
@@ -131,8 +124,7 @@ M:Panel("achievements", {
     apply = SkinAchievements,
     frames = {
         "AchievementFrame", "AchievementFrameCloseButton",
-        ACHIEVEMENT_TABS, ACHIEVEMENT_PANELS, ACHIEVEMENT_SCROLLS,
-        "AchievementFrameFilterButton", "AchievementFrameSearchBox",
+        ACHIEVEMENT_TABS, ACHIEVEMENT_PANELS,
     },
 })
 

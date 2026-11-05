@@ -14,18 +14,13 @@ local Marked = function(o, k) return ns:Marked(o, k) end
 
 local Skin = ns.Skin
 
-local LOOT_ARROWS = { "LootFramePrevPageButton", "LootFrameNextPageButton" }
-
+-- **11-05 实机（拾取窗开过）**：`LootFramePrevPageButton` / `LootFrameNextPageButton` 与两种
+-- `…LootFrameScrollFrame` 拼法都没有实名 —— 拾取列表在 1.60 是 `ScrollBox` + `MinimalScrollBar`，
+-- 翻页挂在 `LootFrame` 的 `parentKey` 下 ⇒ 点名摘掉，窗口侧改走 `deep`（§8.40 ②）。
 local GROUP_LOOT_FRAMES = { "GroupLootFrame1", "GroupLootFrame2", "GroupLootFrame3", "GroupLootFrame4" }
 
 local function SkinLoot()
-    M:Dress("LootFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 }, rule = true, buttons = LOOT_ARROWS })
-    -- The close button is handled by SkinWindow; the pager arrows above get the plate, then their glyphs.
-    Skin:PageArrow(Skin:Need("LootFramePrevPageButton"), "left")
-    Skin:PageArrow(Skin:Need("LootFrameNextPageButton"), "right")
-    -- 老框架把滚动区挂在名字全局上，新框架挂在帧的成员上；短路取第一个，只有真找不到的那个才记账。
-    local scroll = Skin:Need("LootFrame.LootFrameScrollFrame") or Skin:Need("LootFrameScrollFrame")
-    if scroll then Skin:ScrollFrame(scroll) end
+    M:Dress("LootFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 }, rule = true, deep = true })
 
     M:Dress(GROUP_LOOT_FRAMES, { panel = { bgAlpha = 0.96 } })
 
@@ -106,41 +101,30 @@ end
 
 -- Edit Mode: the manager bar plus the three dialogs it opens.  Without this, moving a bar leaves you
 -- staring at stock Blizzard chrome with no indication of what the click did.
+-- **11-05 实机（编辑模式进出去过）**：这 10 个按钮名**一个都不存在** —— 两种拼法
+-- （`…Accept` / `…AcceptChanges`）都是照参考件猜的，没有一条有实名 ⇒ 整组删掉。
+-- 按钮是各对话框 `parentKey` 下的运行期件，改由下面三块对话框走 `deep` 扫接住（§8.40 ②）。
+-- 原来那段注释写的"两份参考各说一种、两份都列进名单"就是问题的根源：
+-- 没有实名证据的名字进了名单，台账于是长期挂十行假"缺失"。
 local EDITMODE_DIALOGS = {
     "EditModeManagerFrame", "EditModeUnsavedChangesDialog", "EditModeLayoutDialog",
 }
 
--- 管理条那两个按钮在不同构建里叫 Accept/Cancel 还是 AcceptChanges/CancelChanges，两份参考各说一种。
--- 两种拼法都列进名单：存在的那个被换肤，不存在的那个在账本留一行 ✗。实机跑一次 `/mui skins diagnose`
--- 就知道该删哪一个 —— 以前这里是"凭记忆猜一个，猜错就静默跳过"，屏幕上永远是原皮，谁也不知道为什么。
-local EDITMODE_BUTTONS = {
-    "EditModeManagerFrameAccept", "EditModeManagerFrameAcceptChanges",
-    "EditModeManagerFrameCancel", "EditModeManagerFrameCancelChanges",
-    "EditModeSystemSettingsDialogAccept", "EditModeSystemSettingsDialogCancel",
-    "EditModeUnsavedChangesDialogOkay", "EditModeUnsavedChangesDialogCancel",
-    "EditModeLayoutDialogSave", "EditModeLayoutDialogCancel",
-}
-
 local function SkinEditMode()
-    M:Dress(EDITMODE_DIALOGS, { panel = { bgAlpha = 0.97 } })
-    M:Dress(EDITMODE_BUTTONS, { as = "button" })
+    M:Dress(EDITMODE_DIALOGS, { panel = { bgAlpha = 0.97 }, deep = true })
     -- 系统设置对话框的行由按钮池懒建，所以单独走 deep：显示时把行 / 滑块 / 滚动区补扫一遍。
     M:Dress("EditModeSystemSettingsDialog", { panel = { bgAlpha = 0.97 }, deep = true })
 end
 
 local function SkinAddonList()
+    -- **11-05 实机（插件列表开过）**：四颗 Enable/Disable All（两种拼法）、两颗 Filter（两种拼法）与
+    -- 两种滚动区名**都没有实名** ⇒ 点名整组摘掉，列表行与按钮由窗口侧 deep 扫接住（§8.40 ②）。
     M:Dress("AddonList", {
         window = true,
         inset = true,
         panel = { bgAlpha = 0.97 },
-        buttons = {
-            "AddonListEnableAllButton", "AddonListDisableAllButton",
-            "AddonList.EnableAllButton", "AddonList.DisableAllButton",
-        },
+        deep = true,
     })
-    local scroll = Skin:Need("AddonList.AddonListScrollFrame") or Skin:Need("AddonList.ScrollFrame")
-    if scroll then Skin:ScrollFrame(scroll) end
-    M:Dress({ "AddonListFilterButton", "AddonList.FilterButton" }, { as = "dropdown" })
 end
 
 --- NineSlice 面板（本客户端的 GameTooltip / ItemRefTooltip 都是这种）：边框和底色不是 backdrop，
@@ -589,8 +573,8 @@ end
 -- 闸门 tools/check-frame-list.js 会把表名解析回具体字符串再核对取用路径。
 M:Panel("loot", { label = "拾取 / 掷骰", group = "系统", apply = SkinLoot,
     frames = {
-        "LootFrame", "LootFrameCloseButton", "LootFrame.LootFrameScrollFrame",
-        LOOT_ARROWS, GROUP_LOOT_FRAMES, "GroupLootHistoryFrame",
+        "LootFrame", "LootFrameCloseButton",
+        GROUP_LOOT_FRAMES, "GroupLootHistoryFrame",
     } })
 
 M:Panel("popups", { label = "确认弹窗", group = "系统", apply = SkinPopups,
@@ -610,15 +594,10 @@ M:Panel("settings", { label = "设置面板", group = "系统", apply = SkinSett
     frames = { "SettingsPanel", "SettingsPanel.CloseButton" } })
 
 M:Panel("editmode", { label = "编辑模式", group = "系统", apply = SkinEditMode,
-    frames = { EDITMODE_DIALOGS, EDITMODE_BUTTONS } })
+    frames = { EDITMODE_DIALOGS } })
 
 M:Panel("addonlist", { label = "插件列表", group = "系统", apply = SkinAddonList,
-    frames = {
-        "AddonList", "AddonList.AddonListScrollFrame", "AddonList.ScrollFrame",
-        "AddonListEnableAllButton", "AddonListDisableAllButton",
-        "AddonList.EnableAllButton", "AddonList.DisableAllButton",
-        "AddonListFilterButton", "AddonList.FilterButton",
-    } })
+    frames = { "AddonList" } })
 
 M:Panel("menus", { label = "菜单 / 右键菜单", group = "系统", apply = SkinMenus, default = true,
     -- 老式下拉：DropDownList1..8 / DropDownListNMenu1..8 全在轮询回调里由 level、menu 两个循环变量
@@ -650,9 +629,8 @@ local function SkinMacros()
         deep = true,
         tabs = { "MacroFrameTab1", "MacroFrameTab2" },
     })
-    -- 编辑区两种拼法都见过；短路取第一个存在的，另一个才记账为缺失。
-    local box = Skin:Need("MacroFrameEditBox") or Skin:Need("MacroEditBox")
-    if box then Skin:EditBox(box) end
+    -- **11-05 实机（宏编辑器开过）**：`MacroFrameEditBox` / `MacroEditBox` 都没有实名
+    -- （编辑区是 MacroPopupFrame 一侧的运行期件）⇒ 摘掉，主窗口已 deep 扫。
 
     -- MacroPopupFrame 是点"选图标"时才创建的：那时主窗口一定开着，所以挂在主窗口的
     -- PollWatch 上等它出现（主窗口关着时轮询不跑，零成本）。
@@ -664,9 +642,7 @@ end
 M:Panel("macros", { label = "宏编辑器", group = "系统", apply = SkinMacros,
     addons = { Blizzard_MacroUI = true },
     frames = {
-        "MacroFrame", "MacroFrameTab1", "MacroFrameTab2",
-        "MacroFrameEditBox", "MacroEditBox",
-        "MacroPopupFrame",
+        "MacroFrame", "MacroFrameTab1", "MacroFrameTab2", "MacroPopupFrame",
     } })
 
 -- 时钟 / 秒表：Blizzard_TimeManager 带 camelot 专属覆写文件（Camelot\Blizzard_TimeManagerOverrides.lua）。
@@ -678,10 +654,9 @@ local function SkinTimeManager()
     M:Dress({ "TimeManagerFrame", "StopwatchFrame" },
         { window = true, panel = { bgAlpha = 0.96 }, deep = true, rule = true, ruleTop = 26 })
     -- 全局名不带 Frame 后缀，M:SkinWindow 的 name.."CloseButton" 推导够不到，显式接一次。
-    -- 两套名字并存是刻意的：`TimeManagerCloseButton` 是旧客户端写法（12.1.5 实机取到过），
-    -- `StopwatchCloseButton` 是 1.60 FrameXML 声明的那个（`tools/frame-name-existence.js` 对撞出来的）。
-    -- 取不到的那一个只会安静地不落美化的钮，不会抛 —— 所以两条都接，覆盖两个客户端。
-    for _, closeName in ipairs({ "TimeManagerCloseButton", "StopwatchCloseButton" }) do
+    -- **11-05 实机（时钟窗开过）**：`TimeManagerCloseButton` 没有实名，摘掉；
+    -- `StopwatchCloseButton` 是 1.60 真存在的那个 ⇒ 只接这一条（§8.40 ②）。
+    for _, closeName in ipairs({ "StopwatchCloseButton" }) do
         Skin:CloseButton(Skin:Need(closeName))
     end
 end
@@ -689,7 +664,7 @@ end
 M:Panel("timemanager", { label = "时钟 / 秒表", group = "系统", apply = SkinTimeManager,
     addons = { Blizzard_TimeManager = true },
     frames = { "TimeManagerFrame", "TimeManagerFrame.CloseButton",
-        "TimeManagerCloseButton", "StopwatchCloseButton", "StopwatchFrame" } })
+        "StopwatchCloseButton", "StopwatchFrame" } })
 
 -- 帮助 / 客服：Blizzard_HelpFrame 是 AllowLoad: Game。
 local function SkinHelp()

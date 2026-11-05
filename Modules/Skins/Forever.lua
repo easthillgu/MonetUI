@@ -169,7 +169,13 @@ M:Panel("lfg", {
 })
 
 local LEGACY_SIDE_TABS = { "LegacyRewardTrackTab", "LegacyChallengeTab", "LegacyTreeTab" }
-local LEGACY_PAGES     = { "RewardTrackPage", "ChallengesPage" }
+-- **实名来源（11-05 补）**：三块页面是 `LegacySystemFrame` 的 **parentKey 子件**，没有全局名 ——
+-- `framexml-source/Blizzard_LegacySystem/Blizzard_LegacySystem.xml:40-42`：
+-- `parentKey="RewardTrackPage"` / `"ChallengesPage"` / `"TreePage"`（还漏了第三块，一并补上）。
+-- 原来点的是裸名 `RewardTrackPage` / `ChallengesPage` ⇒ 台账上两行永远 ✗，而且这段 `M:Controls`
+-- 其实一个字节都没涂过（`Need` 拿不到 ⇒ 循环体一次都不跑）。取用路径改成点路径。
+local LEGACY_PAGES     = { "LegacySystemFrame.RewardTrackPage", "LegacySystemFrame.ChallengesPage",
+                           "LegacySystemFrame.TreePage" }
 
 local function SkinLegacySystem()
     M:Dress("LegacySystemFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 } })
@@ -191,7 +197,7 @@ M:Panel("legacy", {
         "LegacySystemFrame",
         "LegacySystemFrame.LegacyRewardTrackTab", "LegacySystemFrame.LegacyChallengeTab",
         "LegacySystemFrame.LegacyTreeTab",
-        "RewardTrackPage", "ChallengesPage",
+        LEGACY_PAGES,
     },
 })
 

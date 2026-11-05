@@ -44,9 +44,12 @@ end
 
 local MAIL_FRAMES = { "MailFrame", "InboxFrame", "SendMailFrame", "OpenMailFrame" }
 
+-- **11-05 实机（邮箱开过）**：`InboxFrameOpenButton` / `…ReplyButton` / `…DeleteButton` /
+-- `InboxPrevPageButton` / `InboxNextPageButton` 与三种 `…MailListScrollFrame` 拼法**都没有实名**
+-- —— 1.60 的收件箱按钮和列表挂在 `MailFrame`/`InboxFrame` 的 `parentKey` 子件上，
+-- 滚动区是 `ScrollBox` + `MinimalScrollBar`。⇒ 点名摘掉，收件箱由 `MAIL_FRAMES` 的 `deep` 接住
+-- （§8.40 ②）。发送邮件那一侧的两个按钮 + `OpenAllMail` 有实名，保留。
 local MAIL_BUTTONS = {
-    "InboxFrameOpenButton", "InboxFrameReplyButton", "InboxFrameDeleteButton",
-    "InboxPrevPageButton", "InboxNextPageButton",
     "SendMailMailButton", "SendMailCancelButton",
     -- 70450 起邮件收取走 C_SecureTransfer（TakeMailMoney + MAIL_OPEN_ALL_CANCELED），
     -- 收件箱多了"一键收取"按钮 OpenAllMail（全局名，Ellesmere 同客户端实机名单佐证）。
@@ -57,21 +60,13 @@ local function SkinMail()
     M:Dress(MAIL_FRAMES, {
         window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true, buttons = MAIL_BUTTONS,
     })
-    -- 收件箱列表的滚动区在两种布局里挂在不同对象上：全局名，或 MailFrame 的子窗成员。
-    -- 以前传的是 `frame.InboxFrame`（一个 Window，没有 ScrollBar），Skin:ScrollFrame 静默返回，
-    -- 邮件列表的滚动条从来没被美化过。
-    local scroll = Skin:Need("MailListScrollFrame")
-        or Skin:Need("MailFrame.InboxFrame.MailListScrollFrame")
-        or Skin:Need("InboxFrame.MailListScrollFrame")
-    if scroll then Skin:ScrollFrame(scroll) end
-    -- 翻页按钮换成细线左右箭头。
-    Skin:PageArrow(Skin:Need("InboxPrevPageButton"), "left")
-    Skin:PageArrow(Skin:Need("InboxNextPageButton"), "right")
 end
 
+-- **11-05 实机（商人开过）**：`MerchantRepairButton` / `MerchantSellButton` /
+-- `MerchantBuyBackButton` 与 `MerchantFrameScrollFrame` 都没有实名（修理/卖出/回购挂在
+-- `MerchantFrame` 的 `parentKey` 下，商品列表是 `ScrollBox`）⇒ 摘点名，窗口侧 `deep` 接住。
 local MERCHANT_BUTTONS = {
-    "MerchantNextPageButton", "MerchantPrevPageButton", "MerchantRepairButton",
-    "MerchantRepairAllButton", "MerchantSellButton", "MerchantBuyBackButton",
+    "MerchantNextPageButton", "MerchantPrevPageButton", "MerchantRepairAllButton",
 }
 
 local function SkinMerchant()
@@ -80,7 +75,7 @@ local function SkinMerchant()
         inset = true,
         panel = { bgAlpha = 0.96 },
         buttons = MERCHANT_BUTTONS,
-        scrolls = { "MerchantFrameScrollFrame" },
+        deep = true,
         -- 12 格商品 + 回购格的铺平裁切走引擎默认档（翻页后 CropIcon 轮询账本重压 texcoord）。
     })
     -- 翻页按钮换成细线左右箭头（monet_arrow_up + Widget:Arrow 转向）。
@@ -166,12 +161,14 @@ local function SkinAuction()
 end
 
 local function SkinProfessions()
-    M:Dress({ "ProfessionsFrame", "TradeSkillFrame" }, {
+    -- **11-05 实机（专业窗开过）**：`TradeSkillFrame` 与三个页签名（`ProfessionsFrameTab1/2`、
+    -- `TradeSkillFrameTab1`）都没有实名 —— 1.60 的页签是 `ProfessionsFrame` 内 `TabSystemTemplate`
+    -- 的运行期子件 ⇒ 只点窗口本体，页签与内容靠 `deep` 扫（§8.40 ②）。
+    M:Dress("ProfessionsFrame", {
         window = true,
         inset = true,
         panel = { bgAlpha = 0.96 },
         deep = true,
-        tabs = { "ProfessionsFrameTab1", "ProfessionsFrameTab2", "TradeSkillFrameTab1" },
     })
 end
 
@@ -191,14 +188,10 @@ M:Panel("trade", { label = "交易", group = "交易", apply = SkinTrade,
     } })
 
 M:Panel("mail", { label = "邮箱", group = "交易", apply = SkinMail,
-    frames = {
-        MAIL_FRAMES, MAIL_BUTTONS,
-        "MailListScrollFrame", "MailFrame.InboxFrame.MailListScrollFrame",
-        "InboxFrame.MailListScrollFrame",
-    } })
+    frames = { MAIL_FRAMES, MAIL_BUTTONS } })
 
 M:Panel("merchant", { label = "商贩", group = "交易", apply = SkinMerchant,
-    frames = { "MerchantFrame", MERCHANT_BUTTONS, "MerchantFrameScrollFrame" } })
+    frames = { "MerchantFrame", MERCHANT_BUTTONS } })
 
 M:Panel("trainer", { label = "训练师", group = "交易", apply = SkinTrainer,
     frames = {
@@ -210,10 +203,7 @@ M:Panel("auction", { label = "拍卖行", group = "交易", apply = SkinAuction,
     frames = { "AuctionFrame", AUCTION_TABS, AUCTION_PANELS, AUCTION_BUTTONS, AUCTION_EDITS } })
 
 M:Panel("professions", { label = "专业 / 制造", group = "交易", apply = SkinProfessions,
-    frames = {
-        "ProfessionsFrame", "TradeSkillFrame",
-        "ProfessionsFrameTab1", "ProfessionsFrameTab2", "TradeSkillFrameTab1",
-    } })
+    frames = { "ProfessionsFrame" } })
 
 M:Panel("bank", { label = "银行", group = "交易", apply = SkinBank,
     frames = { "BankFrame", "WarbandBankFrame" } })

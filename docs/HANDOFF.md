@@ -3896,6 +3896,40 @@ EnumerateFrames 扫 15908 个框，那个点上命中的 27 个里只有两个 M
 父框 `0 存在`，LoD 没载或本等级用不到（2 级号开不了拍卖/训练师/打孔/幻化）。
 `bank` 的 `WarbandBankFrame` 是**预期不存在**（§8.34 已记），不算缺失。
 
+## 8.41 2026-11-05 B 批落地（作者选 B = ①改名 + ②摘噪一起做）
+
+**结果**：`M:Panel frames` 名单 **374 → 283 个名字**（-91），`/mui skins diagnose` 那些"永远消不掉的 ✗"
+从根上少掉一截；harness 台账同步收窄（`info 1695 → 1609`、去重键 `493 → 407`）—— 这两个数字就是
+"少做了 91 次注定落空的查找"的证据，而不是"我删了东西所以看起来干净"。
+
+**① 改实名（有 `/mui compat find` 原文）**
+
+| 组 | 改动 |
+|---|---|
+| questlog | 窗口 `QuestLogFrame` → **`QuestLogPopupDetailFrame`**（+ `deep`），按钮三颗换成 `…FrameAbandonButton` / `…FrameShareButton` / `…FrameTrackButton`，滚动区 `…FrameScrollFrame` |
+| playerspells | 只留 **`PlayerSpellsFrame`** + `PlayerSpellsFrameCloseButton` / `PlayerSpellsFrameClearButton`（`SpellBookFrame` 与四个页签、两个搜索框都没有实名） |
+| legacy | **两行假 ✗ 其实是"一段从没跑过的代码"**：`RewardTrackPage` / `ChallengesPage` 是 `LegacySystemFrame` 的 parentKey（`Blizzard_LegacySystem.xml:40-41`），裸名 `Need` 永远拿不到 ⇒ `M:Controls` 循环一次都没执行过。改成点路径 `LegacySystemFrame.RewardTrackPage` / `.ChallengesPage`，并把漏掉的第三块 `.TreePage` 一起补上 |
+
+**② 摘掉无实名证据的点名**（每组都在代码里写了理由 + §8.40 的档位）：collections 筛选 5 + 搜索 2、
+achievements 容器/筛选/搜索 4、macros 编辑区 2、mail 收件箱按钮 5 + 滚动区 3 拼法、merchant 3 颗 + 滚动区、
+loot 翻页 2 + 滚动区 2 拼法、editmode 对话框按钮 10（两种拼法都是照参考件猜的）、
+addonlist 6、guild 名册滚动 9 拼法、communities 页签 3、chat 滚动区 4、timemanager 旧全局名 1。
+摘的同时把对应窗口补上 `deep = true`（loot / mail / merchant / gossip / editmode 对话框 / addonlist / professions），
+**避免"摘名字 = 丢覆盖"** —— 这是 §8.40 ② 那条纪律的执行细节。
+
+**跨客户端的取舍写死**：`GuildFrame` / `TradeSkillFrame` / `EncounterJournal` 这类"零售有、1.60 没有"的名字
+**保留**（`_retail_` 还在作预验支），注释里写明"这一行 ✗ 在 1.60 属预期"。
+不为一个客户端删另一个客户端的名字，也不许把它伪装成"已适配"。
+
+**没做完的（③，要开窗/要 NPC 才能判）**：auction 17、trainer 4、inspect 6、socket 3、transmog 2、
+craftorders 2、calendar 3、colorpicker 4（要开取色窗）、merchant/loot 的剩余项要真 NPC 与掉落。
+`#41` 保持 pending，输入已换成"③ 那批 + 二趟开窗复验"。
+
+**闸门**：luac 六文件 / `check-frame-list`（283 名全部有取用路径）/ `api-audit` 无 HARD /
+`audit-taint` 0-0-0 / `audit-locals` / 七条行为探针 / `harness red=0`。
+待实机：作者 `/reload` 后重跑 `/mui skins diagnose`，看任务详情窗、技能书面板、传承三页是否真的被涂到
+（legacy 那一处是**第一次**被执行到，观感变化最直接）。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 

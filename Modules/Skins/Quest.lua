@@ -127,12 +127,14 @@ local QUEST_PANELS = {
     "QuestFrameRewardPanel", "QuestFrameDetailPanel",
 }
 
+-- 正文是挂在窗口外的全局 FontString。**11-05 实机（任务窗开过）**：这十个里只有三个有实名
+-- （`QuestProgressText` / `QuestProgressRequiredItemsText` / `QuestProgressRequiredMoneyText`），
+-- 其余七个（Greeting/Detail/Reward/Complete/ShowItems/ChoiceRequired/Required）在 1.60 不存在
+-- ⇒ 提亮只覆盖这三条，其余正文颜色交给面板侧（`QUEST_PANELS` 的织纹 + 剥原美术）。
+-- 这不是"降级"，是把没有实名证据的名字从名单里摘掉：留着会让 `/mui skins diagnose`
+-- 每次报七行假缺失，而真正需要改名的那几条会被淹掉（§8.40 的 ② 档）。
 local QUEST_FONTS = {
-    "QuestProgressText", "QuestGreetingText", "QuestDetailText",
-    "QuestRewardText", "QuestProgressRequiredItemsText",
-    "QuestProgressRequiredMoneyText", "QuestProgressCompleteText",
-    "QuestProgressShowItemsText", "QuestRewardChoiceRequiredText",
-    "QuestRewardTextRequiredText",
+    "QuestProgressText", "QuestProgressRequiredItemsText", "QuestProgressRequiredMoneyText",
 }
 
 -- 模块级函数 = 稳定引用：SkinQuestFrame 会被 QUEST_LOG_UPDATE 反复触发，
@@ -160,48 +162,41 @@ local function HookQuestBrighten(frame)
     M:HookShow(frame, BrightenQuestPanels)
 end
 
--- 对话选项按钮（GossipGreetingButton1..8）是暴雪在 Show 那一刻才建出来 / 复用的。
--- 模块级函数 + 稳定引用，重复 Apply 不会重复登记回调；查找记在 questframe 名下。
-local function RestyleGossipButtons()
-    Skin.With("questframe", function()
-        if not (Skin:Need("GossipFrame.GreetingPanel") or Skin:Need("GossipFrameGreetingPanel")) then
-            return
-        end
-        for index = 1, 8 do
-            M:Dress("GossipGreetingButton" .. index, { as = "button" })
-        end
-    end)
-end
+-- **1.60 没有 `GossipGreetingButton1..8` 这类全局名**（11-05 实机：NPC 对话开过，一个都不存在；
+-- `GossipFrameGreetingGoodbyeButton` / `GossipGreetingScrollFrame` 同样没有）。
+-- 对话选项是 `GossipFrame` 内 `ScrollBox` 的运行期行 ⇒ 由 `GossipFrame` 的窗口件 +
+-- `QUEST_PANELS` 里那块 `QuestFrameGreetingPanel` 接住；原来的"逐颗点名 1..8 循环"整个删掉。
+-- （§8.40 的 ② 档：留着点名 = 台账上八行永远消不掉的假缺失，会淹掉真要改名的那几条。）
 
+-- **1.60 实名（11-05 `/mui compat find QuestLog`，走 19040 个框只回 9 个）**：任务详情窗是
+-- `QuestLogPopupDetailFrame` 一族（`…FrameAbandonButton` / `…FrameCloseButton` / `…FrameInset` /
+-- `…FrameScrollFrame` / `…FrameShareButton` / `…FrameTrackButton`）。
+-- `QuestLogFrame` / `QuestLogDetailFrame` / `QuestLogFrameCancelButton` / `QuestLogFramePushQuestButton` /
+-- 两个页签 / 三个滚动框**都没有实名**（零售 12.x 的名字），留着就是台账上消不掉的四行假"缺失"。
 local QUESTLOG_BUTTONS = {
-    "QuestLogFrameAbandonButton", "QuestLogFrameTrackButton", "QuestLogFrameShareButton",
-    "QuestLogFrameCancelButton", "QuestLogFramePushQuestButton",
+    "QuestLogPopupDetailFrameAbandonButton", "QuestLogPopupDetailFrameShareButton",
+    "QuestLogPopupDetailFrameTrackButton",
 }
 
-local QUESTLOG_TABS = { "QuestLogFrameTab1", "QuestLogFrameTab2" }
-
-local QUESTLOG_SCROLLS = {
-    "QuestLogListScrollFrame", "QuestLogDetailScrollFrame", "QuestLogObjectiveScrollFrame",
-}
+local QUESTLOG_SCROLLS = { "QuestLogPopupDetailFrameScrollFrame" }
 
 local function SkinQuestLog()
-    M:Dress("QuestLogFrame", { window = true, inset = true, panel = { bgAlpha = READ_ALPHA } })
+    M:Dress("QuestLogPopupDetailFrame", {
+        window = true, inset = true, panel = { bgAlpha = READ_ALPHA }, deep = true,
+    })
     M:Dress(QUESTLOG_BUTTONS, { as = "button" })
-    M:Dress(QUESTLOG_TABS, { as = "tab" })
     M:Dress(QUESTLOG_SCROLLS, { as = "scroll" })
-
-    M:Dress("QuestLogDetailFrame", { window = true, noTitle = true, inset = true, panel = { bgAlpha = READ_ALPHA } })
-    M:Dress("QuestLogPopupDetailFrame", { window = true, noTitle = true, inset = true, panel = { bgAlpha = READ_ALPHA } })
 end
 
+-- `QuestFramePushQuestButton` 在 1.60 没有实名（11-05 实机，任务窗开过）⇒ 摘掉，其余五颗存在。
 local QUESTFRAME_BUTTONS = {
     "QuestFrameAcceptButton", "QuestFrameDeclineButton", "QuestFrameCompleteButton",
-    "QuestFrameCompleteQuestButton", "QuestFrameGoodbyeButton", "QuestFramePushQuestButton",
+    "QuestFrameCompleteQuestButton", "QuestFrameGoodbyeButton",
 }
 
-local QUESTFRAME_SCROLLS = {
-    "QuestProgressScrollFrame", "GossipGreetingScrollFrame", "QuestInfoObjectiveScrollFrame",
-}
+-- 同 §8.40 ②：`GossipGreetingScrollFrame` / `QuestInfoObjectiveScrollFrame` 无实名
+-- （滚动区是 `ScrollBox` + `MinimalScrollBar` 的无名子件，由 GossipFrame / QuestFrame 的深扫接）。
+local QUESTFRAME_SCROLLS = { "QuestProgressScrollFrame" }
 
 local function SkinQuestFrame()
     M:Dress("QuestFrame", { window = true, panel = { bgAlpha = READ_ALPHA } })
@@ -214,11 +209,8 @@ local function SkinQuestFrame()
     -- Show 后再跑一次（暴雪 quest 数据是 Show 后才塞的，面板也可能是那时候才建出来）
     HookQuestBrighten(Skin:Need("QuestFrame"))
 
-    M:Dress("GossipFrame", { window = true, inset = true, panel = { bgAlpha = READ_ALPHA } })
+    M:Dress("GossipFrame", { window = true, inset = true, panel = { bgAlpha = READ_ALPHA }, deep = true })
     M:Dress(QUESTFRAME_SCROLLS, { as = "scroll" })
-    M:Dress("GossipFrameGreetingGoodbyeButton", { as = "button" })
-
-    M:HookShow(Skin:Need("GossipFrame"), RestyleGossipButtons)
 end
 
 -- The quest objective tracker that sits under the minimap.  It has no tabs and no chrome of its own --
@@ -270,8 +262,7 @@ M:Panel("questlog", {
     group = "任务",
     apply = SkinQuestLog,
     frames = {
-        "QuestLogFrame", "QuestLogDetailFrame", "QuestLogPopupDetailFrame",
-        QUESTLOG_BUTTONS, QUESTLOG_TABS, QUESTLOG_SCROLLS,
+        "QuestLogPopupDetailFrame", QUESTLOG_BUTTONS, QUESTLOG_SCROLLS,
     },
 })
 
@@ -280,12 +271,8 @@ M:Panel("questframe", {
     group = "任务",
     apply = SkinQuestFrame,
     frames = {
-        "QuestFrame", "GossipFrame", "GossipFrame.GreetingPanel", "GossipFrameGreetingPanel",
+        "QuestFrame", "GossipFrame",
         QUEST_PANELS, QUEST_FONTS, QUESTFRAME_BUTTONS, QUESTFRAME_SCROLLS,
-        "GossipFrameGreetingGoodbyeButton",
-        -- 对话选项按钮只有 1 号写在名单里：其余 7 个在同一趟循环里按名拼接（见 RestyleGossipButtons），
-        -- 全列出来只是把"暴雪有没有建到第 8 个"当成我们的错报。
-        "GossipGreetingButton1",
     },
 })
 
