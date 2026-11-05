@@ -805,6 +805,15 @@ end
 --- Restyle a Blizzard button (flat Monet plate + themed border + font).
 function Skin:Button(button, opts)
     if not button then return button end
+
+    -- **滚动条步进钮走专门那条路**（11-05 实机判例）：通用档的 `FadeButtonArt` 只压图不补图，
+    -- 于是 `minimal-scrollbar-arrow-*` 被压成 α0、V 形却没放上去 ⇒ 玩家看到的是"箭头不见了"，
+    -- 而 `/mui skins arrows` 的"我们的箭头"一直是 0。`Skin:ScrollArrowButton` 才是"压 + 补"成对的做。
+    -- 为什么以前没兜住：`ScanScrollArrows` 只在登录后 +1s/+4s 各扫一次，而列表的滚动条是**懒建**的
+    -- （第一次滚动才出现）—— 晚出现的箭头就只被通用档压过。放在入口就不依赖扫描时机。
+    -- 非箭头按钮这里返回 false（判据是 region 上的 atlas 名），零副作用继续走通用档。
+    if self:ScrollArrowButton(button) then return button end
+
     opts = opts or {}
 
     self:Strip(button, { keep = opts.keep })
