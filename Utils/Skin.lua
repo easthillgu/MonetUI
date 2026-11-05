@@ -448,13 +448,16 @@ function Skin:FadeAtlasBackdrop(frame, patterns, depth)
     end
 end
 
---- 通用版：递归一趟，**两类处理**（11-05 专业窗 + 角色窗共用）。
+--- 通用版：递归一趟，**三类处理**（11-05 专业窗 + 角色窗共用）。
 ---   fadePatterns 命中的 → `Fade`（纯装饰底图，压没露我们的深色背板）；
----   swapPatterns  命中的 → `SwapArt` 成 monet_barfill + 染我们的边框色（选中/悬停态，
----     压没会丢反馈，所以是"换"不是"剥"）。
+---   swapPatterns  命中的 → `SwapArt` 成 monet_barfill + 染我们的边框色（**实心**选中/悬停条，
+---     压没会丢反馈，所以是"换"不是"剥"）；
+---   tintPatterns  命中的 → 只 `SetVertexColor` 我们的边框色，**保留暴雪原图形状**
+---     （11-05 判例：`common-sidetab-selected` 本是一圈高亮框，SwapArt 换成实心 barfill 后
+---      画在 OVERLAY 压在职业图标上 → 图标"发白"；这种框该染色不该替换）。
 --- 只认 atlas 字符串；内容图标是数字文件 ID（GetAtlas 回 nil）不会被误伤（AGENTS 功能图标豁免）。
---- 幂等：Fade 靠 `hidden` 标记、SwapArt 靠 `art` 标记；换过后 GetAtlas 回 nil，下轮不再命中。
-function Skin:StyleAtlasBackdrop(frame, fadePatterns, swapPatterns, depth)
+--- 幂等：Fade 靠 `hidden` 标记、SwapArt 靠 `art` 标记；tint 每次重染（幂等）。
+function Skin:StyleAtlasBackdrop(frame, fadePatterns, swapPatterns, tintPatterns, depth)
     if not frame or (depth or 0) > 8 or type(frame.GetRegions) ~= "function" then return end
     depth = depth or 0
     local r, g, b = Color:GetBorder()
@@ -464,11 +467,20 @@ function Skin:StyleAtlasBackdrop(frame, fadePatterns, swapPatterns, depth)
             local okA, atlas = pcall(reg.GetAtlas, reg)
             if okA and type(atlas) == "string" and atlas ~= "" then
                 local low = string.lower(atlas)
-                local matchedSwap = false
-                if swapPatterns then
+                local handled = false
+                if tintPatterns and r then
+                    for i = 1, #tintPatterns do
+                        if low:find(tintPatterns[i]) then
+                            pcall(reg.SetVertexColor, reg, r, g, b, 1)
+                            handled = true
+                            break
+                        end
+                    end
+                end
+                if not handled and swapPatterns then
                     for i = 1, #swapPatterns do
                         if low:find(swapPatterns[i]) then
-                            matchedSwap = true
+                            handled = true
                             if self:SwapArt(reg, "monet_barfill") and r then
                                 pcall(reg.SetVertexColor, reg, r, g, b, 0.5)
                             end
@@ -476,7 +488,7 @@ function Skin:StyleAtlasBackdrop(frame, fadePatterns, swapPatterns, depth)
                         end
                     end
                 end
-                if not matchedSwap and fadePatterns then
+                if not handled and fadePatterns then
                     for i = 1, #fadePatterns do
                         if low:find(fadePatterns[i]) then self:Fade(reg); break end
                     end
@@ -486,7 +498,7 @@ function Skin:StyleAtlasBackdrop(frame, fadePatterns, swapPatterns, depth)
     end
     local okC, kids = pcall(function() return { frame:GetChildren() } end)
     if okC then
-        for _, k in ipairs(kids) do self:StyleAtlasBackdrop(k, fadePatterns, swapPatterns, depth + 1) end
+        for _, k in ipairs(kids) do self:StyleAtlasBackdrop(k, fadePatterns, swapPatterns, tintPatterns, depth + 1) end
     end
 end
 

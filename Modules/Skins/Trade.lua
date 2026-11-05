@@ -304,17 +304,21 @@ local FADE_PROF_ATLAS = {
     "common%-button%-list$",
 }
 local SWAP_PROF_ATLAS = {
-    -- 金色选中态 → 换成我们的 barfill + 边框色（压没会丢选中反馈，所以是换不是剥）
+    -- 金色选中/悬停**行条** → 换成我们的 barfill + 边框色（横向实心条，压在行文字下，不遮图标）
     "professions%-recipe%-active",
-    "common%-sidetab%-selected",
     "professions%-recipe%-hover",
+}
+-- 侧页签选中态是一圈高亮框（不是实心条）→ 只染我们的颜色、保留暴雪形状
+-- （SwapArt 换实心会盖住页签里的职业图标 → "发白"，11-05 角色窗判例同因）。
+local TINT_PROF_ATLAS = {
+    "common%-sidetab%-selected",
 }
 
 -- 模块级稳定引用：PollWatch 按引用去重，在 Apply 里现造闭包会每开一次窗多挂一条。
--- 走通用 Skin:StyleAtlasBackdrop（fade 装饰底图 + swap 选中态换我们的颜色），角色窗共用同一条。
+-- 走通用 Skin:StyleAtlasBackdrop（fade 装饰底图 + swap 实心行条 + tint 选中框），角色窗共用同一条。
 local function StyleProfessionsArt()
     local f = Skin:Need("ProfessionsFrame")
-    if f then Skin:StyleAtlasBackdrop(f, FADE_PROF_ATLAS, SWAP_PROF_ATLAS) end
+    if f then Skin:StyleAtlasBackdrop(f, FADE_PROF_ATLAS, SWAP_PROF_ATLAS, TINT_PROF_ATLAS) end
 end
 
 local function SkinProfessions()

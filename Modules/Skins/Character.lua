@@ -55,13 +55,16 @@ local FADE_CHARACTER_ATLAS = {
     "common%-sidetab%-mask",
 }
 local SWAP_CHARACTER_ATLAS = {
+}
+-- 选中页签是一圈高亮框（不是实心条）→ 只染我们的颜色、保留暴雪形状（SwapArt 换实心会盖住职业图标发白）。
+local TINT_CHARACTER_ATLAS = {
     "common%-sidetab%-selected",
 }
 
 -- 模块级稳定引用：PollWatch 按引用去重。
 local function StyleCharacterArt()
     local f = Skin:Need("CharacterFrame")
-    if f then Skin:StyleAtlasBackdrop(f, FADE_CHARACTER_ATLAS, SWAP_CHARACTER_ATLAS) end
+    if f then Skin:StyleAtlasBackdrop(f, FADE_CHARACTER_ATLAS, SWAP_CHARACTER_ATLAS, TINT_CHARACTER_ATLAS) end
 end
 
 local function SkinCharacter()
