@@ -3972,6 +3972,32 @@ MerchantItem19MoneyFrame」—— 它 hook 了暴雪的 `OnMerchantUpdate`（正
 （读同一份 `taint.log` 或现场 `issecurevariable`，只读、不碰别人的框），让玩家和都能自己看见归属，
 而不是把账算到 MonetUI 头上。等作者点头再做，不塞进今天的收尾。
 
+## 8.43 2026-11-05 子帧探测第一批产出（探针修好之后才有的三类结论）
+
+**用法**：`/mui skins layers <窗口名> [片段]` —— 片段过滤走 `label + 图集 + 状态` 的拼接键，
+所以 `scrollbar` / `id:` / `metal` 这类都能当"按家族切片"用，不需要新参数。
+
+**① 新式滚动条的"轨"是空白（已修，`6f3cd41`）**：`QuestFrame` 过滤 `scrollbar` 数出
+`minimal-scrollbar-track ×3 + minimal-scrollbar-arrow ×2`。把手和步进钮早已有
+`Skin:ScrollThumb` / `Skin:Stepper` / `Skin:ScrollArrowButton`，唯独 `Track.Begin/End/Middle`
+三张 atlas 没人管 ⇒ 暴雪 8px 青蓝凹槽坐在我们的细线风里。补法见该提交（剥 atlas + 居中 1px
+`monet_hairline` + 边框色 α0.35 + 悬停随把手一起提亮）。**离线绿不算证据**（桩框架有没有真造出
+`.Track` 没验证），实机看家族计数是否掉下来。
+
+**② 仪表口径修完才看清真实规模**：QuestFrame 的"还看得见"从虚高的 **300 → 69**
+（168 件属于没显示的手柄/隐藏容器），SocialUIFrame **491 → 162**。之前那种数拿去做决定会一路做错。
+
+**③ 剩下的两大类"要拍板"而不是"要修"**（我没自动动）：
+- **列表行美术**：`friends-card-selected ×6 / friends-card-battlenet ×3 / friends-card-disabled ×3`、
+  `common-button-tertiary ×14 / common-button-list ×8` —— 好友列表的行底与选中态是 atlas，
+  换掉等于做一套"我们的行高亮"（设计取向：保留暴雪行底还是压成我们的 well）。
+- **肖像**：探针看到的 `QuestFramePortrait RTPortrait1 62x62` 是**圆图本体**，不是椭圆遮罩 ⇒
+  压成方形得换美术（方形框 + 我们的四角），不是 `SetTexCoord` 能解决的。
+- ⚠ 顺手记一条**仪表边界**（我自己差点踩）：`/mui compat find` 只枚举**框**，
+  所以它报"帧名含 frameportrait 只有 1 个"时，真实情况是 `QuestFramePortrait` / `SocialUIFramePortrait` /
+  `CharacterFramePortrait` **都在**（现场 `type(_G[n..'Portrait'])` = table），只是它们是**贴图不是框**。
+  ⇒ 判"某个名字不存在"之前，先说清这个工具看的是哪一层（贴图/字体要另走 `GetRegions`，就是 layers 探针）。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 
