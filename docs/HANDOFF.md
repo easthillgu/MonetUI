@@ -3616,8 +3616,8 @@ UiMapPoint.CreateFromCoordinates(...))` 可用；`C_MapExplorationInfo.GetExplor
 |---|---|---|
 | `canaccessobject` | 无 | 与 12.1.5 一致。`Secrets.CanRead` 走 `canaccessvalue`，一个字节不用改（§8.13.6 那条继续成立） |
 | `TempEnchantFrame` | 无 | 与 12.1.5 一致 ⇒ `Modules/BuffFrame/BuffFrame.lua` 压制清单里那条**在两个客户端上都是空枪**，名字留作历史，注释已写明 |
-| `LFGParentFrame` | **有** | Forever 专属查找组框真存在 ⇒ `Modules/Skins/Forever.lua` 那块皮肤从"候选"升级为"必验"（名字来自 Ellesmere，两客户端都没验过 —— §8.13.4 第 6 条） |
-| `LegacySystemFrame` | **有** | 同上（传承进度）。这一趟**没开过这两扇窗**，diagnose 里 LFG 组只算"存在"，逐控件名要二趟 |
+| `LFGParentFrame` | **有（08:01 单点证据）** | Forever 专属查找组框真存在 ⇒ `Modules/Skins/Forever.lua` 那块皮肤从"候选"升级为"必验"（名字来自 Ellesmere，两客户端都没验过 —— §8.13.4 第 6 条）。"有"的会话口径见本节末尾订正 |
+| `LegacySystemFrame` | **有（同上，会话相关）** | 同上（传承进度）。A 批复验那一趟它已经是 `0/6 全缺` —— 见本节末尾的口径订正 |
 | `AeLootDisabled` | **生效** | 服务器关掉了组队拾取框架 → 拾取相关面板不归我们管，别去"修"（§8.13.4 差集第 ② 类） |
 | `EncounterJournalDisabled` | **生效** | **`[encounterjournal] 0/8 缺失`不是名字写错，是整块面板被 GameRule 关了** —— AGENTS 那条"1.60 上框读不到的第一嫌疑人是 GameRule"首趟就命中。`/mui report` 的 `[dressDrop:encounterjournal] 跳过 1 个非框体条目：EncounterJournal` 是同一条的另一面（面板被禁时全局只剩 Mixin 表） |
 
@@ -3677,6 +3677,27 @@ GameRule 18 条里 16 条未生效 ⇒ **§8.13.6 那句"这台服务器没关�
 C 组 = `target` 与 `luaAction` 互斥、两者都无 ⇒ 不建行、[受限] API 前面必须有 `ns:IsRestricted()` 门。
 **为什么不能拿 `run.js red=0` 当这条的证据**：`grep MicroMenu tools/harness/run.lua` = 0 命中，harness 根本不派微菜单阶段（A 批的 friends/character 那几路**是**被 `Skins:ApplyAll` 驱动的， micromenu 那一路只由这条探针 + 实机覆盖）。
 
+**A 批台账复验（作者重载后 `/mui skins diagnose`）—— 三组 ✗ 行整行消失**，都变成"对象存在，其中 0 个不是框体"的 ⚠：
+
+| 组 | 复验前 | 复验后 |
+|---|---|---|
+| `[character]` | 5 存在 / **3 缺失** | **6 存在 / 0 缺失**（页签改走 `CharacterFrameTabIndicators` 之后本体可取） |
+| `[friends]` | 6 存在 / **10 缺失** | **9 存在 / 0 缺失**（死名摘掉，`SocialUIFrame` + `WhoFrameEditBox` 进账） |
+| `[micromenu]` | 19 存在 / **2 缺失** | **19 存在 / 0 缺失**（只剩 `UpdateMicroButtons` 那条"命中但不是框体"的 ⚠ —— 它本来就不是框） |
+
+`/mui skins diagnose bad` 全仓只剩三条非框体命中（`UpdateMicroButtons` / `SharedTooltip_SetBackdropStyle` /
+`TradePlayerInputMoneyFrame`），都是记账用的函数或 Mixin，没有一处被当 parent 交给 `CreateFrame`。
+合计 `257 存在 / 200 缺失` → `253 存在 / 177 缺失`：**缺失 −23 是摘死名**，存在 −4 是 LoD 会话差异（下面那条口径）。
+
+**口径订正（复验时发现，影响 §8.34 那张表的两行"有"）**：
+`/mui compat` 的"暴雪框体 有/无"和 `/mui skins diagnose` 的 ✓/✗ **都是会话内的快照，不是永久事实** ——
+LoD 包（`Blizzard_LegacySystem` / `Blizzard_Collections` / `Blizzard_AchievementUI` …）只在**本会话真开过那扇窗**之后
+才把框建出来，`/reload` 之后又回到"无"。同一条 `LegacySystemFrame`：08:01 那趟报 **有**，
+A 批复验那趟（重载后没开传承窗）在 `[legacy]` 里已经是 **0/6 全缺**。⇒ 以后写"某框 有"必须带
+**"本会话（开过 X 窗）"**，只有 `UserScriptsDisabled` / GameRule 那一类是每次登录都在的。
+`LFGParentFrame` 的"有"目前只有 08:01 一趟单点证据；`[lfg]` 那 24 个对象存在是名单里其它子件命中，
+**不等于** parent 在这一刻存在 —— 二趟要单独看这一行。
+
 ## 8.36 2026-11-05 开服第 2 条 P0：信息栏"点一格开一个面板"把暴雪 Lua 面板链拉进我们的执行环境
 
 作者按 A 批复验台账时，日志里先冒出来的是这一条（不是皮肤）。**完整栈（id 1441，1.60.1 build 70790）**：
@@ -3710,7 +3731,7 @@ TextStatusBar.lua:110 attempt to compare a secret number value (execution tainte
 只在造框那一刻 `SetAllPoints(frame)` 一次，之后排版不再碰它。**顺带的第二个坑**：接住器压住格子以后
 鼠标归它，`OnEnter/OnLeave` 再挂本体就永远不触发（提示框会整个消失）⇒ 悬停挂到真正收鼠标的那一层。
 
-**这两条都是"离线闸门这次真驱动到了"的样本**（对照 §8.34 那条"harness 不派微菜单阶段"）：
+**这两条都是"离线闸门这次真驱动到了"的样本**（对照 §8.35 那条"harness 不派微菜单阶段"）：
 信息栏在 harness 里有 `alpha[restricted:*]` 阶段，所以改错了当场红。新增闸门
 `node tools/infobar-secure-click-probe.js`（14 项）钉三组：A = `OpenPanel` 不存在 +
 两个文件里 12 个暴雪 Lua 全局零出现；B = 本体必须普通框 / 接住器一次 `SetAllPoints` /
