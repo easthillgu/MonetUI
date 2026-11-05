@@ -6,7 +6,7 @@
 ![Interface](https://img.shields.io/badge/Interface-16001-orange.svg)
 ![Version](https://img.shields.io/badge/version-0.12.0-informational.svg)
 ![Lua](https://img.shields.io/badge/Lua-5.1-2C2D72.svg)
-![Status](https://img.shields.io/badge/status-待_1.60_实机复验-yellow.svg)
+![Status](https://img.shields.io/badge/status-1.60_实机已验-brightgreen.svg)
 
 配色的两半各管一段：**环境色离线采样**（游戏截图按区域提取，存成一张 `mapID → 环境 HSL` 的表），**主题色运行期实时派生**（拿你所在的地图 ID 查表 → 莫奈规则算出边缘 / 环境 / 高亮 / 中性四档 → 亮度阶梯定位 → 广播重涂）。运行期**不读任何贴图像素**（这个客户端也没有可用的像素读取 API），所以换区域时既不用等截图分析、也不会卡一下。查不到的区域沿 `C_Map` 的父链继承上一层（大陆 / 世界）的派生色，父链也断时退回中性灰兜底 —— 配置面板的「区域配色」一行会写明当前用的是哪一档。
 
@@ -98,22 +98,40 @@ MonetUI/
 
 ## ⚠️ 状态
 
-**2026-10-26 这一轮改动曾在 12.1.5 上实机验收；交付目标《无限》1.60 的复验待 11-05 上线首趟进行，下述结论均属"12.1.5 实测（历史证据），待 1.60 复验"。**
+**2026-11-05（《无限》1.60 开服日）已在交付客户端上实机复验：`1.60.1 · build 70790 · Interface 16001 · zhCN`。**
+更早的 12.1.5 验收记录现在只是历史证据；下面写的都是 1.60 实测。
 
-- 验收过的项：姓名板无光环 + 目标金色/1.1 倍、鼠标提示三摆法 + 1px 主题边框 + 边缘翻转 + Alt 常显 ID、
-  施法条三角贴能量条、经验线三角顶在线上沿、连按 B 不出现两套背包、启动 `17/17 个模块`。
-- `wuxian check`（离线）：**0 error / 5 warning**（4 条 `PickupAction`·`PlaceAction` 受保护调用 + 1 条 `toc-interface`，均为已知基线；前者受 `InCombatLockdown` 守门，后者是部署脚本按客户端改 `## Interface` 造成的）。
-- 静态 API 审核 `tools/api-audit.js`：**0 hard**；taint 闸门 `tools/audit-taint.js`：**0 / 0 / 0**。
-- 仍开着的（都不是功能缺陷）：`ADDON_ACTION_BLOCKED MonetUI UNKNOWN()` 偶发（仅进日志）、
-  `BuffListFrame` 被暴雪钉在牌子右端的小问题、`ActionBars/Secure.lua` 拆分未做、
-  **发行前必须把 `Pingfangpixel.ttf` 换成 OFL 字体**（见 `THIRD-PARTY-NOTICES.txt`）。
+- 登录：`已加载 20/20 个模块`、`界面美化已启用（46 个窗口）`、`/mui report` 四段（环境 / 角色 / 位置 / 受限）都对。
+- 只读诊断全跑过：`/mui compat`（58 项，与假设不符 6 项已逐条处置）、`/mui skins diagnose`
+  （**277 存在 / 64 缺失**，缺的不全是缺陷：GameRule 关掉的面板、别的客户端的名字、以及窗口还没开）、
+  `/mui restrict`、`/mui blocks`、`/mui perf`。
+- 功能项：背包分类窗 + 品质边框 + 等级数字 + **空格可掉落**（拖放实测）；银行与背包**同屏并存不重叠**；
+  人物页签 / 好友 / 社交窗 / 任务详情 / 技能书 / 传承三页按 1.60 实名涂到位。
+- 干净基线（关掉同机 QoL 套件 + 重载，且**在战斗中**）：`ERR / BLOCKED` 零条，`/mui blocks` 账本空。
+
+**v0.12.0 已知限制（都是取舍，不是坏掉的功能）**：
+
+- **点信息栏 / 微菜单不能打开暴雪面板**。1.60 上唯一合法的两条路我们都试过：调暴雪 Lua 全局会把整段面板链
+  记到插件名下（一屏红字），用安全模板转发会把我们逐拍排版的框标成受保护（菜单展不开）。
+  微菜单因此只保留三行：背包（我们自己的窗）/ 地图（`C_Map.OpenWorldMap`）/ 设置（`Settings.OpenToCategory`）。
+- **银行是两套并存**（我们的窗口 + 暴雪的银行框）。我们的空银行格还不是真容器槽，接管默认关；
+  想要单套观感可临时 `/mui bags hidebliz on`，代价是拖放落点消失。
+- 同机插件会抢东西：`RurutiaSuite` 的"小地图按钮收纳"会把我们的命中层搬走（本版已改成挂自己的容器），
+  `DungeonsForeverSpell` 一类会让暴雪动作条报 `SetCooldown`。这类拦截**可能记到 MonetUI 名下**，
+  出问题请先跑 `/mui report`，并在关掉其它插件后复现一次。
+- `/mui perf` 的逐路耗时在这一版恒为 0（`GetTime` 粒度不够，客户端另有高精度计时器，待接入）。
+
 - 逐项进度、验收清单与客户端约定记在**本地**开发文档（`AGENTS.md`、`MonetUI.md`、`TODO.md`、`docs/`，按 `.gitignore` 不入库）。
 
 ## 📄 协议
 
 - **MonetUI 自身代码**：[MIT](LICENSE)。
 - **随包第三方组件**保留各自许可：`LibStub`（公有领域）。逐条清单见 [`THIRD-PARTY-NOTICES.txt`](THIRD-PARTY-NOTICES.txt)（发行时随包分发），细节见 [`Libs/NOTICE.md`](Libs/NOTICE.md) 与 [`Assets/Fonts/NOTICE.md`](Assets/Fonts/NOTICE.md)。
-- **随包字体**各自授权：正文用 `Pingfangpixel.ttf`（点阵苹方，**无可再分发授权，公开发行前必须替换**）、备用 `FusionPixel` 为 SIL OFL 1.1（全文 `Assets/Fonts/OFL-FusionPixel.txt`）、Super Effective 为 CC BY-SA 3.0。
+- **随包字体**各自授权（随包只有三份，`Assets/Fonts/` 实测）：正文小字轨 `Pingfangpixel.ttf`
+  （点阵苹方，**作者 2026-11-01 已授权我们再分发 ⇒ 公开 Release 不需要替换**，条款见
+  `Assets/Fonts/NOTICE.md`）、正文大字 `LXGWWenKai-Regular.ttf`（SIL OFL 1.1，随包附全文）、
+  倒计时数字 `super-effective.ttf`（CC BY-SA 3.0，需署名）。像素轨替代候选（Fusion / Ark Pixel）
+  与朱雀仿宋放在 `Assets-src/Fonts/`，**不进包**；`roadway.ttf` 无授权声明、代码不引用、不分发。
 
 ---
 

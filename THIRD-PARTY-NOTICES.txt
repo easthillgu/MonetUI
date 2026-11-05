@@ -21,21 +21,28 @@ Libraries (Libs/)
   are drawn directly on the client's SecureActionButtonTemplate, and fonts /
   textures are shipped with the add-on.
 
-Fonts (Assets/Fonts/)
-- Pingfangpixel.ttf - "Dianzhen Pingfang" (点阵苹方) by DynaComware, derived from
-  PingFang, a typeface licensed by Apple Inc. The file carries NO license of its
-  own and therefore MUST NOT be redistributed. This build ships it for private
-  use only; remove it before any public release or upload.
-- fusion-pixel-12.ttf - Fusion Pixel Font 12px, Copyright (c) 2022 TakWolf,
-  SIL Open Font License 1.1, full text in Assets/Fonts/OFL-FusionPixel.txt.
-  Redistributable; currently unused and kept as the licensed fallback.
+Fonts actually shipped in the add-on (Assets/Fonts/ - three files, verified by
+directory listing on 2026-11-05):
+- Pingfangpixel.ttf - "Dianzhen Pingfang" by DynaComware, derived from PingFang
+  (a typeface licensed by Apple Inc). The file carries no embedded license field,
+  but the font author granted us a redistribution licence on 2026-11-01; the terms
+  are recorded in Assets/Fonts/NOTICE.md (section 点阵苹方授权). Shipping it in a
+  public release is therefore permitted and needs no replacement. The licence text
+  lives in our NOTICE table, not inside the .ttf.
+- LXGWWenKai-Regular.ttf - LXGW WenKai v1.530, Copyright (c) 2021-2026 LXGW
+  (https://github.com/lxgw/LxgwWenKai), SIL Open Font License 1.1, full text shipped
+  as Assets/Fonts/OFL-LXGWWenKai.txt. Used for body text above 14px.
 - super-effective.ttf - Super Effective v1.0, (c) 2012 The Ender (FontStruct),
   CC BY-SA 3.0 (http://creativecommons.org/licenses/by-sa/3.0/) - attribution
   required, and the font file itself is redistributed under the same license.
   Used for cooldown digits only.
-- roadway.ttf - Roadway, (c) 2005 Keith Bates / K-Type Freebie. The file carries
-  no license statement; it is not referenced by the code and is kept only as a
-  rollback copy, not redistributed.
+
+Fonts kept in the repository but NOT shipped (Assets-src/Fonts/ - git-tracked,
+never copied into the package by tools/deploy-retail.ps1):
+- fusion-pixel-12.ttf / ark-pixel-12.ttf / zhuque-fangsong.ttf - all SIL OFL 1.1
+  (licence texts in that directory); kept as licensed fallbacks / candidates.
+- roadway.ttf - Roadway, (c) 2005 Keith Bates / K-Type Freebie. No licence
+  statement in the file; not referenced by the code and not redistributed.
 
 See Assets/Fonts/NOTICE.md for the per-file provenance table.
 
@@ -55,12 +62,17 @@ Blizzard.
 - 插件本身的代码 / 材质全部是自写或本项目脚本生成，按 MIT 发布（LICENSE）。
 - 随包第三方只有 LibStub（公有领域，未修改）；Libs/ 下其余三份是作者自家
   `monetcolors` 仓库的产物，不算第三方。
-- 字体四份，风险各不相同：
-  * `Pingfangpixel.ttf`（点阵苹方）：文件内无授权声明，且是苹果授权苹方的衍生品，
-    **不可再分发** —— 私有包里可以用，转公开 / 发 Release / 发网盘前必须换成
-    OFL 字体（如 方舟像素 Ark Pixel 12px）。
-  * `fusion-pixel-12.ttf`：SIL OFL 1.1，可自由分发，现作为备用。
-  * `super-effective.ttf`：CC BY-SA 3.0，需署名，且字体文件须以同协议分发。
-  * `roadway.ttf`：无授权声明，代码未引用，仅留作回滚。
+- 字体：**随包只有三份**（Assets/Fonts/ 目录实测）：
+  * Pingfangpixel.ttf（点阵苹方）：文件内没有 license 字段，但作者已于 2026-11-01
+    授予我们再分发的许可，条款记在 Assets/Fonts/NOTICE.md 的「点阵苹方授权」一节
+    ⇒ **可以随公开 Release 分发，转公开前不需要替换**。（本文件此前写的「不可再分发、
+    发 Release 前必须换成 OFL 字体」是 11-01 之前的旧口径，2026-11-05 订正 ——
+    随包声明与仓库内声明互相矛盾时，玩家读到的是前者，所以这份必须跟着事实改。）
+  * LXGWWenKai-Regular.ttf（霞鹜文楷 v1.530）：SIL OFL 1.1，随包附全文
+    OFL-LXGWWenKai.txt；>14px 正文用它。
+  * super-effective.ttf：CC BY-SA 3.0，需署名，字体文件须以同协议分发；倒计时数字专用。
+- 在仓库但**不进包**（Assets-src/Fonts/，部署脚本不拷）：fusion-pixel-12.ttf /
+  ark-pixel-12.ttf / zhuque-fangsong.ttf（均 SIL OFL 1.1，作替代候选）与
+  roadway.ttf（无授权声明，代码不引用，仅留回滚参考，不分发）。
 - Andromeda / EllesmereUI 只作阅读参考，未复制任何文件、材质或字体。
 - 逐文件出处见 `Libs/NOTICE.md` 与 `Assets/Fonts/NOTICE.md`。
