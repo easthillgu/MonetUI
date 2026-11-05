@@ -45,6 +45,13 @@ local ENTRIES = {
         local C_Map = _G.C_Map
         if C_Map and type(C_Map.OpenWorldMap) == "function" then C_Map.OpenWorldMap() end
       end },
+    { label = "日历", luaAction = function()
+        -- 11-05 实测：本客户端的纯 C_* 开窗动词只有 `OpenWorldMap`/`OpenCalendar`/`OpenTradeSkill(要 skillLineID)`/
+        -- `OpenSettingsPanel` 这一小撮（`/run` 扫遍所有 `C_*.Open*`）。日历是其中唯一无参、能直接加进行里的。
+        if ns:IsRestricted() then return end
+        local C_Calendar = _G.C_Calendar
+        if C_Calendar and type(C_Calendar.OpenCalendar) == "function" then C_Calendar.OpenCalendar() end
+      end },
     { label = "设置", luaAction = function()
         -- `Settings.OpenToCategory` 是客户端 C 侧 API，不会把暴雪的 Lua 面板链拉进我们的执行环境
         -- （对比：`ToggleGameMenu` 是暴雪 Lua 函数，已撤掉）。
