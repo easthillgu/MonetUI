@@ -88,6 +88,18 @@ local function DressMerchantSlots()
         local slot = Skin:Need(("MerchantItem%dItemButton"):format(i))
         if slot then Skin:ItemQualityBorder(slot) end
     end
+    -- **三颗工具钮也要有同一套格子边框（11-05 作者实测："三颗工具钮小一些，边框是暴雪材质"）**：
+    -- 量出来暴雪的按钮框我们确实压掉了（`r1 BACKGROUND 64x64 a=0.00 我们压过`），
+    -- 但 `SpellIcon-256x256-Repair/SellJunk` 这张图标**自带一块深色圆角底板**（`r2 BORDER 36x36 a=1.00`），
+    -- 而我们的 `controlBg` 是 `SetAllPoints` 画在**同一尺寸的内侧** ⇒ 被图标美术整个盖住，
+    -- 看到的"边框"其实是暴雪美术，且比格子小一号显得缩进去。
+    -- ⇒ 复用商品格那条路：给它们套**外扩 1px 的边框**（画在图标之外，盖不住），
+    --   与 37×37 的格子读起来同一权重；不改按钮尺寸（动暴雪控件的 Size 会牵动它自己的行布局）。
+    for _, name in ipairs({ "MerchantRepairItemButton", "MerchantRepairAllButton",
+                            "MerchantSellAllJunkButton", "MerchantGuildBankRepairButton" }) do
+        local tool = Skin:Need(name)
+        if tool then Skin:ItemQualityBorder(tool) end
+    end
     local bbSlot = Skin:Need("MerchantBuyBackItemItemButton")
     if not bbSlot then return end
     Skin:ItemQualityBorder(bbSlot)
