@@ -59,10 +59,16 @@ end
 local PLAYERSPELLS_BUTTONS = { "PlayerSpellsFrameCloseButton", "PlayerSpellsFrameClearButton" }
 
 local function SkinPlayerSpells()
+    -- 11-05 实机（天赋/法术页开着扫 `/mui skins layers PlayerSpellsFrame`）：窗口壳已涂，
+    -- 但 `PlayerSpellsFramePortrait`（62×62）+ 那张 58×58 CircleMask 还是"暴雪原样" ⇒ 补 portrait 隐藏。
     M:Dress("PlayerSpellsFrame", {
-        window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true,
+        window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true, portrait = true,
     })
     M:Dress(PLAYERSPELLS_BUTTONS, { as = "button" })
+    -- 英雄天赋选择弹窗（天赋流程的一环，11-05 skin-coverage 实机核对存在、没美化）。
+    M:Dress("HeroTalentsSelectionDialog", {
+        window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true,
+    })
 end
 
 local ACHIEVEMENT_TABS = { "AchievementFrameTab1", "AchievementFrameTab2" }
@@ -104,7 +110,7 @@ M:Panel("playerspells", {
     group = "收藏",
     apply = SkinPlayerSpells,
     frames = {
-        "PlayerSpellsFrame", PLAYERSPELLS_BUTTONS,
+        "PlayerSpellsFrame", PLAYERSPELLS_BUTTONS, "HeroTalentsSelectionDialog",
     },
 })
 
