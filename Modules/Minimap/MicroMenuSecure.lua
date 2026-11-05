@@ -48,13 +48,6 @@ local frame
 local rows
 local built   -- 只在脱战建一次；建失败（受限窗口 / 模板缺失）保持 false，下次脱战再试
 
---- 一行一个**自烘**的点击片段：把目标按钮名直接写进片段串，`ChildUpdate` 一次广播、
---- 每行跑自己那条 ⇒ `type`/`click` 都在**安全环境**里写（Lua 直写是脏值，客户端点下去
---- 会把那次点击连带记成 MonetUI，见 Secure.lua 的 KIND_CHILD 段）。
-local function ClickSnippet(btnName)
-    return ("self:SetAttribute('type', 'click'); self:SetAttribute('click', _G[%q])"):format(btnName)
-end
-
 --- 建载体。**必须在脱战**：建框 + 排版 + 写安全属性全在这一次做完，之后不再排版。
 local function Build()
     if built then return frame end
@@ -96,8 +89,13 @@ local function Build()
             row:SetHeight(ROW_H)
             row:EnableMouse(true)
             row:RegisterForClicks("LeftButtonUp")
-            -- 目标名烘进片段；这里只装片段，真正写属性在下面一次 ChildUpdate（安全环境）。
-            pcall(row.SetAttributeNoHandler, row, "_childupdate-mui-click", ClickSnippet(t.btn))
+            -- `type="click"` + `click=<那颗原生微按钮>`：脱战建一次时用 Lua 写。
+            -- 11-05 实机订正：片段里 `_G[名字]` 取回 nil（安全片段环境的 `_G` 拿不到任意帧引用），
+            -- 所以 `click` 只能从 Lua 传帧引用 —— 这是"代点暴雪按钮"的通用做法（`:Click()` 是帧方法，
+            -- 不像 `action`→UseAction 那样校验标量来源）。真开面板时若 taint.log 记 MonetUI 的 BLOCKED，
+            -- 再退回"片段写 type + 另找路写 click"。
+            row:SetAttribute("type", "click")
+            row:SetAttribute("click", _G[t.btn])
 
             local label = Widget:Font(row, 12, "pixel", "neutral", "CENTER")
             label:SetPoint("LEFT", row, "LEFT", 6, 0)
@@ -120,9 +118,6 @@ local function Build()
     end
 
     container:SetHeight(math.abs(y) + 10)
-
-    -- 一次广播：每行跑自己的片段，把 type/click 写进安全属性。
-    pcall(container.Execute, container, "self:ChildUpdate('mui-click', 0)")
 
     container:Hide()
     frame = container
