@@ -48,6 +48,22 @@ local frame
 local rows
 local built   -- 只在脱战建一次；建失败（受限窗口 / 模板缺失）保持 false，下次脱战再试
 
+--- 让 12 颗代点目标"可见但透明"：shown=true + alpha 0。
+--- 引擎对 `type="click"` 的 `HandleAttributeClick` 会跳过 `IsVisible()=false` 的目标，
+--- 而 `IsVisible` 只看自身与祖先的 shown 链、不看 alpha ⇒ 透明不影响代点落地。
+--- 每次开菜单都重 assert 一次（暴雪/第三方可能把底栏重新藏回去）。
+function M.ensureVisible()
+    for _, name in ipairs({ "MicroMenuContainer", "MicroMenu" }) do
+        local f = _G[name]
+        if f and type(f.IsShown) == "function" and not f:IsShown() then
+            pcall(f.Show, f)
+        end
+        if f and type(f.SetAlpha) == "function" then
+            pcall(f.SetAlpha, f, 0)
+        end
+    end
+end
+
 --- 建载体。**必须在脱战**：建框 + 排版 + 写安全属性全在这一次做完，之后不再排版。
 local function Build()
     if built then return frame end
@@ -78,6 +94,12 @@ local function Build()
     else
         container:SetPoint("CENTER", UIParent, "CENTER")
     end
+
+    -- 代点的目标（那 12 颗原生微按钮）必须 IsVisible，否则引擎的 HandleAttributeClick
+    -- 对 `type="click"` 有 `clickButton:IsVisible()` 守卫，会直接什么都不做（11-05 实机：
+    -- 我们把整排微按钮藏了 ⇒ 行能弹、点了没反应）。做法：把微按钮链 shown + alpha 0
+    -- （IsVisible 只看 shown 不看 alpha）⇒ 玩家看不见底栏，但代点能落地。
+    M.ensureVisible()
 
     rows = {}
     local y = -4
@@ -133,6 +155,7 @@ function M:Toggle()
     -- 受限窗口里 Show 受保护框会被拦 ⇒ 这一拍不开（右键是脱战手势，真在战斗中按就当没这菜单）。
     if ns:IsRestricted() then return end
     if not Build() then return end
+    M.ensureVisible()
     frame:Show()
 end
 
