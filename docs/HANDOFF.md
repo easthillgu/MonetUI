@@ -4248,6 +4248,22 @@ InfoBar 块本就事件驱动；Cooldown 是 taint 敏感区（AGENTS 警告别�
 （要动=覆写方法槽，AGENTS 禁止）；③ 唯一不 hook 的"静音"是 SetAlpha(0)/Hide 全灭，不选择性、丢全部反馈。
 ⇒ 没有合规实现，作者拍板放弃。**别重趟**（下次别把它当"没做的功能"补回来）。
 
+## 8.54 2026-11-06 #34 能力矩阵：GetCapability 兜底出口 + 行为助手（range 表主动不做）
+
+Compat.lua 早就有运行期能力表 `CAPABILITIES` + `Compat:Capability`（三态 true/false/nil）。#34 补的是**调用点用得上的两层**：
+- `Compat:GetCapability(key, fallback)`：普通调用点唯一出口，**永不返回 nil** —— 不知道(nil)塌成 `fallback`，
+  逼调用方显式表态"读不出走哪条降级路"（判例：`Secrets.CanMeasureHealth` 当门 → 血量整段空白还不报错）。
+- **行为助手**（返回"怎么用"的值不是"有没有"的布尔）：`UseOnKeyDown()` 读 `ActionButtonUseKeyDown`、
+  `SecureClickEvents()` 据此给点击掩码。替掉了 `Secure.lua` 里两处重复的 cvar 读取块
+  （`PushSecureInit` / `SetUseOnKeyDown`）。迁移坑记牢：**不能用 `X() or true`** —— 抬起施法时 `X()` 返回
+  false 会被 `or` 顶成 true 读反；写成 `local down = true; if ns.Compat then down = ns.Compat:UseOnKeyDown() end`。
+  实机验过：动作条按下/抬起施法行为不变。
+
+**主动不做的两件事（别当"没做完"补回来）**：
+1. **Interface-range 描述符表**（RurutiaSuite Build.lua 那种按 minInterface/maxInterface 解析）——
+   我们的 CAPABILITIES 是**运行期探针**，比硬编码区间准；再叠一层区间声明是重复且更易错。
+2. **姓名板 / 追踪器的迁移**——它们没有同类散落的 cvar 读取，硬凑迁移是 churn + taint 风险（这两模块最敏感）。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 
