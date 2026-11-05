@@ -148,6 +148,9 @@ local CHAT_CHANNEL_BUTTONS = {
     "ChatChannelManagerPopupDeleteButton",
 }
 
+-- A 档补：频道主窗 + 聊天设置窗（实机 skin-coverage 核对存在）。
+local CHAT_EXTRA_WINDOWS = { "ChannelFrame", "ChatConfigFrame" }
+
 --- 聊天框"贴底"已移除（2026-10-29）。
 --- **原因：ChatFrame1 是暴雪 EditMode 的系统帧（system=8），从插件里对它做
 --- ClearAllPoints / SetPoint / SetClampRectInsets 会把这个帧永久标脏**（AGENTS.md 的
@@ -197,12 +200,17 @@ local function SkinChat()
     -- Channel management: the popup list, and the two create/edit dialogs it opens.
     M:Dress(CHAT_CHANNEL_POPUPS, { window = true, inset = true, panel = { bgAlpha = 0.97 } })
     M:Dress(CHAT_CHANNEL_BUTTONS, { as = "button" })
+
+    -- **A 档覆盖率补（11-05 skin-coverage 实机核对：客户端真存在、没美化）**：
+    -- 聊天频道主窗 `ChannelFrame` 与聊天设置窗 `ChatConfigFrame`（暴雪新拆出来的设置面板）。
+    M:Dress(CHAT_EXTRA_WINDOWS, { window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true })
 end
 
 M:Panel("chat", { label = "聊天", group = "社交", apply = SkinChat,
     frames = {
         CHAT_FRAMES, CHAT_BUTTONS, CHAT_TABS, CHAT_EDITS,
         CHAT_CHANNEL_POPUPS, CHAT_CHANNEL_BUTTONS,
+        CHAT_EXTRA_WINDOWS,
     } })
 
 M:Panel("friends", {
