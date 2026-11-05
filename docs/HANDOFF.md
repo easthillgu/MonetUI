@@ -4179,6 +4179,33 @@ host=ChatFrame1 | R1 Texture tex=8069102 a=0 | R2 Texture tex=-1627 a=1
 已交付且能用的不受影响：4 行右键菜单（背包/地图/日历/设置）+ `SetWidth` 修好的弹框 + 肖像隐藏。
 载体代码留着（默认关、不参与右键），但**当前是坏的**（透明 + 点不开），上线后按上面三条重做或直接删。
 
+## 8.51 2026-11-05 A 档覆盖率补（skin-coverage 工具 + 天赋/法术页）+ 一条"不是我们的 bug"判例
+
+**新工具 `tools/skin-coverage.js`**：作者问"能否从客户端读各暴雪界面、查有没有美化到"。
+`frame-name-existence.js` 是反方向（我们的名单→XML），答不了"暴雪有但我们没做的窗"。这个补那一面：
+从 FrameXML 源枚举顶层窗口（parent=UIParent 类 + 有 strata 或 hidden+mouse，剔 Template/成员路径/非窗后缀），
+和 `Modules/Skins/*.lua` 引用的名字对撞，再策展剔掉"别的模块已管/HUD/开发件"。
+加 `--emit-candidates` + `--live`（读实机 `_G`/EnumerateFrames 存在名单）把缺口分成
+"此刻真存在"与"没加载"。本车道实测：候选 233 · 已美化 42(18%) · 其它模块/HUD/开发 56 · 真缺口 135，
+其中**此刻真存在 45**（其余 90 是 LoD 内容窗）。按类补了 A 档 5 批 32 个窗（好友/聊天/社区/商店/杂项）。
+
+**天赋/法术页（`PlayerSpellsFrame`）两处补**：
+- 肖像：`PlayerSpellsFramePortrait` + CircleMask 补 `portrait=true` 隐藏（同其余窗口）。
+- **羊皮纸 / 天赋背景**：`spellbook-page-*`（法术页正文）和 `talent-background`/`Talents-Background`/
+  `Talents-inner-frame`/`talents-heroclass-backplate`（天赋页）挂在**匿名子帧**上 —— `Strip` 只处理一个框
+  自己的 region、`deep` 只扫子按钮，两条都够不到。新增 `Skin:FadeAtlasBackdrop(frame, patterns)`：
+  按 atlas 模式**递归**压认得出的背景，复用 `Fade`（幂等、可回滚），**只压背景、绝不碰图标/动画遮罩**
+  （AGENTS 功能图标豁免同纪律）。接进 `SkinPlayerSpells`：Apply 剥一次 + `M:HookShow` 开窗重涂。实机确认羊皮纸剥掉。
+
+**判例：tab 图标"先有后没"= 暴雪侧，不是我们的美化（作者一开始怀疑误剥，A/B 证伪）**：
+- 探针：页签所有贴图 `ourHidden=nil`（我们一张没压过）；未选中页签图标 `tex=nil`（暴雪根本没赋图）；
+  未选中页签形状 α=0.40（暴雪自己对未选中态的变暗）。
+- **决定性 A/B**：把 playerspells 面板整个关掉（`panels.playerspells=false`）+ 重载，纯暴雪原样下
+  tab 图标**照样"第一次能看到、之后消失"** ⇒ 现象与我们的皮肤无关，是暴雪页签自己的时序/行为。
+- 教训复用（`feedback-green-gates-must-cover-the-path`）：**"看着像我们剥的"必须用 A/B（关我们的皮肤）证伪**，
+  别在皮肤代码上继续叠改动 —— 这条要是没做 A/B，就会去给页签图标加豁免、或把已经正常的代码再改一遍。
+- 已把面板恢复默认（开）。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 
