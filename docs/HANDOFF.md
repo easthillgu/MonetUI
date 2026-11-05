@@ -3596,19 +3596,82 @@ UiMapPoint.CreateFromCoordinates(...))` 可用；`C_MapExplorationInfo.GetExplor
 `issecretvalue` 在读点 gate 是普遍做法（**连 GUID 都可能是密值**）。
 反例也记了：EQOL 自己有处未 gate 的 `UnitHealth/UnitHealthMax` 直接 format（`HealthText.lua:204-219`）。
 
+## 8.34 2026-11-05 开服日 1.60 首趟实机（客户端：`1.60.1 · build 70790 · Interface 16001 · zhCN`）
+
+这一趟只跑只读命令 + 作者手动按 C/B/M。全部结论标 `1.60 实测`。
+
+**三条昨晚的修复在真机上成立**（日志原文逐条对上）：
+
+- 姓名板 3 项 `isSecure` CVar 聚合成**一行**（`nameplateShowEnemyMinus` / `nameplateShowEnemyTotems` /
+  `nameplateMaxDistance`），不再刷三遍；细账入口 `/mui nameplates cvars`。
+- 加载横幅 `已加载 19/19 个模块（另 1 个已在设置中关闭）` —— 上一趟的"19/20"是 Atmosphere 被玩家关掉，不是加载失败；
+  `/mui report` 的「设置差异」独立确认：`模块 Atmosphere = true（默认 false）`（= 这一版默认关、玩家打开，方向别读反）。
+- **微菜单 P0 消失**（`4a458d1`：`GetScript("OnClick")` 取暴雪脚本自调 → 改 `SecureActionButtonTemplate` + `type="click"`）。
+  判据不是"没看见红字"而是两条：重载后 `logs ERR,BLOCKED` 窗口内**零新增 MonetUI 条目**
+  （唯一残留 `TextStatusBar.lua:110 … tainted by 'MonetUI'` 发生在重载**之前**），且 `/mui blocks` 账本为空。
+
+**`/mui compat`：58 项，与假设不符 6 项**（`/mui compat bad` 的原文，逐条处置）：
+
+| 行 | 1.60 实测 | 处置 |
+|---|---|---|
+| `canaccessobject` | 无 | 与 12.1.5 一致。`Secrets.CanRead` 走 `canaccessvalue`，一个字节不用改（§8.13.6 那条继续成立） |
+| `TempEnchantFrame` | 无 | 与 12.1.5 一致 ⇒ `Modules/BuffFrame/BuffFrame.lua` 压制清单里那条**在两个客户端上都是空枪**，名字留作历史，注释已写明 |
+| `LFGParentFrame` | **有** | Forever 专属查找组框真存在 ⇒ `Modules/Skins/Forever.lua` 那块皮肤从"候选"升级为"必验"（名字来自 Ellesmere，两客户端都没验过 —— §8.13.4 第 6 条） |
+| `LegacySystemFrame` | **有** | 同上（传承进度）。这一趟**没开过这两扇窗**，diagnose 里 LFG 组只算"存在"，逐控件名要二趟 |
+| `AeLootDisabled` | **生效** | 服务器关掉了组队拾取框架 → 拾取相关面板不归我们管，别去"修"（§8.13.4 差集第 ② 类） |
+| `EncounterJournalDisabled` | **生效** | **`[encounterjournal] 0/8 缺失`不是名字写错，是整块面板被 GameRule 关了** —— AGENTS 那条"1.60 上框读不到的第一嫌疑人是 GameRule"首趟就命中。`/mui report` 的 `[dressDrop:encounterjournal] 跳过 1 个非框体条目：EncounterJournal` 是同一条的另一面（面板被禁时全局只剩 Mixin 表） |
+
+其余前提一次性确认（1.60 实测）：`/run` 脚本通道**可用**、`UserScriptsDisabled` 未生效（但随时可能变，诊断照旧走 `/mui` 子命令）；
+`MouseIsOver` / `GetMouseFocus` **无** ⇒ 三条 Watch 轮询是必须的，不是风格选择；
+`PetActionBar_UpdateCooldowns` **无** ⇒ AGENTS 那条"用 `PetActionBar:UpdateCooldowns()` 自己驱动"在 1.60 同样成立；
+`C_RestrictedActions` 3/3 齐、`Enum.AddOnRestrictionType` 6/6 齐 ⇒ `ns:IsRestricted()` 六类完整可用；
+GameRule 18 条里 16 条未生效 ⇒ **§8.13.6 那句"这台服务器没关任何暴雪面板"在 1.60 上反过来**（有 2 条）。
+
+**`/mui skins diagnose`：合计 245 存在 / 198 缺失 —— 这个数字首趟不能当缺陷账。**
+按 §8.13.4 第 3 步，拍卖 / 收藏 / 专业 / 训练师 / 法术书 / 任务日志 / 检查 / 日历 / 宏 / 飞行图 / 幻化 / 打孔 /
+订单 / 公会这一批窗**一扇都没开过**，整排 ✗ 是"面板还没出生"而不是"名字写错"；LoD 包（`Blizzard_Collections` 等）
+同属这一类。⇒ 二趟必须先逐窗打开再跑，差集才可用于改名/摘名字。
+
+**`/mui bags probe`（在杜隆塔尔，不在银行 NPC 前）**：主页候选 `-1:32 -2:0 -3:0`、随身包 `0:20 1:6`、
+标签页 `6..14` **全 0**、`C_Bank(Character) 已购 0 / 上限 9 · 能用 true · 能看 true`、
+`WarbandBankFrame ✗`（预期）、接管=false → 银行两套并存符合当前设计。
+⇒ **#25 要的"银行主页索引语义"这一趟取不到**：不在银行 NPC 前、银行框没开，6..14 报 0 槽无法区分
+"没买标签页"和"索引根本不映射"。这一条必须站着银行再跑一次。
+
+**`/mui report` 聊天框只留前 15 行**（提示历史 112 行把后面的「美化台账」「同机插件」挤掉了）——
+不是缺陷（账本全量在 `MonetUIDB.reportBundle`），但**读法要写死**：想看后两段用 `/mui report full` 或直接读 SavedVariables。
+
+**`/mui restrict` 一趟干净**：六类限制全部"账本空 / 实时空"、`IsRestricted` 否、**轮询被暂停的框 = 0**
+（上一轮那台 `ScrollFrame（无名）` 全程空转的毛病没有复现）。
+
+**`/mui perf` 的耗时档在 1.60 上全是 0 —— 这条是仪表的锅，不是负载的功劳。**
+`调度器：在册 3 · 累计调用 18083 · 累计耗时 0 · 失败 0`，逐路也全是 `累计 0.000s · 峰值 0.000s`。
+根因 `Utils/Scheduler.lua:53` 的注释自己写了：`GetTime` 精度不够量一帧内的差值，所以这套数字**只配排序**，
+而 1.60 实测连排序都排不出来（每个回调的耗时 < 一次 GetTime 的粒度 → 恒等 0）。
+**仪表本身有解**：1.60 实测 `type(debugprofilestop) = function`、返回毫秒且带小数四位
+（`83597232.4398` ≈ 23 小时开机），换成它就能逐路归因。⇒ 记成待办，**开服日不动调度器**（改动落在每拍热路径上）。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 
 ### 9.1 明早开服首趟（唯一优先级，别在此之前加任何新功能）
 
-1. 先看 `已加载 20/20 个模块`（少一个就是某文件加载失败，按红字原文定位，不要猜）。
-2. `docs/VERIFY-1.60-CHECKLIST.md`：R1.0 `/mui report`（整段贴回车道）→ R1.1–R1.7 五只读命令
-   （`compat` → `skins diagnose` → `restrict` → `blocks` → `perf`）→ 功能项 R2–R9 →
-   **R7.5–R7.11**（等级数字 / 银行两列并存 / 折叠面板 / **R7.8 银行主页索引** / R7.8b 拖放三向 /
-   `bagID字段` 是否为 nil）。
-3. 三条"预期不是缺陷"：银行**两套并存**（接管默认 off，#25 没做完之前不许开）；
-   `WarbandBankFrame` 在台账里是 ✗（本客户端没这框）；`diagnose` 的"缺失"里 LoD/窗未出生占大头。
-4. 已知缺口按 `§8.31` 处理：带专用物品的任务在追踪器里点不动 —— **只记影响面，不现场改**。
+**首趟已跑（11-05，结果与逐条处置在 §8.34）**：第 1 步 ✓（19/19 + 关闭项归因清楚）；
+R1.0/R1.1 ✓；`skins diagnose` ✓ 但**只算预扫**（窗没开，198 条 ✗ 里大头是"没出生"）；
+`blocks` ✓ 空；R7.8 银行索引 ✗ **取不到**（不在银行 NPC 前）；微菜单 P0 复验 ✓ 消失。
+
+**二趟（接着跑，顺序有意义）**：
+
+1. 逐窗打开一遍（拍卖 / 收藏 / 专业 / 训练师 / 法术书 / 任务日志 / 检查 / 日历 / 宏 / 飞行图 / 幻化 /
+   打孔 / 订单 / 公会 / **传承 LegacySystemFrame** / **查找组 LFGParentFrame**），再跑
+   `/mui skins diagnose` —— 差集才配拿去改名（任务 #41 的输入）。
+2. **站到银行 NPC 前开银行**跑 `/mui bags probe`，读逐索引行定性 #25 的索引语义；
+   同时跑 R7.5–R7.11（等级数字、两列并存观感、`bagID字段` 是否 nil、拖放三向）。
+3. R2–R6 视觉项按 `docs/VERIFY-1.60-CHECKLIST.md` 逐条走过。
+4. `/mui compat tmpl` 单独一趟（模板 7 项首趟没探，`ActionBarButtonTemplate` 会自带 6 条报错）。
+
+三条"预期不是缺陷"（首趟已按这个口径判过）：银行**两套并存**（接管默认 off，#25 没做完之前不许开）；
+`WarbandBankFrame` 在台账里是 ✗（本客户端没这框）；`EncounterJournal` / `AeLoot` 两块 ✗ 归 GameRule（1.60 实测生效）。
 
 ### 9.2 开服后第一批（任务板已建，按序）
 
