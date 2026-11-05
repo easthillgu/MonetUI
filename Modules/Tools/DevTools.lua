@@ -93,7 +93,6 @@ local function ReadObjectType(obj)
     return nil
 end
 
-local function ReadAtlas(tex)
 --- 类型判断必须走 `IsObjectType`：`GetObjectType()` 返回**最派生**类型名，
 --- 新式步进钮是 `EventButton`（MinimalScrollBar.xml:101/120）、匿名关闭钮也可能是 ——
 --- 11-05 实测：`ReadObjectType(frame) ~= "Button"` 精确比较让 arrows / closes 两条探针
@@ -107,6 +106,7 @@ local function IsButtonObj(obj)
     return ReadObjectType(obj) == "Button"
 end
 
+local function ReadAtlas(tex)
     if not tex or type(tex.GetAtlas) ~= "function" then return nil end
     local ok, a = pcall(tex.GetAtlas, tex)
     if ok and type(a) == "string" and a ~= "" and Secrets.CanRead(a) then return a end
