@@ -70,6 +70,23 @@ local function SkinWho()
     M:Dress(WHO_BUTTONS, { as = "button" })
 end
 
+-- **A 档覆盖率补（11-05 `skin-coverage.js` 实机核对：这些窗此刻客户端真存在、又没美化）**。
+-- 好友/邀请这一族是独立小窗：加好友、战网邀请、好友列表的"好友的好友"、拉新奖励。
+-- 全走窗口档（剥原美术 + 挂底衬 + 标题/关闭 + 整树深扫），按钮/输入框由 deep 接住。
+local ADDFRIEND_WINDOWS = {
+    "AddFriendFrame", "BattleNetInviteFrame", "FriendsFriendsFrame",
+    "RecruitAFriendRecruitmentFrame", "RecruitAFriendRewardsFrame",
+}
+
+local function SkinAddFriend()
+    M:Dress(ADDFRIEND_WINDOWS, {
+        window = true,
+        inset = true,
+        panel = { bgAlpha = 0.96 },
+        deep = true,
+    })
+end
+
 -- `CommunitiesFrameTab1..3` 在 1.60 没有实名（页签是 `TabSystemTemplate` 的运行期子件）⇒ 摘掉点名。
 
 local function SkinCommunities()
@@ -194,12 +211,14 @@ M:Panel("friends", {
     apply = function()
         SkinFriends()
         SkinWho()
+        SkinAddFriend()
     end,
     frames = {
         "FriendsFrame", "FriendsFrameCloseButton",
         FRIENDS_TABS, FRIENDS_BUTTONS,
         SOCIAL_UI_WINDOW,
         WHO_EDIT, WHO_BUTTONS,
+        ADDFRIEND_WINDOWS,
     },
 })
 
