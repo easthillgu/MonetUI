@@ -986,6 +986,10 @@ function Skin:Stepper(button)
     our:SetPoint("CENTER")
     our:SetTexture(Media:Texture("monet_chevron_up"))
     Widget:Arrow(our, dir)
+    -- 我们自己的这张必须打上 `art` 标记：认脸（probeArt / arrows 探针）只信标记与字符串路径，
+    -- 而我们的 BLP 加载后 GetTexture() 回的是**数字 ID**（11-05 实测 -1627）—— 不打标记
+    -- 就会被判成"无我们的图"，明明补好了却查不出来（#44/#45 最后这层就是这个）。
+    Mark(our, "art", true)
     local r, g, b = Color:GetBorder()
     if r then our:SetVertexColor(r, g, b) end
     if not Marked(button, "arrowTint") then
@@ -1243,6 +1247,10 @@ function Skin:ScrollArrowButton(button)
                 our:SetPoint("CENTER")
                 our:SetTexture(Media:Texture("monet_chevron_up"))
                 Widget:Arrow(our, dir)
+                -- 我们自己的这张必须打上 `art` 标记：认脸（probeArt / arrows 探针）只信标记与字符串路径，
+                -- 而我们的 BLP 加载后 GetTexture() 回的是**数字 ID**（11-05 实测 -1627）—— 不打标记
+                -- 就会被判成"无我们的图"，明明补好了却查不出来（#44/#45 最后这层就是这个）。
+                Mark(our, "art", true)
                 local r, g, b = Color:GetBorder()
                 our:SetVertexColor(r, g, b)
                 return true
