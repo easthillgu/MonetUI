@@ -65,8 +65,18 @@ end
 -- **11-05 实机（商人开过）**：`MerchantRepairButton` / `MerchantSellButton` /
 -- `MerchantBuyBackButton` 与 `MerchantFrameScrollFrame` 都没有实名（修理/卖出/回购挂在
 -- `MerchantFrame` 的 `parentKey` 下，商品列表是 `ScrollBox`）⇒ 摘点名，窗口侧 `deep` 接住。
+-- **1.60 实名（11-05 由子帧探针扫出来的，不是照参考件写的）**：
+--   `MerchantRepairItemButton`（修单件）/ `MerchantRepairAllButton`（修全部）/
+--   `MerchantGuildBankRepairButton`（公会银行修理，随商人类型隐藏）/ `MerchantSellAllJunkButton`（卖灰货）
+--   + 翻页 `MerchantPrevPageButton` / `MerchantNextPageButton`（只有超过 12 件才显示）。
+-- ⚠ 订正我自己的一个流程漏洞：上一批我把 `MerchantRepairButton` / `MerchantSellButton` /
+--   `MerchantBuyBackButton` 判成"实名不存在"就**摘掉了事**，没有去扫真名 —— 而作者换了个带修理的商人后
+--   现场确认：那三个字符串确实不存在，但修理/卖出按钮**是存在的，只是叫别的名字**。
+--   ⇒ 规矩：**"某名字不存在"只有配上"真名是什么"才算结论**，否则就是把覆盖删掉了还自称有依据。
 local MERCHANT_BUTTONS = {
-    "MerchantNextPageButton", "MerchantPrevPageButton", "MerchantRepairAllButton",
+    "MerchantNextPageButton", "MerchantPrevPageButton",
+    "MerchantRepairItemButton", "MerchantRepairAllButton",
+    "MerchantGuildBankRepairButton", "MerchantSellAllJunkButton",
 }
 
 local function SkinMerchant()
@@ -112,6 +122,16 @@ local function SkinMerchant()
         if bg then
             Skin:Strip(bg)
         end
+    end
+
+    -- 回购格（11-05 实名扫描出来的）：容器是 `MerchantBuyBackItem`，里面装着
+    -- `MerchantBuyBackItemItemButton`（物品格）与 `MerchantBuyBackItemMoneyFrame`。
+    -- **只剥容器自己的原生底、不碰子件** —— 上一批 MoneyInset 那圈剥子件是安全的（子件是钱框），
+    -- 这里的子件是物品按钮，Strip 下去会把物品图标一起压掉（AGENTS「必需件先注册、装饰件各自 pcall」）。
+    local buyback = Skin:Need("MerchantBuyBackItem")
+    if buyback and root then
+        Skin:Strip(buyback)
+        Skin:Panel(buyback, { bgSurface = "lost", bgAlpha = 0.965, thickness = 1, borderAlpha = 0, host = root })
     end
 
     -- 每格的文字衬底（2026-11-02 实机判例）：MerchantItem<N> 格自带两块**圆角**美术
@@ -193,7 +213,7 @@ M:Panel("mail", { label = "邮箱", group = "交易", apply = SkinMail,
     frames = { MAIL_FRAMES, MAIL_BUTTONS } })
 
 M:Panel("merchant", { label = "商贩", group = "交易", apply = SkinMerchant,
-    frames = { "MerchantFrame", MERCHANT_BUTTONS } })
+    frames = { "MerchantFrame", MERCHANT_BUTTONS, "MerchantBuyBackItem" } })
 
 M:Panel("trainer", { label = "训练师", group = "交易", apply = SkinTrainer,
     frames = {
