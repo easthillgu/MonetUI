@@ -1107,7 +1107,31 @@ function M:ButtonList()
 end
 
 --- `/mui minimap diagnose`：逐条报暴雪帧名在本客户端是否存在。
+--- `/mui minimap menu`：微菜单这一趟到底建不建得出来、面板受不受保护（11-05 "右键没反应"的现场判据）。
 function M:HandleCommand(rest)
+    if rest == "menu" then
+        local mm = self.microMenu
+        if type(mm) == "table" and type(mm.Probe) == "function" then
+            mm:Probe(Settings().microMenu)
+        else
+            ns:Print("微菜单对象不在：MicroMenu.lua 没加载，或它没挂到 Minimap 模块上。")
+        end
+        -- 右键那一拍落在谁身上：`IsMouseOver()` 读的是**此刻**的鼠标位置，所以正确用法是
+        -- "先在小地图上右键一次，马上敲这条命令" —— 光标还停在那儿。
+        -- 鼠标不在遮罩上 ⇒ 事件根本没进我们的 OnMouseUp（层级/命中区问题，不是菜单的毛病）；
+        -- 在遮罩上而菜单没开 ⇒ 看上面那三行（设置 / 行建不出来 / 受保护）。
+        local overlay = _G.MonetUIMinimapOverlay
+        if overlay then
+            local okOver, over = pcall(overlay.IsMouseOver, overlay)
+            local okEn, en = pcall(overlay.IsMouseEnabled, overlay)
+            ns:Print(("此刻鼠标在小地图遮罩上=%s · 遮罩收鼠标=%s（先右键再敲这条，光标还停在原地才准）"):format(
+                tostring(okOver and over), tostring(okEn and en)))
+        else
+            ns:Print("遮罩 MonetUIMinimapOverlay 不存在 ⇒ 右键小地图不会走到微菜单（小地图接管没开或还没建）。")
+        end
+        return true
+    end
+
     if rest ~= "diagnose" and rest ~= "diag" then return false end
 
     ns:Print("---- 小地图自检 ----")

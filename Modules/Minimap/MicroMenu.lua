@@ -1,8 +1,10 @@
 -- Modules/Minimap/MicroMenu.lua
 -- 右键小地图弹出的微型游戏菜单：一列游戏面板的快捷入口，面板用统一的 Monet 材质。
 --
--- 入口全部"存在才显示"：这些面板的开关函数在暴雪代码里（API 手册没收），所以运行时
--- 探测 _G，客户端上缺哪个就不画哪一行 —— 点不到不存在的函数，版本差异也不会出事。
+-- 入口全部"存在才画"：每一行要么把点击**安全转发**给暴雪自己的那颗微按钮
+-- （`SecureActionButtonTemplate` + `type="click"`），要么只有一个**纯 C_* API** 动作
+-- （`Settings.OpenToCategory` / `C_Map.OpenWorldMap` / 我们自己的模块）。两者都拿不到就不建行。
+-- **不再有**"探测 _G 里的暴雪开关函数然后调用它"这条路 —— 那是 11-05 开服 P0 的写法（§8.36）。
 
 local ADDON_NAME, ns = ...
 
@@ -209,6 +211,52 @@ end
 
 function M:IsOpen()
     return frame and frame:IsShown() and true or false
+end
+
+--- `/mui minimap menu` 用（11-05 开服实测：玩家报"右键小地图没出菜单"，而这台机器的 taint.log
+--- 对 `ADDON_ACTION_BLOCKED` 零记录，拿不到栈 ⇒ 只能把判据做成一条命令）。
+--- 报三件事，每件都指向一个不同的原因：
+---   ① 行能不能建出来（入口名在本客户端不存在 ⇒ 那一行整个消失，不是"点了没反应"）；
+---   ② 面板/行**是不是受保护**（安全模板锚到我们要重摆的框会把整条面板传染成受保护 ——
+---      信息栏 §8.37 就是这么炸的，这里就是那条风险的现场复验）；
+---   ③ 开关与展开状态（设置关着 ⇒ 右键那条 `if` 根本不走到这里）。
+function M:Probe(enabledSetting)
+    local withTarget, withAction, dead = 0, 0, {}
+    for _, entry in ipairs(ENTRIES) do
+        if TargetButtonFor(entry) then
+            withTarget = withTarget + 1
+        elseif SafeActionFor(entry) then
+            withAction = withAction + 1
+        else
+            dead[#dead + 1] = entry.label
+        end
+    end
+    ns:Print(("微菜单：%d 个入口定义 · 可安全转发 %d · 纯 C_* 动作 %d · 建不出行 %s"):format(
+        #ENTRIES, withTarget, withAction, (#dead > 0) and table.concat(dead, "、") or "无"))
+
+    if not frame then Build() end
+    if not frame then
+        ns:Print("|cffff6b6b面板造不出来|r（上面「建不出行」若列全了入口，就是这个客户端一颗可转发的按钮都没有）")
+        return
+    end
+
+    local protFrame = (type(frame.IsProtected) == "function") and frame:IsProtected() or false
+    local rowProt = 0
+    for _, row in ipairs(rows or {}) do
+        if type(row.IsProtected) == "function" and row:IsProtected() then rowProt = rowProt + 1 end
+    end
+    ns:Print(("面板：已建 · 受保护=%s · 行 %d 颗（其中受保护 %d）· 高度 %.1f · 当前 shown=%s"):format(
+        tostring(protFrame), #(rows or {}), rowProt, frame:GetHeight() or 0, tostring(frame:IsShown())))
+    ns:Print(("设置 microMenu=%s ⇒ %s"):format(tostring(enabledSetting),
+        enabledSetting and "右键会走到这里" or "右键不会走到这里（模块里那道 if 直接跳过）"))
+
+    if protFrame or rowProt > 0 then
+        ns:Print("|cffff6b6b判读：面板被标成受保护|r ⇒ 之后每次 frame:SetPoint/SetHeight 都会被拒"
+            .. "（和行上的 SecureActionButtonTemplate 锚进同一个家族 = 信息栏 §8.37 那个坑）。"
+            .. "证据看 /mui logs 里有没有一批 ADDON_ACTION_BLOCKED MonetUI Frame:…。")
+    else
+        ns:Print("判读：面板与行都不受保护 ⇒ 每次展开重摆是安全的。")
+    end
 end
 
 ns:GetModule("Minimap").microMenu = M
