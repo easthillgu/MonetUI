@@ -743,3 +743,22 @@ end
 
 M:Panel("store", { label = "商店 / 付费", group = "系统", apply = SkinStore,
     frames = { STORE_WINDOWS } })
+
+-- **A 档覆盖率补（11-05 skin-coverage 实机核对：客户端真存在、没美化）**：日常会弹到的杂项小窗。
+-- 飞行点 TaxiFrame、拾色透明度 OpacityFrame（拾色器的伴生窗）、邮寄金币确认 SecureTransferDialog、
+-- 举报 ReportFrame/ReportCheatingDialog、宠物栏 PetStableFrame、试穿 SideDressUpFrame、
+-- 幻化套装编辑 WardrobeCustomSetEditFrame、银行清理确认 BankCleanUpConfirmationPopup。
+local MISC_WINDOWS = {
+    "TaxiFrame", "OpacityFrame", "SecureTransferDialog",
+    "ReportFrame", "ReportCheatingDialog", "PetStableFrame",
+    "SideDressUpFrame", "WardrobeCustomSetEditFrame", "BankCleanUpConfirmationPopup",
+}
+
+local function SkinMisc()
+    M:Dress(MISC_WINDOWS, {
+        window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true,
+    })
+end
+
+M:Panel("misc", { label = "杂项常用窗", group = "系统", apply = SkinMisc,
+    frames = { MISC_WINDOWS } })
