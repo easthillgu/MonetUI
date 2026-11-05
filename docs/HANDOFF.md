@@ -1533,7 +1533,9 @@ v2 认三种：直接取用（`Skin:Need("A.B")`）、const 表被真实代码�
 
 ### 8.9.2 `/mui blocks` —— 机密布尔被拦的归因账本
 
-本客户端对 `ADDON_ACTION_BLOCKED` **不写 taint.log**，所以这一族只认我们自己记的栈：
+（**条件订正 2026-11-05**：这条只在 12.1.5 / 或 `taintLog` 没开时成立。《无限》1.60 · 70790 实测：
+`C_CVar.SetCVar("taintLog","2")` 之后 BLOCKED **会写** taint.log，见 §8.38 末尾的订正段。）
+开关关闭时本客户端对 `ADDON_ACTION_BLOCKED` 不写 taint.log，所以这一族还要靠我们自己记栈：
 `Secrets.Bool` 的失败路径存 `debugstack`，`/mui blocks` 按栈首行去重打前 8 个调用点与次数，
 `/mui blocks full` 打最早一条的完整栈。**只覆盖 `Secrets.Bool`** —— 引擎容器 / 半套压制那类
 仍然要靠关模块二分。
@@ -3755,12 +3757,12 @@ TextStatusBar.lua:110 attempt to compare a secret number value (execution tainte
 —— **锚定家族把格子连同父链一起传染成受保护**；
 ③ 被拒的四个方法正好对上信息栏排版三件套（`SetText`→`SetWidth`、`Relayout`→`ClearAllPoints`/`SetPoint`、
 分隔线→`SetShown`），且日志里是匿名的 `Button`（格子没有名字）⇒ 是信息栏的格子，不是别的模块。
-这台机器的 `taint.log` 对 `ADDON_ACTION_BLOCKED` **零记录**（开了 `taintLog=2` 之后文件根本不生成，
+（**已订正，见 §8.38 末尾**：当时 `taintLog` 已被我关回 0，所以文件里没有这一批；开采集时 1.60 会写）
 和 AGENTS 里那条旧记录一致），所以拿不到栈，只能这样三角定位。
 
 **处置**：信息栏回到"格子本体 = 普通 `BackdropTemplate`、没有安全接住器、`secureClick` 字段整个撤掉"，
 "点一格开暴雪面板"这个动作**今天下线**（任务 **#43**）。数字、悬停提示、属性面板（我们自己的窗）都不受影响。
-教训已升格成 AGENTS 一条：**安全模板控件不能锚到"之后还要排版"的框上**，而且这种拒绝与战斗无关。
+教训已升格成 AGENTS 一条：**安全模板控件不能锚到"之后还要排版"的框上**（被拒那一拍的归属见 taint.log 原文，判据用 `IsProtected()` + `GetNumPoints()` 两个数）。
 
 **闸门改口**（`tools/infobar-secure-click-probe.js`，10 项）：B 组现在钉的是"这里不许再出现
 `SecureActionButtonTemplate` / `SetAllPoints(frame)` / `secureClick` 字段"，C 组钉
@@ -3800,9 +3802,24 @@ TextStatusBar.lua:110 attempt to compare a secret number value (execution tainte
 ② 面板被 13 行 `SecureActionButtonTemplate` 所在的**锚定家族传染**成受保护
 ⇒ 之后我们对它做 `SetPoint/SetHeight` 就会被丢（信息栏 §8.37 是同一机制，那一例会记日志）。
 （本例的 `GetNumPoints()=0` 来自 `Toggle` 压根没跑，不能拿来当「写入被吞」的证据）
-③ **这批失败不记 `ADDON_ACTION_BLOCKED`、也不报错**（`logs BLOCKED/ERR` 在该窗口内零新增）。
-⇒ 和信息栏（§8.37，同一机制但**会**记日志）比，这一例更危险：**没有日志的静默丢弃只能靠 `IsProtected()`
-+ `GetNumPoints()` 两个数判**，所以在实机问"展不开"之前先跑那条命令，不要去猜命中区。
+③ 这一批当时在聊天框与 logs 游标里都看不到 `ADDON_ACTION_BLOCKED` 的采集条目，**原因是我把 `taintLog` 关回了 0**
+（不是这台机器不记）。订正后的口径见本节末尾与 §8.37；判据仍然是那两个数：
+**`Frame:IsProtected()` + `Frame:GetNumPoints()`** —— 所以在实机问「展不开」之前先跑那条命令，不要去猜命中区。
+
+**taint.log 口径订正（同一小时内第二次自纠，作者贴出的条目逼出来的）**：作者 10:26 贴的那段
+「Message: / Time: / Count: / Stack: / Locals:」是 **taint.log 的条目格式**，说明这台机器**会写**这个文件；
+回头读 `Logs/taint.log`：08:51 那一批（信息栏锚定家族那次）确实在里面，915 KB / 11818 行，原文是
+「**An action was blocked in combat because of taint from MonetUI - Button:ClearAllPoints()**」+ 我们的完整栈
+（`InfoBar.lua:287 Relayout` → `Blocks.lua:294`）。⇒ 三条后果：
+① §8.37 那句「这台机器对 BLOCKED 零记录」**作废**，真实原因是我读完就把 `taintLog` 关回 0；
+② §8.37 那句「与战斗无关」也**作废** —— 日志原文写的是 `in combat`，我读到的 `当前受限：无` 是**事后**那一拍，
+   不能倒推被拒那一拍（这条尤其重要：它意味着当时确有受限窗口在生效，`ns:IsRestricted()` 的读法本身没错，
+   错在我拿一个时刻的读数去否定另一个时刻的事件）；
+③ 10:26 那串 `ActionButton.lua:891 SetCooldown … untainted execution` 现在**还没有归属**
+   （它发生在 taint.log 停止写入之后；栈里只有 `Blizzard_ActionBar` 的帧，聊天框同时把一批 BLOCKED 记给了
+   同机的 `DungeonsForeverSpell`），已重新开 `taintLog=2` 采集，等它再发生时用文件判。
+⇒ **AGENTS 已改**：`taint.log` 那条「12.1.5 实测零记录」降级成「仅在那台客户端 + 开关关闭的条件下观测到」，
+   并写进规矩：**报「某类日志不存在」之前，必须先确认采集开关的状态**。
 
 **处置**：微菜单入口只剩有纯 `C_*` 开口的三行 —— 背包（我们自己的 `Bags:Toggle`）、
 地图（`C_Map.OpenWorldMap`，[受限] ⇒ `ns:IsRestricted()` 前置）、设置（`Settings.OpenToCategory`）。
@@ -3838,7 +3855,7 @@ EnumerateFrames 扫 15908 个框，那个点上命中的 27 个里只有两个 M
 命中的就 `SetParent(panel)` + `SetSize/SetScale` + `ClearAllPoints` + 重新锚到自己的面板（`:390/404`）。
 我们的遮罩因为正是 `Minimap` 的孩子 ⇒ 被当成"一个没认出来的小地图按钮"收走了，
 于是命中区塌成 **0×0 在屏幕原点**：右键微型菜单、滚轮缩放、悬停区域名**三条一起哑**，
-而且**零红字、零 BLOCKED**（§8.38 里那两条机制记录仍然成立，但都不是本例原因）。
+而且当时聊天框与 logs 游标里看不到条目（**因为 `taintLog` 被我关回 0**，不是这台机器不记 —— 见 §8.38 订正）。
 
 **修法（作者选 A）**：`Modules/Minimap/Minimap.lua` 的 `EnsureBlocker` ——
 遮罩父级从 `minimap` 改成**我们自己的 `holder`**，锚点照旧相对 `minimap`

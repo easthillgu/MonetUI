@@ -127,8 +127,13 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   `Secrets.Bool(v, 默认)` 即可，不要再手工拼 `IsSecret` 分支。
   真正需要**分支逻辑**的地方（例如"机密时走另一条路径"）才显式写
   `if Secrets.IsSecret(v) then ... else ... end`。
-  诊断这类拦截**只认** `Secrets.BoolBlocks()`（失败路径自记 `debugstack`）——本客户端
-  taint.log 对"布尔测试被拦"会记、对 `ADDON_ACTION_BLOCKED` 却**零记录**（旗子开着实测 0 字节）。
+  诊断这类拦截**只认** `Secrets.BoolBlocks()`（失败路径自记 `debugstack`）—— **但这条"零记录"的老口径要在
+  每次实测后重判**：12.1.5 上实测是"布尔测试被拦会记、`ADDON_ACTION_BLOCKED` 不记（文件 0 字节）"，
+  而《无限》1.60 / 70790 上 2026-11-05 实测**会写** `taint.log`：`An action was blocked in combat because of
+  taint from MonetUI - Button:ClearAllPoints()` + 我们自己的完整栈（`InfoBar.lua:287 Relayout` 一路到
+  `Blocks.lua:294`），915 KB / 11818 行。**前提是把 `taintLog` 开到 2**（`C_CVar.SetCVar("taintLog","2")`；
+  关回 0 后文件就停在最后一次写入 —— 我因为先关了再判断，才误以为"这台机器不记拦截"）。
+  ⇒ 规矩：**报"某类日志不存在"之前，先确认采集开关的状态**；结论必须写成"在 X=开 的条件下没记录"。
 - **字符串同理，而且 `type()` 判不出来**（2026-10-26 判例）：受限时 `GameTooltip:GetUnit()` 会把
   **unit 令牌本身**标成机密，而机密串的 `type(x)` 照样是 `"string"`——只判类型就放行，
   接着 `unit .. "target"` / `table.concat` 直接抛 `invalid value (secret)`（实机就这样刷了 3 条）。
@@ -192,9 +197,12 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   锚定家族会把普通框一起标成受保护 —— 实测信息栏格子上盖了一层安全接住器之后
   `MonetUIInfoBar:IsProtected()` 变成 `true`，于是 `SetPoint` / `ClearAllPoints` / `SetWidth` / `SetShown`
   **每一次都被拒**，每 10 秒上百条 `ADDON_ACTION_BLOCKED MonetUI Button:…`（匿名 Button = 我们自己造的格子）。
-  关键口径：**这种拒绝与战斗无关** —— `当前受限：无 · InCombatLockdown()=false` 照样拒，所以
+  关键口径：**判据用两个数，不用某一时刻的受限读数** —— `Frame:IsProtected()` + `Frame:GetNumPoints()`。
+  （我 11-05 先写过一次「这种拒绝与战斗无关」，那是拿事后一次 `当前受限：无` 的读数去否定被拒那一拍：
+  taint.log 开采集后原文写的是 `An action was blocked **in combat** because of taint from MonetUI`。
+  教训：**时刻性的读数不能反过来解释已经发生的事件**，只认事件自己那条记录。）
   `ns:IsRestricted()` 守门救不了它，只能从结构上避免。
-  归因只能按"匿名框 + 这一组排版写入"对代码：`taint.log` 对 `ADDON_ACTION_BLOCKED` **零记录**（这台机器实测文件根本不生成）。
+  归因顺序：① 开 `taintLog=2` 读 `Logs/taint.log`（1.60 · 70790 实测会写，带完整栈与归属）；② 关掉采集时才退回「匿名框 + 这一组排版写入」的形状对代码 —— 别把「我关了开关」说成「这台机器不记」。
   ⇒ 安全转发只用在"造好之后不再动布局"的框上（自绘动作条那种：脱战建一次、换页走 state driver、排版在别的时刻）；
   要"点一下开暴雪面板"又同时每拍排版的东西，先别做（本客户端也没有角色/天赋/好友/任务日志的纯 `C_*` 开窗 API）。
 - **同一族里的受保护对象，我们的布局写入可能被**静默丢弃**（同一天第二例，比上一例更难查）**：
