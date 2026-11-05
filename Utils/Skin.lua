@@ -2207,6 +2207,10 @@ local function probeState(obj, owner, fadedParent)
     end
     if Marked(obj, "questWeave") then return "已挂我们的织纹", false end
     if Marked(obj, "art") then return "我们的美术件", false end
+    -- 裁成方形的肖像：图集**仍然是那张肖像图**（我们只改 texcoord 与位置），
+    -- 所以不能落到下面"暴雪原样"那一档 —— 11-05 就因为这条口径，`layers` 把已经裁好、
+    -- 已在框内的 `SocialUIFramePortrait` 报成"暴雪原样"，差点又被当成没做。
+    if Marked(obj, "portraitSquared") then return "我们的肖像(已裁方)", false end
     if Marked(obj, "hidden") then return "已剥掉", true end
     local _, alpha = probeAlpha(obj)
     if alpha and alpha <= 0.001 then return fadedParent and "随父已剥" or "α0", true end

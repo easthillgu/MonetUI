@@ -183,6 +183,9 @@ local QUESTLOG_SCROLLS = { "QuestLogPopupDetailFrameScrollFrame" }
 local function SkinQuestLog()
     M:Dress("QuestLogPopupDetailFrame", {
         window = true, inset = true, panel = { bgAlpha = READ_ALPHA }, deep = true,
+        -- 11-05 实机：这扇窗的肖像没处理过（`marked=nil`、`tc=0..1`、`L-5/top1207` vs 窗 `L0/top1200`
+        -- ⇒ 左溢 5、顶溢 7）。上一批只给了 QuestFrame 点名，漏了这一扇。
+        portrait = true,
     })
     M:Dress(QUESTLOG_BUTTONS, { as = "button" })
     M:Dress(QUESTLOG_SCROLLS, { as = "scroll" })
