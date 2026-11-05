@@ -260,6 +260,13 @@ function M:SetText(block, text)
     if not block or not block.frame then return end
 
     local value = text and text ~= "" and tostring(text) or nil
+    -- 差异写入（#35）：文本没变就整段跳过 —— 不重设 SetText、不重测宽、不重排。
+    -- Relayout 对每个可见块 ClearAllPoints/SetPoint，是这条链最贵的一步；信息栏多数块的值
+    -- 一秒才变一次甚至更久，重写同样的字符串纯属浪费。首次 value=nil 与 lastText=nil 相等也安全：
+    -- 块建出来就是空文本、hasText 初始 false，跳过不影响 UpdateShown 的隐藏判定。
+    if value == block.lastText then return end
+    block.lastText = value
+
     block.text:SetText(value or "")
     block.hasText = value ~= nil
 
@@ -324,8 +331,12 @@ end
 
 local function UpdateShown(block)
     if not block.frame then return end
-    local on = M.active and M:BlockEnabled(block.key) and block.hasText ~= false
-    block.frame:SetShown(on and true or false)
+    local on = (M.active and M:BlockEnabled(block.key) and block.hasText ~= false) and true or false
+    -- 差异写入（#35）：可见性没变就不 SetShown、也不重排（SetShown 本身会触发一次布局）。
+    -- 首次 lastShown=nil 与 on 不等 → 照常走一遍，之后只有真变化才动。
+    if on == block.lastShown then return end
+    block.lastShown = on
+    block.frame:SetShown(on)
     M:Relayout()
 end
 
