@@ -267,6 +267,12 @@ M:Panel("mail", { label = "邮箱", group = "交易", apply = SkinMail,
 M:Panel("merchant", { label = "商贩", group = "交易", apply = SkinMerchant,
     frames = { "MerchantFrame", MERCHANT_BUTTONS, "MerchantBuyBackItem" } })
 
+-- **格子边框必须走事件，不能只靠 Apply / HookShow**（11-05 两次实测）：
+-- 商人 UI 是 LoD —— 登录 Apply 时 `MerchantFrame` 还不存在，所以 `root` 是 nil，
+-- `M:HookShow(nil, …)` 静默什么也不做，格子边框一直没加上（开窗后量：子件仍是 1、那个是暴雪槽框）。
+-- `MERCHANT_SHOW` 派发时窗口已经建好，格子也在里面 ⇒ 在这里补一次，`M:OnEvent` 自带 pcall 与开关判断。
+M:OnEvent("MERCHANT_SHOW", DressMerchantSlots)
+
 M:Panel("trainer", { label = "训练师", group = "交易", apply = SkinTrainer,
     frames = {
         "ClassTrainerFrame", "TrainerFrame",
