@@ -83,6 +83,25 @@ local MERCHANT_BUTTONS = {
 --- **必须是模块级函数**：`M:HookShow` 按引用去重，在 Apply 里现造闭包会每开一次窗多挂一条。
 --- 也要挂在 Show 上：这些格子是首次显示才创建的（11-05 实测登录 Apply 时它们还不存在）。
 --- 不开 `withInfo`：商人格不是装备格，等级数字会挤进 37px 的格子。
+--- 工具钮图标的裁切档（11-05 作者选 A）：`SpellIcon-256x256-*` 把锤子和它的深色圆角底板画在同一张图里，
+--- 外圈还有留白 ⇒ 在 36px 的格子里显得比商品格（37px + 裁 8%）小一号。
+--- 裁掉外圈 8% 后图标填满格子、视觉重量与格子一致。**残留**：底板颜色是图的一部分，切不掉
+--- （要连底板一起换掉得自绘模具，那是 #43 之后的材质工作）。
+local TOOL_ICON_CROP = 0.08
+
+--- 暴雪会在开窗/换商人时重设贴图 ⇒ 裁切必须每次开窗重做一次，不能只裁一遍（肖像那条同一纪律）。
+local function CropToolIcon(btn)
+    local okR, regions = pcall(function() return { btn:GetRegions() } end)
+    if not okR then return end
+    for _, reg in ipairs(regions) do
+        local okA, atlas = pcall(reg.GetAtlas, reg)
+        if okA and type(atlas) == "string" and string.lower(atlas):find("spellicon") then
+            -- 内容图标豁免让它活了下来（不该被 Fade），这里只改它的取样范围
+            pcall(reg.SetTexCoord, reg, TOOL_ICON_CROP, 1 - TOOL_ICON_CROP, TOOL_ICON_CROP, 1 - TOOL_ICON_CROP)
+        end
+    end
+end
+
 local function DressMerchantSlots()
     for i = 1, 12 do
         local slot = Skin:Need(("MerchantItem%dItemButton"):format(i))
@@ -98,7 +117,10 @@ local function DressMerchantSlots()
     for _, name in ipairs({ "MerchantRepairItemButton", "MerchantRepairAllButton",
                             "MerchantSellAllJunkButton", "MerchantGuildBankRepairButton" }) do
         local tool = Skin:Need(name)
-        if tool then Skin:ItemQualityBorder(tool) end
+        if tool then
+            Skin:ItemQualityBorder(tool)
+            CropToolIcon(tool)
+        end
     end
     local bbSlot = Skin:Need("MerchantBuyBackItemItemButton")
     if not bbSlot then return end
