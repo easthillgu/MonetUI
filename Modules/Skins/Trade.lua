@@ -276,11 +276,17 @@ local function SkinProfessions()
     -- **11-05 实机（专业窗开过）**：`TradeSkillFrame` 与三个页签名（`ProfessionsFrameTab1/2`、
     -- `TradeSkillFrameTab1`）都没有实名 —— 1.60 的页签是 `ProfessionsFrame` 内 `TabSystemTemplate`
     -- 的运行期子件 ⇒ 只点窗口本体，页签与内容靠 `deep` 扫（§8.40 ②）。
+    -- 11-05 作者要"把专业美化做掉"，layers 实测还剩 242 件看得见美术：肖像没藏 +
+    -- 侧页签 `common-sidetab` / 配方行 `common-button-list` / `professions_recipe_hover` 都挂在
+    -- 嵌套子帧上（默认 deep 只扫直接子件够不到）。补 portrait，并把行扫描深度开到 4
+    -- （和社交窗同一手法：那些是按钮，够到了就走我们的按钮档）。
     M:Dress("ProfessionsFrame", {
         window = true,
         inset = true,
         panel = { bgAlpha = 0.96 },
         deep = true,
+        deepRows = 4,
+        portrait = true,
     })
 end
 
