@@ -41,7 +41,7 @@ local SUB_PANEL = { panel = { bgAlpha = 0.96 }, deep = true }
 -- 这里不再自己找 CharacterFramePortrait —— 同一个动作只有一个入口，也不给别的窗口留第二份实现。
 
 local function SkinCharacter()
-    M:Dress("CharacterFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 } })
+    M:Dress("CharacterFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 }, portrait = true })
     -- 美化后把肖像压成方形，与方形背景协调
     -- 肖像由 M:Dress(CharacterFrame, { window = true … }) 那一步统一处理
     M:Dress(CHARACTER_TAB_WIDGET, { deep = true })
@@ -50,7 +50,7 @@ local function SkinCharacter()
 end
 
 local function SkinInspect()
-    M:Dress("InspectFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 } })
+    M:Dress("InspectFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 }, portrait = true })
     M:Dress(INSPECT_TABS, { as = "tab" })
     M:Dress(INSPECT_PANELS, SUB_PANEL)
 end

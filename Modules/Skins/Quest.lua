@@ -199,7 +199,7 @@ local QUESTFRAME_BUTTONS = {
 local QUESTFRAME_SCROLLS = { "QuestProgressScrollFrame" }
 
 local function SkinQuestFrame()
-    M:Dress("QuestFrame", { window = true, panel = { bgAlpha = READ_ALPHA } })
+    M:Dress("QuestFrame", { window = true, panel = { bgAlpha = READ_ALPHA }, portrait = true })
     M:Dress(QUESTFRAME_BUTTONS, { as = "button" })
     M:Dress(QUESTFRAME_SCROLLS, { as = "scroll" })
 

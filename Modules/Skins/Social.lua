@@ -44,6 +44,7 @@ local function SkinFriends()
     })
     -- 合并版社交窗口同一套做法（窗口件 + 整树深扫；页签/列表都是运行期子件）。
     M:Dress(SOCIAL_UI_WINDOW, {
+        portrait = true,
         window = true,
         inset = true,
         panel = { bgAlpha = 0.96 },
