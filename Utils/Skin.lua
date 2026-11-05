@@ -1033,6 +1033,34 @@ function Skin:ScrollBar(scrollbar)
     if thumb then
         self:ScrollThumb(thumb)
     end
+
+    -- **新式滚动条的轨**（`MinimalScrollBar` / `WowTrimScrollBar`：`Track.Begin` / `Track.End` /
+    -- `Track.Middle` 三张 ARTWORK atlas）。11-05 子帧探针（`/mui skins layers QuestFrame scrollbar`）
+    -- 数出"还看得见的暴雪美术"里就有 `minimal-scrollbar-track ×3` —— 把手和步进钮都换了皮肤，
+    -- 唯独槽本身还是暴雪那条 8px 宽的青蓝凹槽，细线风一进去就露馅。
+    -- 做法和把手同一套：剥掉暴雪三张 atlas（它们在 ScrollBox 复用前后不重设，不需要轮询兜底），
+    -- 再画一条**居中的 1px 细线**（`monet_hairline`，横向拉伸使用），颜色走边框色 + 主题回调。
+    local track = scrollbar.Track
+    if track and type(track.GetRegions) == "function" and not Marked(track, "scrollTrack") then
+        self:Strip(track, { regions = true })
+        Mark(track, "scrollTrack", true)
+        local line = track:CreateTexture(nil, "ARTWORK")
+        line:SetTexture(Media:Texture("monet_hairline"))
+        line:SetHeight(1)
+        line:SetPoint("TOPLEFT", track, "TOPLEFT", 0, 0)
+        line:SetPoint("BOTTOMRIGHT", track, "BOTTOMRIGHT", 0, 0)
+        local function tintLine(k, a)
+            local r, g, b = Color:GetBorder()
+            if line.SetVertexColor then line:SetVertexColor(r * k, g * k, b * k, a) end
+        end
+        tintLine(1, 0.35)
+        self:OnTheme(function() tintLine(1, 0.35) end)
+        -- 悬停在把手上时把轨提亮一点：滚动条是个整体，只亮把手会让轨像没换皮。
+        if thumb then
+            Widget:HoverWatch(thumb, function() tintLine(1.25, 0.6) end, function() tintLine(1, 0.35) end)
+        end
+    end
+
     return scrollbar
 end
 
