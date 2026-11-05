@@ -76,6 +76,8 @@ local function SkinMerchant()
         panel = { bgAlpha = 0.96 },
         buttons = MERCHANT_BUTTONS,
         deep = true,
+        -- 11-05 实机（商人窗开着扫）：`rtportrait1 ×1` 还在"看得见"里 ⇒ 这扇窗的肖像没点名。
+        portrait = true,
         -- 12 格商品 + 回购格的铺平裁切走引擎默认档（翻页后 CropIcon 轮询账本重压 texcoord）。
     })
     -- 翻页按钮换成细线左右箭头（monet_arrow_up + Widget:Arrow 转向）。

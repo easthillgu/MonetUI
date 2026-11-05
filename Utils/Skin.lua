@@ -2148,7 +2148,9 @@ end
 --            只能在面板 `frames` 名单里把它本人点出来
 -- 分不清这三类就表现为"剥了一层还剩一层纸"：实机在任务对话框里三种各占一个
 -- （QuestFrameBG / QuestFrameInset 底下的 BG / QuestFrameDetailPanelBG），而我们的名单只点到面板本人。
-local MAX_PROBE_NODES, MAX_PROBE_DEPTH, MAX_PROBE_PRINT, MAX_PROBE_REGIONS = 600, 6, 20, 24
+-- 上限提到 1500：11-05 实测商人窗 600 件就截断，"看得见 184"其实是个**下限数**——
+-- 报出下限却不标注，和报假数一样糟（`到上限截断` 那面旗仍然留着）。探针是按需跑的，成本可接受。
+local MAX_PROBE_NODES, MAX_PROBE_DEPTH, MAX_PROBE_PRINT, MAX_PROBE_REGIONS = 1500, 6, 20, 24
 
 local BACKDROP_SET = {}
 for i = 1, #BACKDROP_PIECES do BACKDROP_SET[BACKDROP_PIECES[i]] = true end
