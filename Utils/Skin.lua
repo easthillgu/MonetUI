@@ -2064,6 +2064,9 @@ function Skin:ItemQualityBorder(btn, withInfo)
             return btn
         end
         Widget:Theme(border, { thickness = 1, bgAlpha = 0 })
+        -- 留一个可认脸的标记：以前这颗边框只有 `qualityBorders` 私有表知道，
+        -- 于是 `probeState` 与现场排查都把它读成"不是我们的"（11-05 商人窗误判就是这么来的）。
+        Mark(border, "qualityBorder", true)
         self:Track(border)
         entry = { frame = border }
         qualityBorders[btn] = entry
@@ -2250,6 +2253,8 @@ local function probeState(obj, owner, fadedParent)
     -- 所以不能落到下面"暴雪原样"那一档 —— 11-05 就因为这条口径，`layers` 把已经裁好、
     -- 已在框内的 `SocialUIFramePortrait` 报成"暴雪原样"，差点又被当成没做。
     if Marked(obj, "portraitSquared") then return "我们的肖像(已裁方)", false end
+    -- 格子品质边框：也是"我们的东西"，以前探针认不出（11-05 商人窗误判的源头）
+    if Marked(obj, "qualityBorder") then return "我们的格子边框", false end
     if Marked(obj, "hidden") then return "已剥掉", true end
     local _, alpha = probeAlpha(obj)
     if alpha and alpha <= 0.001 then return fadedParent and "随父已剥" or "α0", true end
