@@ -4264,6 +4264,19 @@ Compat.lua 早就有运行期能力表 `CAPABILITIES` + `Compat:Capability`（�
    我们的 CAPABILITIES 是**运行期探针**，比硬编码区间准；再叠一层区间声明是重复且更易错。
 2. **姓名板 / 追踪器的迁移**——它们没有同类散落的 cvar 读取，硬凑迁移是 churn + taint 风险（这两模块最敏感）。
 
+## 8.55 2026-11-06 #28 共存归因注册表（只读检测 + report 归因，不自动静默）
+
+新 `Utils/Coexist.lua`：模块 `Own(key,{surface,detect,note})` 声明"我拥有哪个表面 + 怎么判断被别的插件接管"，
+`Scan()` 只读扫一遍、`ContestedBy(key)` 给模块可选降级查询。`/mui report` 加"共存归因"节，
+把"某表面被某 addon 接管"自动归因出来（以前只能人工读第三方源码判，见 §8.50 / 共存档案）。
+**参考实现 = Minimap**：登记 `MonetUIMinimapOverlay`，检测器读它的父 —— 不是我们的 `MonetUIMinimapHolder`
+就说明被搬走（开服日 RurutiaSuite MinimapCollector 那例）。实机跑 `/mui report`：当前出
+"所有登记表面都在我们手里（无接管）"（Minimap 的自愈重挂父生效，父确实是 holder）。
+
+**主动不做自动静默**（和 #34 的克制同型）：误判静默 = 模块无声失效，比 Minimap 现在的"每次排版比一次
+GetParent、不对就 SetParent 拉回"更糟。注册表只提供归因 + `ContestedBy` 查询，改不改模块状态由模块自己
+有依据地决定，不盲目常驻也不盲目静默。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 
