@@ -72,6 +72,9 @@ local function Build()
     container:SetFrameLevel(30)
     container:EnableMouse(true)
     container:SetClampedToScreen(true)
+    -- 宽度必须显式给：行是 TOPLEFT/TOPRIGHT 撑到容器两侧，容器没宽就全塌成 ~0（11-05 实机
+    -- "没弹"真凶 = 只 SetHeight 没 SetWidth，探针读矩形 2x242）。
+    container:SetWidth(MENU_W)
 
     -- 活锚点：锚到暴雪 Minimap 的右上角，**只 SetPoint 这一次**。
     -- 小地图被搬动（玩家 / 第三方收纳器）时，活锚点每拍自己重算 ⇒ 菜单跟着走，我们不再写排版。
