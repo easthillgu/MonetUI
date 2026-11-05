@@ -19,49 +19,35 @@ local frame      -- 菜单面板
 local catcher    -- 点别处关闭
 local rows       -- 已建的行
 
---- 入口定义：`buttons` 是**可安全转发**的暴雪微型按钮实名（谁在就用谁），`luaAction` 只允许
---- 纯 C_* API 或我们自己的模块 —— 两个字段都取不到，这一行就不建（宁可少一行，不弹「界面行为失效」）。
+--- 入口定义：**只允许 `luaAction`，而且只能是纯 C_* API 或我们自己的模块**。
 ---
---- ⚠ 以前这里每行还挂一个 `action`（`ToggleAllBags` / `ToggleQuestLog` / `ToggleFriendsFrame`
---- 这类**暴雪 Lua 全局**）当备用开关。11-05 开服 P0 之后这条路径已经整个删掉，`action` 字段
---- 也不再被读（`SafeActionFor` 只认 `luaAction`）：留着就是"看着还有兜底、其实一行不跑"，
---- 而且会把下一个改这里的人引回同一条污染路（AGENTS「绝不直调暴雪 Lua 全局」）。
+--- ⚠ 11-05 开服实测（`/mui minimap menu`）：这里曾给每行做 `SecureActionButtonTemplate` +
+--- `type="click"` 去代点暴雪微按钮，结果是 **面板自己 `IsProtected()=true`、`GetNumPoints()=0`** ——
+--- 13 颗安全行锚进面板这个家族，把面板一起标成受保护，之后 `frame:SetPoint/SetHeight`
+--- 全部**静默丢弃**（不记 BLOCKED、不报错），玩家看到的就是「右键小地图没反应」。
+--- 信息栏那一版是同一个机制、只是它的写入会记日志（HANDOFF §8.36 / §8.37 / §8.38）。
+--- ⇒ 硬规矩：安全模板控件绝不锚到「我们要重摆 / 逐拍排版」的框上。
 ---
---- **1.60 实名（开服日 `/mui compat find MicroButton`，全客户端 17 个命中）**：
---- Character / PlayerSpells / Spellbook / Talent / Achievement / QuestLog / Guild / LFD /
---- Collections / EJ / Profession / Store / Housing / Legacy / MainMenu / Help（+ 容器
---- `MicroButtonAndBagsBar`）。**`BagMicroButton` / `MapMicroButton` / `CalendarMicroButton` /
---- `GJMicroButton` / `SocialsMicroButton` / `PVPMicroButton` 都不存在** —— 背包那一排改名成
---- `BagsBar`（不是可点按钮），日历/社交/PVP 折进了别的窗口，所以那几行换成下面两种合法出口。
+--- 代价说清楚：**这一版微菜单只剩三行**。角色 / 法术 / 任务 / 成就 / 好友 / 收藏 / 副本 /
+--- 职业 / 寻找组 / 住房 / 商店 / 帮助 在本客户端**没有纯 C_* 开窗 API**（docs/api 快照里 Open 动词
+--- 只有 `C_Map.OpenWorldMap` / `C_Calendar.OpenCalendar` / `C_TradeSkillUI.OpenTradeSkill` /
+--- `C_SettingsUtil.OpenSettingsPanel` 这一小撮），而调暴雪 Lua 全局是被禁止的 P0 写法。
+--- 要恢复它们走 #43 的独立安全载体，不要在这里重试第二种安全模板写法。
 local ENTRIES = {
-    { label = "角色", buttons = { "CharacterMicroButton" } },
-    { label = "法术", buttons = { "PlayerSpellsMicroButton", "SpellbookMicroButton" } },
     { label = "背包", luaAction = function()
-        -- 本客户端没有 `BagMicroButton` 可转发（那一排改成了 `BagsBar` 图标簇，不是按钮），
-        -- 而 `ToggleAllBags` 是暴雪 Lua 全局 —— 走我们自己的背包窗口，动作完全在我们名下。
+        -- 我们自己的背包窗口，动作全在我们名下（`ToggleAllBags` 是暴雪 Lua 全局，不许调）。
         local bags = ns:GetModule("Bags")
         if bags and type(bags.Toggle) == "function" then bags:Toggle(true) end
       end },
-    { label = "任务", buttons = { "QuestLogMicroButton" } },
-    { label = "成就", buttons = { "AchievementMicroButton" } },
-    { label = "好友", buttons = { "GuildMicroButton" } },
     { label = "地图", luaAction = function()
         -- `C_Map.OpenWorldMap` 文档标 [受限]：受限窗口里一行都不做，别让它替我们撞墙。
         if ns:IsRestricted() then return end
         local C_Map = _G.C_Map
         if C_Map and type(C_Map.OpenWorldMap) == "function" then C_Map.OpenWorldMap() end
       end },
-    { label = "收藏", buttons = { "CollectionsMicroButton" } },
-    { label = "副本", buttons = { "EJMicroButton" } },
-    { label = "职业", buttons = { "ProfessionMicroButton" } },
-    { label = "寻找组", buttons = { "LFDMicroButton" } },
-    { label = "住房", buttons = { "HousingMicroButton" } },
-    { label = "商店", buttons = { "StoreMicroButton" } },
-    { label = "帮助", buttons = { "HelpMicroButton" } },
-    { label = "设置", buttons = { "MainMenuMicroButton" },
-      -- 只有这条允许 Lua 直调：`Settings.OpenToCategory` 是客户端 C 侧 API，不会把暴雪的
-      -- Lua 面板链拉进我们的执行环境（对比：`ToggleGameMenu` 是暴雪 Lua 函数，已撤掉）。
-      luaAction = function()
+    { label = "设置", luaAction = function()
+        -- `Settings.OpenToCategory` 是客户端 C 侧 API，不会把暴雪的 Lua 面板链拉进我们的执行环境
+        -- （对比：`ToggleGameMenu` 是暴雪 Lua 函数，已撤掉）。
         local settings = _G.Settings
         if settings and type(settings.OpenToCategory) == "function" and settings.INTERFACE_CATEGORY_ID then
             return settings.OpenToCategory(settings.INTERFACE_CATEGORY_ID)
@@ -69,20 +55,9 @@ local ENTRIES = {
       end },
 }
 
---- 这一行的目标：拿暴雪那颗微型按钮**本身**（不是它的 OnClick 函数！）。
---- ⚠ 以前这里写成 `pcall(GetScript(button,"OnClick"))` 再在我们的 Lua 里调用那个函数 ——
---- 11-05 开服实测这是 P0：`TextStatusBar.lua:110 attempt to compare a secret number value
---- (execution tainted by 'MonetUI')`，栈根在 `MicroMenu.lua:74`。把暴雪的 Lua 代码拉进我们的
---- 执行环境跑，等于让它的机密值比较记到我们账上，每个点角色/背包的玩家都会看到一条红。
---- 正解是安全转发：我们的行做成 `SecureActionButtonTemplate`，属性 `type="click"` +
---- `click=<那颗按钮>`，由客户端在受限环境里替我们点它。
-local function TargetButtonFor(entry)
-    for _, name in ipairs(entry.buttons or {}) do
-        local button = _G[name]
-        if button and type(button.GetName) == "function" then return button end
-    end
-    return nil
-end
+--- 曾经这里按名字取暴雪那颗微按钮、把行做成安全按钮去代点它。11-05 实测：那些行锚进面板
+--- 之后面板 `IsProtected()=true`，自己的 `SetPoint` 被静默丢弃 ⇒ 菜单展不开（ENRICES 上方注释）。
+--- 所以这里**不再有第二种动作源**：行只有 `luaAction`（纯 C_* API / 我们自己的模块）这一条路。
 
 --- 只剩"纯 C_* API"可以留在 Lua 里直接调（不牵动暴雪的 Lua 面板链，也不会把机密值比较
 --- 带进我们的环境）。`Settings.OpenToCategory` 属于这类；`ToggleGameMenu` 属于暴雪 Lua 函数，
@@ -108,39 +83,29 @@ local function Build()
     rows = {}
     local y = -4
     for _, entry in ipairs(ENTRIES) do
-        local target = TargetButtonFor(entry)
-        local luaAction = target and nil or SafeActionFor(entry)
-        if target or luaAction then
-            -- 有可转发的暴雪按钮 ⇒ SecureActionButtonTemplate（由客户端安全地"代点"）；
-            -- 只有纯 C_* 动作时才用普通按钮。属性只写在我们自己造的按钮上（AGENTS 允许的那条路）。
-            local row = target
-                and CreateFrame("Button", nil, frame, "SecureActionButtonTemplate")
-                or  CreateFrame("Button", nil, frame)
+        local action = SafeActionFor(entry)
+        if action then
+            -- **普通按钮**，不是 SecureActionButtonTemplate：安全模板锚进面板会把面板标成受保护，
+            -- 面板自己的 SetPoint/SetHeight 随后被静默丢弃（11-05 实测，见 ENTRIES 上方）。
+            local row = CreateFrame("Button", nil, frame)
             row:SetPoint("TOPLEFT", frame, "TOPLEFT", 3, y)
             row:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -3, y)
             row:SetHeight(ROW_H)
             row:EnableMouse(true)
+            row:RegisterForClicks("LeftButtonUp")
 
             local label = Widget:Font(row, 12, "pixel", "neutral", "CENTER")
             label:SetPoint("LEFT", row, "LEFT", 4, 0)
             label:SetPoint("RIGHT", row, "RIGHT", -4, 0)
             label:SetText(entry.label)
 
-            if target then
-                row:RegisterForClicks("LeftButtonUp")
-                pcall(row.SetAttribute, row, "type", "click")
-                pcall(row.SetAttribute, row, "click", target)
-                -- PostClick 是我们自己的收尾钩，允许在安全按钮上挂：只关菜单，不碰暴雪的东西。
-                row:SetScript("PostClick", function() M:Close() end)
-            else
-                row:RegisterForClicks("LeftButtonUp")
-                row:SetScript("OnClick", function()
-                    pcall(luaAction)
-                    M:Close()
-                end)
-            end
-            row:HookScript("OnEnter", function() Widget:ColorText(label, "highlight") end) -- TAINT-OK: row 是自建微型菜单行
-            row:HookScript("OnLeave", function() Widget:ColorText(label, "neutral") end) -- TAINT-OK: 同上
+            row:SetScript("OnClick", function()
+                -- 只有纯 C_* API / 我们自己的模块会走到这里（ENRIES 造行时就筛过一遍）。
+                pcall(action)
+                M:Close()
+            end)
+            row:SetScript("OnEnter", function() Widget:ColorText(label, "highlight") end)
+            row:SetScript("OnLeave", function() Widget:ColorText(label, "neutral") end)
 
             rows[#rows + 1] = row
             y = y - (ROW_H + 1)
@@ -221,22 +186,14 @@ end
 ---      信息栏 §8.37 就是这么炸的，这里就是那条风险的现场复验）；
 ---   ③ 开关与展开状态（设置关着 ⇒ 右键那条 `if` 根本不走到这里）。
 function M:Probe(enabledSetting)
-    local withTarget, withAction, dead = 0, 0, {}
+    local actions, skipped = 0, {}
     for _, entry in ipairs(ENTRIES) do
-        if TargetButtonFor(entry) then
-            withTarget = withTarget + 1
-        elseif SafeActionFor(entry) then
-            withAction = withAction + 1
-        else
-            dead[#dead + 1] = entry.label
-        end
+        if SafeActionFor(entry) then actions = actions + 1 else skipped[#skipped + 1] = entry.label end
     end
-    ns:Print(("微菜单：%d 个入口定义 · 可安全转发 %d · 纯 C_* 动作 %d · 建不出行 %s"):format(
-        #ENTRIES, withTarget, withAction, (#dead > 0) and table.concat(dead, "、") or "无"))
 
     if not frame then Build() end
     if not frame then
-        ns:Print("|cffff6b6b面板造不出来|r（上面「建不出行」若列全了入口，就是这个客户端一颗可转发的按钮都没有）")
+        ns:Print("|cffff6b6b面板造不出来|r（入口里一个合法动作都没有）")
         return
     end
 
@@ -245,17 +202,28 @@ function M:Probe(enabledSetting)
     for _, row in ipairs(rows or {}) do
         if type(row.IsProtected) == "function" and row:IsProtected() then rowProt = rowProt + 1 end
     end
-    ns:Print(("面板：已建 · 受保护=%s · 行 %d 颗（其中受保护 %d）· 高度 %.1f · 当前 shown=%s"):format(
-        tostring(protFrame), #(rows or {}), rowProt, frame:GetHeight() or 0, tostring(frame:IsShown())))
+    local np = (type(frame.GetNumPoints) == "function") and frame:GetNumPoints() or "?"
+    -- GetRect 返回 left, bottom, width, height（四个角是读不出来的，11-04 记过）
+    local rl, rb, rw, rh
+    if type(frame.GetRect) == "function" then rl, rb, rw, rh = frame:GetRect() end
+
+    ns:Print(("微菜单：入口 %d · 有合法动作 %d · 无动作跳过 %s"):format(
+        #ENTRIES, actions, (#skipped > 0) and table.concat(skipped, "、") or "无"))
+    ns:Print(("面板：已建 · 受保护=%s · 行 %d 颗（其中受保护 %d）· 锚点数=%s · 矩形=%s · 高 %.1f · shown=%s"):format(
+        tostring(protFrame), #(rows or {}), rowProt, tostring(np),
+        (rl and string.format("%.0f,%.0f %.0fx%.0f", rl, rb, rw or 0, rh or 0)) or "读不出",
+        frame:GetHeight() or 0, tostring(frame:IsShown())))
     ns:Print(("设置 microMenu=%s ⇒ %s"):format(tostring(enabledSetting),
         enabledSetting and "右键会走到这里" or "右键不会走到这里（模块里那道 if 直接跳过）"))
 
     if protFrame or rowProt > 0 then
-        ns:Print("|cffff6b6b判读：面板被标成受保护|r ⇒ 之后每次 frame:SetPoint/SetHeight 都会被拒"
-            .. "（和行上的 SecureActionButtonTemplate 锚进同一个家族 = 信息栏 §8.37 那个坑）。"
-            .. "证据看 /mui logs 里有没有一批 ADDON_ACTION_BLOCKED MonetUI Frame:…。")
+        ns:Print("|cffff6b6b判读：这一族里还有受保护对象|r ⇒ 我们自己的 SetPoint/SetHeight 会被**静默丢弃**"
+            .. "（不记 BLOCKED、也不报错），症状就是「右键没反应」。成因一直是行上挂了安全模板。")
+    elseif np == 0 then
+        ns:Print("|cffff6b6b判读：面板一个锚点都没有|r ⇒ 上一次 Toggle 的 SetPoint 没落地"
+            .. "（事件进来了、面板也建了，就是没位置）。")
     else
-        ns:Print("判读：面板与行都不受保护 ⇒ 每次展开重摆是安全的。")
+        ns:Print("判读：面板是普通框、锚点就位 ⇒ 若还展不开，只剩「此刻右键落点不在遮罩上」或「别的菜单抢了这次点击」（看最后一行）。")
     end
 end
 

@@ -3774,6 +3774,42 @@ TextStatusBar.lua:110 attempt to compare a secret number value (execution tainte
 ⇒ 复验动作：`/reload` 后展开一次微菜单，我立刻读 `logs BLOCKED` + 现场读 `IsProtected()`。
 如果确认被传染，退路是把那几行也回成普通按钮并接受"微菜单不代点暴雪面板"（**不再赌**）。
 
+## 8.38 2026-11-05 微菜单同型确认：安全模板把面板传染成受保护，而且是**静默**失败
+
+作者报「右键小地图展不开，没有出菜单」。新命令 `/mui minimap menu` 的实机读数（1.60.1 · 70790）：
+
+```
+微菜单：15 个入口定义 · 可安全转发 13 · 纯 C_* 动作 2 · 建不出行 无
+面板：已建 · 受保护=true · 行 15 颗（其中受保护 13）· 高度 269.0 · 当前 shown=false
+设置 microMenu=true ⇒ 右键会走到这里
+```
+
+现场再读一次（`/run` 只读取数）：`points=0 · rect 读不出 · strata=DIALOG · shown=false`。
+
+**三条结论**：
+① 右键事件**进到了我们这里**（"面板：已建"只有 `Build()` 会留下，而 `Build()` 只在 `Toggle` 里调用）
+⇒ 不是命中区、不是别的插件抢点击、不是设置关着；
+② 面板被 13 行 `SecureActionButtonTemplate` 所在的**锚定家族传染**成受保护
+⇒ 之后 `Toggle` 里的 `frame:ClearAllPoints() / SetPoint(...) / SetHeight(...)` 一个都没落地
+（`GetNumPoints()=0` 就是铁证）⇒ 菜单永远没有位置 ⇒ 玩家眼里就是"点了没反应"；
+③ **这批失败不记 `ADDON_ACTION_BLOCKED`、也不报错**（`logs BLOCKED/ERR` 在该窗口内零新增）。
+⇒ 和信息栏（§8.37，同一机制但**会**记日志）比，这一例更危险：**没有日志的静默丢弃只能靠 `IsProtected()`
++ `GetNumPoints()` 两个数判**，所以在实机问"展不开"之前先跑那条命令，不要去猜命中区。
+
+**处置**：微菜单入口只剩有纯 `C_*` 开口的三行 —— 背包（我们自己的 `Bags:Toggle`）、
+地图（`C_Map.OpenWorldMap`，[受限] ⇒ `ns:IsRestricted()` 前置）、设置（`Settings.OpenToCategory`）。
+`SecureActionButtonTemplate` / `SetAttribute` / `TargetButtonFor` 在本文件里**整体不存在**，
+`buttons =` 名单也删掉。代价写进代码注释：**角色/法术/任务/成就/好友/收藏/副本/职业/寻找组/住房/商店/帮助
+这 12 行本客户端没有 C 侧开窗 API**（`docs/api` 快照里 `Open` 动词只有
+`C_Map.OpenWorldMap` / `C_Calendar.OpenCalendar` / `C_TradeSkillUI.OpenTradeSkill` /
+`C_SettingsUtil.OpenSettingsPanel`），而调暴雪 Lua 全局是被禁止的 P0 写法 ⇒ 走 **#43** 找独立安全载体。
+
+**闸门**：`tools/micromenu-entries-probe.js` 重写（13 项）。A 组现在钉的是"这里一个 `GetScript` /
+一个 `SecureActionButtonTemplate` / 一个 `SetAttribute` 都不许出现"，B 组钉"入口 ≤6 行、每行自带
+`luaAction`、没有 `buttons =` 名单"，C 组钉"判据命令在位且读 `GetNumPoints`"。
+三次失败（抠脚本自调 / 本体做安全框 / 接住器传染）都写进探针头注。
+**harness 不派微菜单阶段** ⇒ 这条路径的证据只有探针 + `/mui minimap menu` 实机读数两样。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 

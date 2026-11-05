@@ -41,7 +41,7 @@ node tools/report-probe.js          # /mui report 行为闸门（30 项：段落
 node tools/whatsnew-probe.js        # 更新提示行为闸门（15 项：只打一次 / 可重看 / 无记录不编内容 / 拿不到版本不崩）
 node tools/capability-probe.js      # N4 能力表行为闸门（16 项：三态不塌值 / 受限窗口不造框 / 一辈子只造一次 / 列表无副作用）
 node tools/bank-parity-probe.js     # 银行与背包并存接线闸门（37 项：命名空间/不猜索引/停车纪律/越权边界）
-node tools/micromenu-entries-probe.js # 微菜单入口闸门（12 项：安全转发三件套 / 暴雪 Lua 全局零调用 / 1.60 实名账 / 建行纪律）
+node tools/micromenu-entries-probe.js # 微菜单入口闸门（13 项：GetScript/安全模板/SetAttribute 零出现 · 入口只留纯 C_* 动作行 · 判据命令读 GetNumPoints）
 node tools/infobar-secure-click-probe.js # 信息栏越权闸门（10 项：OpenPanel 已删 / 暴雪 Lua 全局零调用 / 这里禁止出现安全模板（锚定家族判例）/ 唯一 onClick 只开我们自己的窗）
 
 # 12.1.5（_retail_ / 120105）观感预验趟：docs/PRECHECK-RETAIL-120105.md
