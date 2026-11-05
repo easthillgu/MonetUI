@@ -972,6 +972,52 @@ function Skin:Stepper(button)
 end
 
 --- Restyle a scroll bar (track + arrows + thumb).
+--- 肖像压成方形 + 收进窗口外框以内（2026-11-05 作者定的口径："肖像改方形，并且注意对齐到外框以内"）。
+---
+--- 两条实测前提，写下来免得下次又照椭圆去改遮罩：
+---   ① `QuestFramePortrait` / `SocialUIFramePortrait` / `CharacterFramePortrait` 都是**贴图不是框**，
+---      所以 `/mui compat find`（只枚举框）看不见它们，取用只能靠 `<窗口名>Portrait` 全局名或
+---      `frame.Portrait` 成员；
+---   ② 圆图本体是 atlas `RTPortrait1`（62×62），**方形靠裁，不靠拉伸**：那张圆图内切于画布，
+---      裁到 `0.15..0.85` 正好是它的内接正方形 ⇒ 四角不留透明、也不会把脸拉扁。
+--- 越界才重锚：只有当贴图左/上沿跑到窗口外面（暴雪那圈金属边本来就往框外溢）才按窗口左上角收回来，
+--- 正常位置一律不动它 —— 免得把已经排好的窗口搞成第二次布局。
+function Skin:SquarePortrait(frame)
+    if not frame then return false end
+    local okN, name = pcall(frame.GetName, frame)
+    local por = frame.Portrait
+    -- 取用仍走 `Skin:Need` 这唯一漏斗（不是直接查 `_G`）：名字不存在时必须是账本里的一行 ✗，
+    -- 不是静默跳过（AGENTS「确认对象存在只有一个漏斗」）。
+    if por == nil and okN and name then por = self:Need(name .. "Portrait") end
+    if type(por) ~= "table" or type(por.SetTexCoord) ~= "function" then return false end
+    if Marked(por, "portraitSquared") then return true end
+    Mark(por, "portraitSquared", true)
+
+    pcall(por.SetTexCoord, por, 0.15, 0.85, 0.15, 0.85)
+
+    local okW, w = pcall(por.GetWidth, por)
+    local okH, h = pcall(por.GetHeight, por)
+    if okW and okH and type(w) == "number" and type(h) == "number" then
+        local side = math.min(w, h)
+        if side > 0 then pcall(por.SetSize, por, side, side) end
+    end
+
+    -- GetRect 返回 left, bottom, width, height（不是四个角：11-04 记过这个口径）
+    local okF, fl, fb, fw, fh = pcall(frame.GetRect, frame)
+    local okP, pl, pb, pw, ph = pcall(por.GetRect, por)
+    if okF and okP and type(fl) == "number" and type(pl) == "number" then
+        local dx = pl - fl                       -- 距窗口左沿
+        local dy = (fb + (fh or 0)) - (pb + (ph or 0))  -- 距窗口顶沿，向下为正
+        if dx < 2 or dy < 2 then
+            dx = math.max(dx, 4)
+            dy = math.max(dy, 4)
+            pcall(por.ClearAllPoints, por)
+            pcall(por.SetPoint, por, "TOPLEFT", frame, "TOPLEFT", dx, -dy)
+        end
+    end
+    return true
+end
+
 function Skin:ScrollBar(scrollbar)
     if not scrollbar then return scrollbar end
 
@@ -1186,7 +1232,20 @@ function Skin:ScanScrollArrows()
                     self:ScrollThumb(frame.Thumb)
                 end
                 local kind = frame.GetObjectType and frame:GetObjectType()
-                if kind == "Button" then
+                -- ⚠ 11-05 实机判例：`/mui skins arrows` 扫 15306 框、命中 400，**我们的箭头 0**，
+                -- 而箭头 region 已被 Strip 压成 α0 ⇒ "压掉没人补图"。根因就在这一行：
+                -- `MinimalScrollBar` 的步进钮是 **`EventButton`**（`Blizzard_SharedXML/Shared/Scroll/
+                -- MinimalScrollBar.xml:101/120`），`GetObjectType()` 返回的是最派生类型名，
+                -- 精确比较 `== "Button"` 一条都不命中。⇒ 必须用 `IsObjectType("Button")`
+                -- （它认 Button 与 EventButton 两支），老式 `ScrollUpButton` 那些照旧命中。
+                local isButton = false
+                if frame.IsObjectType then
+                    local okT, t = pcall(frame.IsObjectType, frame, "Button")
+                    isButton = (okT and t) or false
+                elseif kind == "Button" then
+                    isButton = true
+                end
+                if isButton then
                     self:ScrollArrowButton(frame)
                     -- 关闭按钮按**美术签名**兜底：名字不可靠（12.x 有匿名的、也有不叫 CloseButton 的），
                     -- 12.1.5 实测 53 只里 32 只还是暴雪原样（历史证据，5bc814e 正文）；

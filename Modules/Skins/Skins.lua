@@ -193,6 +193,11 @@ function M:SkinWindow(frame, opts)
         end
     end
 
+    -- 肖像：带 `Portrait` 的窗口（PortraitFrameTemplate 那一族：角色 / 任务 / 社交 / 观察 / 交易…）
+    -- 统一在窗口档里压成方形并收进外框以内（判据与裁法见 Skin:SquarePortrait）。
+    -- 单一入口 = 这里，各皮肤文件不要再自己去找 `<窗口名>Portrait`。
+    if not opts.noPortrait then Skin:SquarePortrait(frame) end
+
     -- 标题字串和关闭按钮的位置各家不同：新框架挂在 TitleContainer 里，老框架直接挂在框上，
     -- 还有一批（WorldMapFrame 这类）两者都在 BorderFrame 那一层。
     local border = frame.BorderFrame
