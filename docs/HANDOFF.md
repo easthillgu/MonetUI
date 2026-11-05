@@ -3998,6 +3998,31 @@ MerchantItem19MoneyFrame」—— 它 hook 了暴雪的 `OnMerchantUpdate`（正
   `CharacterFramePortrait` **都在**（现场 `type(_G[n..'Portrait'])` = table），只是它们是**贴图不是框**。
   ⇒ 判"某个名字不存在"之前，先说清这个工具看的是哪一层（贴图/字体要另走 `GetRegions`，就是 layers 探针）。
 
+## 8.44 2026-11-05 子帧探测第二批：轨修好了，但**滚动条箭头是我们自己压掉又没补的**（缺陷，不是取向）
+
+`/reload` 后同一对探针的复验：
+
+- **轨（作者批准的 A 类）确认生效**：`QuestFrame` 过滤 `scrollbar` 的家族表从 `minimal-scrollbar-track ×3 + arrow ×2`
+  变成 **只剩 `minimal-scrollbar-arrow ×2`**，三张 track atlas 全部 `α0.00 已剥掉`；
+  `QuestFrame 看得见 69 → 64`。⇒ 那条"离线绿不算证据"现在有实机证据了。
+- **箭头是新发现的自己的缺陷**：`/mui skins arrows` 全量 15306 框 / 命中 400 ——
+  **`我们的箭头 0`**，而逐条写着 `键=minimal-scrollbar-arrow-top(up) · 无我们的图 · 暴雪层 α=0.00`
+  （宿主：`QuestProgressScrollFrame`、`SocialUIFrame`）。
+  ⇒ 暴雪的箭头图**被压成 α0 却没有放我们的 V 形上去**：滚动条上下箭头现在是"看不见但存在"的状态。
+  最可能的链路（下一步验）：`deep` 扫的 `Skin:Strip(regions=true)` 直接压了步进钮的 region，
+  而 `Skin:Stepper` / `Skin:ScrollArrowButton` 这两条"压图 + 补图"的正经路径**根本没被叫到**
+  —— 它们才会 `Mark(button,'scrollArrow')` 并建我们自己的 chevron。
+  这正是 AGENTS 里"FadeButtonArt 压掉却没有东西补上"那一族的第三种形态（前两种：Skin:Slider 漏 Strip、
+  Stepper 误用 Strip）。
+- **修法（下一步）**：① 让深扫在遇到 `Texture` 为 `minimal-scrollbar-arrow-*` 匿名步进钮时走
+  `Skin:ScrollArrowButton`（它已支持"按 region atlas 认方向"）；② 或者在 `Skin:Strip` 里**别压这类 atlas**
+  （把它列进"必须成对处理"的名单：压了就要求补图）。二者取其一，①更靠近现有代码；②
+  更防未来。先看 `arrows` 探针在改动后 `我们的箭头` 是否从 0 变成 >0 —— 那就是这条的验收判据。
+- **肖像（作者拍板：改方形 + 对齐到外框以内）待做**，注意实测：`QuestFramePortrait` /
+  `SocialUIFramePortrait` / `CharacterFramePortrait` 都是**贴图不是框**（`/mui compat find` 看不见它们，
+  见 §8.43 ③），所以取用只能靠全局名或 `frame.Portrait` 成员；圆图本体是 `RTPortrait1 62x62`，
+  要方形得**裁贴图**（内接方框 `0.15..0.85`）而不是拉伸或换坐标。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 
