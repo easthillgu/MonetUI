@@ -724,3 +724,22 @@ end
 
 M:Panel("mirrortimer", { label = "呼吸 / 疲劳条", group = "系统", apply = SkinMirrorTimer,
     frames = { "MirrorTimerContainer" } })
+
+-- **A 档覆盖率补（11-05 skin-coverage 实机核对：客户端真存在、没美化）**：商店 / 付费 / 战网点一族。
+-- StoreFrame 主体是网页内容（商店商品），只收拾窗口壳 + 深扫子控件；几个确认弹窗走同一档。
+-- 注意：这些是 Blizzard_AccountStore / Blizzard_CatalogShop* / Blizzard_WowTokenUI / Blizzard_StoreUI，
+-- 多数玩家很少进，但既然客户端有、又没做，就补上（漏一扇 = 玩家一进就看到整块暴雪原样）。
+local STORE_WINDOWS = {
+    "StoreFrame", "StoreDialog",
+    "CatalogShopFrame", "CatalogShopRefundFrame", "CatalogShopTopUpFrame",
+    "WowTokenDialog", "WowTokenRedemptionFrame", "ServicesLogoutPopup",
+}
+
+local function SkinStore()
+    M:Dress(STORE_WINDOWS, {
+        window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true,
+    })
+end
+
+M:Panel("store", { label = "商店 / 付费", group = "系统", apply = SkinStore,
+    frames = { STORE_WINDOWS } })
