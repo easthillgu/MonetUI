@@ -58,6 +58,21 @@ end
 -- 由窗口这侧的 `deep = true` 接住（§8.40 的 ② 档）。
 local PLAYERSPELLS_BUTTONS = { "PlayerSpellsFrameCloseButton", "PlayerSpellsFrameClearButton" }
 
+-- **羊皮纸 / 天赋背景递归剥（11-05 作者指定）**：法术页正文是暴雪 `spellbook-page-*` 羊皮纸，
+-- 天赋页是 `talent-background` / `Talents-Background` / `Talents-inner-frame` /
+-- `talents-heroclass-backplate`，都挂在匿名子帧上 —— Strip 不递归、deep 只扫按钮，两条都够不到。
+-- 只压这些**认得出的背景 atlas**，不碰图标 / 动画遮罩（`talents-animations-mask` / `specart` 保留）。
+local SPELLBOOK_BACKDROP_ATLAS = {
+    "spellbook%-page", "talent%-background", "talents%-background",
+    "talents%-inner%-frame", "talents%-heroclass%-backplate",
+}
+
+-- 模块级稳定引用：M:HookShow 按引用去重，在 Apply 里现造闭包会每开一次窗多挂一条。
+local function FadeSpellbookBackdrops()
+    local f = Skin:Need("PlayerSpellsFrame")
+    if f then Skin:FadeAtlasBackdrop(f, SPELLBOOK_BACKDROP_ATLAS) end
+end
+
 local function SkinPlayerSpells()
     -- 11-05 实机（天赋/法术页开着扫 `/mui skins layers PlayerSpellsFrame`）：窗口壳已涂，
     -- 但 `PlayerSpellsFramePortrait`（62×62）+ 那张 58×58 CircleMask 还是"暴雪原样" ⇒ 补 portrait 隐藏。
@@ -69,6 +84,9 @@ local function SkinPlayerSpells()
     M:Dress("HeroTalentsSelectionDialog", {
         window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true,
     })
+    -- 羊皮纸 / 天赋背景：Apply 先剥一次，再挂 Show 重涂（面板懒建 + 暴雪 Show 会重设 alpha）。
+    FadeSpellbookBackdrops()
+    M:HookShow(Skin:Need("PlayerSpellsFrame"), FadeSpellbookBackdrops)
 end
 
 local ACHIEVEMENT_TABS = { "AchievementFrameTab1", "AchievementFrameTab2" }

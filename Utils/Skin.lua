@@ -416,6 +416,38 @@ function Skin:FadeButtonArt(button)
     end
 end
 
+--- 递归剥"按 atlas 认得出的窗体背景"（11-05 天赋/法术页羊皮纸）。
+--- `Strip` 只处理一个框**自己的** region，不递归子帧；而法术页的羊皮纸
+--- （`spellbook-page-*`）和天赋页背景（`talent-background` / `Talents-Background` /
+--- `Talents-inner-frame` / `talents-heroclass-backplate`）都挂在**匿名子帧**上，
+--- deep 的按钮扫也够不到（它们不是按钮）。这条通道只压**认得出的背景 atlas**，
+--- 绝不做"整框 regions=true"那种会把图标一起压掉的事（AGENTS 功能图标豁免同一条）。
+--- 复用 `Fade`：幂等（`hidden` 标记）、可回滚。
+-- @param patterns  小写 Lua 模式列表（string.find 用）
+function Skin:FadeAtlasBackdrop(frame, patterns, depth)
+    if not frame or (depth or 0) > 8 or type(frame.GetRegions) ~= "function" then return end
+    depth = depth or 0
+    local okR, regions = pcall(function() return { frame:GetRegions() } end)
+    if okR then
+        for _, reg in ipairs(regions) do
+            local okA, atlas = pcall(reg.GetAtlas, reg)
+            if okA and type(atlas) == "string" and atlas ~= "" then
+                local low = string.lower(atlas)
+                for i = 1, #patterns do
+                    if low:find(patterns[i]) then
+                        self:Fade(reg)
+                        break
+                    end
+                end
+            end
+        end
+    end
+    local okC, kids = pcall(function() return { frame:GetChildren() } end)
+    if okC then
+        for _, k in ipairs(kids) do self:FadeAtlasBackdrop(k, patterns, depth + 1) end
+    end
+end
+
 -- Named background pieces Blizzard keeps on its panels.
 local BACKDROP_PIECES = {
     "NineSlice", "Bg", "Background", "Border", "BorderFrame", "Inset", "InsetFrame",
