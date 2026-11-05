@@ -85,6 +85,11 @@ local function SkinMerchant()
         inset = true,
         panel = { bgAlpha = 0.96 },
         buttons = MERCHANT_BUTTONS,
+        -- 底板边框提到显眼档（11-05 作者："维修那三个按钮没有我们的方框边框吧?"）：
+        -- 实测底板是有的（36x36、两点锚定、边框色 α0.80），但 1px + `edge` 档的半透明边框
+        -- 在 36px 的小控件上读不出来 ⇒ 换成 `bright` 档 + α1（`opts.control` 必须在**第一次**
+        -- ControlBg 时给：底板有缓存，第二次传参不会重做，这是 Skin:ControlBg 的既有行为）。
+        control = { thickness = 1, bgAlpha = 0.9, borderAlpha = 1, borderKey = "bright" },
         deep = true,
         -- 11-05 实机（商人窗开着扫）：`rtportrait1 ×1` 还在"看得见"里 ⇒ 这扇窗的肖像没点名。
         portrait = true,

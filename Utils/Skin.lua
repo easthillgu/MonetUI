@@ -2050,8 +2050,19 @@ end
 function Skin:ItemQualityBorder(btn, withInfo)
     if not btn then return btn end
     local entry = qualityBorders[btn]
+    -- 只认"真的造出了背板"的条目：以前 `NewBackdropFrame` 返回 nil 时照样往下走，
+    -- `Widget:Theme(nil, …)` 抛错被上层 `M:Controls` 的 pcall 吞掉 ⇒
+    -- 11-05 商人格"品质边框一个都没加上"在日志里完全看不见（第三次栽在"静默失败"上）。
+    if entry and not entry.frame then entry = nil end
     if not entry then
         local border = NewBackdropFrame(btn, 1)
+        if not border then
+            local who = tostring((type(btn.GetName) == "function" and btn:GetName()) or "匿名格")
+            Skin:WarnOnce("qualityBorder:" .. who,
+                ("造不出品质边框的背板框：%s（IsScriptObject=%s）")
+                    :format(who, tostring(self:IsScriptObject(btn))))
+            return btn
+        end
         Widget:Theme(border, { thickness = 1, bgAlpha = 0 })
         self:Track(border)
         entry = { frame = border }
