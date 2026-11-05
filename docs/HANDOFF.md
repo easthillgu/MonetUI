@@ -3651,6 +3651,32 @@ GameRule 18 条里 16 条未生效 ⇒ **§8.13.6 那句"这台服务器没关�
 **仪表本身有解**：1.60 实测 `type(debugprofilestop) = function`、返回毫秒且带小数四位
 （`83597232.4398` ≈ 23 小时开机），换成它就能逐路归因。⇒ 记成待办，**开服日不动调度器**（改动落在每拍热路径上）。
 
+## 8.35 2026-11-05 皮肤死名 → 1.60 实名账（A 批，作者问"现在修还是等后面一起"→ 现在修）
+
+**判据口径**：每条改动都要两样东西 —— ① 实机 `/mui compat find <片段>`（走 ~19800 个框，`EnumerateFrames` + 逐层 `GetChildren`）
+给的**实名清单**；② 离线 `framexml-source`（1.60.1.70707）里那个包的 `.toc` 门控（`AllowLoadGameType` / `[ExcludeLoadGameType camelot]`）
+说明**为什么是这个名字**。只有其中一样，就写"待实机"，不改代码（§8.13.4 差集第 ③ 类不许靠记忆）。
+
+| 面板 | 死名（1.60 实测不存在） | 实名 / 新做法 |
+|---|---|---|
+| character | `CharacterFrameTab1/2/3` | `CharacterFrameTabIndicators`（+ `…LeftTabButton` / `…RightTabButton`，都是容器子件）⇒ 只点容器名，整棵子树 `deep` 扫。**后果说清楚**：这三行一直是空枪，角色页签从收口起没被涂过 |
+| friends | `FriendsFrameTab2/Tab5`、`FriendsFrameAddIgnoreButton`、`FriendsFrameBroadcastButton`、`FriendsFrameListScrollFrame` | 页签只有 **1 / 3 / 4**；按钮剩 `SendMessage` / `AddFriend`；列表是 `parentKey="ScrollBox"`(WowScrollBoxList) + `parentKey="ScrollBar"`(MinimalScrollBar) 的**无名子件** ⇒ 滚动区交给 `deep`，死名从名单里摘掉 |
+| who | `WhoFrame`、`WhoFrameWhoButton/AddFriendButton/GroupInviteButton`、`WhoListScrollFrame` | 独立查询窗在 1.60 已折进好友第 4 页，全客户端只剩 `WhoFrameEditBox` + `…ClearButton` 两个实名 ⇒ 只涂这两只 |
+| （新增） | —— | **`SocialUIFrame`**：1.60 把好友/公会/社区/黑名单合并进它（`Blizzard_SocialUI/Mainline/SocialUI.xml:3` 继承 `PortraitFrameTemplate`；实机有 `SocialUIFrame` + `…CloseButton` + `…Inset`），而我们**一个字节都没涂** ⇒ 两扇窗都 Dress（`FriendsFrame` 同名也还在，哪扇被 O 打开取决于玩家设置） |
+| micromenu（皮肤） | `SocialsMicroButton`、`PVPMicroButton` | 全客户端微按钮一共 17 个命中：Character/Profession/PlayerSpells/Achievement/QuestLog/Guild/LFD/Collections/EJ/Store/MainMenu/Help/Housing/Spellbook/Talent/Legacy + 容器 `MicroButtonAndBagsBar` |
+| micromenu（模块入口） | `BagMicroButton`、`MapMicroButton`、`CalendarMicroButton`、`GJMicroButton` | 这几行以前**静默消失**（`TargetButtonFor` 取不到 ⇒ 行不建）。现在：背包 → `ns:GetModule("Bags"):Toggle(true)`（我们自己的窗）；地图 → `C_Map.OpenWorldMap`（文档标 **[受限]** ⇒ 前置 `ns:IsRestricted()`）；日历 → 没有合法出口，**继续不建这一行**（宁缺一行，不调 `ToggleCalendar`） |
+| quest（人物/任务文本） | `QuestDetailText` 等 7 条 `[_]` 名 | **A 批没动**：这 7 条要开着任务窗才能扫实名，属 B 批（下一段） |
+
+**同批清掉的设计债**：`MicroMenu.lua` 的 ENTRIES 里那六个 `action = function() … _G.ToggleXxx() … end` 字段
+在 `4a458d1`（P0 修）之后**已经不再是任何路径**（`SafeActionFor` 只认 `luaAction`），但字段还挂在表上 ——
+读代码的人会以为"按钮不在还有兜底"，而那条兜底正是弹「界面行为失效」的写法。字段连同文件头那句
+"动作优先直接调按钮自己的 OnClick" 一起删掉。
+
+**新闸门**：`node tools/micromenu-entries-probe.js`（12 项）钉住这一类缺陷不再回来：A 组 = 安全转发三件套 +
+`GetScript` 全文零出现 + 15 个暴雪 Lua 全局零调用；B 组 = 六颗死名不得回到源码、十三颗实名不得漏；
+C 组 = `target` 与 `luaAction` 互斥、两者都无 ⇒ 不建行、[受限] API 前面必须有 `ns:IsRestricted()` 门。
+**为什么不能拿 `run.js red=0` 当这条的证据**：`grep MicroMenu tools/harness/run.lua` = 0 命中，harness 根本不派微菜单阶段（A 批的 friends/character 那几路**是**被 `Skins:ApplyAll` 驱动的， micromenu 那一路只由这条探针 + 实机覆盖）。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 

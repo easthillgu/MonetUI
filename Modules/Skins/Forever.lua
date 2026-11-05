@@ -195,16 +195,20 @@ M:Panel("legacy", {
     },
 })
 
--- Retail folded several of these away; Forever keeps the classic row, so the full list is declared and each missing button is skipped by the guarded lookup.
+-- **1.60 实测（开服日 11-05，`/mui compat find MicroButton` 走 19804 个框，全客户端一共 17 个命中）**：
+-- 底栏 15 颗 = Achievement / Character / Collections / EJ / Guild / Help / Housing / LFD / Legacy /
+-- MainMenu / PlayerSpells / Profession / QuestLog / Spellbook / Store / Talent（+ 容器 `MicroButtonAndBagsBar`）。
+-- `SocialsMicroButton` 与 `PVPMicroButton` **不存在**（好友/社区/PVP 合并进 `SocialUIFrame`，
+-- 名字是 `SocialUIFrame*`；PVP 那一档整个折掉了）—— 这两行是空枪，从收口起那两颗"按钮"没被涂过，
+-- 因为它们压根不在。删掉，别让台账上永远挂着两行消不掉的 ✗。
 local MICRO_BUTTONS = {
     "CharacterMicroButton", "ProfessionMicroButton", "PlayerSpellsMicroButton",
     "AchievementMicroButton", "QuestLogMicroButton", "GuildMicroButton",
     "LFDMicroButton", "CollectionsMicroButton", "EJMicroButton",
     "StoreMicroButton", "MainMenuMicroButton", "HelpMicroButton",
     "HousingMicroButton",
-    -- Forever-only survivors retail renamed or folded away:
-    "SpellbookMicroButton", "TalentMicroButton", "SocialsMicroButton",
-    "PVPMicroButton", "LegacyMicroButton",
+    -- Forever 保留、零售改名或折掉的那几颗：
+    "SpellbookMicroButton", "TalentMicroButton", "LegacyMicroButton",
 }
 
 local function SkinOneMicroButton(name)

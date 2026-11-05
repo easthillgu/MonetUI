@@ -17,37 +17,40 @@ local frame      -- 菜单面板
 local catcher    -- 点别处关闭
 local rows       -- 已建的行
 
---- 入口定义：label 是显示文字，buttons 是暴雪微型按钮的候选名字（两个客户端的名字不一样，
---- 谁在用谁），action 是按钮不在时的备用开关函数。
---
--- 动作优先直接调按钮自己的 OnClick —— 和玩家点那一排按钮完全一样，客户端改名也不会失效
--- （零售 12.x 把 ToggleCharacterSheet 之类删干净了，角色面板只能这么开）。
+--- 入口定义：`buttons` 是**可安全转发**的暴雪微型按钮实名（谁在就用谁），`luaAction` 只允许
+--- 纯 C_* API 或我们自己的模块 —— 两个字段都取不到，这一行就不建（宁可少一行，不弹「界面行为失效」）。
+---
+--- ⚠ 以前这里每行还挂一个 `action`（`ToggleAllBags` / `ToggleQuestLog` / `ToggleFriendsFrame`
+--- 这类**暴雪 Lua 全局**）当备用开关。11-05 开服 P0 之后这条路径已经整个删掉，`action` 字段
+--- 也不再被读（`SafeActionFor` 只认 `luaAction`）：留着就是"看着还有兜底、其实一行不跑"，
+--- 而且会把下一个改这里的人引回同一条污染路（AGENTS「绝不直调暴雪 Lua 全局」）。
+---
+--- **1.60 实名（开服日 `/mui compat find MicroButton`，全客户端 17 个命中）**：
+--- Character / PlayerSpells / Spellbook / Talent / Achievement / QuestLog / Guild / LFD /
+--- Collections / EJ / Profession / Store / Housing / Legacy / MainMenu / Help（+ 容器
+--- `MicroButtonAndBagsBar`）。**`BagMicroButton` / `MapMicroButton` / `CalendarMicroButton` /
+--- `GJMicroButton` / `SocialsMicroButton` / `PVPMicroButton` 都不存在** —— 背包那一排改名成
+--- `BagsBar`（不是可点按钮），日历/社交/PVP 折进了别的窗口，所以那几行换成下面两种合法出口。
 local ENTRIES = {
     { label = "角色", buttons = { "CharacterMicroButton" } },
-    { label = "法术", buttons = { "PlayerSpellsMicroButton", "SpellbookMicroButton" },
-      action = function()
-        local util = _G.PlayerSpellsUtil
-        if util and type(util.ToggleSpellBookFrame) == "function" then
-            return util.ToggleSpellBookFrame()
-        end
-        if type(_G.ToggleSpellBook) == "function" then return _G.ToggleSpellBook() end
+    { label = "法术", buttons = { "PlayerSpellsMicroButton", "SpellbookMicroButton" } },
+    { label = "背包", luaAction = function()
+        -- 本客户端没有 `BagMicroButton` 可转发（那一排改成了 `BagsBar` 图标簇，不是按钮），
+        -- 而 `ToggleAllBags` 是暴雪 Lua 全局 —— 走我们自己的背包窗口，动作完全在我们名下。
+        local bags = ns:GetModule("Bags")
+        if bags and type(bags.Toggle) == "function" then bags:Toggle(true) end
       end },
-    { label = "背包", buttons = { "BagMicroButton" },
-      action = function() if type(_G.ToggleAllBags) == "function" then _G.ToggleAllBags() end end },
-    { label = "任务", buttons = { "QuestLogMicroButton" },
-      action = function() if type(_G.ToggleQuestLog) == "function" then _G.ToggleQuestLog() end end },
-    { label = "成就", buttons = { "AchievementMicroButton" },
-      action = function() if type(_G.ToggleAchievementFrame) == "function" then _G.ToggleAchievementFrame() end end },
-    { label = "好友", buttons = { "GuildMicroButton", "GJMicroButton", "SocialsMicroButton" },
-      action = function() if type(_G.ToggleFriendsFrame) == "function" then _G.ToggleFriendsFrame() end end },
-    { label = "地图", buttons = { "MapMicroButton" },
-      action = function() if type(_G.ToggleWorldMap) == "function" then _G.ToggleWorldMap() end end },
-    { label = "日历", buttons = { "CalendarMicroButton" },
-      action = function() if type(_G.ToggleCalendar) == "function" then _G.ToggleCalendar() end end },
-    { label = "收藏", buttons = { "CollectionsMicroButton" },
-      action = function() if type(_G.ToggleCollectionsJournal) == "function" then _G.ToggleCollectionsJournal() end end },
-    { label = "副本", buttons = { "EJMicroButton" },
-      action = function() if type(_G.ToggleEncounterJournal) == "function" then _G.ToggleEncounterJournal() end end },
+    { label = "任务", buttons = { "QuestLogMicroButton" } },
+    { label = "成就", buttons = { "AchievementMicroButton" } },
+    { label = "好友", buttons = { "GuildMicroButton" } },
+    { label = "地图", luaAction = function()
+        -- `C_Map.OpenWorldMap` 文档标 [受限]：受限窗口里一行都不做，别让它替我们撞墙。
+        if ns:IsRestricted() then return end
+        local C_Map = _G.C_Map
+        if C_Map and type(C_Map.OpenWorldMap) == "function" then C_Map.OpenWorldMap() end
+      end },
+    { label = "收藏", buttons = { "CollectionsMicroButton" } },
+    { label = "副本", buttons = { "EJMicroButton" } },
     { label = "职业", buttons = { "ProfessionMicroButton" } },
     { label = "寻找组", buttons = { "LFDMicroButton" } },
     { label = "住房", buttons = { "HousingMicroButton" } },

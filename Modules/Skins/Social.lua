@@ -8,15 +8,26 @@ local ADDON_NAME, ns = ...
 local M    = ns.Skins
 local Skin = ns.Skin
 
+-- **1.60 实测（开服日 11-05，`/mui compat find Friends` 走 19805 个框，只返回这 18 个实名）**：
+-- 编号页签只有 **1 / 3 / 4**，`FriendsFrameTab2`、`FriendsFrameTab5` 与
+-- `FriendsFrameAddIgnoreButton`、`FriendsFrameBroadcastButton`、`FriendsFrameListScrollFrame`
+-- 在本客户端**不存在**（离线佐证：`framexml-source` 的 `Blizzard_FriendsFrame/Mainline/FriendsFrame.xml`
+-- 里列表是 `parentKey="ScrollBox"`(WowScrollBoxList) + `parentKey="ScrollBar"`(MinimalScrollBar)，
+-- 全是**无名子件**，没有 `…ListScrollFrame` 这种东西）。⇒ 滚动区交给 `deep = true` 的整树扫，
+-- 不再点这些死名；死名留在名单里只会变成台账上永远消不掉的一行 ✗。
 local FRIENDS_TABS = {
-    "FriendsFrameTab1", "FriendsFrameTab2", "FriendsFrameTab3",
-    "FriendsFrameTab4", "FriendsFrameTab5",
+    "FriendsFrameTab1", "FriendsFrameTab3", "FriendsFrameTab4",
 }
 
 local FRIENDS_BUTTONS = {
     "FriendsFrameSendMessageButton", "FriendsFrameAddFriendButton",
-    "FriendsFrameAddIgnoreButton", "FriendsFrameBroadcastButton",
 }
+
+-- 1.60 把好友 / 公会 / 社区 / 黑名单合并进 `SocialUIFrame`（离线：`Blizzard_SocialUI/Mainline/
+-- SocialUI.xml:3` 继承 `PortraitFrameTemplate`；实机：`/mui compat find Social` 返回
+-- `SocialUIFrame` + `…CloseButton` + `…Inset`）。`FriendsFrame` 那套经典窗口同名也还在，
+-- **哪一个真被 O 打开取决于玩家设置**，所以两扇都涂 —— 漏一扇就是玩家看到整块暴雪原样。
+local SOCIAL_UI_WINDOW = "SocialUIFrame"
 
 local function SkinFriends()
     -- 各标签页（好友 / 声望 / 团队 / 公会…）的列表用 ScrollBox，滚动条是无名 Frame + Thumb，
@@ -30,19 +41,27 @@ local function SkinFriends()
         rule = true,
         tabs = FRIENDS_TABS,
         buttons = FRIENDS_BUTTONS,
-        scrolls = { "FriendsFrameListScrollFrame" },
+    })
+    -- 合并版社交窗口同一套做法（窗口件 + 整树深扫；页签/列表都是运行期子件）。
+    M:Dress(SOCIAL_UI_WINDOW, {
+        window = true,
+        inset = true,
+        panel = { bgAlpha = 0.96 },
+        deep = true,
     })
 end
 
-local WHO_BUTTONS = { "WhoFrameWhoButton", "WhoFrameAddFriendButton", "WhoFrameGroupInviteButton" }
+-- **1.60 实测（`/mui compat find WhoFrame`）**：独立"查询"窗口 `WhoFrame` 不存在，
+-- 三个按钮名（`WhoFrameWhoButton` / `…AddFriendButton` / `…GroupInviteButton`）和
+-- `WhoListScrollFrame` 一起是死名 —— 查询已经并进好友窗的第 4 页，全客户端只剩
+-- `WhoFrameEditBox` 和它的清除按钮两个实名。所以这里只涂那只有实名证据的输入框，
+-- 页面本身由 `SkinFriends` 的 `FriendsFrame` / `SocialUIFrame` 深扫接住。
+local WHO_EDIT = "WhoFrameEditBox"
+local WHO_BUTTONS = { "WhoFrameEditBoxClearButton" }
 
 local function SkinWho()
-    -- Who 在本客户端要么是独立窗口，要么就是 FriendsFrame 的第 4 页（查无独立窗口时退回它）。
-    local frame = Skin:Need("WhoFrame") or Skin:Need("FriendsFrame")
-    M:Dress(frame, {
-        window = true, noTitle = true, inset = true, panel = { bgAlpha = 0.96 },
-        buttons = WHO_BUTTONS, scrolls = { "WhoListScrollFrame" },
-    })
+    M:Dress(WHO_EDIT, { as = "editbox" })
+    M:Dress(WHO_BUTTONS, { as = "button" })
 end
 
 local COMMUNITIES_TABS = { "CommunitiesFrameTab1", "CommunitiesFrameTab2", "CommunitiesFrameTab3" }
@@ -176,8 +195,9 @@ M:Panel("friends", {
     end,
     frames = {
         "FriendsFrame", "FriendsFrameCloseButton",
-        FRIENDS_TABS, FRIENDS_BUTTONS, "FriendsFrameListScrollFrame",
-        "WhoFrame", "WhoListScrollFrame", WHO_BUTTONS,
+        FRIENDS_TABS, FRIENDS_BUTTONS,
+        SOCIAL_UI_WINDOW,
+        WHO_EDIT, WHO_BUTTONS,
     },
 })
 

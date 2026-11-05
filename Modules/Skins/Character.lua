@@ -6,9 +6,12 @@ local ADDON_NAME, ns = ...
 local M = ns.Skins
 local Skin = ns.Skin
 
-local CHARACTER_TABS = {
-    "CharacterFrameTab1", "CharacterFrameTab2", "CharacterFrameTab3",
-}
+-- **1.60 实测（开服日 11-05，`/mui compat find CharacterFrameTab`）**：`CharacterFrameTab1..3`
+-- 这排编号页签**在本客户端不存在**，全 UI 只有 3 个名字命中 —— `CharacterFrameTabIndicators`
+-- 这套 TabGroup 容器 + 它的左右翻页箭头。真正的页签按钮是容器**运行期**建的子件（点名会漏），
+-- 所以这里只点容器名，整棵子树走 deep 扫；箭头由子树扫顺带涂成我们的按钮。
+-- 后果说清楚：以前这三行是空枪，角色页签从收口起一直是暴雪原样。
+local CHARACTER_TAB_WIDGET = "CharacterFrameTabIndicators"
 
 local CHARACTER_PANELS = {
     "ReputationFrame", "TokenFrame",
@@ -53,7 +56,7 @@ local function SkinCharacter()
     M:Dress("CharacterFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 } })
     -- 美化后把肖像压成方形，与方形背景协调
     MakePortraitSquare()
-    M:Dress(CHARACTER_TABS, { as = "tab" })
+    M:Dress(CHARACTER_TAB_WIDGET, { deep = true })
     M:Dress(CHARACTER_PANELS, SUB_PANEL)
     M:Dress("PaperDollFrame", PAPERDOLL_PANEL)
 end
@@ -70,7 +73,7 @@ M:Panel("character", {
     apply = SkinCharacter,
     frames = {
         "CharacterFrame", "CharacterFrameCloseButton",
-        "CharacterFrameTab1", "CharacterFrameTab2", "CharacterFrameTab3",
+        CHARACTER_TAB_WIDGET,
         "PaperDollFrame", "ReputationFrame", "TokenFrame",
     },
 })
