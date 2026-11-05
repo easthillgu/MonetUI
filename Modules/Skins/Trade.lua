@@ -278,12 +278,18 @@ end
 -- layers 实测这些 atlas 挂在 ScrollBox 回收行的匿名子帧上，deep 够不到：
 local FADE_PROF_ATLAS = {
     -- 纯面板底图 / 水印 → 压没，露出我们的深色背板
+    -- ⚠ 11-05 实机订正：这些 atlas 有**单数 `Profession-`** 和**复数 `Professions-`** 两种前缀，
+    --   只写复数会漏掉详情面板的职业插画水印（`Profession-background-card-Cooking`）与 Template2 底图。
+    "profession%-background%-card%-",
+    "profession%-background%-template",
     "professions%-background%-summarylist",
     "professions%-qualitywindow%-background",
     "professions%-qualitypane%-bg",
     "professions%-minimizedview%-qualitypane%-bg",
     "professions%-recrafting%-panel",
     "professions%-qualitybar%-frame",
+    -- 分类头的金色条（所有分类都显示，是装饰不是选中态 → 剥掉，留文字）
+    "common%-button%-list%-collapseexpand",
 }
 local SWAP_PROF_ATLAS = {
     -- 金色选中态 → 换成我们的 barfill + 边框色（压没会丢选中反馈，所以是换不是剥）
