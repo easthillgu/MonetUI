@@ -999,31 +999,44 @@ function Skin:SquarePortrait(frame)
     -- 不是静默跳过（AGENTS「确认对象存在只有一个漏斗」）。
     if por == nil and okN and name then por = self:Need(name .. "Portrait") end
     if type(por) ~= "table" or type(por.SetTexCoord) ~= "function" then return false end
-    if Marked(por, "portraitSquared") then return true end
-    Mark(por, "portraitSquared", true)
 
-    pcall(por.SetTexCoord, por, 0.15, 0.85, 0.15, 0.85)
+    -- ⚠ 一次性换肤在这里**不够**（11-05 实测）：ApplyAll 时我们裁好了（`Marked(por,'portraitSquared')=true`），
+    -- 但窗口一 Show，暴雪自己的 `SetPortraitTexture` 那类会把 texcoord 重置回 0..1、锚点也摆回越界位置。
+    -- ⇒ 和箭头/滚动条同一族："会被暴雪重设的东西"必须每次显示重涂（`Widget:ShowWatch`，引擎自带幂等）。
+    -- 闭包按对象存进旁表复用：ShowWatch 按引用去重，每次 Apply 现造闭包就会越挂越多。
+    local function applyOnce()
+        pcall(por.SetTexCoord, por, 0.15, 0.85, 0.15, 0.85)
 
-    local okW, w = pcall(por.GetWidth, por)
-    local okH, h = pcall(por.GetHeight, por)
-    if okW and okH and type(w) == "number" and type(h) == "number" then
-        local side = math.min(w, h)
-        if side > 0 then pcall(por.SetSize, por, side, side) end
-    end
+        local okW, w = pcall(por.GetWidth, por)
+        local okH, h = pcall(por.GetHeight, por)
+        if okW and okH and type(w) == "number" and type(h) == "number" then
+            local side = math.min(w, h)
+            if side > 0 then pcall(por.SetSize, por, side, side) end
+        end
 
-    -- GetRect 返回 left, bottom, width, height（不是四个角：11-04 记过这个口径）
-    local okF, fl, fb, fw, fh = pcall(frame.GetRect, frame)
-    local okP, pl, pb, pw, ph = pcall(por.GetRect, por)
-    if okF and okP and type(fl) == "number" and type(pl) == "number" then
-        local dx = pl - fl                       -- 距窗口左沿
-        local dy = (fb + (fh or 0)) - (pb + (ph or 0))  -- 距窗口顶沿，向下为正
-        if dx < 2 or dy < 2 then
-            dx = math.max(dx, 4)
-            dy = math.max(dy, 4)
-            pcall(por.ClearAllPoints, por)
-            pcall(por.SetPoint, por, "TOPLEFT", frame, "TOPLEFT", dx, -dy)
+        -- GetRect 返回 left, bottom, width, height（不是四个角：11-04 记过这个口径）
+        local okF, fl, fb, fw, fh = pcall(frame.GetRect, frame)
+        local okP, pl, pb, pw, ph = pcall(por.GetRect, por)
+        if okF and okP and type(fl) == "number" and type(pl) == "number" then
+            local dx = pl - fl
+            local dy = (fb + (fh or 0)) - (pb + (ph or 0))
+            if dx < 2 or dy < 2 then
+                dx = math.max(dx, 4)
+                dy = math.max(dy, 4)
+                pcall(por.ClearAllPoints, por)
+                pcall(por.SetPoint, por, "TOPLEFT", frame, "TOPLEFT", dx, -dy)
+            end
         end
     end
+
+    local fn = Marked(por, "portraitApply")
+    if not fn then
+        fn = applyOnce
+        Mark(por, "portraitApply", fn)
+        Mark(por, "portraitSquared", true)
+    end
+    applyOnce()
+    if Widget and Widget.ShowWatch then Widget:ShowWatch(frame, fn) end
     return true
 end
 
