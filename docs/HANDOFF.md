@@ -4152,6 +4152,33 @@ host=ChatFrame1 | R1 Texture tex=8069102 a=0 | R2 Texture tex=-1627 a=1
 （对象数 62257 → 62291，就是这十几条边）。**观感必须实机看**：裁到 0.22 会不会把额头裁没了，
 只有开角色面板（I）/ 任务 NPC 对话框才能判。
 
+## 8.50 2026-11-05 #43 全量安全载体（MicroMenuSecure）实机撞墙，押回上线后：三条硬约束
+
+作者选 A（独立安全载体，右键弹 12 行代点原生微按钮）。写了 `Modules/Minimap/MicroMenuSecure.lua`
+（默认关 `microMenuSecure=false`），逐条实机验，**没跑通**，记录三条真实拦路石（上线后重做先读这段，别重趟）：
+
+1. **代点目标必须 `IsVisible`，而它住的 `MicroMenu` 正是我们要藏的**（架构级冲突，真凶）。
+   引擎 `HandleAttributeClick` 对 `type="click"` 有 `clickButton:IsVisible()` 守卫：目标不可见就什么都不做
+   （`/mui` 探针：`row.type=click`、`row.click=CharacterMicroButton`、行 shown/enabled 全对，但点了没反应）。
+   而 `CharacterMicroButton` 的父 `MicroMenu` 被 `hideMicroMenu`（默认 true）藏了 ⇒ `IsVisible=false`。
+   试过 `ensureVisible()`（建时 + Toggle 时 `MicroMenuContainer`/`MicroMenu` `Show()+SetAlpha(0)`，
+   IsVisible 只看 shown 不看 alpha）：探针实测 `MicroMenuContainer shown=true` 但 `MicroMenu shown=false` ——
+   我们的 `Show()` 被 `hideMicroMenu` 的静音逻辑**重新藏掉**（AGENTS 的"和暴雪 Show/Hide 拉锯"现场）。
+   ⇒ 上线后要么**不复用 MicroMenu**（另找一组常驻可见的触发件），要么让 `microMenuSecure` 开着时
+   `hideMicroMenu` 改成 alpha 0 而非 hidden，且解决拉锯（谁最后写谁赢）。
+
+2. **安全片段环境取不到暴雪帧**：片段里 `self:SetAttribute('click', CharacterMicroButton)`（裸名）和
+   `_G['CharacterMicroButton']` 两种写法回读都 `click=nil`（`MonetUISnippetProbe` 实测）。
+   ⇒ `click` 的帧引用只能 Lua 写；而 Lua 写的是脏值，**在 ForceTaint_Strong 开发者模式下没法干净验证引擎认不认**。
+
+3. **workshop 是 developer 模式 + ForceTaint_Strong**：`/run` 造的框被强制标脏，
+   `MonetUITestCarrier:Hide()` 报的是 `*** ForceTaint_Strong ***` 归属，不是 MonetUI。
+   ⇒ 今天所有 `/run` 可行性探针（含"脱战 SetPoint 落地"）都在脏环境里出的数，**不能当 A 可行/不可行的结论**。
+   上线后要在**非强污点**环境重测。
+
+已交付且能用的不受影响：4 行右键菜单（背包/地图/日历/设置）+ `SetWidth` 修好的弹框 + 肖像隐藏。
+载体代码留着（默认关、不参与右键），但**当前是坏的**（透明 + 点不开），上线后按上面三条重做或直接删。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 
