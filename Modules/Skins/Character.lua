@@ -23,7 +23,10 @@ local PAPERDOLL_PANEL = { panel = { bgAlpha = 0.96 }, deep = true, slotInfo = tr
 
 local INSPECT_TABS = { "InspectFrameTab1", "InspectFrameTab2" }
 
-local INSPECT_PANELS = { "InspectPaperDollFrame", "InspectPVPFrame", "InspectTalentFrame" }
+-- **11-05 实机（观察窗开过 + `/mui compat find Inspect` 走 17972 框）**：`InspectTalentFrame`
+-- 实名不存在（天赋在 1.60 折进独立系统，观察窗只剩装备 / PVP / 公会三页），而
+-- `InspectPaperDollFrame` / `InspectPVPFrame` 都在 ⇒ 摘掉这一条假点名（§8.40 ②）。
+local INSPECT_PANELS = { "InspectPaperDollFrame", "InspectPVPFrame" }
 
 -- 子面板的处理和窗口不同：不剥标题/关闭，只剥自己的原美术 + 挂底衬 + 扫直接子控件。
 -- 标签页内容（滚动条、上下箭头）是懒建的，`Dress` 默认会在显示时再扫一遍。
@@ -73,6 +76,6 @@ M:Panel("inspect", {
     frames = {
         "InspectFrame", "InspectFrameCloseButton",
         "InspectFrameTab1", "InspectFrameTab2",
-        "InspectPaperDollFrame", "InspectPVPFrame", "InspectTalentFrame",
+        "InspectPaperDollFrame", "InspectPVPFrame",
     },
 })
