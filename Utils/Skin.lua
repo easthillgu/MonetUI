@@ -1085,8 +1085,8 @@ end
 ---   ① `QuestFramePortrait` / `SocialUIFramePortrait` / `CharacterFramePortrait` 都是**贴图不是框**，
 ---      所以 `/mui compat find`（只枚举框）看不见它们，取用只能靠 `<窗口名>Portrait` 全局名或
 ---      `frame.Portrait` 成员；
----   ② 圆图本体是 atlas `RTPortrait1`（62×62），**方形靠裁，不靠拉伸**：那张圆图内切于画布，
----      裁到 `0.15..0.85` 正好是它的内接正方形 ⇒ 四角不留透明、也不会把脸拉扁。
+---   ② 圆图本体是 atlas `RTPortrait1`（62×62），**方形靠裁，不靠拉伸**：裁多少见下面 `PORTRAIT_CROP`
+---      的现场依据 —— 图集里的圆没占满画布，裁太松四角仍是透明。
 --- 越界才重锚：只有当贴图左/上沿跑到窗口外面（暴雪那圈金属边本来就往框外溢）才按窗口左上角收回来，
 --- 正常位置一律不动它 —— 免得把已经排好的窗口搞成第二次布局。
 function Skin:SquarePortrait(frame)
@@ -1102,8 +1102,60 @@ function Skin:SquarePortrait(frame)
     -- 但窗口一 Show，暴雪自己的 `SetPortraitTexture` 那类会把 texcoord 重置回 0..1、锚点也摆回越界位置。
     -- ⇒ 和箭头/滚动条同一族："会被暴雪重设的东西"必须每次显示重涂（`Widget:ShowWatch`，引擎自带幂等）。
     -- 闭包按对象存进旁表复用：ShowWatch 按引用去重，每次 Apply 现造闭包就会越挂越多。
+    -- 裁切档（11-05 作者选 C 的第一半）：`0.15` 的内接方框**切不掉圆图自带的留白** ——
+    -- 现场读数是两张肖像都已经 `tc=0.15..0.85 [已裁方]`，可视觉上仍是圆 ⇒ 图集里的圆没占满画布，
+    -- 四角还是透明，露出窗体底色，眼睛就读成"圆形"。收紧到 0.22。
+    local PORTRAIT_CROP = 0.22
+
+    -- C 的第二半：给肖像描一圈**1px 方框**。为什么不用我们的背板框（`NewBackdropFrame`）：
+    -- 肖像是**贴图**，不能挂子框 —— 任何子框都必然画在父框的贴图之上，会把脸盖掉。
+    -- 所以四条边直接做成**同一个父框的 region**，放在 `OVERLAY` 高 sublevel：
+    -- 压在圆图之上、只占 1px 边，不遮内容（和格子边框同一视觉权重）。
+    local function ensurePortraitRing(por)
+        if Marked(por, "portraitRing") then return end
+        local parent = por.GetParent and por:GetParent()
+        if type(parent) ~= "table" or type(parent.CreateTexture) ~= "function" then return end
+        local r, g, b = Color:GetBorder()
+        if not r then return end
+        local t = Media:Mult()
+        local ring = {}
+        local edges = {
+            { "BOTTOMLEFT", "TOPLEFT",   0,  t, "BOTTOMRIGHT", "TOPRIGHT",   0,  t, "h" },
+            { "TOPLEFT",    "BOTTOMLEFT", 0, -t, "TOPRIGHT",   "BOTTOMRIGHT", 0, -t, "h" },
+            { "TOPRIGHT",   "TOPLEFT",   -t,  t, "BOTTOMRIGHT", "BOTTOMLEFT", -t, -t, "v" },
+            { "TOPLEFT",    "TOPRIGHT",   t,  t, "BOTTOMLEFT",  "BOTTOMRIGHT", t, -t, "v" },
+        }
+        for _, e in ipairs(edges) do
+            local tex = parent:CreateTexture(nil, "OVERLAY", nil, 7)
+            tex:SetTexture(Media:Texture("monet_hairline"))
+            tex:SetVertexColor(r, g, b, 1)
+            tex:SetPoint(e[1], por, e[2], e[3], e[4])
+            tex:SetPoint(e[5], por, e[6], e[7], e[8])
+            if e[9] == "h" then
+                tex:SetHeight(t)
+            else
+                tex:SetWidth(t)
+            end
+            Mark(tex, "art", true)
+            ring[#ring + 1] = tex
+            self:Track(tex)
+        end
+        Mark(por, "portraitRing", true)
+        -- 换色时这一圈要跟着别的边框走；只注册一次（OnTheme 的回调表按肖像存，重复注册会攒）
+        if not Marked(por, "portraitRingTheme") then
+            Mark(por, "portraitRingTheme", true)
+            self:OnTheme(function()
+                local nr, ng, nb = Color:GetBorder()
+                if nr then
+                    for _, tex in ipairs(ring) do tex:SetVertexColor(nr, ng, nb, 1) end
+                end
+            end)
+        end
+    end
+
     local function applyOnce()
-        pcall(por.SetTexCoord, por, 0.15, 0.85, 0.15, 0.85)
+        pcall(por.SetTexCoord, por, PORTRAIT_CROP, 1 - PORTRAIT_CROP, PORTRAIT_CROP, 1 - PORTRAIT_CROP)
+        ensurePortraitRing(por)
 
         local okW, w = pcall(por.GetWidth, por)
         local okH, h = pcall(por.GetHeight, por)
