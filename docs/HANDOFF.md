@@ -4226,6 +4226,28 @@ WTF 文件里 `iconSize=34`/`UnitFrames=true`/`snapRange=6`/`alertSeconds=5` 等
 **没解决、也不属于本任务**：文件仍 ~400KB，大头是诊断账本（layerReport 1500 行等），那是故意落盘供
 从 WTF 读的，不是配置默认。要瘦身得单独动账本的落盘策略（另议）。
 
+## 8.53 2026-11-06 #35 / #29 完成 + #30 证伪放弃（错误静音在这客户端没有合规实现）
+
+**#35 差异写入（717266b）**：InfoBar `M:SetText` 文本没变整段跳（不重设/不重测宽/不重排），
+`UpdateShown` 可见性没变不 SetShown/不重排 —— 之前 UpdateBlock 每拍走 update(→SetText→Relayout)
++ UpdateShown(→Relayout)，等于每块两次无条件重排。实机验证 8 块显示正常、行为等价。
+**Cooldown / 共享驱动主动不做**：调度器 #1 每帧实测是 Tooltip PlaceTick（不在本任务范围），
+InfoBar 块本就事件驱动；Cooldown 是 taint 敏感区（AGENTS 警告别碰暴雪冷却框 OnUpdate/SetCooldown），
+为微小收益不值当引入拦截风险。
+
+**#29 XP 速率（8f0d8ca）**：Apply 里经验模式按事件采样 {t,xp} 到 5 分钟滚动窗口，
+速率 = 末-初 xp / 时间差；升级换级清样本（xp 归零否则算成负增益）。XP tooltip 加"速率 xx/分钟（近 N 分钟）"
++ "预计 xx 升下一级"（Math:DurationText）。速率<=0/跨度<30s 不显示；估时>1天省略。
+不做"还需几只怪"——每怪经验差异大不可靠，只给基于实测速率的时间估计。作者实机验过。
+
+**#30 放弃（证伪）**：任务原意"按 LE_GAME_ERR_* 类型静音错误、不 hook 帧"。实测：
+① 触发空动作键红字，UIErrorsFrame 显示了，但 `ChatFrame_AddMessageEventFilter("UI_ERROR_MESSAGE")`
+的过滤器 **0 调用** ⇒ 这客户端的 UIErrorsFrame（MessageFrame）不吃 chat 过滤器管线，
+错误多半是客户端直接 `AddMessage`、不发可被过滤的事件；
+② UIErrorsFrame **无官方回调口**（SetCallbackOnErrorFrame / RegisterCallback 全 nil），只有 AddMessage/Clear
+（要动=覆写方法槽，AGENTS 禁止）；③ 唯一不 hook 的"静音"是 SetAlpha(0)/Hide 全灭，不选择性、丢全部反馈。
+⇒ 没有合规实现，作者拍板放弃。**别重趟**（下次别把它当"没做的功能"补回来）。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 
