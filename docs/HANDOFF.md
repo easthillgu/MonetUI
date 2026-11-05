@@ -3848,6 +3848,54 @@ EnumerateFrames 扫 15908 个框，那个点上命中的 27 个里只有两个 M
 （`EnumerateFrames` 列不到我们的遮罩 → 命中区不在那儿；`GetParent():GetName()` 是别人的框 → 被搬走了），
 因为这类问题**不产生红字**，看日志会得出"没问题"的错误结论。
 
+## 8.40 2026-11-05 B 批：逐窗开过之后的 176 条缺失，分诊成三档（#41 的输入）
+
+**口径**：改代码要两样齐 —— ① 实机 `/mui compat find <片段>` 给的实名；② `/mui skins diagnose` 在**那个窗真开过**之后仍然报 ✗。
+只有其中一样 = 不动。
+（今晚我还试过用离线 `framexml-source` 按 game-type 分桶来批量定性，**那个脚本判错了**：
+桶的正则不认 Windows 反斜杠路径，`Camelot/` 与 `Mainline/` 全落进同一个桶，于是"加载面有"只剩 8 条、
+`QuestLogFrame` 这类"只在另一个变体里"的名字被归成"全无"。临时文件 `dead-audit.js` / `dead-audit2.txt` 已删，
+**不进仓、不当证据** —— 这类"跑得出数但桶分错了"的仪表比没有仪表更危险，见 `feedback-green-gates-must-cover-the-path`。）
+
+**总数**：`277 存在 / 176 缺失`（开窗前 253/177；开窗带出 +24 存在）。
+
+### ① 今晚就扫到实名 ⇒ 可以改名（8 条，三组）
+
+| 组 | 我们的死名 | 1.60 实名（`/mui compat find` 原文） |
+|---|---|---|
+| questlog | `QuestLogFrame` + `QuestLogDetailFrame` / `…DetailScrollFrame` / `FrameAbandonButton` / `FrameCancelButton` / `FrameTrackButton` / `FrameShareButton` / `QuestLogListScrollFrame`（12 条里 8 条有对应） | **`QuestLogPopupDetailFrame`** 一族：`…FrameAbandonButton` / `…FrameCloseButton` / `…FrameInset` / `…FrameScrollFrame` / `…FrameShareButton` / `…FrameTrackButton`（走 19040 个框，全 UI 只有这 9 个含 questlog） |
+| playerspells | `PlayerSpellsCloseButton`、`PlayerSpellsSearchBox`、`PlayerSpellsTab1..4` | `PlayerSpellsFrame`、**`PlayerSpellsFrameCloseButton`**、**`PlayerSpellsFrameClearButton`**（+ `PlayerSpellsMicroButton`）。`SpellBookFrame` 不存在（只有 `SpellbookMicroButton`）⇒ 这组的页签/搜索框属 ② |
+| chat | `ChatFrame1..4ScrollFrame`（4 条） | 全 UI 含 `chatframe1` 的 18 个实名里**没有** `…ScrollFrame`：聊天滚动条是运行期 `ScrollBar` 子件 ⇒ 正确动作是**摘掉点名**（面板已 `deep = true`，控件本来就被涂到了），不是改名 |
+
+### ② 架构档：那些控件在 1.60 根本没有全局名（约 90 条）⇒ 摘点名，不改名
+
+共同证据：`/mui compat find` 扫过、实名不存在，而窗口本体存在；控件是 `ScrollBox`(WowScrollBoxList) +
+`MinimalScrollBar` + `TabSystem` 这类**运行期子件**或 `parentKey`。今晚已经用过两次这个模式并且见效：
+`CharacterFrameTabIndicators`（改成只点容器 + 深扫）与 friends（摘 5 条点名 + `SocialUIFrame` 深扫），
+两组台账都从 ✗ 变成"0 缺失"。
+
+| 组 | 条数 | 1.60 的真实形态 |
+|---|---|---|
+| editmode 各对话框按钮 | 10 | 按钮是对话框框体的 `parentKey` 子件，无全局名 |
+| collections 筛选/搜索/第 6 页签 | 9 | `TabSystemTemplate` + 无名 `SearchEditBox`；`CampsitesJournal` 本客户端无 |
+| guild 名册滚动 ×9 | 9 | 名册在 `SocialUIFrame` 内，`GuildFrame` 整个不存在（实名只有 `GuildControlUI*`、`Communities*`） |
+| questframe / gossip 文本与按钮 | 12+8 | `QuestDetailText` 一类是 `FontString`（不是框），`GossipGreetingButton1..8` 是运行期建的 |
+| mail 翻页/滚动/按钮 | 8 | 现代邮箱用 `MailFrame` 内的 `ScrollBox`，无 `MailListScrollFrame`/翻页键 |
+| achievements 容器/筛选/搜索 | 4 | `AchievementFrame` 存在，子件走 `TabSystem`/`HyperText` |
+| merchant / loot | 4 / 4 | 需要 NPC 与真实掉落才能判，暂列 ③ 也可以（商人那四个键 1.60 改名成 `MerchantFrame` 的 parentKey） |
+| colorpicker | 4 | 取色窗的 okay/cancel 只有开窗后才建；`/mui compat find ColorPicker` 只回 `ColorPickerFrame` + `ColorPickerSoftCursor` ⇒ 待开取色窗再判 |
+| legacy 两页 / macros 两编辑框 / flightmap / addonlist | 2/2/2/6 | 都是 `parentKey` 或共用控件名（`FlightMapFrame.CloseButton` ⇒ 该写点路径 `FlightMapFrame.CloseButton`，我们已经支持点路径） |
+
+⇒ **这一档的动作 = 从面板 `frames` 名单里摘掉点名**（保留窗口名与 `Window.Key` 点路径），
+让台账从 176 降到能真正指导改动的量级；摘的时候逐组确认 `deep = true` 覆盖到了控件，
+否则就是丢覆盖（AGENTS：名单里有名字而代码没取用路径 = 缺陷，反之"有路径但名字不存在"是噪声）。
+
+### ③ 还不能判：窗口/包根本没加载过（34 条）
+
+`auction`(17) / `trainer`(4) / `inspect`(6) / `socket`(3) / `transmog`(2) / `craftorders`(2) / `calendar`(3) ——
+父框 `0 存在`，LoD 没载或本等级用不到（2 级号开不了拍卖/训练师/打孔/幻化）。
+`bank` 的 `WarbandBankFrame` 是**预期不存在**（§8.34 已记），不算缺失。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 
