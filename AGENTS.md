@@ -175,6 +175,16 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
 `attempt to compare ... (a secret number value, while execution tainted by 'MonetUI')`。
 它们几乎都不是"那行代码写错了"，而是**我们把暴雪的受保护对象标脏了**。
 
+- **我们的"收鼠标"层不要做成暴雪小地图的子框**（2026-11-05 开服判例，症状是"整个小地图交互没反应且零报错"）：
+  同机 `RurutiaSuite/Modules/MinimapCollector` 按 `_G.Minimap` 的**子树**收养"小地图按钮"
+  （命中的做 `SetParent(panel)` + `SetSize` + `ClearAllPoints`，`Core.lua:373/390/404`），
+  我们的遮罩 `MonetUIMinimapOverlay` 因为正是 Minimap 的孩子被搬走，实测变成
+  `[0,0 0x0] parent=RurutiaSuiteMinimapCollector` ⇒ 右键微型菜单、滚轮缩放、悬停区域名**三条一起哑**，
+  而日志里一条错误都没有。做法：交互层挂**我们自己的容器**（`MonetUIMinimapHolder`），
+  锚点仍然相对 `Minimap`（跨父锚定对普通框没有限制，几何完全等价），并在每次排版时比较一次
+  `GetParent()`、不对就 `SetParent` 拉回来。
+  **报障判据两件套**：`EnumerateFrames` 在小地图那个点上列不到我们的遮罩（说明命中区不在那儿），
+  再加 `frame:GetParent():GetName()`（说明它被人搬走了）—— 别看"插件有没有红字"，这类问题不产生红字。
 - **绝不往暴雪的框体 / 贴图 / 字体串上写字段**（`frame.__monetXxx = ...`）。本客户端按"键"判污染：
   写过一次，这个对象之后跑的暴雪代码全部以我们的名义执行。一律走 `ns:Mark(obj, key, value)` /
   `ns:Marked(obj, key)`（Core.lua，**以对象为弱键的旁表**），我们自己的框体也一样处理，省得判断。

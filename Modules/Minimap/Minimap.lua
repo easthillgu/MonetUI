@@ -539,8 +539,17 @@ local OpenTrackingMenu
 ---   * 右键 —— 弹微型菜单；
 ---   * 鼠标移动 —— 透传给地图，地图自己的悬停效果照旧。
 local function EnsureBlocker(minimap)
+    -- ⚠ 11-05 开服实测：这层遮罩原来是 `Minimap` 的**子框**，于是被同机的
+    --   `RurutiaSuite/Modules/MinimapCollector/Core.lua` 当成"小地图按钮"收走了 —— 它取
+    --   `_G.Minimap` 的子树、按白名单过滤（`Adapter:CanCollect`），命中的做
+    --   `SetParent(panel)` + `SetSize` + `ClearAllPoints`（Core.lua:373/390/404）。
+    --   后果实测：`MonetUIMinimapOverlay` 变成 `[0,0 0x0] parent=RurutiaSuiteMinimapCollector`，
+    --   `EnumerateFrames` 在小地图上看不到它，右键/滚轮/悬停三条全哑（玩家眼里就是"插件没反应"）。
+    --   ⇒ 父级改挂**我们自己的 holder**，锚点照旧相对 `minimap`（几何完全等价，跨父锚定不受保护限制）；
+    --   它按 `Minimap` 的子树遍历，我们从此不在候选里 = 一次搬家永久躲开，不产生拉锯。
+    local parent = holder or minimap
     if not blocker then
-        blocker = CreateFrame("Frame", "MonetUIMinimapOverlay", minimap)
+        blocker = CreateFrame("Frame", "MonetUIMinimapOverlay", parent)
         blocker:SetFrameLevel(minimap:GetFrameLevel() + 10)
         blocker:SetPropagateMouseMotion(true)
         blocker:EnableMouse(true)
@@ -571,6 +580,9 @@ local function EnsureBlocker(minimap)
         blocker:HookScript("OnLeave", function() SetZoneTextVisible(false) end) -- TAINT-OK: 同上
     end
     blocker:ClearAllPoints()
+    -- 每次排版都先验一次父级：被第三方收纳器搬走时（实测 RurutiaSuite）自己拉回来。
+    -- 只在父级真的不对时才 SetParent，正常路径就是一次 GetParent 比较。
+    if blocker:GetParent() ~= parent then blocker:SetParent(parent) end
     -- 画布上下各有一条被裁掉的带子，覆盖层只铺**可见区**（落在那儿的位置地图上并不显示）。
     -- 偏移的符号：SetPoint 的 y 正值是**向上**。可见带是画布从上往下 33..223 行，
     -- 所以顶边要往下 33（-33）、底边要往上 33（+33）。原来两个符号都写反了，

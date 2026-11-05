@@ -3818,6 +3818,36 @@ TextStatusBar.lua:110 attempt to compare a secret number value (execution tainte
 三次失败（抠脚本自调 / 本体做安全框 / 接住器传染）都写进探针头注。
 **harness 不派微菜单阶段** ⇒ 这条路径的证据只有探针 + `/mui minimap menu` 实机读数两样。
 
+## 8.39 2026-11-05 §8.38 那个洞补上了：遮罩被同机收纳器搬走，命中区塌成 0×0（零报错）
+
+作者报障后我按 §8.38 里定的下一步做了一次**悬停读数**（光标放在小地图上、不点）：
+
+```
+EnumerateFrames 扫 15908 个框，那个点上命中的 27 个里只有两个 M（收鼠标）：
+  19) Minimap @LOW/2 M          ← 暴雪的地图本体
+  （MonetUIMinimapOverlay 根本不在清单里）
+矩形实测：
+  MonetUIMinimapOverlay  [0,0 0x0]      shown=true  parent=RurutiaSuiteMinimapCollector
+  Minimap                [1842,0 256x256]           parent=MonetUIMinimapHolder
+  MonetUIMinimapHolder   [0,0 0x0]
+  MonetUIMinimapPanel    [1840,31 260x194]
+```
+
+**真因**（读 `RurutiaSuite/Modules/MinimapCollector/Core.lua` 实证，只读）：它按 `_G.Minimap` 的
+**子树**递归遍历（`Core.lua:169-171`），逐个过白名单 `Adapter:CanCollect`（`:373`），
+命中的就 `SetParent(panel)` + `SetSize/SetScale` + `ClearAllPoints` + 重新锚到自己的面板（`:390/404`）。
+我们的遮罩因为正是 `Minimap` 的孩子 ⇒ 被当成"一个没认出来的小地图按钮"收走了，
+于是命中区塌成 **0×0 在屏幕原点**：右键微型菜单、滚轮缩放、悬停区域名**三条一起哑**，
+而且**零红字、零 BLOCKED**（§8.38 里那两条机制记录仍然成立，但都不是本例原因）。
+
+**修法（作者选 A）**：`Modules/Minimap/Minimap.lua` 的 `EnsureBlocker` ——
+遮罩父级从 `minimap` 改成**我们自己的 `holder`**，锚点照旧相对 `minimap`
+（跨父锚定对普通框没限制，几何完全等价）；它按 Minimap 子树遍历，我们从此不在候选里 = **一次搬家永久躲开，不拉锯**。
+另加一行兜底：每次排版比一次 `blocker:GetParent() ~= parent`，不对就 `SetParent` 拉回来
+（正常路径只是一次比较）。AGENTS 同步加一条硬规矩 + **报障判据两件套**
+（`EnumerateFrames` 列不到我们的遮罩 → 命中区不在那儿；`GetParent():GetName()` 是别人的框 → 被搬走了），
+因为这类问题**不产生红字**，看日志会得出"没问题"的错误结论。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 
