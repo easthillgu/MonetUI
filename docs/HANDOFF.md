@@ -3677,6 +3677,46 @@ GameRule 18 条里 16 条未生效 ⇒ **§8.13.6 那句"这台服务器没关�
 C 组 = `target` 与 `luaAction` 互斥、两者都无 ⇒ 不建行、[受限] API 前面必须有 `ns:IsRestricted()` 门。
 **为什么不能拿 `run.js red=0` 当这条的证据**：`grep MicroMenu tools/harness/run.lua` = 0 命中，harness 根本不派微菜单阶段（A 批的 friends/character 那几路**是**被 `Skins:ApplyAll` 驱动的， micromenu 那一路只由这条探针 + 实机覆盖）。
 
+## 8.36 2026-11-05 开服第 2 条 P0：信息栏"点一格开一个面板"把暴雪 Lua 面板链拉进我们的执行环境
+
+作者按 A 批复验台账时，日志里先冒出来的是这一条（不是皮肤）。**完整栈（id 1441，1.60.1 build 70790）**：
+
+```
+TextStatusBar.lua:110 attempt to compare a secret number value (execution tainted by 'MonetUI')
+ ← ShowStatusBarText ← CharacterFrame.lua:729 ← [Camelot]CharacterFrame.lua:25
+ ← [C]:ShowUIPanel ← UIParentPanelManager.lua:900/335/498 ← SetUIPanel
+ ← [C]:pcall
+ ← MonetUI/Modules/InfoBar/InfoBar.lua:255 in function 'OpenPanel'
+ ← MonetUI/Modules/InfoBar/Blocks.lua:78            ← 玩家点了一下金钱数字
+```
+
+**根因一句话**：`M:OpenPanel(globalName)` 按名字取**暴雪的 FrameXML 全局**（`ToggleCharacter` /
+`ToggleTalentFrame` / `ToggleFriends` / `ToggleQuestLog`）再 `pcall` 调用它。这和微菜单那条 P0
+（`4a458d1`）**同型**，只是换了一个模块——AGENTS 已经写了"暴雪 Lua 全局一律不碰"，我修微菜单时
+只改了那一处，没有把同一条禁令扫遍全仓（`grep -rn "OpenPanel"` 当时不在我的清单上）。
+后面 8 条 `ADDON_ACTION_BLOCKED MonetUI UNKNOWN()`（id 1502/1512，`/mui blocks` 账本为空）
+**高度可疑是同一条脏链的下游**（机密值测试以我们的名义被拦），但这条要复验后才能算结论。
+
+**修法（和安全按钮那一套完全一致）**：`secureClick = <暴雪那颗微按钮的实名>`，格子内造一层
+`SecureActionButtonTemplate` 接住器，`type="click"` + `click=那颗按钮`，由客户端在受限环境里代点。
+四个目标全部有实名证据（§8.35 的 17 个命中）：金钱格 / 耐久格 → `CharacterMicroButton`、
+专精格 → `TalentMicroButton`、好友格 → `GuildMicroButton`、任务格 → `QuestLogMicroButton`。
+`M:OpenPanel` 整个函数删除（留着就是"通用入口"，下一个人一定用它）。
+
+**第一版又踩了一个新坑，而且是 harness 抓的（66 条红）**：我直接把**格子本体**做成
+`SecureActionButtonTemplate`。结果 `Relayout` 每拍在格子上 `ClearAllPoints/SetPoint`
+（`InfoBar.lua:287`）变成"对安全框做受保护布局写入"，`restricted:Combat` ×10 + `restricted:Encounter` ×56。
+⇒ 正解是**两层**：格子本体保持普通 `BackdropTemplate`（布局随便写），上面盖一层安全接住器，
+只在造框那一刻 `SetAllPoints(frame)` 一次，之后排版不再碰它。**顺带的第二个坑**：接住器压住格子以后
+鼠标归它，`OnEnter/OnLeave` 再挂本体就永远不触发（提示框会整个消失）⇒ 悬停挂到真正收鼠标的那一层。
+
+**这两条都是"离线闸门这次真驱动到了"的样本**（对照 §8.34 那条"harness 不派微菜单阶段"）：
+信息栏在 harness 里有 `alpha[restricted:*]` 阶段，所以改错了当场红。新增闸门
+`node tools/infobar-secure-click-probe.js`（14 项）钉三组：A = `OpenPanel` 不存在 +
+两个文件里 12 个暴雪 Lua 全局零出现；B = 本体必须普通框 / 接住器一次 `SetAllPoints` /
+有目标时不挂我们自己的 `OnClick` / 悬停挂在收鼠标的那层；C = 五个目标都在 1.60 实名集合里，
+且查找过 `Skin:Need`（缺席 ⇒ 账本一行 ✗，不是静默）。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 

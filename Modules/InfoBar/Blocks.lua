@@ -73,11 +73,7 @@ M:RegisterBlock({
     events   = { "PLAYER_ENTERING_WORLD", "PLAYER_MONEY" },
     update   = GoldUpdate,
     tooltip  = GoldTooltip,
-    onClick  = function(_, button)
-        if button == "LeftButton" then
-            M:OpenPanel("ToggleCharacter", "PaperDollFrame")
-        end
-    end,
+    secureClick = "CharacterMicroButton",
 })
 
 -- 1.60 客户端的耐久 API 只支持背包物品：C_Container.GetContainerItemDurability(containerIndex, slotIndex)
@@ -138,11 +134,7 @@ M:RegisterBlock({
     events   = { "UPDATE_INVENTORY_DURABILITY", "PLAYER_ENTERING_WORLD" },
     update   = DurabilityUpdate,
     tooltip  = DurabilityTooltip,
-    onClick  = function(_, button)
-        if button == "LeftButton" then
-            M:OpenPanel("ToggleCharacter", "PaperDollFrame")
-        end
-    end,
+    secureClick = "CharacterMicroButton",
 })
 
 -- Retail's "watched" flag has no equivalent here; `isShowInBackpack` (the currency shown beside the gold in the bag bar) is the closest and is used instead.
@@ -409,11 +401,7 @@ M:RegisterBlock({
     events   = { "ACTIVE_TALENT_GROUP_CHANGED", "PLAYER_ENTERING_WORLD" },
     update   = SpecUpdate,
     tooltip  = SpecTooltip,
-    onClick  = function(_, button)
-        if button == "LeftButton" then
-            M:OpenPanel("ToggleTalentFrame")
-        end
-    end,
+    secureClick = "TalentMicroButton",
 })
 
 local function FriendsUpdate(block)
@@ -450,11 +438,7 @@ M:RegisterBlock({
     events   = { "FRIENDLIST_UPDATE", "PLAYER_ENTERING_WORLD" },
     update   = FriendsUpdate,
     tooltip  = FriendsTooltip,
-    onClick  = function(_, button)
-        if button == "LeftButton" then
-            M:OpenPanel("ToggleFriends")
-        end
-    end,
+    secureClick = "GuildMicroButton",
 })
 
 -- =========================================================================
@@ -517,11 +501,7 @@ M:RegisterBlock({
     events   = { "QUEST_LOG_UPDATE", "PLAYER_ENTERING_WORLD" },
     update   = QuestUpdate,
     tooltip  = QuestTooltip,
-    onClick  = function(_, button)
-        if button == "LeftButton" then
-            M:OpenPanel("ToggleQuestLog")
-        end
-    end,
+    secureClick = "QuestLogMicroButton",
 })
 
 -- =========================================================================

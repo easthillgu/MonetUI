@@ -247,15 +247,11 @@ function M:HideTooltip()
 end
 
 --- Run a Blizzard panel opener by *name*.  These FrameXML globals are not in this client's API manual, so look them up defensively (a wrong name shows via `/mui infobar diagnose`).
-function M:OpenPanel(globalName, ...)
-    local fn = _G[globalName]
-    if type(fn) ~= "function" then return false end
-    local combat = _G.InCombatLockdown
-    if type(combat) == "function" and combat() then return false end
-    local ok = pcall(fn, ...)
-    if not ok then ns:Print("无法打开 " .. tostring(globalName) .. "（本客户端可能没有这个函数）") end
-    return ok
-end
+---
+--- **已删除**（11-05 开服 P0）：这条路径本身就是"在我们的 Lua 里调暴雪的 FrameXML 全局"，
+--- 栈会一路跑到 `TextStatusBar.lua:110` 的机密值比较并按 MonetUI 的名义记账。
+--- 现在只有一个出口：块注册时给 `secureClick = <暴雪那颗微按钮的实名>`，
+--- 由客户端在受限环境里代点（见 `BuildBlockFrame` 上方那段注释）。
 
 --- Fit a block to its text; an empty block is hidden instead of left as a hollow gap, so a missing API costs one number, not a stripe of the bar.
 function M:SetText(block, text)
@@ -332,7 +328,8 @@ local function UpdateShown(block)
 end
 
 --- Record a block's spec; frames are built later in `M:Build` because blocks register at file load while the bar only exists at login.
--- @param spec { key, label, position="LEFT"|"RIGHT", update, tooltip, onClick, onUpdate }
+-- @param spec { key, label, position="LEFT"|"RIGHT", update, tooltip, secureClick, onClick, onUpdate }
+--   `secureClick` = 要安全转发的暴雪微按钮**实名**（唯一合法的面板打开方式）；有它就不看 `onClick`。
 function M:RegisterBlock(spec)
     if type(spec) ~= "table" or type(spec.key) ~= "string" then return nil end
     for i = 1, #blocks do
@@ -406,35 +403,75 @@ function M:RemoveDecorations()
     end
 end
 
+--- 这一格能不能"点开某个暴雪面板"，只有一个合法出口：**把点击安全转发给暴雪自己的那颗微按钮**。
+---
+--- ⚠ 11-05 开服实机判例（日志 id 1441 有完整栈）：以前这里是 `M:OpenPanel("ToggleCharacter", …)`，
+--- 也就是**在我们的 Lua 里调用暴雪的 FrameXML 全局**。栈一路走到
+--- `CharacterFrame.lua:729 → TextStatusBar.lua:110` 的机密值比较，整段以 MonetUI 的名义执行，
+--- 玩家点一下金钱数字就吃一条红 —— 和微菜单那条 P0 同型（AGENTS「绝不直调暴雪 Lua 全局」）。
+--- `OpenPanel` 整个函数已删除，别再把它当"备用开关"加回来。
+---
+--- 目标缺席（本客户端没有那颗按钮）就**不转发**：这一格还是能悬停看数字，只是点了没面板 ——
+--- 少一个功能远好于刷一屏拦截。缺席会由 `ns.Skin:Need` 记成账本里的一行 ✗，不是静默。
+local function SecureClickTarget(block)
+    local name = block.secureClick
+    if not name then return nil end
+    local target = ns.Skin and ns.Skin:Need(name) or _G[name]
+    if target and type(target.GetName) == "function" then return target end
+    return nil
+end
+
 local function BuildBlockFrame(block)
     if block.frame or not bar then return end
 
+    local target = SecureClickTarget(block)
+    -- 格子本体**永远是普通按钮**：`Relayout` 每拍都要在它身上 ClearAllPoints / SetPoint。
+    -- ⚠ 第一次把它本身做成 SecureActionButtonTemplate 时，harness 当场出 **66 条红**
+    -- （`InfoBar.lua:287 :ClearAllPoints() ← 判据 文档 fl.pm（ScriptRegionResizing）`，
+    -- 阶段 restricted:Combat / restricted:Encounter）—— 安全框的布局写入是受保护的，
+    -- 受限窗口里每排一次就被拒一次。正解：格子上盖一层安全接住器，只在造框那一刻
+    -- `SetAllPoints(frame)` 一次，之后格子怎么挪都不碰它，写入全部留在普通框上。
     local frame = CreateFrame("Button", nil, bar, "BackdropTemplate")
     frame:SetHeight(bar:GetHeight())
     frame:EnableMouse(true)
     -- Borderless so the strip reads as one surface; Theme still registers it so a border-colour change follows.
     Widget:Theme(frame, { thickness = 1, bgAlpha = 0, borderAlpha = 0 })
 
-    frame:SetScript("OnEnter", function(self)
+    local hover = frame
+    if target then
+        local catcher = CreateFrame("Button", nil, frame, "SecureActionButtonTemplate")
+        catcher:SetAllPoints(frame)
+        catcher:EnableMouse(true)
+        catcher:RegisterForClicks("LeftButtonUp")
+        -- 安全按钮的 OnClick 归客户端的执行片段，这里**不挂我们自己的 Lua 回调**
+        -- （挂了就是"两个动作源"，且把暴雪的面板链拉进我们的上下文 —— 正是 id 1441 那条栈）。
+        pcall(catcher.SetAttribute, catcher, "type", "click")
+        pcall(catcher.SetAttribute, catcher, "click", target)
+        -- 接住器压在格子上，鼠标归它；悬停/离开要挂在它身上才收得到（回填色仍写格子本体）。
+        hover = catcher
+        block.catcher = catcher
+    end
+
+    hover:SetScript("OnEnter", function()
         -- Counted first: the fade must survive the hand-off between two blocks.
         OnEnter()
         local r, g, b = Color:GetAmbient()
-        if self.SetBackdropColor then
-            self:SetBackdropColor(r * 0.35, g * 0.35, b * 0.35, 0.25)
+        if frame.SetBackdropColor then
+            frame:SetBackdropColor(r * 0.35, g * 0.35, b * 0.35, 0.25)
         end
-        M:ShowTooltip(self)
+        M:ShowTooltip(frame)
         if block.tooltip then pcall(block.tooltip, block) end
         local tip = _G.GameTooltip
         if tip then pcall(tip.Show, tip) end
     end)
 
-    frame:SetScript("OnLeave", function(self)
+    hover:SetScript("OnLeave", function()
         OnLeave()
-        if self.SetBackdropColor then self:SetBackdropColor(0, 0, 0, 0) end
+        if frame.SetBackdropColor then frame:SetBackdropColor(0, 0, 0, 0) end
         M:HideTooltip()
     end)
 
-    if block.onClick then
+    if not target and block.onClick then
         frame:SetScript("OnClick", function(_, mouseButton)
             pcall(block.onClick, block, mouseButton)
         end)
@@ -664,7 +701,8 @@ function M:SetEnabled(enabled)
     end
 end
 
--- Every function this module calls; absent names are a report, not an error -- missing APIs simply mean the matching block stays empty.
+-- 每格的数据源 + 安全转发目标。缺名字是一份报告，不是错误 —— 数据源缺 ⇒ 那一格留空；
+-- 转发目标缺 ⇒ 那一格点了没面板（**绝不会**退回"直接调暴雪 Lua 全局"，见 `SecureClickTarget`）。
 local PROBED = {
     "GetMoney", "GetFramerate", "GetNetStats",
     "C_AddOns.GetNumAddOns", "C_AddOns.GetAddOnName",
@@ -677,7 +715,7 @@ local PROBED = {
     "UnitClass", "InCombatLockdown",
     "UnitXP", "UnitXPMax", "GetXPExhaustion",
     "IsXPUserDisabled", "GetMaxLevelForPlayerExpansion", "BreakUpLargeNumbers",
-    "ToggleCharacter", "ToggleFriends", "ToggleTalentFrame",
+    "CharacterMicroButton", "GuildMicroButton", "TalentMicroButton", "QuestLogMicroButton",
 }
 
 function M:Diagnose()
