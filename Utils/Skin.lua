@@ -955,7 +955,20 @@ function Skin:Stepper(button)
     local tex = button.Texture
     if not tex or type(tex.SetAlpha) ~= "function" then return false end
     if self:TexOf(button, "GetNormalTexture") then return false end
+    -- 方向键有**两个来源**（11-05 实测）：老写法把它存成 Lua 字段（`button.upTexture`），
+    -- 而 `CharacterStatsPaneScrollBox` / `ChatFrame1` 那批 MinimalScrollBar 只把它存在
+    -- **安全属性**上（`frame:GetAttribute("upTexture")`）—— 字段读不到 ⇒ 旧版在这里返回 false，
+    -- 于是原图被通用档压成 α0、V 形却没放上去（`arrows` 探针的"无我们的图"就是这一批）。
     local key = button.upTexture or button.normalTexture
+    if type(key) ~= "string" and type(button.GetAttribute) == "function" then
+        for _, attr in ipairs({ "upTexture", "normalTexture", "downTexture" }) do
+            local okA, v = pcall(button.GetAttribute, button, attr)
+            if okA and type(v) == "string" and v ~= "" and Secrets.CanRead(v) then
+                key = v
+                break
+            end
+        end
+    end
     local dir = key and STEPPER_ATLAS_DIR[key]
     if not dir then return false end
 
