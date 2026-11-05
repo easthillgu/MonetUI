@@ -290,11 +290,21 @@ local FADE_PROF_ATLAS = {
     "professions%-qualitybar%-frame",
     -- 分类头的金色条（所有分类都显示，是装饰不是选中态 → 剥掉，留文字）
     "common%-button%-list%-collapseexpand",
+    -- 左侧职业分类页签的底/悬停/遮罩（选中态在 SWAP 里换色，不剥）
+    "common%-sidetab$",
+    "common%-sidetab%-hover",
+    "common%-sidetab%-mask",
+    -- 右侧详情面板：材料槽框 / 结果槽框 / 重制槽框 / 分隔线（纯装饰，槽里的图标是数字 ID 不受影响）
+    "professions%-slot%-frame",
+    "professions%-choicereagent%-frame",
+    "professions%-recrafting%-frame%-item",
+    "professions%-qualitypane%-divider",
 }
 local SWAP_PROF_ATLAS = {
     -- 金色选中态 → 换成我们的 barfill + 边框色（压没会丢选中反馈，所以是换不是剥）
     "professions%-recipe%-active",
     "common%-sidetab%-selected",
+    "professions%-recipe%-hover",
 }
 
 -- 模块级稳定引用：PollWatch 按引用去重，在 Apply 里现造闭包会每开一次窗多挂一条。
