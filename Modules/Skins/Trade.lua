@@ -342,9 +342,10 @@ local function SkinProfessions()
     -- 侧页签 `common-sidetab` / 配方行 `common-button-list` / `professions_recipe_hover` 都挂在
     -- 嵌套子帧上（默认 deep 只扫直接子件够不到）。补 portrait，并把行扫描深度开到 4
     -- （和社交窗同一手法：那些是按钮，够到了就走我们的按钮档）。
+    -- 11-05 作者实测"背板尺寸不到边"（A 方案）：去掉 `inset` —— 专业窗自带复杂多面板布局，
+    -- 我们再叠一层内缩凹槽反而和它打架、把"不到边"放大。只留 frame 背板铺满 + deep + portrait。
     M:Dress("ProfessionsFrame", {
         window = true,
-        inset = true,
         panel = { bgAlpha = 0.96 },
         deep = true,
         deepRows = 4,
