@@ -216,6 +216,27 @@ local function SectionAddons()
     return { ("同机插件 %d 个（除本插件）："):format(#list) }, list, lines
 end
 
+--- 共存归因（#28）：扫 Coexist 注册表，报"我们的哪个表面被别的插件接管了 + 接管者是谁"。
+--- 只读检测（Coexist 不改任何模块状态）；没被接管的表面不占行，全干净就出一行"无"。
+local function SectionCoexist()
+    if type(ns.Coexist) ~= "table" or type(ns.Coexist.Scan) ~= "function" then
+        return { "共存归因：Coexist 不可用" }, {}
+    end
+    local lines, contested = {}, {}
+    for _, e in ipairs(ns.Coexist:Scan()) do
+        if e.contested then
+            local taker = Text(e.taker) or UNKNOWN
+            lines[#lines + 1] = ("⚠ %s 被接管 → 归因父框/接管者 [%s]（%s）"):format(
+                Text(e.key) or "?", taker, Text(e.note) or "")
+            contested[#contested + 1] = { key = e.key, taker = taker }
+        end
+    end
+    if #lines == 0 then
+        return { "共存归因：所有登记表面都在我们手里（无接管）" }, contested
+    end
+    return lines, contested
+end
+
 -- ---------------------------------------------------------------- 模块本体
 
 local M = { name = "Report" }
@@ -241,6 +262,8 @@ function M:Build()
     local head, addonList, addonLines = SectionAddons()
     for _, line in ipairs(addonLines or {}) do head[#head + 1] = line end
     add("同机插件", head, { key = "addons", value = addonList })
+    local coexistLines, contested = SectionCoexist()
+    add("共存归因", coexistLines, { key = "contestedSurfaces", value = contested })
     return lines, detail
 end
 

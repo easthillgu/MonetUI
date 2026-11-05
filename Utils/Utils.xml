@@ -18,4 +18,6 @@
          必须在 Skin.lua 之后（它往 Skin 上挂方法）。 -->
     <Script file="SkinTemplates.lua"/>
     <Script file="Compat.lua"/>
+    <!-- Coexist 只在运行期被模块/报告调用（加载期一个接口都不碰），放最后。 -->
+    <Script file="Coexist.lua"/>
 </Ui>

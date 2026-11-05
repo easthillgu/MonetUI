@@ -1058,6 +1058,24 @@ function Skin()
 end
 
 function M:Initialize()
+    -- 共存归因登记（#28）：我们的交互遮罩 MonetUIMinimapOverlay 本该挂在 MonetUIMinimapHolder 上。
+    -- 若被别的插件 SetParent 搬走（开服日实测 RurutiaSuite 的 MinimapCollector 就这么干），
+    -- 命中区被搬成 0×0、三条交互一起哑且零报错。检测器只读父级名，不改任何东西。
+    if ns.Coexist then
+        ns.Coexist:Own("minimapOverlay", {
+            surface = "MonetUIMinimapOverlay",
+            note = "小地图交互遮罩（右键菜单/滚轮缩放/悬停区域名的命中区）",
+            detect = function(obj)
+                if not obj or type(obj.GetParent) ~= "function" then return false end
+                local par = obj:GetParent()
+                local want = holder or _G.MonetUIMinimapHolder
+                if not par or par == want then return false end
+                local okName, nm = pcall(par.GetName, par)
+                return true, (okName and nm) and nm or "(匿名父框)"
+            end,
+        })
+    end
+
     -- 暴雪在换区域时会重排集群，皮肤要跟着重做。
     EventBus:Register("PLAYER_ENTERING_WORLD",   function() Skin() end)
     EventBus:Register("ZONE_CHANGED_NEW_AREA",   function() Skin() end)
