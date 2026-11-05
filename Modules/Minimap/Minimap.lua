@@ -574,7 +574,12 @@ local function EnsureBlocker(minimap)
             if button ~= "RightButton" then return end
             -- 停在按钮上时不弹菜单（暴雪按钮自己要用这个键）
             if M.buttons and M.buttons:IsOverButton() then return end
-            if M.microMenu and Settings().microMenu then M.microMenu:Toggle(M.panel) end
+            -- #43：开着全量安全载体就用它（12 行代点原生微按钮），否则用 4 行纯 C_* 菜单。
+            if M.microMenuSecure and Settings().microMenuSecure then
+                M.microMenuSecure:Toggle()
+            elseif M.microMenu and Settings().microMenu then
+                M.microMenu:Toggle(M.panel)
+            end
         end)
         -- 区域名：悬停小地图才显示，平时藏起来
         blocker:HookScript("OnEnter", function() SetZoneTextVisible(true) end) -- TAINT-OK: blocker 是自建小地图遮罩
@@ -1009,6 +1014,7 @@ function Restore()
     -- 被我们压掉的第三方 pin（遮罩档的带子裁剪）放回去
     if M.pins then M.pins:Restore() end
     if M.microMenu then M.microMenu:Close() end
+    if M.microMenuSecure then M.microMenuSecure:Close() end
 
     if failed then
         Queue("restore")
@@ -1141,6 +1147,17 @@ function M:HandleCommand(rest)
                 tostring(okOver and over), tostring(okEn and en)))
         else
             ns:Print("遮罩 MonetUIMinimapOverlay 不存在 ⇒ 右键小地图不会走到微菜单（小地图接管没开或还没建）。")
+        end
+        return true
+    end
+
+    -- `/mui minimap securemenu`：#43 全量安全载体的现场判据（能不能建 / 受不受保护 / 此刻能不能开）。
+    if rest == "securemenu" then
+        local mm = self.microMenuSecure
+        if type(mm) == "table" and type(mm.Probe) == "function" then
+            mm:Probe(Settings().microMenuSecure)
+        else
+            ns:Print("安全载体对象不在：MicroMenuSecure.lua 没加载，或它没挂到 Minimap 模块上。")
         end
         return true
     end

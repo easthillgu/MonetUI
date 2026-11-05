@@ -750,6 +750,9 @@ function SimpleConfig:Build()
         MakeCheckbox(content, "右键小地图弹出微型游戏菜单", row(28),
             MapSetting("microMenu"), MapSetter("microMenu"))
 
+        MakeCheckbox(content, "微型菜单改全量安全载体（12 行代点原生按钮·实验，默认关）", row(28),
+            MapSetting("microMenuSecure"), MapSetter("microMenuSecure"))
+
         -- 地图形状只有一套（正方画布 + 遮罩裁带），不再提供切换
 
         -- 地图内的三个独立按钮（3:4 矩形图标）

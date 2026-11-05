@@ -216,6 +216,7 @@ local DEFAULTS = {
         mapDifficulty  = true, -- 难度（左上）
         mapCompartment = true, -- 插件收纳（右上）
         microMenu      = true, -- 右键小地图弹出微型游戏菜单
+        microMenuSecure = false, -- #43 全量安全载体（12 行代点原生微按钮）；默认关，作者实机验后再开
         hideZoneText    = true,
         hideCoords      = true,
         hideClock       = true,
