@@ -311,40 +311,10 @@ local SWAP_PROF_ATLAS = {
 }
 
 -- 模块级稳定引用：PollWatch 按引用去重，在 Apply 里现造闭包会每开一次窗多挂一条。
+-- 走通用 Skin:StyleAtlasBackdrop（fade 装饰底图 + swap 选中态换我们的颜色），角色窗共用同一条。
 local function StyleProfessionsArt()
     local f = Skin:Need("ProfessionsFrame")
-    if not f then return end
-    local r, g, b = Color:GetBorder()
-    local function walk(fr, depth)
-        if depth > 8 then return end
-        local okR, regions = pcall(function() return { fr:GetRegions() } end)
-        if okR then
-            for _, reg in ipairs(regions) do
-                local okA, atlas = pcall(reg.GetAtlas, reg)
-                if okA and type(atlas) == "string" and atlas ~= "" then
-                    local low = string.lower(atlas)
-                    for i = 1, #FADE_PROF_ATLAS do
-                        if low:find(FADE_PROF_ATLAS[i]) then Skin:Fade(reg); break end
-                    end
-                    for i = 1, #SWAP_PROF_ATLAS do
-                        if low:find(SWAP_PROF_ATLAS[i]) then
-                            -- 换过之后 GetAtlas 回 nil（SwapArt 走 SetTexture），下轮不再命中 → 天然幂等；
-                            -- 暴雪滚动重设 atlas 时这里会再命中重换。
-                            if Skin:SwapArt(reg, "monet_barfill") and r then
-                                pcall(reg.SetVertexColor, reg, r, g, b, 0.5)
-                            end
-                            break
-                        end
-                    end
-                end
-            end
-        end
-        local okC, kids = pcall(function() return { fr:GetChildren() } end)
-        if okC then
-            for _, k in ipairs(kids) do walk(k, depth + 1) end
-        end
-    end
-    walk(f, 1)
+    if f then Skin:StyleAtlasBackdrop(f, FADE_PROF_ATLAS, SWAP_PROF_ATLAS) end
 end
 
 local function SkinProfessions()

@@ -3,8 +3,9 @@
 
 local ADDON_NAME, ns = ...
 
-local M = ns.Skins
-local Skin = ns.Skin
+local M     = ns.Skins
+local Skin  = ns.Skin
+local Widget = ns.Widget
 
 -- **1.60 实测（开服日 11-05，`/mui compat find CharacterFrameTab`）**：`CharacterFrameTab1..3`
 -- 这排编号页签**在本客户端不存在**，全 UI 只有 3 个名字命中 —— `CharacterFrameTabIndicators`
@@ -43,6 +44,26 @@ local SUB_PANEL = { panel = { bgAlpha = 0.96 }, deep = true }
 -- 肖像压方形已经上收到**窗口档**（M:SkinWindow 调 Skin:SquarePortrait：裁内接方框 + 越界才收进外框），
 -- 这里不再自己找 CharacterFramePortrait —— 同一个动作只有一个入口，也不给别的窗口留第二份实现。
 
+-- **角色面板剥背景 + 美化侧页签（11-05 作者指定，复用专业窗那条通用通道）**。
+-- layers 实测 CharacterFrame 还剩：`ui-character-info`（信息栏行底图）×32、
+-- `common-sidetab`（模式页签 CharacterFrameModeTab1..4 的底/悬停/遮罩）×18；
+-- 装备/属性图标是数字文件 ID（GetAtlas 回 nil），不会被这些 atlas 模式误伤。
+local FADE_CHARACTER_ATLAS = {
+    "ui%-character%-info",
+    "common%-sidetab$",
+    "common%-sidetab%-hover",
+    "common%-sidetab%-mask",
+}
+local SWAP_CHARACTER_ATLAS = {
+    "common%-sidetab%-selected",
+}
+
+-- 模块级稳定引用：PollWatch 按引用去重。
+local function StyleCharacterArt()
+    local f = Skin:Need("CharacterFrame")
+    if f then Skin:StyleAtlasBackdrop(f, FADE_CHARACTER_ATLAS, SWAP_CHARACTER_ATLAS) end
+end
+
 local function SkinCharacter()
     M:Dress("CharacterFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 }, portrait = true })
     -- 美化后把肖像压成方形，与方形背景协调
@@ -50,6 +71,10 @@ local function SkinCharacter()
     M:Dress(CHARACTER_TAB_WIDGET, { deep = true })
     M:Dress(CHARACTER_PANELS, SUB_PANEL)
     M:Dress("PaperDollFrame", PAPERDOLL_PANEL)
+    -- 剥信息栏底图 + 美化侧页签（11-05 作者指定，和专业窗共用 Skin:StyleAtlasBackdrop）。
+    StyleCharacterArt()
+    local cf = Skin:Need("CharacterFrame")
+    if cf then Widget:PollWatch(cf, StyleCharacterArt, 2) end
 end
 
 local function SkinInspect()
