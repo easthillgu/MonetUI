@@ -243,6 +243,15 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
      读完记得关回 0（详细模式有开销）。
 - 结算顺序：先修"往暴雪对象写东西"，再看 `issecurevariable` 是否全干净，最后才看弹窗是否消失。
   只删自己代码里的"清理"动作是不够的 —— 键一旦脏了，**同一次会话里不会自己变干净**（要重载）。
+- **剥美术的循环必须豁免"功能图标"**（2026-11-05 玩家实测判例）：商人窗的修理 / 修全部，
+  其 normal 贴图就是铁槌本身（atlas `SpellIcon-256x256-Repair` / `-RepairAll`），
+  被 `Skin:FadeButtonArt` 和 `Skin:Strip` 的 region 循环当成窗体装饰压成 α0 ⇒ 玩家看到的是
+  **"维修和全修的铁槌图标看不到了"**。判据在 `Utils/Skin.lua` 的 `IsContentIcon()`
+  （`CONTENT_ICON_ATLAS` 前缀表：`spellicon-` / `inv-` / `ability_` / `spell_` / `item_` / `coin-` /
+  `class-icon` / `icons\` 等），两条剥图路径都走它。
+  ⚠ **口径提醒**：`/mui skins layers` 那句"还看得见的暴雪美术"下降**不是进展指标** ——
+  把功能图标删掉同样会让它下降（本次就是这样，而且更早那版 `RepairAll` 已被压掉却没人注意）。
+  验收必须问"这个按钮还看得出是干什么的吗"，图标类控件要**逐颗肉眼过**或让报障方复述。
 - **界面美化只做窗口装饰，不给里面的按钮/页签挂任何脚本钩子**（`HookScript` / `hooksecurefunc`）：
   HookScript 往框体的脚本槽写我们的函数、hooksecurefunc 改它的方法槽，两者都等于"写过这个框"，
   之后这个框自己的脚本（例如法术书图标的 `OnIconEnter → ClearOnBarHighlightMarks`）就跑在

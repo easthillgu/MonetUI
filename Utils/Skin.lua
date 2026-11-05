@@ -382,6 +382,27 @@ function Skin:Fade(region)
 end
 
 --- Fade a texture's four sprite edges / a whole button's art, whatever shape it has.
+--- **内容图标类 atlas**：这些画的是"这个按钮是什么功能"，不是窗体装饰 —— 压掉就等于把功能图标删了。
+--- 11-05 玩家实测判例：商人窗的修理 / 修全部（`SpellIcon-256x256-Repair` / `-RepairAll`）
+--- 被 `FadeButtonArt` 连 normal 贴图一起压成 α0 ⇒ "维修和全修的铁槌图标看不到了"。
+--- （更早那一版 `RepairAll` 也已经被压掉，只是当时没人看它 —— 一次"看不见的美术变少了"的绿灯
+---   把真缺陷读成了进展。）
+local CONTENT_ICON_ATLAS = {
+    "^spellicon%-", "^spell%-icon%-", "^inv%-", "^ability_", "^spell_", "^item_",
+    "^coin%-", "^class%-icon", "^pet%-", "^icons\\", "^interface\\icons\\",
+}
+
+local function IsContentIcon(tex)
+    if not tex or type(tex.GetAtlas) ~= "function" then return false end
+    local ok, atlas = pcall(tex.GetAtlas, tex)
+    if not ok or type(atlas) ~= "string" or atlas == "" then return false end
+    local low = string.lower(atlas)
+    for i = 1, #CONTENT_ICON_ATLAS do
+        if low:find(CONTENT_ICON_ATLAS[i]) then return true end
+    end
+    return false
+end
+
 function Skin:FadeButtonArt(button)
     if not button then return end
     local getters = { "GetNormalTexture", "GetPushedTexture", "GetDisabledTexture", "GetHighlightTexture" }
@@ -389,7 +410,8 @@ function Skin:FadeButtonArt(button)
         local getter = button[getters[i]]
         if type(getter) == "function" then
             local tex = getter(button)
-            if tex then self:Fade(tex) end
+            -- 功能图标留着，只换它底下的那层板（Strip / ControlBg 负责）
+            if tex and not IsContentIcon(tex) then self:Fade(tex) end
         end
     end
 end
@@ -429,7 +451,11 @@ function Skin:Strip(frame, opts)
                 local region = regions[i]
                 if IsTexture(region) and region ~= opts.keepTexture then
                     if not (keep and keep(region)) then
-                        self:Fade(region)
+                        -- 功能图标（法术 / 物品 / 职业 / 货币 atlas）不剥：它不是窗体装饰，
+                        -- 剥掉就是把"这按钮是干什么的"删了（FadeButtonArt 同一条豁免）。
+                        if not IsContentIcon(region) then
+                            self:Fade(region)
+                        end
                     end
                 end
             end

@@ -50,8 +50,8 @@ ok(/pcall\(Skin\.ItemQualityBorder, Skin, target, withInfo\)/.test(SKINS),
   'B4 图标扫描把 withInfo 透传给边框');
 ok(/M:IconWidgetsIn\(frame, nil, withInfo\)/.test(SKINS),
   'B5 SweepDeep 的可见期补扫也带上（懒建格子跑不掉）');
-ok(/M:SweepDeep\(frame, opts\.control, opts\.slotInfo\)/.test(SKINS),
-  'B6 Dress 的 deep 分支从面板规格取 slotInfo');
+ok(/M:SweepDeep\(frame, opts\.control, opts\.slotInfo(, opts\.deepRows)?\)/.test(SKINS),
+  'B6 Dress 的 deep 分支从面板规格取 slotInfo（第四个参数 deepRows 可有可无）');
 ok(/M:IconWidgetsIn\(frame, nil, opts\.slotInfo\)/.test(SKINS),
   'B7 Dress 的 icons 默认分支同样取 slotInfo');
 ok(/local PAPERDOLL_PANEL = .*\bslotInfo = true/.test(CHAR),
@@ -61,6 +61,18 @@ ok(PANEL_LIST !== '' && !/PaperDollFrame/.test(PANEL_LIST),
   'B9 PaperDoll 已从共用面板名单里拆出（否则 SUB_PANEL 会先把它无信息地扫掉）');
 ok(/M:Dress\("PaperDollFrame", PAPERDOLL_PANEL\)/.test(CHAR),
   'B10 拆出去的 PaperDoll 确实被 Dress 了');
+
+// ---------------------------------------------------------------- D 功能图标豁免
+// 11-05 玩家实测判例：商人修理 / 修全部的铁槌（atlas `SpellIcon-256x256-Repair(All)`）被剥美术的
+// 循环当成窗体装饰压成 α0 ⇒「维修和全修的铁槌图标看不到了」。
+// ⚠ 而当时 `/mui skins layers` 的"还看得见的暴雪美术"是**下降**的 —— 删掉图标同样会让它下降，
+//   所以那个指标不能单独当验收（AGENTS 已加口径提醒：图标类控件要逐颗肉眼过）。
+ok(/local CONTENT_ICON_ATLAS = \{/.test(SKIN) && /spellicon/.test(SKIN),
+  'D1 内容图标 atlas 前缀表在位（含 spellicon 家族，否则铁槌还会被压掉）');
+ok(/if tex and not IsContentIcon\(tex\) then self:Fade\(tex\) end/.test(SKIN),
+  'D2 FadeButtonArt 走豁免：normal / pushed / disabled / highlight 里的功能图标不剥');
+ok(/if not IsContentIcon\(region\) then/.test(SKIN),
+  'D3 Strip 的 region 循环走同一条豁免（两条剥图路径不能只修一条）');
 
 // ---------------------------------------------------------------- C 守卫口径
 ok(/local function ItemIDOf\(key\)/.test(SKIN) && /Secrets\.CanRead\(key\)/.test(SKIN),
