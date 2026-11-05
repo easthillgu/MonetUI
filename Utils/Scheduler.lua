@@ -50,8 +50,26 @@ local function ReportFailure(id, err)
     end
 end
 
---- 单路耗时。`GetTime` 的精度不够量一帧里的微小差值，所以这套数字只用来**排序找最贵的那一路**，
---- 绝对值要实机核。
+--- 计时源（#42，11-05 实机）：`GetTime()` 的粒度量不到一帧里的微小差值 ——
+--- `/mui perf` 在 1.60 上每一路都是 `累计 0.000s · 峰值 0.000s`（18083 次调用全归零），
+--- 于是"找最贵的一路"这个用途整个失效。这台客户端有 `debugprofilestop`
+--- （实测 `type=function`、返回**毫秒**且带四位小数：`83597232.4398`）⇒ 优先用它，
+--- 没有才退回 `GetTime`。两者都读不到就不计时，一个回调都不许因为仪表而抛。
+local HaveProfileStop = type(_G.debugprofilestop) == "function"
+
+local function Now()
+    if HaveProfileStop then
+        local ok, v = pcall(_G.debugprofilestop)
+        if ok and type(v) == "number" then return v / 1000 end
+    end
+    if type(GetTime) == "function" then
+        local ok, v = pcall(GetTime)
+        if ok and type(v) == "number" then return v end
+    end
+    return nil
+end
+
+--- 单路耗时。换源之后绝对值终于可信，但**排序找最贵的那一路**仍是主要用途。
 local function RecordCost(id, dt)
     if not dt or dt <= 0 then dt = 0 end
     local st = timings[id]
@@ -69,14 +87,15 @@ end
 --- pcall 在这里、不在调用点：一个订阅的失败不能影响同拍其余订阅。
 --- 保持原有语义：每帧订阅收 elapsed，定频订阅**不收参数**（有的回调看 `...`）。
 local function Invoke(id, sub, elapsed)
-    local before = GetTime and GetTime() or nil
+    local before = Now()
     local ok, err
     if sub.intervalSec <= 0 then
         ok, err = pcall(sub.fn, elapsed)
     else
         ok, err = pcall(sub.fn)
     end
-    RecordCost(id, before and (GetTime() - before) or nil)
+    local after = Now()
+    RecordCost(id, (before and after) and (after - before) or nil)
     if not ok then ReportFailure(id, err) end
 end
 
