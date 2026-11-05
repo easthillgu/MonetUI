@@ -2064,7 +2064,22 @@ function Skin:ProbeLayers(path, filter)
     end
 
     local rows, nodes = {}, 0
-    local counts = { plain = 0, faded = 0, ours = 0 }
+    local counts = { plain = 0, faded = 0, ours = 0, hidden = 0 }
+
+    -- "看得见"的口径（11-05 自纠）：以前只看 alpha 和我们的标记，于是手柄专用的
+    -- `gamepad-uiframemetal-largeportrait-focus`（宿主框根本没显示）也被算进"还看得见的暴雪美术"，
+    -- QuestFrame 报出 300 件这种虚高数 —— 数字虚高时按家族/按宿主的两张表全部不可用。
+    -- ⇒ 现在同时要求：宿主框 `IsVisible()`（含父链）为真 **且** 贴图自己 `IsShown()` 为真。
+    -- 读不出来时一律算"看得见"（保守：宁可多算，不能把真问题算没了）。
+    local function visOf(obj, method)
+        if type(obj[method]) ~= "function" then return true end
+        local ok, v = pcall(obj[method], obj)
+        if not ok then return true end
+        return v and true or false
+    end
+
+    -- 整扇窗关着时探结构还有意义，但"看得见"这一列全空是废话 ⇒ 单独提醒，不让它冒充观感结论。
+    local rootVisible = visOf(root, "IsVisible")
 
     local function placeOfFrame(obj)
         local okS, strata = pcall(obj.GetFrameStrata, obj)
@@ -2080,12 +2095,16 @@ function Skin:ProbeLayers(path, filter)
         return "?"
     end
 
-    local function push(indent, tag, obj, place, owner, fadedParent)
+    local function push(indent, tag, obj, place, owner, fadedParent, hostHidden, regionSelf)
         local label = probeLabel(obj)
         local art = probeArt(obj)
         local alphaText = probeAlpha(obj)
         local state, invisible = probeState(obj, owner, fadedParent)
+        if state == "暴雪原样" and (hostHidden or regionSelf == false) then
+            state = hostHidden and "看不见（宿主未显示）" or "看不见（自己隐藏）"
+        end
         if state == "暴雪原样" then counts.plain = counts.plain + 1
+        elseif state == "看不见（宿主未显示）" or state == "看不见（自己隐藏）" then counts.hidden = counts.hidden + 1
         elseif state == "已剥掉" or state == "随父已剥" or state == "α0" then counts.faded = counts.faded + 1
         else counts.ours = counts.ours + 1 end
         rows[#rows + 1] = {
@@ -2101,7 +2120,7 @@ function Skin:ProbeLayers(path, filter)
         return invisible
     end
 
-    local function walkRegions(frame, depth, fadedParent)
+    local function walkRegions(frame, depth, fadedParent, hostHidden)
         if type(frame.GetRegions) ~= "function" then return end
         local ok, regions = pcall(function() return { frame:GetRegions() } end)
         if not ok or type(regions) ~= "table" then return end
@@ -2114,7 +2133,8 @@ function Skin:ProbeLayers(path, filter)
                     nodes = nodes + 1
                     shown = shown + 1
                     -- region 是父框本人的贴图，Strip 的 regions 这一层直接够得到
-                    push(depth + 1, "region", region, placeOfTex(region), frame, fadedParent)
+                    push(depth + 1, "region", region, placeOfTex(region), frame, fadedParent,
+                        hostHidden, visOf(region, "IsShown"))
                 end
             end
         end
@@ -2126,7 +2146,7 @@ function Skin:ProbeLayers(path, filter)
         end
     end
 
-    local function walk(frame, parentName, depth, fadedParent)
+    local function walk(frame, parentName, depth, fadedParent, hostHidden)
         if nodes >= MAX_PROBE_NODES or depth > MAX_PROBE_DEPTH then return end
         nodes = nodes + 1
         if not Widget:Readable(frame) then
@@ -2136,20 +2156,22 @@ function Skin:ProbeLayers(path, filter)
             }
             return
         end
+        -- 只按"自己"判，父链交给 IsVisible（它本身就含父链），避免两层口径互相抵消
+        local hiddenHere = hostHidden or (rootVisible and not visOf(frame, "IsShown"))
         local invisible = push(depth, depth == 0 and "根框" or probeTag(probeLabel(frame), parentName),
-            frame, placeOfFrame(frame), nil, fadedParent)
-        walkRegions(frame, depth, invisible or fadedParent)
+            frame, placeOfFrame(frame), nil, fadedParent, hiddenHere, nil)
+        walkRegions(frame, depth, invisible or fadedParent, hiddenHere)
         local ok, kids = pcall(function() return { frame:GetChildren() } end)
         if ok and type(kids) == "table" then
             local myName = probeLabel(frame)
             for i = 1, #kids do
                 if nodes >= MAX_PROBE_NODES then return end
-                walk(kids[i], myName, depth + 1, invisible or fadedParent)
+                walk(kids[i], myName, depth + 1, invisible or fadedParent, hiddenHere)
             end
         end
     end
 
-    walk(root, nil, 0, false)
+    walk(root, nil, 0, false, not rootVisible)
 
     -- 全量进 SavedVariables：聊天框只留最后十几行，几十行一定被顶掉（读法同 compatReport，
     -- 落盘比 /reload 晚 1–2 分钟）。
@@ -2161,7 +2183,9 @@ function Skin:ProbeLayers(path, filter)
         db.layerReport = {
             when = (_G.date and _G.date("%Y-%m-%d %H:%M:%S")) or nil,
             root = tostring(path), filter = needle, total = #rows,
-            plain = counts.plain, faded = counts.faded, ours = counts.ours, rows = texts,
+            rootVisible = rootVisible,
+            plain = counts.plain, faded = counts.faded, hidden = counts.hidden, ours = counts.ours,
+            rows = texts,
         }
     end
 
@@ -2212,9 +2236,13 @@ function Skin:ProbeLayers(path, filter)
     if okDb and type(db) == "table" then
         db.layerReport.families, db.layerReport.hosts = famTop, hostTop
     end
-    ns:Print(("|cffffd100%s 的底层|r：%d 件 —— 还看得见的暴雪美术 %d / 已剥或看不见 %d / 我们自己的 %d%s%s"):format(
-        tostring(path), #rows, counts.plain, counts.faded, counts.ours,
+    ns:Print(("|cffffd100%s 的底层|r：%d 件 —— 还看得见的暴雪美术 %d / 已剥或看不见 %d / 没显示 %d / 我们自己的 %d%s%s"):format(
+        tostring(path), #rows, counts.plain, counts.faded, counts.hidden, counts.ours,
         needle and ("；其中含 %q 的 %d 件"):format(needle, matched) or "",
         nodes >= MAX_PROBE_NODES and "，到上限截断" or ""))
+    if not rootVisible then
+        ns:Print("|cffff6b6b这扇窗此刻没显示|r ⇒ 结构能读，但\"看得见的美术\"那一列全是 0 —— "
+            .. "**先打开这扇窗再跑一次**，否则数出来的是结构，不是玩家看到的画面。")
+    end
     return #rows
 end
