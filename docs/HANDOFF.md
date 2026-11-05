@@ -3786,12 +3786,20 @@ TextStatusBar.lua:110 attempt to compare a secret number value (execution tainte
 
 现场再读一次（`/run` 只读取数）：`points=0 · rect 读不出 · strata=DIALOG · shown=false`。
 
-**三条结论**：
-① 右键事件**进到了我们这里**（"面板：已建"只有 `Build()` 会留下，而 `Build()` 只在 `Toggle` 里调用）
-⇒ 不是命中区、不是别的插件抢点击、不是设置关着；
+**三条判读；① 当场被我推翻，先把推翻写清楚，免得下一个人照 ① 去查命中区**：
+
+① ~~「右键事件进到了我们这里」~~ —— **错，公开收回**。判据原本是「读数里写着『面板：已建』，而只有
+   `Build()` 会留下它」；但我自己的 `Probe` 里就写着 `if not frame then Build() end` ⇒「已建」很可能
+   只是我这次读数造的。而 `Build()` **不设锚点**（锚点由 `Toggle` 设），撤回安全模板之后（`/reload` ×2
+   实测 `受保护=false`、3 行 0 颗受保护）**`GetNumPoints()` 仍然是 0** ⇒ 真正的事实是 **`Toggle` 一次都没跑到**，
+   右键根本没落进我们的处理函数 ⇒ 本次「展不开」的原因还没找到（下一趟判据：光标悬在小地图上时用
+   `EnumerateFrames` 列出压在遮罩之上的框，看谁吃了这次点击）。
+   ⇒ **探针纪律加一条：诊断命令不许产生它正在判定的状态**（Probe 造面板 = 污染自己的判据）。
+
+**仍然成立的两条（但都不是本次「展不开」的解释）**：
 ② 面板被 13 行 `SecureActionButtonTemplate` 所在的**锚定家族传染**成受保护
-⇒ 之后 `Toggle` 里的 `frame:ClearAllPoints() / SetPoint(...) / SetHeight(...)` 一个都没落地
-（`GetNumPoints()=0` 就是铁证）⇒ 菜单永远没有位置 ⇒ 玩家眼里就是"点了没反应"；
+⇒ 之后我们对它做 `SetPoint/SetHeight` 就会被丢（信息栏 §8.37 是同一机制，那一例会记日志）。
+（本例的 `GetNumPoints()=0` 来自 `Toggle` 压根没跑，不能拿来当「写入被吞」的证据）
 ③ **这批失败不记 `ADDON_ACTION_BLOCKED`、也不报错**（`logs BLOCKED/ERR` 在该窗口内零新增）。
 ⇒ 和信息栏（§8.37，同一机制但**会**记日志）比，这一例更危险：**没有日志的静默丢弃只能靠 `IsProtected()`
 + `GetNumPoints()` 两个数判**，所以在实机问"展不开"之前先跑那条命令，不要去猜命中区。
