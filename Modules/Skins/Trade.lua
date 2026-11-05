@@ -299,6 +299,9 @@ local FADE_PROF_ATLAS = {
     "professions%-choicereagent%-frame",
     "professions%-recrafting%-frame%-item",
     "professions%-qualitypane%-divider",
+    -- 配方行背景（common-button-list 本体）→ 剥掉，行变透明坐在我们的深色上；
+    -- 选中行仍由 SWAP 的 recipe-active 给高亮，不会没有选中反馈。
+    "common%-button%-list$",
 }
 local SWAP_PROF_ATLAS = {
     -- 金色选中态 → 换成我们的 barfill + 边框色（压没会丢选中反馈，所以是换不是剥）
