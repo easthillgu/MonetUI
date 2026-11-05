@@ -1556,7 +1556,8 @@ function Skin:FindAnonClose(frame)
     if type(frame.BorderFrame) == "table" then roots[#roots + 1] = frame.BorderFrame end
     for _, root in ipairs(roots) do
         for _, kid in ipairs({ root:GetChildren() }) do
-            if kid.GetObjectType and kid:GetObjectType() == "Button"
+            -- `IsObjectType("Button")` 而不是精确比较：匿名关闭钮可能是 EventButton（11-05 判例）
+            if kid.IsObjectType and kid:IsObjectType("Button")
                 and kid.GetName and not kid:GetName() then
                 for _, region in ipairs({ kid:GetRegions() }) do
                     local atlas = region.GetAtlas and region:GetAtlas()

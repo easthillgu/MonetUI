@@ -94,6 +94,19 @@ local function ReadObjectType(obj)
 end
 
 local function ReadAtlas(tex)
+--- 类型判断必须走 `IsObjectType`：`GetObjectType()` 返回**最派生**类型名，
+--- 新式步进钮是 `EventButton`（MinimalScrollBar.xml:101/120）、匿名关闭钮也可能是 ——
+--- 11-05 实测：`ReadObjectType(frame) ~= "Button"` 精确比较让 arrows / closes 两条探针
+--- 对 236 只步进钮一条都不访问（报「我们的箭头 0」，而现场数是 226 只已经补好图）。
+local function IsButtonObj(obj)
+    if not obj then return false end
+    if type(obj.IsObjectType) == "function" then
+        local ok, v = pcall(obj.IsObjectType, obj, "Button")
+        if ok then return v and true or false end
+    end
+    return ReadObjectType(obj) == "Button"
+end
+
     if not tex or type(tex.GetAtlas) ~= "function" then return nil end
     local ok, a = pcall(tex.GetAtlas, tex)
     if ok and type(a) == "string" and a ~= "" and Secrets.CanRead(a) then return a end
@@ -494,11 +507,15 @@ end
 -- 我们自绘的箭头基图（Utils/Skin.lua 两条路都落在这两个键上：`Media:Texture` 直挂 或 `SwapArt`）。
 local OUR_ARROW_KEYS = { "monet_chevron", "monet_arrow" }
 
-local function IsOurArrowPath(path)
+local function IsOurArrowPath(path, reg)
+    -- 我们的箭头是 BLP：GetTexture() 回的是**数字纹理 ID**（11-05 实测 -1627），
+    -- ReadPath 只认字符串 ⇒ 旧版这里永远 false，探针把已经补好图的 226 只数成「我们的箭头 0」。
+    -- 认脸改成两条腿：路径命中我们的材质名，**或** 这张 region 带我们的美术标记（与换肤同一条判据）。
+    if reg and ns.Marked and ns:Marked(reg, "art") then return true end
     if not path then return false end
     local p = string.lower(path)
-    for i = 1, #OUR_ARROW_KEYS do
-        if string.find(p, OUR_ARROW_KEYS[i]) then return true end
+    for k = 1, #OUR_ARROW_KEYS do
+        if string.find(p, OUR_ARROW_KEYS[k]) then return true end
     end
     return false
 end
@@ -526,7 +543,7 @@ function DevTools:SkinsCloses()
     local unreadable, buttons = 0, 0
 
     local function visit(frame)
-        if ReadObjectType(frame) ~= "Button" then return end
+        if not IsButtonObj(frame) then return end
         buttons = buttons + 1
         if #rows >= CLOSE_ROWS_CAP then return end
         if Widget and type(Widget.Readable) == "function" then
@@ -704,7 +721,7 @@ function DevTools:SkinsArrows()
     end
 
     local function visit(frame)
-        if ReadObjectType(frame) ~= "Button" then return end
+        if not IsButtonObj(frame) then return end
         if #rows >= ARROW_ROWS_CAP then return end
         if Widget and type(Widget.Readable) == "function" then
             -- forbidden 框从一开始就读不出：挂进账本只会变成长期空转的一行
@@ -737,7 +754,7 @@ function DevTools:SkinsArrows()
             if type(reg) == "table" and ReadObjectType(reg) == "Texture" then
                 local atlas = ReadAtlas(reg)
                 local path = ReadPath(reg)
-                local isOurs = IsOurArrowPath(path)
+                local isOurs = IsOurArrowPath(path, reg)
                 if isOurs or atlasHit(atlas and string.lower(atlas)) then
                     local one = RegionRow(reg)
                     local into
