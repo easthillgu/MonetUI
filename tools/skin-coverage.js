@@ -116,19 +116,46 @@ for (const [name, info] of [...windows.entries()].sort()) {
   else notSkinned.push({ name, ...info });
 }
 
+// --emit-candidates <file>：把"真缺口"候选名一行一个导出，供实机 EnumerateFrames 核对用。
+const emitFile = argVal('--emit-candidates');
+if (emitFile) {
+  fs.writeFileSync(emitFile, notSkinned.map(w => w.name).join('\n') + '\n');
+  console.log(`已导出 ${notSkinned.length} 个真缺口候选到 ${emitFile}（一行一个，喂给实机存在性核对）。`);
+  process.exit(0);
+}
+
+// --live <file>：读实机存在的帧名（一行一个），把"真缺口"再分成"此刻真存在"与"此刻没加载(LoD没开)"。
+const liveFile = argVal('--live');
+let liveSet = null;
+if (liveFile && fs.existsSync(liveFile)) {
+  liveSet = new Set(fs.readFileSync(liveFile, 'utf8').split(/\r?\n/).map(s => s.trim()).filter(Boolean));
+}
+
 const pct = Math.round(skinned.length / windows.size * 100);
 console.log(`暴雪顶层窗口候选 ${windows.size} 个 · Skins 已美化 ${skinned.length} (${pct}%) · 其它模块/HUD/开发件 ${otherHandled.length} · 真缺口 ${notSkinned.length}`);
 console.log(`（启发式；真缺口里仍含"2 级号进不去的内容窗"，要逐个实机确认）\n`);
 
 if (!args.includes('--show-skipped')) {
-  console.log('== 真缺口：Skins 没美化、且不是别的模块该管的暴雪窗口（按插件目录分组）==');
-  const byAddon = new Map();
-  for (const w of notSkinned) {
-    if (!byAddon.has(w.addon)) byAddon.set(w.addon, []);
-    byAddon.get(w.addon).push(w.name);
-  }
-  for (const [addon, names] of [...byAddon.entries()].sort()) {
-    console.log(`  [${addon}] ${names.join(', ')}`);
+  if (liveSet) {
+    const liveExists = notSkinned.filter(w => liveSet.has(w.name));
+    const notLoaded = notSkinned.filter(w => !liveSet.has(w.name));
+    console.log(`== 真缺口里【此刻实机已存在】${liveExists.length} 个（这些是 XML 有、客户端也有、我们没做 —— 最该看）==`);
+    const byAddon1 = new Map();
+    for (const w of liveExists) { if (!byAddon1.has(w.addon)) byAddon1.set(w.addon, []); byAddon1.get(w.addon).push(w.name); }
+    for (const [addon, names] of [...byAddon1.entries()].sort()) console.log(`  [${addon}] ${names.join(', ')}`);
+    console.log(`\n== 真缺口里【此刻没加载】${notLoaded.length} 个（LoD 没开 / 本客户端真没这名字，需开窗或实机确认才能判）==`);
+    console.log('  ' + notLoaded.map(w => w.name).join(', '));
+  } else {
+    console.log('== 真缺口：Skins 没美化、且不是别的模块该管的暴雪窗口（按插件目录分组）==');
+    const byAddon = new Map();
+    for (const w of notSkinned) {
+      if (!byAddon.has(w.addon)) byAddon.set(w.addon, []);
+      byAddon.get(w.addon).push(w.name);
+    }
+    for (const [addon, names] of [...byAddon.entries()].sort()) {
+      console.log(`  [${addon}] ${names.join(', ')}`);
+    }
+    console.log('\n（加 --live <实机存在名单> 可把缺口分成"此刻真存在"和"没加载"两档）');
   }
 } else {
   console.log('== 已美化到 ==');
