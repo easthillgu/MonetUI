@@ -302,7 +302,7 @@ local function UnreadableDesc(frame)
     return ("%s · 父链 %s"):format(kind, #parents > 0 and table.concat(parents, " ← ") or "读不出")
 end
 
-function M:SweepDeep(frame, controlOpts, withInfo)
+function M:SweepDeep(frame, controlOpts, withInfo, rowDepth)
     if not frame or type(frame.GetChildren) ~= "function" then return end
     -- 读不出可见性 = forbidden 对象（被引擎接管的安全框那一类）。给它挂常驻轮询没有任何意义：
     -- 驱动每拍都只能把它暂停掉，5 秒复检一次、永远检不回来，账本里多一条查不下去的"无名框"。
@@ -320,7 +320,7 @@ function M:SweepDeep(frame, controlOpts, withInfo)
     -- Skin:WarnOnce 报名字（受限框读 GetChildren 就会被拒）。
     local sweep = function()
         local ok, err = pcall(function()
-            M:SkinButtonsIn(frame, controlOpts)
+            M:SkinButtonsIn(frame, controlOpts, rowDepth)
             M:SkinScrollsIn(frame)
             M:SkinSlidersIn(frame)
             M:IconWidgetsIn(frame, nil, withInfo)
@@ -468,7 +468,7 @@ function M:Dress(spec, opts)
 
                 if opts.deep then
                     if opts.lazy ~= false then
-                        M:SweepDeep(frame, opts.control, opts.slotInfo)
+                        M:SweepDeep(frame, opts.control, opts.slotInfo, opts.deepRows)
                     else
                         M:SkinButtonsIn(frame, opts.control)
                         M:SkinScrollsIn(frame)
@@ -548,29 +548,54 @@ end
 local LooksLikeItemButton = function(button) return Skin:LooksLikeItemButton(button) end
 
 --- Restyle every direct child Button of a frame, skipping item buttons.
-function M:SkinButtonsIn(frame, opts)
+function M:SkinButtonsIn(frame, opts, depth)
     if not frame or type(frame.GetChildren) ~= "function" then return end
     -- GetChildren 本身也可能撞 forbidden object（IconWidgetsIn 同款判例），裹住。
     local okKids, children = pcall(function() return { frame:GetChildren() } end)
     if not okKids or type(children) ~= "table" then return end
-    for i = 1, #children do
-        local child = children[i]
-        -- 受保护窗口的子控件在零售服上是 forbidden object：连 GetObjectType 都可能抛
-        -- "Attempt to access forbidden object from code tainted by an AddOn"，所以整段都走 pcall。
-        local okKind, kind = pcall(child.GetObjectType, child)
-        if okKind then
-            if kind == "RadioButton" then
-                pcall(Skin.RadioButton, Skin, child, opts)
-            elseif kind == "CheckButton" then
-                pcall(Skin.CheckButton, Skin, child, opts)
-            elseif kind == "Button" then
-                local okItem, isItem = pcall(LooksLikeItemButton, child)
-                if not okItem or not isItem then
-                    pcall(Skin.Button, Skin, child, opts)
+    -- `depth` 只给"列表行藏在 ScrollBox 好几层下面"的窗口用（11-05 实测：社交窗的行是
+    -- `Button:匿名 <- Frame <- Frame <- Frame <- SocialUIFrame`，四深，直接子件档永远扫不到）。
+    -- 默认仍然 1 层：递归深度是轮询成本的主要来源，不给所有窗口默认打开。
+    local maxDepth = tonumber(depth) or 1
+    local function walk(node, d)
+        local kids
+        if node == frame then
+            kids = children
+        else
+            local ok, c = pcall(function() return { node:GetChildren() } end)
+            kids = ok and c or nil
+        end
+        if type(kids) ~= "table" then return end
+        for i = 1, #kids do
+            local child = kids[i]
+            -- 受保护窗口的子控件在零售服上是 forbidden object：连 GetObjectType 都可能抛
+            -- "Attempt to access forbidden object from code tainted by an AddOn"，所以整段都走 pcall。
+            local okKind, kind = pcall(child.GetObjectType, child)
+            if okKind then
+                -- 类型判断走 IsObjectType：`EventButton` 的 GetObjectType 回的是最派生名，
+                -- 精确比较会整批漏掉（#44/#45 同一族，别再留第三处）。
+                local isButton = false
+                if child.IsObjectType then
+                    local okB, v = pcall(child.IsObjectType, child, "Button")
+                    isButton = (okB and v) or false
+                else
+                    isButton = (kind == "Button")
                 end
+                if kind == "RadioButton" then
+                    pcall(Skin.RadioButton, Skin, child, opts)
+                elseif kind == "CheckButton" then
+                    pcall(Skin.CheckButton, Skin, child, opts)
+                elseif isButton then
+                    local okItem, isItem = pcall(LooksLikeItemButton, child)
+                    if not okItem or not isItem then
+                        pcall(Skin.Button, Skin, child, opts)
+                    end
+                end
+                if d < maxDepth then walk(child, d + 1) end
             end
         end
     end
+    walk(frame, 1)
 end
 
 --- Flatten + square-crop every item-icon button in a frame's subtree.  This is Dress's

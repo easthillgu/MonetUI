@@ -803,6 +803,53 @@ end
 -- The control helpers below are *re-appliable*: fades are idempotent through the side-table mark "hidden" (cleared by Rollback) and created objects (backplate, tab underline, thumb fill) are cached on the frame and only toggled, so no helper short-circuits the whole visual pass.
 
 --- Restyle a Blizzard button (flat Monet plate + themed border + font).
+--- 列表行 / 按钮底这一类**新式 atlas**（11-05 子帧探针：社交窗 `friends-card-* ×12`、
+--- `common-button-list/tertiary ×22` 全是 `α1.00 暴雪原样`，宿主是 ScrollBox 下第 4 层的匿名 Button）。
+local ROW_ART_PATTERNS = {
+    "friends%-card%-",
+    "common%-button%-list",
+    "common%-button%-tertiary",
+}
+
+--- 只压**认得出来的那几个** region：行里还有职业图标与名字，整框 `regions = true` 会把图标一起压掉
+--- （AGENTS「必需件先注册、装饰件各自 pcall」同一纪律）。
+--- 选中态（HIGHLIGHT 层）不压掉 —— 列表必须看得出选中，换成我们的 barfill 染边框色，
+--- 读起来是"我们的行"而不是"暴雪的蓝条"。
+function Skin:FadeRowArt(button)
+    local okRegions, regions = pcall(function() return { button:GetRegions() } end)
+    if not okRegions or type(regions) ~= "table" then return false end
+    local touched = 0
+    for _, reg in ipairs(regions) do
+        local okA, atlas = pcall(reg.GetAtlas, reg)
+        if okA and type(atlas) == "string" and atlas ~= "" then
+            local low = string.lower(atlas)
+            for i = 1, #ROW_ART_PATTERNS do
+                if low:find(ROW_ART_PATTERNS[i]) then
+                    local isHighlight = false
+                    if type(reg.GetDrawLayer) == "function" then
+                        local okL, layer = pcall(reg.GetDrawLayer, reg)
+                        isHighlight = okL and layer == "HIGHLIGHT"
+                    end
+                    if isHighlight then
+                        if self:SwapArt(reg, "monet_barfill") then
+                            local okC, r, g, b = pcall(Color.GetBorder, Color)
+                            if okC and r and type(reg.SetVertexColor) == "function" then
+                                reg:SetVertexColor(r, g, b, 0.45)
+                            end
+                            touched = touched + 1
+                        end
+                    else
+                        self:Fade(reg)
+                        touched = touched + 1
+                    end
+                    break
+                end
+            end
+        end
+    end
+    return touched > 0
+end
+
 function Skin:Button(button, opts)
     if not button then return button end
 
@@ -823,6 +870,9 @@ function Skin:Button(button, opts)
 
     self:Strip(button, { keep = opts.keep })
     self:FadeButtonArt(button)
+    -- 行底 / 按钮底的 atlas 家族（`friends-card-*`、`common-button-*`）：通用档压不到它们
+    -- （那些图在 region 上，不是 NormalTexture），所以在这里单独认脸换掉。
+    pcall(self.FadeRowArt, self, button)
     self:ControlBg(button, {
         thickness   = opts.thickness or 1,
         bgAlpha     = opts.bgAlpha or 0.9,

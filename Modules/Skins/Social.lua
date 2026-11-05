@@ -43,12 +43,17 @@ local function SkinFriends()
         buttons = FRIENDS_BUTTONS,
     })
     -- 合并版社交窗口同一套做法（窗口件 + 整树深扫；页签/列表都是运行期子件）。
+    -- `deepRows = 4`：11-05 实机测得好友列表的行是
+    -- `Button:匿名 <- Frame <- Frame <- Frame <- SocialUIFrame`（四深），默认的直接子件档扫不到
+    -- ⇒ 那 12 件 `friends-card-*` 一直是 `α1.00 暴雪原样`。深度只给这一扇窗开：
+    -- 递归深度就是轮询成本，不顺手加给所有窗口。
     M:Dress(SOCIAL_UI_WINDOW, {
         portrait = true,
         window = true,
         inset = true,
         panel = { bgAlpha = 0.96 },
         deep = true,
+        deepRows = 4,
     })
 end
 
