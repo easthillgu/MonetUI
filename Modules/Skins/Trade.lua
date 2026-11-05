@@ -245,6 +245,10 @@ local function SkinTrainer()
         inset = true,
         panel = { bgAlpha = 0.96 },
         deep = true,
+        -- 11-05 作者实测：训练师左上角那颗圆头像没处理。肖像实名是全局
+        -- `ClassTrainerFramePortrait`（`ClassTrainerFrame` 没有 `.Portrait` 成员，SquarePortrait
+        -- 靠 `<名>Portrait` 回退命中）⇒ 和其余窗口同一口径直接隐藏。
+        portrait = true,
         buttons = { "ClassTrainerTrainButton", "ClassTrainerCancelButton" },
     })
 end
