@@ -146,15 +146,19 @@ local BUTTONS = {
     -- 旧小地图的顶边：零售 12.x 把它拆成了 MinimapCluster.BorderTop（老名字 MinimapBorderTop
     -- 在这个客户端上不存在），一条横条留在地图上方，只能按新名字收掉。
     { key = "hideBorderTop",   label = "地图顶边", paths = { "MinimapCluster.BorderTop", "MinimapBorderTop" } },
-    -- 微型菜单那一排：零售 12.x 的按钮改名了（PlayerSpellsMicroButton 之类），整排只剩空格子，
-    -- 右键小地图弹出的菜单已经接管了这些入口，所以零售上把整排收起来；老客户端（和 Forever）
-    -- 保留那排经典按钮，只压美术（见 Modules/Skins/Forever.lua）。
-    { key = "hideMicroMenu",   label = "微型菜单", paths = { "MicroMenu" }, retailOnly = true },
+    -- 微型菜单那一排（`MicroMenu`，12 颗）。
+    -- **11-05 订正**：这条以前标 `retailOnly`，理由写的是"老客户端和 Forever 保留那排经典按钮"。
+    -- 实机读数是 1.60 上它**整排可见**（`shown=true vis=true 位置=1032,6 尺寸=302x40 alpha=1.00 子件=12`），
+    -- 而我们的设置默认就是"隐藏微型菜单"（`Core.lua` 的 `hideMicroMenu = true`）⇒
+    -- 默认开着的功能在交付目标上被一个 `retailOnly` 闸整条跳过 = 玩家看到的"系统微型菜单没被藏掉"。
+    -- 现在两个客户端都收：`HideObject` 走 alpha 0 + 关鼠标（绝不 Hide 到底），设置里可以关回去。
+    -- 代价说清楚：藏掉这排之后，角色 / 法术书 / 任务日志这些入口只剩热键（`I` / `O` / 与 NPC 交互）
+    -- 和我们右键的三行微型菜单（#43 之前给不了更多）。
+    { key = "hideMicroMenu",   label = "微型菜单", paths = { "MicroMenu" } },
 }
 
--- 零售 12.x 的微型按钮改过名（PlayerSpellsMicroButton 而不是 SpellbookMicroButton）；
--- 老客户端（和 Forever）上认这两个老名字。
-local RETAIL_MICRO = (_G.PlayerSpellsMicroButton ~= nil) and (_G.SpellbookMicroButton == nil)
+-- （旧 `RETAIL_MICRO` 闸已删：它唯一的用处是让"隐藏微型菜单"在 1.60 上整条跳过，
+--   而那条设置默认是开的 —— 11-05 实机证明这排按钮在本交付目标上照样可见，见 BUTTONS 注释。）
 
 --- 走点号路径取对象（MinimapCluster.ZoneTextButton 这类 parentKey 路径）。
 --- 全仓唯一的实现是 Core.lua 的 `ns.ResolveObject`（逐段 pcall，帧是带元表的用户数据也照样取得到），
@@ -240,11 +244,8 @@ end
 local function ApplyButtons()
     local settings = Settings()
     for _, entry in ipairs(BUTTONS) do
-        -- 只在零售上生效的条目（比如微型菜单那一排），老客户端上跳过。
-        if entry.retailOnly and not RETAIL_MICRO then
-            -- 跳过
         -- 追踪 / 收纳按钮被搬进地图后，"藏起来"就归搬进去的那一路管
-        elseif entry.skipKey and settings[entry.skipKey] then
+        if entry.skipKey and settings[entry.skipKey] then
             -- 交给 mapTracking / mapCompartment 处理
         else
             local wanted = settings[entry.key] and true or false
