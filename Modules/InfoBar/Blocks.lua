@@ -73,7 +73,6 @@ M:RegisterBlock({
     events   = { "PLAYER_ENTERING_WORLD", "PLAYER_MONEY" },
     update   = GoldUpdate,
     tooltip  = GoldTooltip,
-    secureClick = "CharacterMicroButton",
 })
 
 -- 1.60 客户端的耐久 API 只支持背包物品：C_Container.GetContainerItemDurability(containerIndex, slotIndex)
@@ -134,7 +133,6 @@ M:RegisterBlock({
     events   = { "UPDATE_INVENTORY_DURABILITY", "PLAYER_ENTERING_WORLD" },
     update   = DurabilityUpdate,
     tooltip  = DurabilityTooltip,
-    secureClick = "CharacterMicroButton",
 })
 
 -- Retail's "watched" flag has no equivalent here; `isShowInBackpack` (the currency shown beside the gold in the bag bar) is the closest and is used instead.
@@ -401,7 +399,6 @@ M:RegisterBlock({
     events   = { "ACTIVE_TALENT_GROUP_CHANGED", "PLAYER_ENTERING_WORLD" },
     update   = SpecUpdate,
     tooltip  = SpecTooltip,
-    secureClick = "TalentMicroButton",
 })
 
 local function FriendsUpdate(block)
@@ -438,7 +435,6 @@ M:RegisterBlock({
     events   = { "FRIENDLIST_UPDATE", "PLAYER_ENTERING_WORLD" },
     update   = FriendsUpdate,
     tooltip  = FriendsTooltip,
-    secureClick = "GuildMicroButton",
 })
 
 -- =========================================================================
@@ -501,7 +497,6 @@ M:RegisterBlock({
     events   = { "QUEST_LOG_UPDATE", "PLAYER_ENTERING_WORLD" },
     update   = QuestUpdate,
     tooltip  = QuestTooltip,
-    secureClick = "QuestLogMicroButton",
 })
 
 -- =========================================================================

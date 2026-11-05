@@ -178,6 +178,15 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
 - **绝不往暴雪的框体 / 贴图 / 字体串上写字段**（`frame.__monetXxx = ...`）。本客户端按"键"判污染：
   写过一次，这个对象之后跑的暴雪代码全部以我们的名义执行。一律走 `ns:Mark(obj, key, value)` /
   `ns:Marked(obj, key)`（Core.lua，**以对象为弱键的旁表**），我们自己的框体也一样处理，省得判断。
+- **绝不把 `SecureActionButtonTemplate` 的控件锚到"我们之后还要排版"的框上**（2026-11-05 开服判例，代价 = 一屏拦截）：
+  锚定家族会把普通框一起标成受保护 —— 实测信息栏格子上盖了一层安全接住器之后
+  `MonetUIInfoBar:IsProtected()` 变成 `true`，于是 `SetPoint` / `ClearAllPoints` / `SetWidth` / `SetShown`
+  **每一次都被拒**，每 10 秒上百条 `ADDON_ACTION_BLOCKED MonetUI Button:…`（匿名 Button = 我们自己造的格子）。
+  关键口径：**这种拒绝与战斗无关** —— `当前受限：无 · InCombatLockdown()=false` 照样拒，所以
+  `ns:IsRestricted()` 守门救不了它，只能从结构上避免。
+  归因只能按"匿名框 + 这一组排版写入"对代码：`taint.log` 对 `ADDON_ACTION_BLOCKED` **零记录**（这台机器实测文件根本不生成）。
+  ⇒ 安全转发只用在"造好之后不再动布局"的框上（自绘动作条那种：脱战建一次、换页走 state driver、排版在别的时刻）；
+  要"点一下开暴雪面板"又同时每拍排版的东西，先别做（本客户端也没有角色/天赋/好友/任务日志的纯 `C_*` 开窗 API）。
 - **绝不把暴雪的脚本函数抠出来自己调用**（比 hook 更隐蔽的同型错误）：
   `local fn = select(2, button:GetScript("OnClick")); pcall(fn, button)` 看着像"模拟点击"，
   实际是把**暴雪那段 Lua 拉进 MonetUI 的执行环境**跑 —— 它碰到的机密值比较全部按我们的名义抛。

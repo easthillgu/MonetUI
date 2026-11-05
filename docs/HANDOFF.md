@@ -3738,6 +3738,42 @@ TextStatusBar.lua:110 attempt to compare a secret number value (execution tainte
 有目标时不挂我们自己的 `OnClick` / 悬停挂在收鼠标的那层；C = 五个目标都在 1.60 实名集合里，
 且查找过 `Skin:Need`（缺席 ⇒ 账本一行 ✗，不是静默）。
 
+## 8.37 2026-11-05 §8.36 的修法**在真机上也不成立**：锚定家族把信息栏整条标成受保护
+
+作者重载后点了金钱 / 耐久 / 好友 / 任务四格（专精格 2 级还没开放，点不了）。两件事同时发生：
+
+- **好了**：`TextStatusBar.lua:110 … tainted by 'MonetUI'` 一条都没有（`logs ERR` 在该窗口内零新增），
+  `/mui blocks` 账本仍为空 ⇒ §8.36 那条 P0 的根因（调暴雪 Lua 全局）确实被堵住。
+- **坏了**：紧随其后是一整批 `ADDON_ACTION_BLOCKED MonetUI Button:ClearAllPoints() / :SetPoint() /
+  :SetWidth() / :SetShown()`，**每 10 秒 60–120 条**，持续十几分钟不停。
+
+**归因（不靠猜，三条实测）**：
+① `/mui restrict` → `当前受限：无`，`/run` 现场再问 `InCombatLockdown()` → `false` ⇒ **不是战斗/受限窗口拒的**，
+`ns:IsRestricted()` 这类守门对这种拒绝完全无效；
+② `Frame:IsProtected()` 现场读 → `MonetUIInfoBar=true`（同批 `MonetUIBar1=true` 是动作条安全模板，本来就该是）
+⇒ 我们那条**普通**信息栏被标成受保护了，唯一的变化就是格子上多了个 `SetAllPoints(frame)` 的安全接住器
+—— **锚定家族把格子连同父链一起传染成受保护**；
+③ 被拒的四个方法正好对上信息栏排版三件套（`SetText`→`SetWidth`、`Relayout`→`ClearAllPoints`/`SetPoint`、
+分隔线→`SetShown`），且日志里是匿名的 `Button`（格子没有名字）⇒ 是信息栏的格子，不是别的模块。
+这台机器的 `taint.log` 对 `ADDON_ACTION_BLOCKED` **零记录**（开了 `taintLog=2` 之后文件根本不生成，
+和 AGENTS 里那条旧记录一致），所以拿不到栈，只能这样三角定位。
+
+**处置**：信息栏回到"格子本体 = 普通 `BackdropTemplate`、没有安全接住器、`secureClick` 字段整个撤掉"，
+"点一格开暴雪面板"这个动作**今天下线**（任务 **#43**）。数字、悬停提示、属性面板（我们自己的窗）都不受影响。
+教训已升格成 AGENTS 一条：**安全模板控件不能锚到"之后还要排版"的框上**，而且这种拒绝与战斗无关。
+
+**闸门改口**（`tools/infobar-secure-click-probe.js`，10 项）：B 组现在钉的是"这里不许再出现
+`SecureActionButtonTemplate` / `SetAllPoints(frame)` / `secureClick` 字段"，C 组钉
+"唯一的 `onClick` 只能开我们自己的属性面板 + `/mui infobar diagnose` 名单里不再列那四颗微按钮（没有取用路径 = 假账）"。
+两次失败的写法都写进探针头注，免得下一个人把第三次当"改进"。
+
+**同型风险（还没测到，必须测）**：`Modules/Minimap/MicroMenu.lua` 的微菜单行是
+`SecureActionButtonTemplate` + `row:SetPoint(..., frame, ...)`，而 `frame:SetHeight()`（`:148`）和
+`frame:SetPoint()`（`:197/199`）**每次打开都会写** ⇒ 理论上和 §8.37 同一个坑。
+这一趟 `MonetUIMinimapMicroMenu` 还是"缺席"（菜单没被打开过，`Build` 是懒的），**没有实测证据**。
+⇒ 复验动作：`/reload` 后展开一次微菜单，我立刻读 `logs BLOCKED` + 现场读 `IsProtected()`。
+如果确认被传染，退路是把那几行也回成普通按钮并接受"微菜单不代点暴雪面板"（**不再赌**）。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 
