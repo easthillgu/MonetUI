@@ -24,11 +24,20 @@
   **口径不变：改名字要"实机 find 实名 + 窗口真开过仍 ✗"两样齐**，只有一样就写"待实机"。
 - **#42** `Utils/Scheduler.lua` 的计时源换 `debugprofilestop`（1.60 实测存在、毫秒带四位小数），
   让 `/mui perf` 真能排序找最贵的一路。改动在每拍热路径上，要小步 + 战斗内外各验一遍。
-- **#43** "点一格开面板"的合法载体。约束已实测清楚：① 调暴雪 Lua 全局 = 一屏红字（id 1441）；
-  ② 安全模板锚到我们要排版的框 = 框被标成受保护、`SetPoint` 静默丢弃（`IsProtected()=true` +
-  `GetNumPoints()=0`）；③ 本客户端只有 `C_Map.OpenWorldMap` / `C_Calendar.OpenCalendar` /
-  `C_TradeSkillUI.OpenTradeSkill` / `C_SettingsUtil.OpenSettingsPanel` 这几个纯 C_* 开口。
-  可行方向是"一次建好、之后只换属性不换锚点"的独立停靠载体，**不要在信息栏或微菜单的重排路径上重试**。
+- **#43** "点一格开面板"的合法载体。**微菜单那一半已做完并转正（11-06，见 HANDOFF §8.63）**，
+  剩下的就是**信息栏那一半**。已经实测清楚的约束：
+  ① 调暴雪 Lua 全局 = 一屏红字（id 1441）；
+  ② 安全模板锚到"我们要重排版的框" = 框被标成受保护、`SetPoint` 静默丢弃
+     （`IsProtected()=true` + `GetNumPoints()=0`）⇒ 载体必须**一次建好、之后只换属性不换锚点**；
+  ③ 本客户端只有 `C_Map.OpenWorldMap` / `C_Calendar.OpenCalendar` /
+     `C_TradeSkillUI.OpenTradeSkill` / `C_SettingsUtil.OpenSettingsPanel` 这几个纯 C_* 开口；
+  ④ **代点写法已钉死**（两条都会静默失效）：委托属性名是 `clickbutton`（不是 `click`），
+     并且必须 `RegisterForClicks("AnyDown","AnyUp")`（本机 `ActionButtonUseKeyDown=1`，只注册 Up 会被算成"释放"）；
+  ⑤ **不是所有暴雪按钮都吃脚本化点击**：`MainMenuMicroButton`（游戏菜单）放行值全对仍零反应 ⇒ 那颗放弃；
+     实测能代点的有 **10 个**：角色 / 专业 / 法术书 / 天赋 / 任务日志 / 公会 / 查找队伍 / 收藏 / 帮助 / 商店
+     （`LegacyMicroButton` 在 18 级 `IsEnabled()=false`，高等级要复验）。
+  ⇒ 信息栏那一格不要另起第三种写法，直接复用 `MicroMenuSecure.lua` 的形状（一次建 + 活锚点 + 属性单换）；
+     **也不要在信息栏的重排路径上重试**（§8.37 就炸在那儿）。
 - **#28** 共存归因做成产品能力：模块注册表声明 `conflicts / needs`，被接管时自静默并在
   `/mui report` 出一行"**谁在动受保护框**"（读 `Logs/taint.log` 或现场 `issecurevariable`，只读、不碰别人的框）。
   开服日已经拿到第一例硬数据：`RurutiaSuite/Modules/MinimapCollector` 按 `_G.Minimap` 子树收养按钮，
