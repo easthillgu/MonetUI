@@ -1271,6 +1271,19 @@ function Skin:UpdateTabState(tab)
 
     underline:SetAlpha(selected and 1 or 0.25)
     underline:Show()
+
+    -- **整框 alpha 的鬼影**（2026-11-06 实机）：暴雪按"未读 / 非活动"把整个页签框淡到
+    -- `0.4` / `0.2`（`ChatFrame1Tab`=0.4、`ChatFrame4Tab`=0.2），我们的贴图与文字挂在同一个框上，
+    -- 跟着一起消失 ⇒ 页签"看着没换皮、像没字"。登记过 `tabFullAlpha` 的页签在这里把整框抬回 1，
+    -- 选中与否**只由上面那条下划线表达**（与其余 48 个窗口同一语言）。
+    -- 实测空闲时暴雪不会自己顶回来（写 1 后 0.2 / 0.6 / 1.5 / 3.0 秒复检都还是 1），
+    -- 只有它自己的事件会重设 —— 这条跟着 0.5 秒轮询走，正好兜住那些时刻。
+    if Marked(tab, "tabFullAlpha") then
+        local S = ns.Secrets   -- 不能用文件末尾那个 `local Secrets`（它在下面 2200+ 行才声明，这里会是全局 nil）
+        local ok, a = pcall(tab.GetAlpha, tab)
+        local num = ok and type(a) == "number" and (not S or not S.IsSecret(a)) and a or nil
+        if num and num < 0.99 then pcall(tab.SetAlpha, tab, 1) end
+    end
 end
 
 --- 页签选中态的跟随：**不再 hooksecurefunc(PanelTemplates_SelectTab/DeselectTab)**。
@@ -1308,6 +1321,10 @@ function Skin:Tab(tab, opts)
     -- 必须自己收口 —— 以前直接 tab:CreateTexture 抛 "attempt to call a nil value"，
     -- 被 Dress 逐件 pcall 兜住后变成 4 条红字，而账本里那条 ✗ 才是有效信息。
     if not self:IsScriptObject(tab) then return tab end
+    -- 调用点传 `fullAlpha = true` ⇒ 这条页签不吃暴雪的"未读 / 非活动"整框淡化
+    -- （判据与代价见 `UpdateTabState` 末段；聊天页签实测被压到 0.2~0.4）。
+    -- 走 `ns:Mark` 的旁表，不往暴雪框上写字段。
+    if opts and opts.fullAlpha then Mark(tab, "tabFullAlpha", true) end
     self:Button(tab, opts)
 
     if not Marked(tab, "tab") then
@@ -1797,6 +1814,54 @@ function Skin:PageArrow(button, dir)
         end
     end
     return button
+end
+
+--- 聊天窗那枚"滚回底部"提示箭头（`ChatFrameN.ScrollToBottomButton`，17×15）。
+--- **只能换皮，不能藏**（2026-11-06 实机 + Aurora 同一判据：
+--- `Blizzard_ChatFrameBase/Mainline/FloatingChatFrame.lua:154-162`）：窗口被往上滚期间，暴雪用
+--- **alpha 动画**逐帧重放它的 `.Flash`（一层 ADD 混合的淡三角）—— `Skin:Fade` 与 `arrowRegions`
+--- 那套"压 α0 + 驱动持续压回"都会被动画顶回去，于是玩家看到的是"切页 / 滚过之后，边框外侧
+--- 冒出一枚暴雪原样的箭头"（`.Flash` 平时 `IsShown()=false`，所以静止状态扫描一条都抓不到）。
+--- 换皮之后：动画脉冲的是我们自己的 V 形，"下面还有未读"这个功能信号也保住。
+--- **五层都要换**：Normal / Highlight / Pushed / Disabled + `.Flash`，少一层就还剩一层原样。
+function Skin:ChatScrollAlert(button)
+    if not button or Marked(button, "chatScrollAlert") then return false end
+    local swapped = 0
+    local function one(tex)
+        if not tex then return end
+        local ours = self:SwapArt(tex, "monet_chevron_up")
+        if ours then
+            Widget:Arrow(ours, "down")
+            swapped = swapped + 1
+        end
+        return ours
+    end
+    local normal = one(self:TexOf(button, "GetNormalTexture"))
+    one(self:TexOf(button, "GetHighlightTexture"))
+    one(self:TexOf(button, "GetPushedTexture"))
+    one(self:TexOf(button, "GetDisabledTexture"))
+    -- Flash 是字段而不是贴图槽，而且它是 ADD 混合：换成我们的白色模具后 ADD 会烧成一团白光，
+    -- 所以连混合模式一起改成 BLEND（Aurora 同一处理，`flash:SetBlendMode("BLEND")`）。
+    local flash = button.Flash
+    if flash and type(flash.GetAtlas) == "function" then
+        local ours = self:SwapArt(flash, "monet_chevron_up")
+        if ours then
+            Widget:Arrow(ours, "down")
+            pcall(ours.SetBlendMode, ours, "BLEND")
+            swapped = swapped + 1
+        end
+    end
+    if swapped == 0 then return false end
+    Mark(button, "chatScrollAlert", true)
+    if normal and normal.SetVertexColor then
+        local r, g, b = Color:GetBorder()
+        normal:SetVertexColor(r, g, b)
+        self:OnTheme(function()
+            local nr, ng, nb = Color:GetBorder()
+            if normal.SetVertexColor then normal:SetVertexColor(nr, ng, nb) end
+        end)
+    end
+    return true
 end
 
 --- Walk a scroll frame's scroll bar (Blizzard names differ across builds).

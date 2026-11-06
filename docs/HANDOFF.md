@@ -4469,7 +4469,52 @@ API：`Each(list, perItem, onDone)`（万次扫描最常用形状）、`Run(body
 `TaxiRouteMap` 那类地图/画布窗）**不能进通用名单**，要么点名豁免、要么单独建档。
 判据一行：`frame.InsetBg` 之类字段的 `GetTexture()` 是非空 fileID/路径且尺寸≈内容区 ⇒ 那是内容，不是底衬。
 
+## 8.62 2026-11-06 聊天框：页签鬼影 / 底板边框 / 输入框置顶 / "滚回底部"那枚藏不住的箭头
+
+**四件事，三条是"我们改错了地方"，一条是"客户端机制不允许藏"**：
+
+1. **页签只点了 2 枚**（`ChatFrame1Tab` / `2Tab`），而实机 `ChatFrame1Tab..ChatFrame10Tab` **十个全在**
+   ⇒ 正在用的 `ChatFrame4Tab`（CHAT）一直是暴雪原样（10 张贴图 α1）。补齐到十个。
+2. **暴雪按"未读 / 非活动"把整个页签框淡到 0.2 / 0.4**（`ChatFrame1Tab`=0.4、`ChatFrame4Tab`=0.2）
+   —— 我们的贴图与文字挂在同一个框上，跟着一起消失，看着就像"没换皮"。做法：`Skin:Tab` 认
+   `opts.fullAlpha` → 打 `tabFullAlpha` 旁表标记 → 现成的 0.5 秒页签驱动在 `UpdateTabState` 末尾
+   把整框抬回 1，选中与否**只由我们的下划线**（1 / 0.25）表达。实测空闲时暴雪不自己顶回来
+   （写 1 之后 0.2 / 0.6 / 1.5 / 3.0 秒复检都是 1），只有它的事件会重设 ⇒ 轮询兜住。
+   **踩到的分发坑（下次直接查这里）**：`DRESSERS.tab = Skin:Tab(obj, opts.control)` ——
+   键写在**顶层 `opts`** 上根本进不到 `Skin:Tab`；第一次就写错，reload 后 alpha 仍是 0.4 / 0.2，
+   必须写 `control = { fullAlpha = true }`。
+3. **输入框置顶**（玩家拍板"摆在窗口上方、不遮文字"）：暴雪钉在窗口**下沿**
+   （`pt TOPLEFT→ChatFrameN.BOTTOMLEFT (-5,-2)` + `RIGHT→无名 ScrollBar.RIGHT (+8)`），
+   而**页签条就压在窗口上沿**（页签顶边比窗口顶边高 ~36 UI）⇒ 钉到顶边会盖住页签行，
+   实测做法是 `dy = (页签顶边 - 窗口顶边) + 页签高 + 2`，再 `BOTTOMLEFT/BOTTOMRIGHT` 两点对称钉。
+   `FCF_DockUpdate`（拖窗 / 改大小 / 改停靠）会重钉回底部，我们不给暴雪框挂钩子 ⇒
+   `Widget:PollWatch` 每 1 秒校一次，**几何对不上才写**。`ChatFrame1..10EditBox`
+   实测 `IsProtected()=false`（能写）。顺带：暴雪还把非活动窗口的输入框整框淡到 **0.349**
+   （1..10 全中，连我们没点名的 5/6 也一样 ⇒ 不是我们写的），显示着的那条一起抬回 1。
+4. **"滚回底部"箭头不能藏，只能换皮**（`ChatFrameN.ScrollToBottomButton`，17×15，匿名子件）：
+   症状是"切页 / 滚过之后边框外侧多出一枚暴雪原样的箭头"。机制（Aurora 同一判据，
+   `Blizzard_ChatFrameBase/Mainline/FloatingChatFrame.lua:154-162`）：窗口往上滚期间
+   `ChatFrameMixin:OnUpdate` 用 **alpha 动画**逐帧重放 `.Flash`（一层 ADD 混合的淡三角），
+   `Skin:Fade` 与 `arrowRegions` 那套"压 α0 + 驱动持续压回"都会被动画顶回去。
+   ⇒ 新增唯一入口 `Skin:ChatScrollAlert(button)`：**五层全换**（Normal / Highlight / Pushed /
+   Disabled + `button.Flash`）成我们的 `monet_chevron_up` 转向下，`.Flash` 的混合模式一并改
+   BLEND（白色模具走 ADD 会烧成一团光），主题换色跟着走。
+   **为什么前两次静止扫描一条都没抓到**：`.Flash` 平时 `IsShown()=false`，只在滚过之后显形
+   ⇒ 这类"只在交互后出现"的美术必须用 0.1 秒记录器抓沿（本次抓到 `anon/Button [459,58 16x11] a=1.00`，
+   父链 `← anon/Frame ← ChatFrame1`），别用一次性 `EnumerateFrames` 快照下"没有残留"的结论。
+
+**底板观感**（玩家选的"保持半透明 + 边框可见"）：`panel = { thickness = 1, bgAlpha = 0.35, borderAlpha = 1 }`
+—— 聊天浮在世界之上要能透，但边框以前跟着 `edge` 的默认强度，在 0.35 的底上一起发虚。
+
+**验收数字（reload + 滚过之后）**：四枚 `ScrollToBottomButton` 的五层贴图全部
+`atlas=nil tex=-2824`（我们的 BLP）、`blend=BLEND`；`ChatFrame1/2/4Tab alpha=1`；
+`ChatFrame4EditBox` = `pt1 BOTTOMLEFT` + `pt2 BOTTOMRIGHT`、`alpha=1`；截图自上而下 =
+输入框 / 页签行 / 半透板 + 细边；`logs ERR` 自 reload 起零新增（唯一一条 `BLOCKED` 是同机
+`DungeonsForever UNKNOWN()`，不是我们）。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
+
+
 
 
 
