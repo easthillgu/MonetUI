@@ -51,6 +51,7 @@ local MODULE_LABEL = {
     Toast        = "通知横幅 (Toast)",
     Durability   = "耐久警告 (Durability)",
     Atmosphere   = "氛围暗角 (Atmosphere)",
+    Tweaks       = "控制台优化 (Tweaks)",
     WhatsNew     = "更新提示 (WhatsNew)",
 }
 
@@ -1507,6 +1508,31 @@ function SimpleConfig:Build()
         atHint:SetWidth(328)
         atHint:SetJustifyH("LEFT")
         atHint:SetText("只在画面四周压暗，越靠中心越亮：压的是游戏世界，所有界面（面板、动作条、姓名板）都天然在这层之上，文字亮度一位不减。默认关。")
+        sec.bodyHeight = -row.y + 4
+    end
+
+    local tweaks = ns:GetModule("Tweaks")
+    if tweaks then
+        sec = BeginSection("控制台优化", false)
+        content = sec.body
+        row = LayoutCursor(0)
+
+        local list = tweaks:Tweaks()
+        for i = 1, #list do
+            local t = list[i]
+            MakeCheckbox(content, t.label, row(26),
+                function() return tweaks:IsOn(t.key) end,
+                function(value)
+                    tweaks:Settings()[t.key] = value and true or false
+                    tweaks:Apply()
+                end)
+        end
+
+        local tweakHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
+        tweakHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(44))
+        tweakHint:SetWidth(328)
+        tweakHint:SetJustifyH("LEFT")
+        tweakHint:SetText("逐条开关客户端控制台设置：打开写入、关掉还原成你原来的值。名单来自《无限》服常用优化，个别名字在本客户端可能不存在或被拒写——那样这条会空转，用 /mui tweaks status 看账本。默认全关。")
         sec.bodyHeight = -row.y + 4
     end
 

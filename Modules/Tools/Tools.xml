@@ -9,6 +9,7 @@
     5. DevTools.lua - 只读探针（perf / skins closes|inset|arrows）
     6. Report.lua - /mui report 诊断包（环境·设置差异·提示历史·美化台账·同机插件；只读）
     7. WhatsNew.lua - 版本更新后一次性的"本版要点"提示（/mui whatsnew 可重看）
+    8. Tweaks.lua - 控制台优化（逐条 CVar 开关）
     
     注意：Atmosphere 必须在 InfoBar 之前加载（见 MonetUI.toc 注释）
 -->
@@ -21,4 +22,5 @@
     <Script file="DevTools.lua"/>
     <Script file="Report.lua"/>
     <Script file="WhatsNew.lua"/>
+    <Script file="Tweaks.lua"/>
 </Ui>
