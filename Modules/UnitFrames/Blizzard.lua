@@ -10,6 +10,8 @@ local ADDON_NAME, ns = ...
 local Widget = ns.Widget
 local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
 local Marked = function(o, k) return ns:Marked(o, k) end
+-- 模块私有的幂等守卫键走 per-module 弱旁表（ns:NewFrameData）。
+local FFD, GetFFD = ns:NewFrameData()
 
 local M = ns:GetModule("UnitFrames")
 if not M then return end
@@ -30,8 +32,8 @@ function M:SuppressBlizzard(enable)
     for _, globalName in pairs(BLIZZARD_FRAMES) do
         local blizzard = _G[globalName]
         if blizzard then
-            if enable and not Marked(blizzard, "suppressed") then
-                Mark(blizzard, "suppressed", true)
+            if enable and not GetFFD(blizzard).suppressed then
+                GetFFD(blizzard).suppressed = true
                 -- 2026-10-25：**TargetFrame 也走彻底压制**。
                 -- 以前给它留的是"借用模式"（只 alpha 0、事件照跑），因为 A 方案靠它画光环；
                 -- A 方案已废（光环改由引擎容器自绘），留着的后果是：TargetFrame 自己的代码
@@ -42,8 +44,8 @@ function M:SuppressBlizzard(enable)
                     pcall(blizzard.SetScript, blizzard, "OnShow", blizzard.Hide)
                 end
                 blizzard:Hide()
-            elseif not enable and Marked(blizzard, "suppressed") then
-                Mark(blizzard, "suppressed", nil)
+            elseif not enable and GetFFD(blizzard).suppressed then
+                GetFFD(blizzard).suppressed = nil
                 pcall(blizzard.SetScript, blizzard, "OnShow", nil)
                 if type(blizzard.EnableMouse) == "function" then
                     pcall(blizzard.EnableMouse, blizzard, true)
@@ -81,8 +83,8 @@ function M:HideBlizzardCastBars(enable)
         local frame = _G[name]
         if frame then
             if enable then
-                if not Marked(frame, "castHidden") then
-                    Mark(frame, "castHidden", true)
+                if not GetFFD(frame).castHidden then
+                    GetFFD(frame).castHidden = true
                     if frame.SetScript then
                         pcall(frame.SetScript, frame, "OnShow", frame.Hide)
                     end

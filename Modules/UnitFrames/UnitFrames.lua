@@ -10,6 +10,8 @@ local ADDON_NAME, ns = ...
 -- 否则那个框体之后跑的暴雪代码会被判成“被 MonetUI 污染”。
 local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
 local Marked = function(o, k) return ns:Marked(o, k) end
+-- 模块私有的幂等守卫键走 per-module 弱旁表（ns:NewFrameData）；跨文件共享键（weave 等）仍走 Mark/Marked。
+local FFD, GetFFD = ns:NewFrameData()
 local Secrets = ns.Secrets
 local Widget  = ns.Widget
 local Color   = ns.Color
@@ -131,9 +133,9 @@ end
 
 local function SetPetAlpha(frame, shown)
     local value = shown and 1 or PET_IDLE_ALPHA
-    if Marked(frame, "petAlpha") == value then return end
+    if GetFFD(frame).petAlpha == value then return end
     -- 只记成功的那个值：受限环境下 SetAlpha 万一被拒，下次轮询还要再试。
-    if pcall(frame.SetAlpha, frame, value) then Mark(frame, "petAlpha", value) end
+    if pcall(frame.SetAlpha, frame, value) then GetFFD(frame).petAlpha = value end
 end
 
 --- 宠物框的"悬停 / 选中才显示"只有**一个回调、一个驱动**。
@@ -148,7 +150,7 @@ local PET_HOVER_TICK = 0.1
 local petWatchPending = false    -- 登记那一刻读不出来，等限制换边再补装
 
 local function PetHoverPoll(frame)
-    if not Marked(frame, "petHoverOn") then return end
+    if not GetFFD(frame).petHoverOn then return end
     local over = false
     local ok, inside = pcall(frame.IsMouseOver, frame)
     if ok then over = Secrets.Bool(inside, false) end
@@ -160,7 +162,7 @@ end
 --- 不抛错也不记错，降级就是原来那条：下面的"立刻定一次"照做（SetAlpha 自己 pcall，被拒就按
 --- 失败处理），等限制换边那一拍再补装。
 local function InstallPetWatch(frame)
-    if Marked(frame, "petHoverWatched") then
+    if GetFFD(frame).petHoverWatched then
         petWatchPending = false
         return true
     end
@@ -173,7 +175,7 @@ local function InstallPetWatch(frame)
         return false
     end
     petWatchPending = false
-    Mark(frame, "petHoverWatched", true)
+    GetFFD(frame).petHoverWatched = true
     Widget:PollWatch(frame, PetHoverPoll, PET_HOVER_TICK)
     return true
 end
@@ -184,7 +186,7 @@ end
 EventBus:Register("MONETUI_RESTRICTION_CHANGED", function()
     if not petWatchPending then return end
     local frame = frames.pet
-    if frame and frame.unit == "pet" and Marked(frame, "petHoverOn") then
+    if frame and frame.unit == "pet" and GetFFD(frame).petHoverOn then
         InstallPetWatch(frame)
     end
 end)
@@ -192,7 +194,7 @@ end)
 --- 开关只改标记（回调是常驻登记的，轮询里自己看标记，关掉后不会再被拉回 0）。
 local function ApplyPetHover(frame, enabled)
     if not frame or frame.unit ~= "pet" then return end
-    Mark(frame, "petHoverOn", enabled and true or false)
+    GetFFD(frame).petHoverOn = enabled and true or false
     if not enabled then
         SetPetAlpha(frame, true)
         return
@@ -314,8 +316,8 @@ end
 local function ApplyWeaveDensity(frame)
     if not frame.health then return end
     local alpha = Setting(frame.unit, "lostColor") == "weave" and 0.85 or 0.15
-    if Marked(frame, "weaveAlpha") == alpha then return end
-    Mark(frame, "weaveAlpha", alpha)
+    if GetFFD(frame).weaveAlpha == alpha then return end
+    GetFFD(frame).weaveAlpha = alpha
     ns.Widget:BarWeaveDensity(frame.health, alpha)
 end
 
@@ -1043,7 +1045,7 @@ function M:DebugLost()
         if frame then ApplyWeaveDensity(frame) end
         ns:Print(("%s：样式 %s　空槽色 %.2f/%.2f/%.2f　织纹 %s → %s　mark=%s　frame.unit=%s")
             :format(unit, tostring(style), r or -1, g or -1, b or -1, before, alphaOf(),
-                tostring(frame and Marked(frame, "weaveAlpha")), tostring(frame and frame.unit)))
+                tostring(frame and GetFFD(frame).weaveAlpha), tostring(frame and frame.unit)))
     end
 end
 

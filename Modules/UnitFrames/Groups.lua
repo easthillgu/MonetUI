@@ -14,6 +14,8 @@ local ADDON_NAME, ns = ...
 local Secrets  = ns.Secrets
 local Widget   = ns.Widget
 local Color    = ns.Color
+-- 模块私有的幂等守卫键走 per-module 弱旁表（ns:NewFrameData）。
+local FFD, GetFFD = ns:NewFrameData()
 local Media    = ns.Media
 local Math     = ns.Math
 local EventBus = ns.EventBus
@@ -321,7 +323,7 @@ local function StyleButton(button, cfg, small)
 
     -- 血条 / 能量 / 覆盖层可能是这次重建出来的（新对象 alpha=1）：作废"上次写过的距离档位"，
     -- 否则 SetContentAlpha 会以为已经是 0.45 而跳过，远处的人就永远不淡。
-    ns:Mark(button, "contentAlpha", nil)
+    GetFFD(button).contentAlpha = nil
 
     -- Clique / 点击施法类插件认这张表；没装也没有副作用。
     -- 走 _G 拿：这个全局在本客户端根本没有，直接写全局名会被静态检查当成"用了一个不存在的全局"。
@@ -338,8 +340,8 @@ end
 --- 记在旁表上（AGENTS：不往框体写字段）。`StyleButton` 会清掉它 —— 条可能被重建成新对象，
 --- 新对象 alpha 是 1，旁表还留着 0.45 就会让远处的人永远不淡。
 local function SetContentAlpha(button, alpha)
-    if ns:Marked(button, "contentAlpha") == alpha then return end
-    ns:Mark(button, "contentAlpha", alpha)
+    if GetFFD(button).contentAlpha == alpha then return end
+    GetFFD(button).contentAlpha = alpha
     if button.health then button.health:SetAlpha(alpha) end
     if button.power then button.power:SetAlpha(alpha) end
     -- 文字与职责图标都收在覆盖层里，淡一次全淡；预估 / 吸收盾是血条的子框，随血条淡
