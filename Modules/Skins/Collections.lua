@@ -7,6 +7,12 @@ local ADDON_NAME, ns = ...
 
 local M    = ns.Skins
 local Skin = ns.Skin
+-- `Widget` 必须显式取：本文件以前没有这个 local，而 2026-11-06 新加的
+-- `Widget:PollWatch` / `Widget:HeaderRule` 直接写了 `Widget:...` ⇒ 那是**全局 nil**，
+-- Apply 在中途抛错（`audit-locals` / `api-audit` / `taint` 全过，只有实机看得出"重涂没生效"）。
+local Widget = ns.Widget
+local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
+local Marked = function(o, k) return ns:Marked(o, k) end
 
 -- 1.60 实机（11-05 逐窗开过 + `/mui compat find`，见 HANDOFF §8.40）：只有 1..5，
 -- `CollectionsJournalTab6` 不存在（幻化在 1.60 是 `WardrobeCollectionFrame`，不占第 6 页签）。
@@ -58,19 +64,61 @@ end
 -- 由窗口这侧的 `deep = true` 接住（§8.40 的 ② 档）。
 local PLAYERSPELLS_BUTTONS = { "PlayerSpellsFrameCloseButton", "PlayerSpellsFrameClearButton" }
 
--- **羊皮纸 / 天赋背景递归剥（11-05 作者指定）**：法术页正文是暴雪 `spellbook-page-*` 羊皮纸，
+-- **羊皮纸 / 天赋背景 / 行底衬递归剥**：法术页正文是暴雪 `spellbook-page-*` 羊皮纸，
+-- 行与行下面还有 `spellbook-list-backplate`（列表底，实测 α0.65）与
+-- `spellbook-item-backplate`（每行一块 256x64 的柔和底，实测 α0.25）——
+-- 这两层本来是为羊皮纸配的，羊皮纸一剥就变成深底上的**脏暗云**（2026-11-06 玩家报的）。
 -- 天赋页是 `talent-background` / `Talents-Background` / `Talents-inner-frame` /
 -- `talents-heroclass-backplate`，都挂在匿名子帧上 —— Strip 不递归、deep 只扫按钮，两条都够不到。
 -- 只压这些**认得出的背景 atlas**，不碰图标 / 动画遮罩（`talents-animations-mask` / `specart` 保留）。
 local SPELLBOOK_BACKDROP_ATLAS = {
-    "spellbook%-page", "talent%-background", "talents%-background",
+    "spellbook%-list%-backplate", "spellbook%-item%-backplate",
+    "talent%-background", "talents%-background",
     "talents%-inner%-frame", "talents%-heroclass%-backplate",
 }
+-- 页底（羊皮纸）**不归零**：照 EUI 口径留 0.1 淡纸 —— 全 0 会让整页纯黑、丢掉"书"的感觉。
+local SPELLBOOK_PAGE_ATLAS = { "spellbook%-page" }
 
--- 模块级稳定引用：M:HookShow 按引用去重，在 Apply 里现造闭包会每开一次窗多挂一条。
-local function FadeSpellbookBackdrops()
+-- 模块级稳定引用：M:HookShow / Widget:PollWatch 都按引用去重，在 Apply 里现造闭包会每次多挂一条。
+--- 法术书 / 天赋页的"全暗化"一趟：剥背景 + 提亮为浅底配的深色字 + 压掉页内装饰纹样。
+local function DarkenSpellbookPage()
     local f = Skin:Need("PlayerSpellsFrame")
-    if f then Skin:FadeAtlasBackdrop(f, SPELLBOOK_BACKDROP_ATLAS) end
+    if not f then return end
+    Skin:FadeAtlasBackdrop(f, SPELLBOOK_BACKDROP_ATLAS)
+    Skin:FadeAtlasBackdrop(f, SPELLBOOK_PAGE_ATLAS, nil, 0.1)
+    Skin:BrightenDarkText(f)
+    -- EUI 口径的字段通道（比按 atlas 认更稳，名字与 `EllesmereUIBlizzardSkin_WindowPacks.lua` 同源）。
+    local sb = f.SpellBookFrame
+    if sb then
+        for _, key in ipairs({ "BookBGLeft", "BookBGRight", "BookBGHalved" }) do
+            local t = sb[key]
+            if t and t.SetAlpha then pcall(t.SetAlpha, t, 0.1) end
+        end
+        for _, key in ipairs({ "TopBar", "BookCornerFlipbook", "Bookmark" }) do
+            local t = sb[key]
+            -- Bookmark 是"当前页签书签"，EUI 保留它；这里只压 TopBar / 翻书角。
+            if key ~= "Bookmark" and t and t.SetAlpha then pcall(t.SetAlpha, t, 0) end
+        end
+    end
+    -- 法术格美术（backplate 归零 / 金环留半）—— 这一步只碰格子，不动页签。
+    Skin:SpellbookItemArt(f)
+    -- 页签：**只做纯文字页签**（专精 / 天赋 / 法术书）。
+    -- `CategoryTabSystem`（法术书里那排分类图标）**整档不碰** —— 2026-11-06 实机：
+    -- 那排页签在展开/收回两种布局下都被法术网格压住、图标不可见；照 EUI 判据换皮后依旧不可见，
+    -- 无法证明收益、却引入了"图标丢"的嫌疑。按"宁可不换皮，也不动图标"收口。
+    -- （`Skin:TabSystemArt` 内部也会跳过任何 `Icon` 有贴图的页签，双保险。）
+    Skin:TabSystemArt(f.tabSystem or f.TabSystem)
+    -- 页签：**只做纯文字页签**（专精 / 天赋 / 法术书）。带图标的 `CategoryTabSystem`
+    -- 一律不碰 —— 2026-11-06 实机两次判例：那排图标页签在"收回"布局下与法术网格重叠，
+    -- 且图标/方模式/数组贴图三家并存，任何"换皮"都会把图标压没（`Skin:TabSystemArt`
+    -- 内部也会跳过任何 Icon 有贴图的页签）。
+    Skin:TabSystemArt(f.tabSystem or f.TabSystem)
+    -- 标题：字段通道认不到（挂在匿名子帧上），按几何认领后排成我们的样式 + 一条发丝线。
+    local title = Skin:AdoptTopTitle(f)
+    if title and not Marked(f, "topTitleRule") and ns.Widget and ns.Widget.HeaderRule then
+        Widget:HeaderRule(f, title, { pad = 8, gap = 3 }) -- TAINT-OK: 只读标题矩形，线是我们自己的
+        Mark(f, "topTitleRule", true)
+    end
 end
 
 local function SkinPlayerSpells()
@@ -84,9 +132,14 @@ local function SkinPlayerSpells()
     M:Dress("HeroTalentsSelectionDialog", {
         window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true,
     })
-    -- 羊皮纸 / 天赋背景：Apply 先剥一次，再挂 Show 重涂（面板懒建 + 暴雪 Show 会重设 alpha）。
-    FadeSpellbookBackdrops()
-    M:HookShow(Skin:Need("PlayerSpellsFrame"), FadeSpellbookBackdrops)
+    -- 羊皮纸 / 行底衬 / 天赋背景 + 深色字提亮：Apply 先跑一趟，再挂 Show 重涂
+    -- （面板懒建 + 暴雪 Show 会重设 alpha），**最后加 2 秒轮询兜住"切页才出生的行"** ——
+    -- Show 不覆盖这种时刻（法术书切分类、学新法术补行都不发 Show）。
+    -- 三处都是幂等：Fade 靠 `hidden` 标记，提亮靠"提亮后颜色不再暗"自跳过。
+    DarkenSpellbookPage()
+    M:HookShow(Skin:Need("PlayerSpellsFrame"), DarkenSpellbookPage)
+    local frame = Skin:Need("PlayerSpellsFrame")
+    if frame then Widget:PollWatch(frame, DarkenSpellbookPage, 2) end
 end
 
 local ACHIEVEMENT_TABS = { "AchievementFrameTab1", "AchievementFrameTab2" }

@@ -416,15 +416,95 @@ function Skin:FadeButtonArt(button)
     end
 end
 
+--- 把"为浅底设计的深色字"提亮（2026-11-06，法术书 / 天赋页全暗化的配套）。
+--- **为什么需要**：剥掉羊皮纸（`spellbook-page-*`）之后，法术名 / 等级 / 分类标题仍然是
+--- 暴雪给浅底配的深棕（实测 `0.18,0.11,0.06`，字体 `Fonts\ARKai_T.ttf`）—— 压在 0.96 的
+--- 深色背板上等于看不见。11-05 那次只验了"羊皮纸消失"，没验"字还看得见"，这就是那条缺口。
+--- **判据是颜色，不是文字内容**（不猜哪个串是标题）：只提亮**暗且接近中性**的字
+--- （`max < 0.5` 且 `max-min < 0.18`）—— 后一条是为了放过职业色 / 品质色这类**饱和**文字，
+--- 它们本该保留色相。提亮后颜色不再"暗"，下一遍自然跳过（幂等，无需标记表）。
+--- 分级沿用调色板：`等级 N` 这类次级行 → `neutral`，其余（名字 / 分类标题）→ `bright`。
+function Skin:BrightenDarkText(frame, depth)
+    if not frame or (depth or 0) > 8 or type(frame.GetRegions) ~= "function" then return end
+    depth = depth or 0
+    local okR, regions = pcall(function() return { frame:GetRegions() } end)
+    if okR then
+        for _, reg in ipairs(regions) do
+            local okT, kind = pcall(function() return reg:GetObjectType() end)
+            if okT and kind == "FontString" and reg.GetTextColor and reg.SetTextColor then
+                local okC, r, g, b = pcall(function() return reg:GetTextColor() end)
+                if okC and type(r) == "number" then
+                    local hi = math.max(r, g, b)
+                    if hi < 0.5 and (hi - math.min(r, g, b)) < 0.18 then
+                        local okX, txt = pcall(function() return reg:GetText() end)
+                        local key = (okX and type(txt) == "string" and txt:find("^等级")) and "neutral" or "bright"
+                        local nr, ng, nb = Widget:PaletteColor(key)
+                        if nr then
+                            local okA, a = pcall(function() return reg:GetTextAlpha() end)
+                            pcall(reg.SetTextColor, reg, nr, ng, nb, (okA and a) or 1)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    local okC, kids = pcall(function() return { frame:GetChildren() } end)
+    if okC then
+        for _, k in ipairs(kids) do self:BrightenDarkText(k, depth + 1) end
+    end
+end
+
+--- 认领"挂在匿名子帧上的窗口标题"并排成我们的样式（2026-11-06，法术书判例）。
+--- **为什么需要**：`Skin:Dress` 的标题通道只认 `frame.TitleContainer.TitleText` / `TitleText` /
+--- `Title` 这几个字段；法术书的标题字体串挂在**匿名子帧**上（字段一个都没有），于是它一直是
+--- 暴雪原样：居中、`0.53,0.56,0.69 @0.8`、12px，和我们其它窗口的"左对齐 + edge 色 + 发丝线"
+--- 完全两套。这里按**几何**认领（宽 ≥ 窗宽 55%、顶边贴窗口顶 26px 以内、有文字），不按文本猜。
+--- 锚点写入受保护框的子件在战斗里会被拒 ⇒ 只做非战斗；字体/颜色不受限，随时可做。
+function Skin:AdoptTopTitle(frame)
+    if not frame or type(frame.GetRegions) ~= "function" then return nil end
+    local fs = Marked(frame, "topTitle")
+    if not fs or not fs.GetTop then
+        local fTop = select(2, pcall(function() return frame:GetTop() end))
+        local fW = select(2, pcall(function() return frame:GetWidth() end))
+        if type(fTop) ~= "number" or type(fW) ~= "number" then return nil end
+        local best, bestW = nil, 0
+        local function scan(o, depth)
+            if depth > 4 then return end
+            for _, reg in ipairs({ o:GetRegions() }) do
+                local okT, kind = pcall(function() return reg:GetObjectType() end)
+                if okT and kind == "FontString" then
+                    local okX, txt = pcall(function() return reg:GetText() end)
+                    local okW, w = pcall(function() return reg:GetWidth() end)
+                    local okTop, top = pcall(function() return reg:GetTop() end)
+                    if okX and txt and txt ~= "" and okW and okTop and w and w >= fW * 0.55
+                        and top and top <= fTop + 2 and top >= fTop - 26 then
+                        if w > bestW then best, bestW = reg, w end
+                    end
+                end
+            end
+            for _, c in ipairs({ o:GetChildren() }) do scan(c, depth + 1) end
+        end
+        scan(frame, 0)
+        fs = best
+        if not fs then return nil end
+        Mark(frame, "topTitle", fs)
+    end
+    self:Font(fs, 12, "pixel", "edge", "LEFT")
+    if not InCombatLockdown() then
+        local fW = select(2, pcall(function() return frame:GetWidth() end))
+        pcall(fs.ClearAllPoints, fs)
+        pcall(fs.SetPoint, fs, "TOPLEFT", frame, "TOPLEFT", 18, -5)
+        if type(fW) == "number" then pcall(fs.SetWidth, fs, fW - 36) end
+        pcall(fs.SetJustifyH, fs, "LEFT")
+    end
+    return fs
+end
+
 --- 递归剥"按 atlas 认得出的窗体背景"（11-05 天赋/法术页羊皮纸）。
---- `Strip` 只处理一个框**自己的** region，不递归子帧；而法术页的羊皮纸
---- （`spellbook-page-*`）和天赋页背景（`talent-background` / `Talents-Background` /
---- `Talents-inner-frame` / `talents-heroclass-backplate`）都挂在**匿名子帧**上，
---- deep 的按钮扫也够不到（它们不是按钮）。这条通道只压**认得出的背景 atlas**，
---- 绝不做"整框 regions=true"那种会把图标一起压掉的事（AGENTS 功能图标豁免同一条）。
---- 复用 `Fade`：幂等（`hidden` 标记）、可回滚。
--- @param patterns  小写 Lua 模式列表（string.find 用）
-function Skin:FadeAtlasBackdrop(frame, patterns, depth)
+--- `alpha` 省略 = 压成 0；给数值 = 压到那个值（2026-11-06 EUI 口径：羊皮纸留 0.1 淡纸，
+--- 全 0 会让整页变成纯黑，反而失去"书"的感觉 —— `EllesmereUIBlizzardSkin_WindowPacks.lua:556`
+--- 对 `BookBGLeft/Right/Halved` 用的就是 0.1）。
+function Skin:FadeAtlasBackdrop(frame, patterns, depth, alpha)
     if not frame or (depth or 0) > 8 or type(frame.GetRegions) ~= "function" then return end
     depth = depth or 0
     local okR, regions = pcall(function() return { frame:GetRegions() } end)
@@ -435,7 +515,13 @@ function Skin:FadeAtlasBackdrop(frame, patterns, depth)
                 local low = string.lower(atlas)
                 for i = 1, #patterns do
                     if low:find(patterns[i]) then
-                        self:Fade(reg)
+                        if alpha then
+                            -- 指定值：不复用 Fade 的 "hidden" 标记（那标记的含义是"归零"），
+                            -- 直接写 alpha；每次重涂都写一遍，幂等。
+                            pcall(reg.SetAlpha, reg, alpha)
+                        else
+                            self:Fade(reg)
+                        end
                         break
                     end
                 end
@@ -444,7 +530,145 @@ function Skin:FadeAtlasBackdrop(frame, patterns, depth)
     end
     local okC, kids = pcall(function() return { frame:GetChildren() } end)
     if okC then
-        for _, k in ipairs(kids) do self:FadeAtlasBackdrop(k, patterns, depth + 1) end
+        for _, k in ipairs(kids) do self:FadeAtlasBackdrop(k, patterns, depth + 1, alpha) end
+    end
+end
+
+--- 法术格的美术口径（照 `EllesmereUIBlizzardSkin_WindowPacks.lua:308-330` 的 FadeSpellItem）：
+---   `item.Backplate` 归零（每次 populate/hover 都会被暴雪抬回来，所以这一趟要反复跑）；
+---   图标金环 `Button.Border` **留但压半**（α0.5 + 去饱和 0.5，EUI 的判断：它承载"这是个技能格"的信息）；
+---   `BorderSheen` / `IconHighlight` 归零（那两样是羊皮纸底上的高光）。
+--- 判据只看字段是否存在（EUI 用同一套名字，本客户端实测齐全），不按贴图猜。
+function Skin:SpellbookItemArt(frame, depth)
+    if not frame or (depth or 0) > 10 or type(frame.GetChildren) ~= "function" then return end
+    depth = depth or 0
+    if frame.IsForbidden then
+        local okF, forbidden = pcall(function() return frame:IsForbidden() end)
+        if okF and forbidden then return end
+    end
+    local okB, backplate = pcall(function() return frame.Backplate end)
+    local okBtn, btn = pcall(function() return frame.Button end)
+    if okB and okBtn and backplate and btn then
+        -- 廉价前置：backplate 已经被压过就不用再写五项（每 2 秒一趟，几十个格）。
+        local raised = true
+        if backplate.GetAlpha then
+            local okA, a = pcall(function() return backplate:GetAlpha() end)
+            if okA and type(a) == "number" and a <= 0.01 then raised = false end
+        end
+        if raised then
+            pcall(backplate.SetAlpha, backplate, 0)
+            if btn.Border then
+                pcall(btn.Border.SetAlpha, btn.Border, 0.5)
+                pcall(btn.Border.SetDesaturation, btn.Border, 0.5)
+            end
+            if btn.BorderSheen then pcall(btn.BorderSheen.SetAlpha, btn.BorderSheen, 0) end
+            if btn.IconHighlight then pcall(btn.IconHighlight.SetAlpha, btn.IconHighlight, 0) end
+        end
+    end
+    local okC, kids = pcall(function() return { frame:GetChildren() } end)
+    if okC then
+        for _, k in ipairs(kids) do self:SpellbookItemArt(k, depth + 1) end
+    end
+end
+
+--- 页签：**不搬位置**，只把暴雪 TabSystem 的按钮换皮（2026-11-06 照 EUI 口径）。
+--- 依据 `EllesmereUIBlizzardSkin_WindowEngine.lua:1253`（WSkin.Tab）：清掉页签自己的全部贴图
+--- 与 `Left/Middle/Right` 三段图，自画一块深色底板 + 自建居中文案；暴雪那条文字**只把颜色设成
+--- 全透明（不删）**，文案每次从它读回来镜像（动态文案走 `SetFormattedText`，不走 `SetText`）。
+--- 选中态读 `tab.isSelected` 字段（不调 `IsSelected()` —— 那是暴雪 Lua）。
+function Skin:TabSystemArt(tsys)
+    if not tsys or type(tsys.GetChildren) ~= "function" then return end
+    local okF, forbidden = pcall(function() return tsys:IsForbidden() end)
+    if okF and forbidden then return end
+    local okC, kids = pcall(function() return { tsys:GetChildren() } end)
+    if not okC then return end
+    for _, tab in ipairs(kids) do
+        local okT, kind = pcall(function() return tab:GetObjectType() end)
+        -- **带图标的页签整组跳过**：图标页签在本客户端是 `Icon + IconMask + SquareTextures 数组
+        -- + SquareBackground` 四家并存，任何换皮都可能连带压掉图标（2026-11-06 实机反复验证）。
+        -- 判据只看 `Icon` 上有没有贴图，不看名字。
+        local hasIcon = false
+        if okT and kind == "Button" and tab.Icon and tab.Icon.GetTexture then
+            local okX, v = pcall(function() return tab.Icon:GetTexture() end)
+            if okX and v ~= nil then hasIcon = true end
+        end
+        if okT and kind == "Button" and not hasIcon then
+            local done = Marked(tab, "tabArt")
+            if not done then
+                Mark(tab, "tabArt", true)
+                -- 1) **清贴图，不压 alpha**（EUI `WSkin.Tab` 原文的判据，2026-11-06 对齐）。
+                --    两个理由，都是实机判例：
+                --    ① `IconMask` 是 **MaskTexture**，把它 alpha 置 0 = 被它遮的图标整块不画
+                --       （我们第二版"只压 alpha"就这么把图标弄没的）。EUI 用
+                --       `r:IsObjectType("Texture")` 天然跳过蒙版，这里显式只认 Texture。
+                --    ② 清贴图比压 alpha 更彻底：暴雪重新 Show 那些 region 时没东西可显示。
+                local okR, regions = pcall(function() return { tab:GetRegions() } end)
+                if okR then
+                    for _, reg in ipairs(regions) do
+                        if reg ~= tab.Icon and reg ~= tab.IconMask then
+                            local okK, k2 = pcall(function() return reg:GetObjectType() end)
+                            if okK and k2 == "Texture" then
+                                pcall(reg.SetTexture, reg, nil)
+                                pcall(reg.SetAtlas, reg, "")
+                            end
+                        end
+                    end
+                end
+                for _, key in ipairs({ "Left", "Middle", "Right", "LeftActive", "MiddleActive",
+                                       "RightActive", "LeftHighlight", "MiddleHighlight", "RightHighlight" }) do
+                    local piece = rawget(tab, key)
+                    if piece and piece.SetTexture then pcall(piece.SetTexture, piece, nil) end
+                end
+                local hl = tab.GetHighlightTexture and select(2, pcall(function() return tab:GetHighlightTexture() end))
+                if hl and hl.SetTexture then pcall(hl.SetTexture, hl, nil) end
+                -- 2) 我们的底板：BACKGROUND 子层 -8（永远垫在暴雪 BACKGROUND 美术之下）。
+                local bg = tab:CreateTexture(nil, "BACKGROUND", nil, -8)
+                bg:SetAllPoints()
+                pcall(bg.SetDrawLayer, bg, "BACKGROUND", -8)
+                Mark(tab, "tabBg", bg)
+                -- 3) 暴雪文案只变透明，不删（要读它的文字）。
+                local bliz = tab.Text or (tab.GetFontString and tab:GetFontString())
+                if bliz and bliz.SetTextColor then pcall(bliz.SetTextColor, bliz, 0, 0, 0, 0) end
+                Mark(tab, "tabBliz", bliz)
+                -- 4) 我们自己的居中文案（11px 像素字，跟随主题）。
+                local label = Widget:Font(tab, 11, "pixel", "neutral", "CENTER")
+                label:SetPoint("CENTER", tab, "CENTER", 0, 0)
+                Mark(tab, "tabLabel", label)
+            end
+            -- 每次重涂：文案镜像 + 选中态（幂等、便宜）。
+            local bliz = Marked(tab, "tabBliz")
+            local label = Marked(tab, "tabLabel")
+            local bg = Marked(tab, "tabBg")
+            -- 图标方模式（窗口"收回"时暴雪会切过去）：这时背景板必须整个让位，
+            -- 否则它即便在 BACKGROUND/-8 也会和图标抢同一块视觉区域（实机：收回后图标又没了）。
+            local iconMode = false
+            if tab.SquareBackground then
+                local okS, sh = pcall(function() return tab.SquareBackground:IsShown() end)
+                iconMode = okS and sh and true or false
+            end
+            local text
+            if bliz and bliz.GetText then
+                local okX, v = pcall(function() return bliz:GetText() end)
+                if okX and type(v) == "string" then text = v end
+            end
+            if not text then
+                local okX, v = pcall(function() return tab.tabText end)
+                if okX and type(v) == "string" then text = v end
+            end
+            if label then
+                if text then pcall(label.SetText, label, text) end
+                local sel = rawget(tab, "isSelected") and true or false
+                pcall(label.SetTextColor, label, Widget:PaletteColor(sel and "bright" or "neutral"))
+            end
+            if bg then
+                local sel = rawget(tab, "isSelected") and true or false
+                local r, g, b = Widget:PaletteColor(sel and "edge" or "ambient")
+                if r then
+                    bg:SetAlpha(1)
+                    bg:SetColorTexture(r * 0.35, g * 0.35, b * 0.35, sel and 0.95 or 0.45)
+                end
+            end
+        end
     end
 end
 

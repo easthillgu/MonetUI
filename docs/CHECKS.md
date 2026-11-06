@@ -14,7 +14,11 @@ git status --short
 # 2) 离线闸门：C_* 名字 / 事件名 / Enum 值 是否对得上本客户端快照（HARD 项 = 退出码 1）
 node tools/api-audit.js
 
-# 3) 有 wuxian MCP 时（0 error 才算完）
+# 3) **必须**：Lua 语法 + 未解析名字 + 受保护调用（`live:false` 也行，不需要游戏）
+#    2026-11-06 判例：离线三条闸门（api-audit / audit-locals / audit-taint）**都只做文本匹配、
+#    不解析 Lua 语法** —— 我给 Skin.lua 少吃一个 `end`、给 Collections.lua 用了不存在的全局 `Widget`，
+#    三条全绿、直接部署 ⇒ `Skin` 整块不加载、17/21 模块、五个模块连锁失败。
+#    **这一条是唯一会做语法解析的闸门**：部署前必跑，0 error 才算完。
 #    **传仓库绝对路径**：按 addon 名查的是"已安装副本"，审不到还没部署的源码
 #    tools.wuxian.check({ target = "C:\\Users\\EastHillGu\\Documents\\wowaddonsdev\\MonetUI", live = false })
 #    （按名字跑会多一条 toc-interface 警告：部署脚本才会把 ## Interface 改成客户端号，不是缺陷）

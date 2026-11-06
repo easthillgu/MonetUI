@@ -4352,6 +4352,37 @@ API：`Each(list, perItem, onDone)`（万次扫描最常用形状）、`Run(body
 （"关了下次又自己开"，这类默认值 bug 只有改成显式布尔才不复发）。README 的玩家可见限制清单已同步
 （原文写"两套并存 / 接管默认关"，现在是"默认接管，买栏位走 `/mui bags bank off`"）。
 
+## 8.58 2026-11-06 法术书（PlayerSpellsFrame）收口：文字/页底/格子做了，分类页签换皮**放弃**
+
+**作者报的原始问题**：「法术」难看。取证后发现是真缺陷，不只是审美：11-05 把羊皮纸
+（`spellbook-page-*`）剥掉之后，页内文字仍是**给浅底配的深棕**（实测 `0.18,0.11,0.06`，
+字体 `Fonts\ARKai_T.ttf`）⇒ 深底深字，法术名/等级几乎不可读；行底
+`spellbook-list-backplate`(α0.65) / `spellbook-item-backplate`(α0.25) 也成了深底上的脏暗云。
+
+**做了的（已验）**：
+- `Skin:BrightenDarkText`：只提亮"暗且近中性"的字（`max<0.5` 且 `max-min<0.18`），放过职业/品质这类饱和色；`等级 N` → neutral，名字/标题 → bright；
+- 行底两层 backplate 加入剥除名单；页底按 **EUI 口径留 0.1 淡纸**（`BookBGLeft/Right/Halved` + `spellbook-page-*`），`TopBar`/`BookCornerFlipbook` 压 0；
+- `Skin:SpellbookItemArt`（照 EUI `FadeSpellItem`）：`Backplate`→0、`Button.Border`→α0.5+去饱和0.5、`BorderSheen`/`IconHighlight`→0；
+- `Skin:AdoptTopTitle`：标题挂在**匿名子帧**上、`Dress` 的字段通道认不到，改按几何认领（宽≥窗宽55%、顶边距窗顶26px内）后排成我们的样式 + 发丝线；
+- 2 秒轮询（EUI 用 `hooksecurefunc`，我们的规矩不许给暴雪窗口挂钩子），窗关着不跑。
+
+**放弃的（写清，别再试）**：法术书里那排**分类页签**（`SpellBookFrame.CategoryTabSystem`）换皮。
+- 它的图标在这台客户端是 `Icon + IconMask + SquareTextures(数组) + SquareBackground` 四家并存；
+- 照 EUI 判据（只清 `Texture`、跳过 `Icon`/`IconMask`、不碰 alpha）实现后，**展开与收回两种布局下
+  实测都看不见**（把图标抬到 `OVERLAY/7` 仍不可见 ⇒ 不是同帧覆盖）；
+- 结论：**无法证明收益**（原生展开态那一排也看不到），却引入了"图标丢"的嫌疑 ⇒ 整档不碰。
+  `Skin:TabSystemArt` 现在只服务纯文字页签（专精/天赋/法术书），并且**任何 `Icon` 有贴图的页签一律跳过**。
+
+**这轮我自己造的两个加载级 bug（都记在这里，别再犯）**：
+1. `Modules/Skins/Collections.lua` 里写了 `Widget:PollWatch` / `Widget:HeaderRule`，但那个文件
+   **没有 `local Widget`** ⇒ 全局 nil ⇒ Apply 中途抛错、重涂从未注册。`audit-locals` / `api-audit` /
+   `audit-taint` **全过**（它们不查"用了不存在的全局"）。
+2. `Utils/Skin.lua` 编辑时多吃掉一个 `end` ⇒ 语法错误 ⇒ `Skin` 整块不加载、**17/21 模块**、
+   `BuffFrame`/`QuestTracker`/`ActionBars`/`Skins`/`Nameplates` 连锁初始化失败。
+   **离线三条闸门同样是绿的**（正则层面，不解析语法）。
+⇒ **规矩（已写进 `docs/CHECKS.md` A 段）：部署前必须跑 `tools.wuxian.check`（`live:false` 也算），
+它是唯一会做 Lua 语法解析的闸门。闸门绿 ≠ 能加载。**
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 
