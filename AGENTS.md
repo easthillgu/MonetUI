@@ -341,6 +341,16 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   Lua 写进去的是脏值，客户端照用，但整条执行被记成我们的 → 同一次点击里暴雪的安全调用
   （`CastPetAction → PetActionBar:UpdateShownButtons → SetShown`、`UseAction → MainActionBar:ClearAllPoints`）
   全部被拒。本仓用 `_childupdate-mui-kind` / `_childupdate-mui-keydown` + `ChildUpdate` 写。
+- **代点暴雪按钮的属性名是 `clickbutton`，而且必须双注册 `AnyDown`+`AnyUp`**（2026-11-06 实机定案，
+  两条都是**静默失效**——零报错、零 `taint.log`、玩家只看到"点了没反应"）：
+  暴雪 `SecureTemplates` 的 `SECURE_ACTIONS.click` 读的是
+  `SecureButton_GetModifiedAttribute(self, "clickbutton", button)`，写 `click` 拿到的是 nil；
+  而本机 `ActionButtonUseKeyDown=1` 时引擎判定 `clickAction = (down and useOnKeyDown) or (not down and not useOnKeyDown)`，
+  只注册 `LeftButtonUp` 的那一拍被算成"释放"，`type=click` 没有释放动作 ⇒ 什么都不执行。
+  对照实验：同一目标，`type="macro"` + `/click <按钮>` **不通**，`type="click"` + `clickbutton` + 双注册 **通**。
+- **不是所有暴雪按钮都肯吃脚本化点击**：`MainMenuMicroButton`（游戏菜单）的 `IsEnabled` / `IsVisible` /
+  `HasAnyForbiddenAspects(Enum.ForbiddenAspect.ScriptedInput)` 全是放行值，代点仍然零反应 ⇒ 卡在那颗按钮
+  自己的处理里。做入口清单时**逐颗实测**，不通过的直接不建行（宁缺毋"死行"）。
 - **本客户端没有通用安全按钮的 `type="pet"`，也没有 `SecureHandlerClickTemplate`**：
   自建宠物按钮怎么点都不会施法（实测：属性全对、位置不重叠、层级压过所有条、**0 拦截**，
   但点击无任何反应 → 客户端根本不处理该 type）。**宠物条必须"收养"暴雪的 `PetActionButton1..10`**

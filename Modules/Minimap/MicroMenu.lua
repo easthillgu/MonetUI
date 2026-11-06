@@ -63,8 +63,13 @@ local ENTRIES = {
 }
 
 --- 曾经这里按名字取暴雪那颗微按钮、把行做成安全按钮去代点它。11-05 实测：那些行锚进面板
---- 之后面板 `IsProtected()=true`，自己的 `SetPoint` 被静默丢弃 ⇒ 菜单展不开（ENRICES 上方注释）。
+--- 之后面板 `IsProtected()=true`，自己的 `SetPoint` 被静默丢弃 ⇒ 菜单展不开（ENTRIES 上方注释）。
 --- 所以这里**不再有第二种动作源**：行只有 `luaAction`（纯 C_* API / 我们自己的模块）这一条路。
+---
+--- **11-06 加的唯一出口**：`#43` 那版独立安全载体（`MicroMenuSecure.lua`）要在它的菜单里也放这几行
+--- （右键开着载体时本文件的 4 行菜单不参与，见 `Minimap.lua` 的右键分发），
+--- 但入口定义**只能有一份** —— 这里导出，载体那边读，不许抄第二份。
+M.ownEntries = ENTRIES
 
 --- 只剩"纯 C_* API"可以留在 Lua 里直接调（不牵动暴雪的 Lua 面板链，也不会把机密值比较
 --- 带进我们的环境）。`Settings.OpenToCategory` 属于这类；`ToggleGameMenu` 属于暴雪 Lua 函数，

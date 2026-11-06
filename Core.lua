@@ -222,7 +222,10 @@ local DEFAULTS = {
         mapDifficulty  = true, -- 难度（左上）
         mapCompartment = true, -- 插件收纳（右上）
         microMenu      = true, -- 右键小地图弹出微型游戏菜单
-        microMenuSecure = false, -- #43 全量安全载体（12 行代点原生微按钮）；默认关，作者实机验后再开
+        microMenuSecure = true, -- #43 全量安全载体（14 行：4 个自有动作 + 10 行代点原生微按钮）。
+                                 -- 2026-11-06 作者实机逐行验过转正：能开的全部开出对应面板，
+                                 -- 传承（IsEnabled=false）与游戏菜单（暴雪不吃脚本化点击）不建行，
+                                 -- 全程 logs ERR / BLOCKED 与 taint.log 零新增。关掉即回 4 行纯 C_* 菜单。
         hideZoneText    = true,
         hideCoords      = true,
         hideClock       = true,

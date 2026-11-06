@@ -202,6 +202,21 @@ local hooked = setmetatable({}, { __mode = "k" })
 --- 暴雪在换区域、过场、载入之后会重新 Show 这些按钮，钩一次 Show 把它们按回去。
 --- 钩子里只做「按回去」的动作，不碰暴雪的逻辑，所以它自己的状态机不会错乱。
 --- 集群按钮被暴雪重新 Show 时再藏一次。
+--- 这一档条目能不能只按 alpha 收（不 Hide）。
+--- `art` 是原意（美术层，藏了会留空洞）。**第二条是 11-06 实机加的必要条件**：
+--- `hideMicroMenu` 平时走 `Hide()` + "一 Show 就再 Hide"，而 `microMenuSecure` 那 12 行是
+--- **代点**原生微按钮（`type="click"`），引擎的 `HandleAttributeClick` 对 `IsVisible()=false`
+--- 的目标**静默跳过**（实测：12 行全成死行、`logs` 与 `taint.log` 零记录，玩家只看到"点了没反应"）
+--- ⇒ 开着载体时这一条只能压 alpha，不能断掉 shown 链（照样看不见，但链是通的）。
+local function alphaOnlyFor(entry)
+    if entry.art then return true end
+    if entry.key == "hideMicroMenu" then
+        local s = Settings()
+        return (s and s.microMenuSecure) and true or false
+    end
+    return false
+end
+
 --- **不再 hooksecurefunc(obj, "Show")**：那会往暴雪的按钮上写方法槽（污染），
 --- 而且常驻的 MinimapMixin:OnEnter 等脚本链会被一起拖脏。改用轮询"变显示了"。
 local function HookShow(obj, entry)
@@ -214,7 +229,7 @@ local function HookShow(obj, entry)
             Queue("skin")
             return
         end
-        if entry.art then
+        if alphaOnlyFor(entry) then
             pcall(self.SetAlpha, self, 0)
         else
             pcall(self.Hide, self)
@@ -227,7 +242,7 @@ end
 --- 战斗中 Hide() 会被无声拒绝（连报错都没有），所以先排队，脱战后再补一次。
 local function HideObject(obj, entry)
     RememberObject(obj)
-    if entry.art then
+    if alphaOnlyFor(entry) then
         pcall(obj.SetAlpha, obj, 0)
     else
         if InCombat() and obj.IsProtected and obj:IsProtected() then
@@ -574,7 +589,7 @@ local function EnsureBlocker(minimap)
             if button ~= "RightButton" then return end
             -- 停在按钮上时不弹菜单（暴雪按钮自己要用这个键）
             if M.buttons and M.buttons:IsOverButton() then return end
-            -- #43：开着全量安全载体就用它（12 行代点原生微按钮），否则用 4 行纯 C_* 菜单。
+            -- #43：开着全量安全载体就用它（自有动作行 + 代点原生微按钮行的并集），否则用 4 行纯 C_* 菜单。
             if M.microMenuSecure and Settings().microMenuSecure then
                 M.microMenuSecure:Toggle()
             elseif M.microMenu and Settings().microMenu then
@@ -1167,6 +1182,31 @@ function M:HandleCommand(rest)
             ns:Print("遮罩 MonetUIMinimapOverlay 不存在 ⇒ 右键小地图不会走到微菜单（小地图接管没开或还没建）。")
         end
         return true
+    end
+
+    -- `/mui minimap secure on|off`：#43 载体的开关（验证要反复开关，点配置 UI 太慢）。
+    -- 只写 `settings.microMenuSecure` 一个键，右键分发处（本文件 578 行）每拍现读，**不需要重载**。
+    if rest == "secure" then
+        ns:Print("用法：/mui minimap secure on|off（当前=" ..
+            tostring((Settings() or {}).microMenuSecure) .. "）· 判据：/mui minimap securemenu")
+        return true
+    end
+    local subSecure = (rest or ""):match("^secure%s+(%a+)$")
+    if subSecure then
+        local s = Settings()
+        if s then
+            if subSecure == "on" or subSecure == "1" then
+                s.microMenuSecure = true
+                ns:Print("微型菜单改用**全量安全载体**（12 行代点原生微按钮）。右键小地图即生效，无需重载。")
+            elseif subSecure == "off" or subSecure == "0" then
+                s.microMenuSecure = false
+                if self.microMenuSecure then self.microMenuSecure:Close() end
+                ns:Print("微型菜单回到 4 行纯 C_* 菜单。")
+            else
+                ns:Print("用法：/mui minimap secure on|off（当前=" .. tostring(s.microMenuSecure) .. "）")
+            end
+            return true
+        end
     end
 
     -- `/mui minimap securemenu`：#43 全量安全载体的现场判据（能不能建 / 受不受保护 / 此刻能不能开）。

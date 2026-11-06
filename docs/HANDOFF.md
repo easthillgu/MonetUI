@@ -4512,7 +4512,56 @@ API：`Each(list, perItem, onDone)`（万次扫描最常用形状）、`Run(body
 输入框 / 页签行 / 半透板 + 细边；`logs ERR` 自 reload 起零新增（唯一一条 `BLOCKED` 是同机
 `DungeonsForever UNKNOWN()`，不是我们）。
 
+## 8.63 2026-11-06 微菜单 #43 全量安全载体：实机验通并转正（四条静默失败一次抓全）
+
+**背景**：§8.38 那轮把 13 行安全钮撤掉、只留 4 行纯 `C_*`，条件是"等 #43 找到独立安全载体"。
+这轮把 `MicroMenuSecure.lua`（独立文件、默认关）验完并**转成默认开**。全程一句话总结：
+**这条路线本身是合法的、干净的（零报错 / 零 BLOCKED / `taint.log` +0 字节），此前"点了没反应"
+全部是我们自己的写法错误，而且全是静默的那种。**
+
+**四条静默失败（都不记 BLOCKED、不报错，只会"没反应"）**：
+
+1. **委托属性名写错**：`SECURE_ACTIONS.click` 读的是 **`clickbutton`**
+   （`SecureButton_GetModifiedAttribute(self, "clickbutton", button)`），我们写的是 `click` ⇒ 引擎拿到 nil。
+   对照实验同时否掉了另一条路：**`type="macro"` + `/click <按钮>` 在这台客户端不通**（同一目标、同一注册，
+   macro 型不开、click+clickbutton 开）⇒ 用后者。
+2. **点击方向**：本机 `ActionButtonUseKeyDown=1`，引擎判定
+   `clickAction = (down and useOnKeyDown) or (not down and not useOnKeyDown)`；我们只注册了 `LeftButtonUp`
+   ⇒ 那一拍被算成"释放"，而 `type=click` 没有释放动作 ⇒ 什么都不执行。改成
+   `RegisterForClicks("AnyDown","AnyUp")`（与我们自绘动作条同一口径，一次点击只执行一次）。
+3. **被我们自己的设置掐死**：`hideMicroMenu=true` 平时走 `Hide()` + "一 Show 就再 Hide"，
+   而引擎对 `type="click"` 有 `IsVisible()` 守卫 ⇒ 12 行全成死行。新增 `alphaOnlyFor(entry)`
+   （`HideObject` 与 `HookShow` 共用）：**开着载体时这一条只压 alpha、不断 shown 链**（照样看不见，但链通）。
+4. **底板凭空消失**：容器若用模板串 `"SecureHandlerBaseTemplate, BackdropTemplate"`，实测
+   `SetBackdrop=true` 但 **`Execute` 一起没了**（base 时相反）——而我上一轮验模板时只测了"我想要的
+   `SetBackdrop`"、**没测"我依赖的 `Execute`"**，于是 `Build()` 的能力闸直接判"建不出来"、菜单不弹。
+   而这版载体从头到尾没用过 `Execute`（属性是 Lua 直接 `SetAttribute`）⇒ 容器只要普通 `BackdropTemplate`，
+   能力闸改成**验这一行自己是不是受保护**（安全模板缺席时 `CreateFrame` 不报错，只给普通按钮）。
+
+**覆盖倒退补上**：开着载体时 `Minimap.lua` 的右键分发不再走 `MicroMenu.lua`，于是原来的
+背包 / 地图 / 日历 / 设置 4 行被整条丢掉 ⇒ 载体改成**并集**：第一组是我们的动作行（入口**单源** =
+`MicroMenu.lua` 导出 `ownEntries`，不抄第二份），第二组才是代点行。
+
+**不建行的入口要有台账**（这是本轮的方法结论）：建行时逐颗筛 —— 按钮不存在 / `IsEnabled()=false` /
+在 `FORWARD_BLOCKED` 黑名单里 ⇒ 不建行，并把原因记进 `skipped`，`/mui minimap securemenu` 逐条印成
+"没建行的入口（故意跳过，不是漏建）"。实测两类：`LegacyMicroButton`（18 级 `IsEnabled=false`）、
+`MainMenuMicroButton`（**暴雪不吃脚本化点击**：`IsEnabled`/`IsVisible`/`HasAnyForbiddenAspects(ScriptedInput)`
+全是放行值，代点仍零反应 ⇒ 卡在那颗按钮自己的处理里，进黑名单）。
+
+**验收数字（作者实机）**：并集菜单 **4 + 10 = 14 行**，能开的逐行开出对应面板，
+"传承 / 游戏菜单"按预期不建行；`logs ERR/BLOCKED` 游标之后 **0 条新增**，
+`taintLog=2` 采集中 `Logs/taint.log` **175,852 → 175,852 字节（+0）**。
+
+**新增命令**：`/mui minimap secure on|off`（右键分发每拍现读，不需要重载）—— 验证要反复开关，
+点配置 UI 太慢；`securemenu` 探针多了两行判据（可点目标数 / 跳过台账），并且**只读不写**
+（守 §8.38 的探针纪律：诊断命令不许产生它正在判定的状态；实测 `shown=false` 就是它没替我打开菜单）。
+
+**默认值已翻**：`Core.lua` 的 `microMenuSecure = true`，配置页文案去掉"实验，默认关"；
+关掉就回 4 行纯 `C_*` 菜单（那条路仍在，作为回退）。AGENTS 已把第 1/2/4 条写成硬规矩。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
+
+
 
 
 
