@@ -46,7 +46,14 @@ local BANK_TABS    = { 6, 7, 8, 9, 10, 11, 12, 13, 14 }    -- CharacterBankTab_1
 -- ⇒ 不猜：把三个候选都交给 Scan，`GetContainerNumSlots` 返 >0 的才算数（返 0 / nil /
 --   机密的一律跳过，绝不会画出个假空页）。`/mui bags probe` 把每个候选的实测槽数、
 --   `C_Bank` 的几项查询和 `WarbandBankFrame` 是否解析得到一次打全，上线日对着账定稿。
-local BANK_PAGE_CANDIDATES = { -1, -2, -3 }
+--
+-- **2026-11-06 定性完成（1.60.1 / 70790，站银行 NPC 前开银行实测）**：
+--   `-1` = **Keyring（钥匙扣）**，32 槽 / 0 件 —— **它不是银行页面，绝不能再进银行扫描**
+--   （否则"银行空格"会把钥匙扣 32 格算进去：实测 55 = 钥匙扣 32 + 银行 23）。
+--   `-2` / `-3` = Characterbanktab / Accountbanktab，本客户端 **0 槽**（`WarbandBankFrame` 也不存在）。
+--   真正的银行存储 = `6..14` = `CharacterBankTab_1..9`，已购 1 个 ⇒ `6:48 槽 / 25 件 / 23 空`，
+--   未购买的 7..14 全 0 槽 ⇒ **索引与物理格子 1:1，不存在"同一格出现在多个索引"**（那条旧担忧作废）。
+local BANK_PAGE_CANDIDATES = { -2, -3 }   -- -1 是钥匙扣，见上（保留 -2/-3 只为将来客户端有内容时自动接上）
 
 -- ---- 模式（背包 / 银行）：窗口键与存档位置都带模式前缀 --------------------------
 -- 以前银行是**原地替换**背包（同一批 cat.key 的窗），所以"位置不能和背包重叠"这件事
@@ -558,6 +565,9 @@ local function UpdateButton(shell, rec)
         btn:SetID(0)
         pcall(SetItemButtonTexture, btn, nil)
         pcall(SetItemButtonCount, btn, 0)
+        -- 图标贴图也要显式置 nil：`SetItemButtonTexture(btn, nil)` 在本客户端**不会**清掉
+        -- icon 上已有的贴图（见下面空格那段注释），回收再复用时旧物品图标会留着。
+        if btn.icon then pcall(btn.icon.SetTexture, btn.icon, nil) end
         if quest then quest:SetText("") end
         if count then count:SetText("") end
         if ilvlFs then ilvlFs:SetText("") end
@@ -580,6 +590,15 @@ local function UpdateButton(shell, rec)
     if type(btn.SetBagID) == "function" then pcall(btn.SetBagID, btn, rec.bag or 0) end
     if type(btn.UpdateExtended) == "function" then pcall(btn.UpdateExtended, btn) end
     pcall(SetItemButtonTexture, btn, rec.texture)
+    -- 空格子（`rec.texture == nil`）：模板自带的**默认图标贴图**会留在 icon 上
+    -- （1.60 实测 fileID 8187737 —— 那圈"缺贴图"斜纹就是它），而
+    -- `SetItemButtonTexture(btn, nil)` **不会**把它清掉；格子被回收给另一个空格时，
+    -- 上一位的物品图标同样会留着。⇒ 显式置 nil（图标仍 Show，无贴图即什么都不画；
+    -- 不能靠 Hide —— `Skin:FlattenSlotArt` 里是无条件 `icon.Show()`）。
+    -- 2026-11-06 玩家报的"空格美化问题"= 我们的凹槽上盖着一层暴雪斜纹，就是这条。
+    if rec.texture == nil and btn.icon then
+        pcall(btn.icon.SetTexture, btn.icon, nil)
+    end
     pcall(SetItemButtonCount, btn, (rec.count and rec.count > 1) and rec.count or 0)
     -- 数量：我们自己的白字（模板那条被图标盖住，见 AcquireButton）。1 个不写数字。
     -- 走 Secrets.Number：机密/非数字一律当"读不到"（同一行下面的冷却代码就是这个口径）。
@@ -1010,14 +1029,12 @@ local function Rebuild(bagType)
         bankFree = free
     end
     -- 「剩余空间」排在最后（FREE_CAT 在 ORDERED 里 order 最大，LayoutWindows 自然把它堆在末尾）。
-    -- 「剩余空间」排在最后（FREE_CAT 在 ORDERED 里 order 最大，LayoutWindows 自然把它堆在末尾）。
-    -- 传**真实坐标表**而不是数量：那些格子现在得是能落东西的真槽位。
-    -- ⚠ 只对**背包侧**开：作者 11-04 的要求是"修背包侧"，而银行索引的语义还没定性
-    --   （12.1.5 实测 6..12 每个都报 98 槽，同一物理空格极可能在多个索引里重复出现 ⇒
-    --   真槽位会把拖放绑到错槽位，还会刷出一面几百格的假网格）。明天用 `/mui bags probe`
-    --   的逐索引行定完性，再把银行侧接上。银行侧接管本来也默认 off（暴雪框照旧能用）。
-    FillFreeWindow(EnsureWindow(WinKey(FREE_CAT.key)),
-        activeMode == "bags" and empties or {})
+    -- 传**真实坐标表**而不是数量：那些格子得是能落东西的真槽位。
+    -- 2026-11-06：**银行侧也开了** —— 索引语义已定性（`6..14` = CharacterBankTab_1..9、
+    -- 与物理格子 1:1、钥匙扣 `-1` 已从扫描里剔除），原先"银行索引没定性、真槽位可能绑错格"
+    -- 这条阻塞消失。上限仍是 FREE_MAX=84（9 个标签页全买满时 432 个空格只画前 84 个，
+    -- 溢出数写在最后一格，见 FillFreeWindow）。
+    FillFreeWindow(EnsureWindow(WinKey(FREE_CAT.key)), empties)
 
     LayoutBothModes()
     RestoreDragged()
@@ -1026,10 +1043,10 @@ local function Rebuild(bagType)
     if activeMode == "bank" then
         EnsureBankTools()
         LayoutBankTools()
-        -- ⚠ 接管默认**关**（`hideBlizzardBank` 未设 = false）。11-04 实机判例：接管之后
-        -- "背包↔银行拖放失效，能拖不能放"—— 因为我们的"空格子"是占位壳（`Scan` 只把空格
-        -- 统计成一个数，`FillFreeWindow` 画假格子），暴雪银行框才是唯一能落东西的容器槽面。
-        -- 正解是把空格做成真 ItemButton（绑 bag/slot），在那之前收起默认路径。
+        -- ⚠ 接管默认**关**（`hideBlizzardBank` 未设 = false）。11-04 当时的理由是我们"空格子"
+        -- 是占位壳（能拖不能放），**11-06 这条已不成立**：空格子改成真 ItemButton 后，
+        -- 银行侧也走同一条路径（见 FillFreeWindow 的调用点）。保持 off 的两个现由：
+        -- ① 银行侧拖放**还没实机验过**；② "两套并存"是当前口径（暴雪框拖放原生可靠）。
         ParkBlizzardBank((Setting("hideBlizzardBank") and true or false) and bankDrawn > 0)
     end
 end
@@ -1640,9 +1657,11 @@ end
 
 function M:HandleCommand(rest)
     if rest == "hidebliz on" or rest == "hidebliz off" then
-        -- 接管暴雪银行框的开关。默认 off：我们的空格子是占位壳、不是真容器槽，
-        -- 接管掉暴雪框就等于把唯一能落东西的面收走（11-04 拖放失效判例）。
-        -- 想把观感做完整（只留我们的窗）就 on，代价是银行侧只能看不能拖放。
+        -- 接管暴雪银行框的开关。**默认仍 off**（11-06 起理由变了）：我们的空格子从 11-06
+        -- 起是**真 ItemButton**（绑 bag/slot，银行索引语义已定性），所以"接管后不能拖放"
+        -- 那条旧理由不再成立；现在保持 off 是因为**银行侧拖放还没实机验过**，
+        -- 而且"两套并存"本身是当前口径（§8.34 三条"预期不是缺陷"之一）。
+        -- 想只留我们的窗就 on —— 但 on 之前先跑一次"背包↔银行三向拖放"探针。
         local on = (rest == "hidebliz on")
         SetBankToolsSetting("hideBlizzardBank", on or nil)
         if on then
@@ -1652,7 +1671,7 @@ function M:HandleCommand(rest)
         end
         ns:Print(("[mui bags hidebliz] 接管暴雪银行框 = %s（画出 %d 件）%s")
             :format(tostring(on), bankDrawn or 0,
-                on and "｜注意：空格子目前是占位壳，接管后**无法拖放进空位**"
+                on and "｜空格子已是真槽位（11-06），但**银行侧拖放未实机验证**；先拖一次再当结论"
                     or "｜暴雪银行框已放开，拖放可用（观感上两套并存）"))
         return true
     end
@@ -1755,11 +1774,11 @@ function M:HandleCommand(rest)
         local verdict
         -- 第一分叉必须是"接管开关 + 银行现在开没开"，不是上一次重绘的计数：11-04 实测就是
         -- 拿陈旧的 `bankDrawn>0` 当现状，印出"应当接管"而同一行观测写着 `接管=false`。
-        -- 开关默认 off（空格子是占位壳，接管会拿走唯一能落东西的面），不写出来就会被误读成 bug。
+        -- 开关默认 off（11-06 起空格子已是真槽位，off 的理由变成"银行侧拖放未实机验 + 两套并存是口径"）。
         if not (Setting("hideBlizzardBank") and true or false) then
-            verdict = "接管开关 off（默认）→ **不该接管**：我们的空格子是占位壳、不是真容器槽，"
-                .. "接管等于拿走唯一能落东西的面（11-04 拖放失效判例）。所以暴雪银行框照旧可见可用，"
-                .. "观感上两套并存。想要单套观感：`/mui bags hidebliz on`（代价 = 拖放落点没了）。"
+            verdict = "接管开关 off（默认）→ 不该接管：两条路都有人要 —— 暴雪框拖放原生可靠，"
+                .. "我们的空格子 11-06 起也是真槽位（银行索引语义已定性），但**银行侧拖放还没实机验过**，"
+                .. "所以先两套并存。想单套观感：`/mui bags hidebliz on`（开之前先拖一次验落点）。"
         elseif not bankOpen then
             verdict = "接管开着但银行没开 → 不该接管：每行都该是 接管=false · alpha=1"
                 .. "（IsShown 归暴雪自己，不是判据）"

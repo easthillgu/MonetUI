@@ -34,10 +34,16 @@ ok(/Mark\(shell, "ilvlF", ilvl\)/.test(BAGS),
   'A1 AcquireButton 给每格造了等级字体串并登记进旁表');
 ok(/if ilvlFs then ilvlFs:SetText\(""\) end/.test(BAGS),
   'A2 空槽路径清等级文字（不留上一件的数字）');
-ok(/local lv = Secrets\.Number\(rec\.ilvl\)/.test(BAGS),
-  'A3 等级取值过 Secrets.Number 才比较');
-ok(/lv and lv > 0/.test(BAGS),
+// 2026-11-06：等级取词/写入的守卫**已收口到 `Skin:SlotInfoText`**（`1fae0b0` 把物品格三件套
+// 抽成共享原语）。断言跟着单源走 —— 仍要证明"过 Secrets.Number + >0 才写"，
+// 但位置从 Bags 内联搬到 Skin；再加一条**反向守卫**：Bags 必须调那个原语，
+// 否则等于有人在背包侧又写了一份内联算术（闸门要拦的是这个）。
+ok(/local n = Secrets\.Number\(raw\)/.test(SKIN) && /function Skin:SlotInfoText\(raw\)/.test(SKIN),
+  'A3 等级取值过 Secrets.Number 才比较（单源 Skin:SlotInfoText）');
+ok(/if n and n > 0 then return tostring\(math\.floor\(n\)\)/.test(SKIN),
   'A4 只在 ilvl > 0 时写数字（材料/布料不画 0）');
+ok(/ilvlFs:SetText\(Skin:SlotInfoText\(rec\.ilvl\)\)/.test(BAGS),
+  'A5 背包/银行格用的是同一个原语（没有第二份内联取词）');
 
 // ---------------------------------------------------------------- B 人物面板
 ok(/function Skin:ItemQualityBorder\(btn, withInfo\)/.test(SKIN),
@@ -77,8 +83,8 @@ ok(/if not IsContentIcon\(region\) then/.test(SKIN),
 // ---------------------------------------------------------------- C 守卫口径
 ok(/local function ItemIDOf\(key\)/.test(SKIN) && /Secrets\.CanRead\(key\)/.test(SKIN),
   'C1 link 抠 itemID 前先过 Secrets.CanRead（未守卫的 string.match 会抛 invalid value）');
-ok(/local n = ok and Secrets\.Number\(lv\) or nil/.test(SKIN),
-  'C2 装备格等级过 Secrets.Number');
+ok(/text = Skin:SlotInfoText\(ok and lv or nil\)/.test(SKIN),
+  'C2 装备格等级过 Secrets.Number（同一条 Skin:SlotInfoText）');
 ok(/start, duration, enable = ok and Secrets\.Number\(s\) or nil, Secrets\.Number\(d\), Secrets\.Number\(e\)/.test(SKIN),
   'C3 冷却三个返回全过 Secrets.Number 才比较');
 ok(/cd:SetHideCountdownNumbers\(true\)/.test(SKIN),

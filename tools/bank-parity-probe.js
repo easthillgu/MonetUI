@@ -62,8 +62,11 @@ ok(iCreate >= 0 && iReg >= 0 && iFirstUse >= 0 && iCreate < iReg && iReg < iFirs
   'A11 EnsureWindow 建框当场就登记 windows[key]（登记排在末尾 = 中间抛错留下"名占表空"，下次必炸 already exists）');
 
 // ---------------------------------------------------------------- B 不猜索引
-ok(/local BANK_PAGE_CANDIDATES = \{ -1, -2, -3 \}/.test(SRC),
-  'B1 主页三个候选一起交给扫描（本客户端 Enum.BagIndex 与正式服不同）');
+// 2026-11-06 定性（1.60.1/70790 实机）：本客户端 `-1` = **Keyring（钥匙扣）**，
+// 它不是银行页面 —— 留在候选里会让"银行空格"多算 32 格（实测 55 = 钥匙扣 32 + 银行 23）。
+// B1 因此**反向**断言：候选里不许再出现 -1，同时保留"为什么不轻信正式服语义"的记录。
+ok(/local BANK_PAGE_CANDIDATES = \{ -2, -3 \}/.test(SRC) && /-1 是钥匙扣/.test(SRC),
+  'B1 银行候选里不含 -1（本客户端 -1 = Keyring；正式服那套 Bank 语义在这里不成立）');
 ok(/for _, i in ipairs\(BANK_PAGE_CANDIDATES\) do indexes\[#indexes \+ 1\] = i end/.test(SRC),
   'B2 银行索引 = 主页候选 + 标签页，不是只扫 6..14（旧行为等于主页一个没扫）');
 ok(/local num = Secrets\.Number\(C_Container\.GetContainerNumSlots\(bag\)\)/.test(SRC)
@@ -125,10 +128,13 @@ ok(/shell = AcquireButton\(win\)/.test(FREEFN) && /UpdateButton\(shell, \{ bag =
   'F3 空格用真 ItemButton + UpdateButton 绑身份（落点靠 GetBagID 的父级 GetID 兜底）');
 ok(FREEFN !== '' && !/AcquireFreeSlot/.test(FREEFN),
   'F4 占位壳工厂已删（留着就会有第二条"看着像格子但不能落"的路径）');
-ok(/activeMode == "bags" and empties or \{\}/.test(SRC),
-  'F5 银行侧暂时不接（索引语义未定性：6..12 各报 98 槽，重复坐标会把拖放绑错槽位）');
-ok(/elseif cd then/.test(SRC) && /if not rec.itemID then return end/.test(SRC),
-  'F6 空格复用清冷却遮罩 + 空槽悬停不弹空提示框');
+// 2026-11-06：银行侧**已接**（原先"索引语义未定性就不接"的临时口径作废）。
+// 定性的硬证据：`Enum.BagIndex` 里 6..14 = CharacterBankTab_1..9；站银行 NPC 前实测
+// `6:48 槽 / 26 件 / 22 空`、7..14 全 0 槽 ⇒ 索引与物理格子 1:1，不存在"同一格多个索引"。
+ok(/FillFreeWindow\(EnsureWindow\(WinKey\(FREE_CAT\.key\)\), empties\)/.test(SRC),
+  'F5 银行侧也传真槽位坐标（定性结论就是这行的依据）');
+ok(/Skin:ApplySlotCooldown\(cd, rec\.itemID\)/.test(SRC) && /if not rec\.itemID then return end/.test(SRC),
+  'F6 空格复用清冷却遮罩（共用 Skin:ApplySlotCooldown，nil itemID 也显式收）+ 空槽悬停不弹提示');
 
 console.log(`bank-parity-probe: ${pass} 过 / ${fail} 失`);
 process.exit(fail === 0 ? 0 : 1);
