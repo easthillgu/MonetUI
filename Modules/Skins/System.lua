@@ -745,11 +745,14 @@ M:Panel("store", { label = "商店 / 付费", group = "系统", apply = SkinStor
     frames = { STORE_WINDOWS } })
 
 -- **A 档覆盖率补（11-05 skin-coverage 实机核对：客户端真存在、没美化）**：日常会弹到的杂项小窗。
--- 飞行点 TaxiFrame、拾色透明度 OpacityFrame（拾色器的伴生窗）、邮寄金币确认 SecureTransferDialog、
+-- ~~飞行点 TaxiFrame~~（**11-06 移出本名单**：通用 `window + deep` 档把它的 `InsetBg` —— 也就是
+-- **航线图本体** —— 一起剥黑，玩家报「飞行地图全是黑的」；改由 `WorldMap.lua` 的 `flightmap` 档
+-- 单独处理，带 `strip.keep` 豁免，见该文件注释）。
+-- 拾色透明度 OpacityFrame（拾色器的伴生窗）、邮寄金币确认 SecureTransferDialog、
 -- 举报 ReportFrame/ReportCheatingDialog、宠物栏 PetStableFrame、试穿 SideDressUpFrame、
 -- 幻化套装编辑 WardrobeCustomSetEditFrame、银行清理确认 BankCleanUpConfirmationPopup。
 local MISC_WINDOWS = {
-    "TaxiFrame", "OpacityFrame", "SecureTransferDialog",
+    "OpacityFrame", "SecureTransferDialog",
     "ReportFrame", "ReportCheatingDialog", "PetStableFrame",
     "SideDressUpFrame", "WardrobeCustomSetEditFrame", "BankCleanUpConfirmationPopup",
 }

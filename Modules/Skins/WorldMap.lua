@@ -62,16 +62,35 @@ M:OnEvent("WORLD_MAP_UPDATE", function()
     M:Apply(M.byKey.worldmap)
 end)
 
--- 飞行点地图：本客户端没有 TaxiFrame（vanilla/mainline 专属门控），用的是 Blizzard_FlightMap
--- （无 game-type 门控）。航线图本身是内容，只收拾窗口壳。
+-- 飞行点地图（2026-11-06 订正，玩家报「飞行地图页面全是黑的」）。
+-- **本客户端的飞行图是核心 FrameXML 的 `TaxiFrame`**，不是 `FlightMapFrame`：
+-- `Interface/AddOns` 里没有 `Blizzard_FlightMap` 这个包、`_G.FlightMapFrame` = nil，
+-- 而 `_G.TaxiFrame` / `_G.TaxiRouteMap` / `TaxiButton1..14` 实机都在。
+-- 以前这档挂在不存在的 `FlightMapFrame` 上、还带 `addons = { Blizzard_FlightMap = true }` 门控
+-- ⇒ 从来没跑过；同时 `TaxiFrame` 被 `System.lua` 的「杂项常用窗」用通用 `window + deep` 档处理了，
+-- 于是**地图本体被当成窗体装饰剥掉**：航线图不是 `TaxiRouteMap` 画的，是客户端渲染进
+-- `TaxiFrame.InsetBg` 这张贴图的（Aurora 同一判据，`Blizzard_UIPanels_Game/Shared/TaxiFrame.lua:26`
+-- "the flight map is rendered INTO InsetBg (SetTaxiMap(self.InsetBg)) — it must survive the sweep"），
+-- 实机读数 `InsetBg tex=8033753 alpha=0` ⇒ 整页黑。
+-- 两条动作缺一不可：① `strip.keep` 把那张贴图豁免在剥除之外；② 剥完**显式抬回 α1** ——
+-- 本会话里它已经被上一版剥过、`Skin:Fade` 的"隐藏一次"旁表还挂在上面，光靠豁免不会自己回来。
 local function SkinFlightMap()
-    M:Dress("FlightMapFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 } })
+    local tf = Skin:Need("TaxiFrame")
+    if not tf then return end
+    local mapTex = tf.InsetBg
+    M:Dress(tf, {
+        window = true,
+        panel  = { bgAlpha = 0.96 },
+        strip  = mapTex and { keep = function(region) return region == mapTex end } or nil,
+    })
+    if mapTex and type(mapTex.SetAlpha) == "function" then
+        pcall(mapTex.SetAlpha, mapTex, 1)
+    end
 end
 
 M:Panel("flightmap", {
     label = "飞行点地图",
     group = "地图",
     apply = SkinFlightMap,
-    addons = { Blizzard_FlightMap = true },
-    frames = { "FlightMapFrame", "FlightMapFrame.CloseButton" },
+    frames = { "TaxiFrame" },
 })

@@ -4441,7 +4441,36 @@ API：`Each(list, perItem, onDone)`（万次扫描最常用形状）、`Run(body
    **本轮未追**（每次受限换边只 1–2 条、无功能损失）；下次要追就先按"哪个框"取证，
    别改 `Skin:ApplyBackdrop` 的通用路径。
 
+## 8.61 2026-11-06 飞行地图整页黑：认错窗 + 通用档把地图本体当装饰剥了
+
+**症状**：玩家报「飞行地图页面全是黑的」，并猜"图层剥离错误"。**真因不是层级，是两件事叠在一起**：
+
+1. **认错窗**：`WorldMap.lua` 的 `flightmap` 档点名 `FlightMapFrame` 并挂 `addons = { Blizzard_FlightMap = true }`
+   门控 —— 这台机器 `Interface/AddOns` 里**没有 `Blizzard_FlightMap` 这个包**、`_G.FlightMapFrame` = nil
+   ⇒ 那一档**一行都没跑过**（旧注释"本客户端没有 TaxiFrame"是反的）。飞行图用的是**核心 FrameXML 的
+   `TaxiFrame`**（实机：`_G.TaxiFrame` + `TaxiRouteMap` + `TaxiButton1..14` 都在）。
+2. **通用档剥掉内容**：`TaxiFrame` 落在 `System.lua` 的「杂项常用窗」`window + deep` 名单里，
+   而**航线图不是 `TaxiRouteMap` 画的，是客户端渲染进 `TaxiFrame.InsetBg` 这张贴图**的
+   （Aurora 同一判据 + 同一句警告注释：`Blizzard_UIPanels_Game/Shared/TaxiFrame.lua:26`
+   "the flight map is rendered INTO InsetBg (`SetTaxiMap(self.InsetBg)`) — it must survive the sweep"）。
+   `Skin:Strip` 的"本框全部 regions"通道于是把地图本体一起归零，实机读数 `InsetBg tex=8033753 alpha=0`。
+
+**修法（两条缺一不可）**：`flightmap` 档改认 `TaxiFrame`，用 `Strip` 现成的 `opts.strip.keep`
+谓词豁免那张贴图；**并且剥完显式 `SetAlpha(1)`** —— 同一次会话里 `Skin:Fade` 的"隐藏一次"旁表
+已经挂在这张贴图上，只加豁免不会自己回来。`TaxiFrame` 从「杂项常用窗」名单移出（原地写明原因，
+别再被通用 `deep` 档捡回去）。没有用 `inset`/`deep`：飞行图上的 `TaxiButton` 是**内容节点**，不是控件。
+
+**验收数字（reload 后开窗）**：`InsetBg alpha=1 tex=374154 size=580x580`；同窗 `TopTileStreaks alpha=0`
+（该剥的还剥着）；我们的背板在未命名子帧 `level=0 / 9 regions`（父框 `level 1`，
+`NewBackdropFrame` 的 `-1` 偏移被夹到 0）⇒ 垫在地图之下、不遮挡；`logs ERR` 无新增。
+
+**口径补一条（下次排查同类"整页黑/整块没内容"直接查这个）**：通用 `window`/`deep` 档的前提是
+"本框的 regions 都是装饰"。**凡是"客户端把内容画进窗口自带贴图"的窗**（飞行图 `InsetBg`、
+`TaxiRouteMap` 那类地图/画布窗）**不能进通用名单**，要么点名豁免、要么单独建档。
+判据一行：`frame.InsetBg` 之类字段的 `GetTexture()` 是非空 fileID/路径且尺寸≈内容区 ⇒ 那是内容，不是底衬。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
+
 
 
 ### 9.1 明早开服首趟（唯一优先级，别在此之前加任何新功能）
