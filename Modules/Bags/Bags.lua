@@ -957,6 +957,10 @@ local function LayoutBothModes()
 end
 
 local bankDrawn = 0
+-- `bankFree`（最近一次银行扫描的空格数）**必须声明在 Rebuild 之前**：原先它写在文件下半段
+-- （银行工具那一段），而 Rebuild 在上面就 `bankFree = free` 了 —— 那个赋值落到**全局**上，
+-- 本地这份永远是 0（2026-11-06 `wuxian check` 的 `global-write` 警告抓出来的）。
+local bankFree = 0
 local EnsureBankTools, ParkBlizzardBank, LayoutBankTools   -- 前置声明：函数体排在 CloseAllBags 之后（依赖那条链）
 
 --- 关掉某一模式的全部窗口（银行关闭只收银行那几扇，背包窗一张都不动）。
@@ -1223,7 +1227,6 @@ end
 --      `PutItemInBackpack` / `BuyBankSlot` / `GetNumBankSlots` **全部不存在**（逐个查过快照）。
 -- ⇒ 这两件事留在暴雪自己那块管理区上，`/mui bags bank off` 或 ✕ 关闭即放开。
 local bankTools, bankToolsBody, bankToolsInfo, bankToolsArrow
-local bankFree = 0   -- 最近一次银行扫描的空格数；物品数用上面那个 bankDrawn
 
 local function BankToolsSetting(key)
     local db = ns:DB().bags or {}
