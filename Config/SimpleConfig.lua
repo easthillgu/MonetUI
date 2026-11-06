@@ -8,6 +8,8 @@ local ADDON_NAME, ns = ...
 -- 否则那个框体之后跑的暴雪代码会被判成“被 MonetUI 污染”。
 local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
 local Marked = function(o, k) return ns:Marked(o, k) end
+-- 模块私有的幂等守卫键走 per-module 弱旁表（ns:NewFrameData）；跨文件共享键仍走 Mark/Marked。
+local FFD, GetFFD = ns:NewFrameData()
 local Widget = ns.Widget
 local Color = ns.Color
 local Media = ns.Media
@@ -229,8 +231,9 @@ local function MakeDropdown(parent, y, caption, items, getter, setter, swatch)
         openList = list
     end)
 
-    if not Marked(parent, "hideHook") then
-        Mark(parent, "hideHook", true)
+    local fd = GetFFD(parent)
+    if not fd.hideHook then
+        fd.hideHook = true
         parent:HookScript("OnHide", CloseDropdown) -- TAINT-OK: parent 是自建设置面板（Widget:CreateFrame），上方有 Marked 幂等守卫
     end
 

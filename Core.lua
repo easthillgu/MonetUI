@@ -504,7 +504,9 @@ end
 --- 与 ActionBars 共用）仍走 ns:Mark 全局表；只有模块私有的幂等守卫键迁到 NewFrameData。
 function ns:NewFrameData()
     local FFD = setmetatable({}, { __mode = "k" })
+    local EMPTY = {}   -- nil 对象的占位行：读恒为 nil、写不落地，复刻 ns:Mark(nil,…) 的 no-op 语义
     return FFD, function(frame)
+        if frame == nil then return EMPTY end
         local d = FFD[frame]
         if not d then d = {}; FFD[frame] = d end
         return d

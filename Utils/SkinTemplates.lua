@@ -23,6 +23,14 @@ local Skin   = ns.Skin
 
 local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
 local Marked = function(o, k) return ns:Marked(o, k) end
+-- 模块私有的幂等守卫键走 per-module 弱旁表（ns:NewFrameData）。ns:NewFrameData 在 Core.lua
+-- 定义、而本文件随 Utils.xml 在 Core 之前加载，所以**首次调用时**才取句柄（同 Mark/Marked
+-- 把 ns:Mark 查找推迟到调用期一个道理）。
+local _FD, _GetFD
+local function GetFFD(frame)
+    if not _GetFD then _FD, _GetFD = ns:NewFrameData() end
+    return _GetFD(frame)
+end
 
 -- ---------------------------------------------------------------------------
 -- 识别
@@ -148,12 +156,12 @@ function Skin:Money(frame)
     if not frame or type(frame.GetChildren) ~= "function" then return frame end
 
     local function denom(button)
-        if not button or Marked(button, "moneyDenom") then return end
+        if not button or GetFFD(button).moneyDenom then return end
         local okKind, kind = pcall(button.GetObjectType, button)
         if not okKind or kind ~= "Button" then return end
         local text = button.Text
         if not text then return end       -- 没有数值字体串 = 不是面额按钮
-        Mark(button, "moneyDenom", true)
+        GetFFD(button).moneyDenom = true
         for _, region in next, { button:GetRegions() } do
             local ok, rkind = pcall(region.GetObjectType, region)
             if ok and rkind == "Texture" then
@@ -178,8 +186,8 @@ end
 --- 1.60 的 ColoredProgressBarTemplate（名望 / 技能条底座）。
 --- Fill / Mask 归 mixin，一个字节都不碰；只淡掉其余 chrome 贴图 + 挂我们的底衬。
 function Skin:ColoredBar(frame)
-    if not frame or Marked(frame, "coloredBar") then return frame end
-    Mark(frame, "coloredBar", true)
+    if not frame or GetFFD(frame).coloredBar then return frame end
+    GetFFD(frame).coloredBar = true
 
     local keepFill, keepMask = frame.Fill, frame.Mask
     local okBar, barTexture = pcall(function()
@@ -220,8 +228,8 @@ function Skin:ExtrasIn(frame, opts, depth)
         local okKind, kind = pcall(child.GetObjectType, child)
         if okKind then
             if kind == "EditBox" then
-                if not Marked(child, "extras") then
-                    Mark(child, "extras", true)
+                if not GetFFD(child).extras then
+                    GetFFD(child).extras = true
                     pcall(self.EditBox, self, child)
                 end
             elseif kind == "Frame" then

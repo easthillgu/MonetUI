@@ -19,6 +19,8 @@ local EventBus = ns.EventBus
 -- 旁表标记（见 Core.lua 的 ns:Mark）
 local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
 local Marked = function(o, k) return ns:Marked(o, k) end
+-- 模块私有的幂等守卫键走 per-module 弱旁表（ns:NewFrameData）；跨文件共享键仍走 Mark/Marked。
+local FFD, GetFFD = ns:NewFrameData()
 
 local B = {}
 
@@ -134,8 +136,9 @@ end
 --- 以前用 hooksecurefunc 钩 SetParent/SetPoint/SetScale（写方法槽 = 污染，见 AGENTS）；
 --- 改成每 0.5 秒轮询一次"父级还是不是 container"，不是就 Reassert 按回去。
 local function HookReassert(frame)
-    if Marked(frame, "reassertHooked") then return end
-    Mark(frame, "reassertHooked", true)
+    local fd = GetFFD(frame)
+    if fd.reassertHooked then return end
+    fd.reassertHooked = true
     Widget:PollWatch(frame, function(self)
         if InCombatLockdown() then return end
         if self:GetParent() ~= container then
