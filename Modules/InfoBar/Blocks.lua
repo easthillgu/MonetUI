@@ -13,6 +13,37 @@ local function Tip()
     return _G.GameTooltip
 end
 
+--- 格子点击动作的**唯一入口**：动作本体住在 `MicroMenu.lua` 的 `M.actions`（11-07 抽成函数），
+--- 信息栏这里只按名字取，**不抄第二份开窗逻辑**（AGENTS：一处判据一份实现）。
+---
+--- 映射按"数据住在哪"来定，不是随手分配：
+---   金钱 / 耐久 / 货币 → **我们自己的背包窗**（钱数就显示在背包窗底部，而耐久与代币的数据
+---     本来就只能从背包物品读 —— 见本文件 `DurabilityUpdate` 上方那条 1.60 API 限制注释）；
+---   延迟/帧率/内存 → **设置**（`Settings.OpenToCategory`，纯 C_*，无暴雪 Lua 链）；
+---   专精 / 任务 / 好友 → **先开代点坞**（`MicroMenuSecure`），第二击才到面板。
+---     这三格要开的暴雪面板**没有纯 C_* 开口**，而信息栏是"内容驱动排版"的框 ——
+---     它永远不能挂安全模板（AGENTS 硬判据 / HANDOFF §8.64），所以走坞，不走格子直连。
+--- 坞自己锚在小地图旁、与信息栏没有锚定关系 ⇒ 这条路不会把信息栏标成受保护。
+--- 提示行用的文案（动作名 → 一句话）。信息栏的提示层读 `block.onClick.hint`，
+--- 一处集中、不用给 7 个注册表各加一个字段。
+local CLICK_HINT = {
+    bags     = "打开背包",
+    settings = "打开设置",
+    dock     = "打开快捷入口（角色 / 任务 / 好友 / 天赋 …）",
+}
+
+local function BlockClick(actionName)
+    local fn = function(_, button)
+        if button ~= "LeftButton" then return end
+        local minimap = ns:GetModule("Minimap")
+        local actions = minimap and minimap.microMenu and minimap.microMenu.actions
+        local fn2 = actions and actions[actionName]
+        if type(fn2) == "function" then pcall(fn2) end
+    end
+    fn.hint = CLICK_HINT[actionName] or actionName
+    return fn
+end
+
 -- `GetMoneyString` is not in this client's API manual, so the formatting is done here rather than assumed.
 local function FormatMoney(copper)
     copper = Secrets.Number(copper)
@@ -73,6 +104,7 @@ M:RegisterBlock({
     events   = { "PLAYER_ENTERING_WORLD", "PLAYER_MONEY" },
     update   = GoldUpdate,
     tooltip  = GoldTooltip,
+    onClick  = BlockClick("bags"),   -- 钱数就显示在背包窗底部
 })
 
 -- 1.60 客户端的耐久 API 只支持背包物品：C_Container.GetContainerItemDurability(containerIndex, slotIndex)
@@ -133,6 +165,7 @@ M:RegisterBlock({
     events   = { "UPDATE_INVENTORY_DURABILITY", "PLAYER_ENTERING_WORLD" },
     update   = DurabilityUpdate,
     tooltip  = DurabilityTooltip,
+    onClick  = BlockClick("bags"),   -- 耐久数据本来就只能从背包物品读
 })
 
 -- Retail's "watched" flag has no equivalent here; `isShowInBackpack` (the currency shown beside the gold in the bag bar) is the closest and is used instead.
@@ -207,6 +240,7 @@ M:RegisterBlock({
     events   = { "CURRENCY_DISPLAY_UPDATE", "PLAYER_ENTERING_WORLD" },
     update   = CurrencyUpdate,
     tooltip  = CurrencyTooltip,
+    onClick  = BlockClick("bags"),   -- 代币/货币的实物就在背包里，钱数也显示在那扇窗底部
 })
 
 local function Latency()
@@ -314,6 +348,7 @@ M:RegisterBlock({
     update   = SystemUpdate,
     tooltip  = SystemTooltip,
     onUpdate = SystemOnUpdate,
+    onClick  = BlockClick("settings"),   -- 纯 C_*：`Settings.OpenToCategory`
 })
 
 local function CurrentSpecIndex()
@@ -399,6 +434,7 @@ M:RegisterBlock({
     events   = { "ACTIVE_TALENT_GROUP_CHANGED", "PLAYER_ENTERING_WORLD" },
     update   = SpecUpdate,
     tooltip  = SpecTooltip,
+    onClick  = BlockClick("dock"),   -- 专精→天赋面板没有纯 C_* 开口：先开代点坞，第二击到面板
 })
 
 local function FriendsUpdate(block)
@@ -435,6 +471,7 @@ M:RegisterBlock({
     events   = { "FRIENDLIST_UPDATE", "PLAYER_ENTERING_WORLD" },
     update   = FriendsUpdate,
     tooltip  = FriendsTooltip,
+    onClick  = BlockClick("dock"),   -- 好友/社区窗没有纯 C_* 开口：先开代点坞
 })
 
 -- =========================================================================
@@ -497,6 +534,7 @@ M:RegisterBlock({
     events   = { "QUEST_LOG_UPDATE", "PLAYER_ENTERING_WORLD" },
     update   = QuestUpdate,
     tooltip  = QuestTooltip,
+    onClick  = BlockClick("dock"),   -- 任务日志没有纯 C_* 开口：先开代点坞
 })
 
 -- =========================================================================

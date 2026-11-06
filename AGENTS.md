@@ -341,6 +341,13 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   Lua 写进去的是脏值，客户端照用，但整条执行被记成我们的 → 同一次点击里暴雪的安全调用
   （`CastPetAction → PetActionBar:UpdateShownButtons → SetShown`、`UseAction → MainActionBar:ClearAllPoints`）
   全部被拒。本仓用 `_childupdate-mui-kind` / `_childupdate-mui-keydown` + `ChildUpdate` 写。
+- **内容驱动排版的框，永远不能碰安全模板**（2026-11-06 判定，#43 信息栏那一半因此**明确不做**）：
+  信息栏 `SetBlockText` 每次值变化都要 `GetStringWidth → SetWidth → Relayout()`（逐格 `ClearAllPoints/SetPoint`），
+  而金钱/公会/威胁这些值**战斗中也在变** ⇒ 排版不能停；安全模板控件一旦与格子或其父框建立锚定关系，
+  整族被标成受保护，之后这些高频写入全部被拒（§8.37 实测每 10 秒上百条 `ADDON_ACTION_BLOCKED`）。
+  这与"写法找对没有"无关 —— 微菜单那版载体能成立，正是因为它的排版**一次做完**（活锚点跟随小地图）。
+  ⇒ 要做"点一格开面板"只能把信息栏改成固定宽度网格（损失"读数字"的性格，已否决）；
+     入口由已转正的微型菜单提供（右键小地图，一行开一个面板）。
 - **代点暴雪按钮的属性名是 `clickbutton`，而且必须双注册 `AnyDown`+`AnyUp`**（2026-11-06 实机定案，
   两条都是**静默失效**——零报错、零 `taint.log`、玩家只看到"点了没反应"）：
   暴雪 `SecureTemplates` 的 `SECURE_ACTIONS.click` 读的是

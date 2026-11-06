@@ -33,33 +33,62 @@ local rows       -- 已建的行
 --- 只有 `C_Map.OpenWorldMap` / `C_Calendar.OpenCalendar` / `C_TradeSkillUI.OpenTradeSkill` /
 --- `C_SettingsUtil.OpenSettingsPanel` 这一小撮），而调暴雪 Lua 全局是被禁止的 P0 写法。
 --- 要恢复它们走 #43 的独立安全载体，不要在这里重试第二种安全模板写法。
+--- 四个动作抽成**函数**并导出（11-07）：信息栏的格子（`Blocks.lua`）也要用同一批动作，
+--- 而 AGENTS 的规矩是"一处判据一份实现" —— 入口表可以各开各的，**开窗逻辑不能抄第二份**。
+local function OpenBags()
+    -- 我们自己的背包窗口，动作全在我们名下（`ToggleAllBags` 是暴雪 Lua 全局，不许调）。
+    local bags = ns:GetModule("Bags")
+    if bags and type(bags.Toggle) == "function" then bags:Toggle(true) end
+end
+
+local function OpenMap()
+    -- `C_Map.OpenWorldMap` 文档标 [受限]：受限窗口里一行都不做，别让它替我们撞墙。
+    if ns:IsRestricted() then return end
+    local C_Map = _G.C_Map
+    if C_Map and type(C_Map.OpenWorldMap) == "function" then C_Map.OpenWorldMap() end
+end
+
+local function OpenCalendar()
+    -- 11-05 实测：本客户端的纯 C_* 开窗动词只有 `OpenWorldMap`/`OpenCalendar`/`OpenTradeSkill(要 skillLineID)`/
+    -- `OpenSettingsPanel` 这一小撮（`/run` 扫遍所有 `C_*.Open*`）。日历是其中唯一无参、能直接加进行里的。
+    if ns:IsRestricted() then return end
+    local C_Calendar = _G.C_Calendar
+    if C_Calendar and type(C_Calendar.OpenCalendar) == "function" then C_Calendar.OpenCalendar() end
+end
+
+local function OpenSettings()
+    -- `Settings.OpenToCategory` 是客户端 C 侧 API，不会把暴雪的 Lua 面板链拉进我们的执行环境
+    -- （对比：`ToggleGameMenu` 是暴雪 Lua 函数，已撤掉）。
+    local settings = _G.Settings
+    if settings and type(settings.OpenToCategory) == "function" and settings.INTERFACE_CATEGORY_ID then
+        return settings.OpenToCategory(settings.INTERFACE_CATEGORY_ID)
+    end
+end
+
+--- 打开 #43 那个代点坞（`MicroMenuSecure`）。信息栏里"需要代点才能开的暴雪面板"的格子
+--- （专精 / 任务 / 好友…）点一下**先到这个坞**，第二击才到面板 ——
+--- 信息栏本身**永远不能碰安全模板**（内容驱动排版，AGENTS 硬判据 / HANDOFF §8.64）。
+--- 坞自己锚在小地图旁、不在信息栏的锚定家族里，所以这条路不会把信息栏标成受保护。
+local function OpenMicroDock()
+    local minimap = ns:GetModule("Minimap")
+    local dock = minimap and minimap.microMenuSecure
+    if dock and type(dock.Toggle) == "function" then dock:Toggle() end
+end
+
 local ENTRIES = {
-    { label = "背包", luaAction = function()
-        -- 我们自己的背包窗口，动作全在我们名下（`ToggleAllBags` 是暴雪 Lua 全局，不许调）。
-        local bags = ns:GetModule("Bags")
-        if bags and type(bags.Toggle) == "function" then bags:Toggle(true) end
-      end },
-    { label = "地图", luaAction = function()
-        -- `C_Map.OpenWorldMap` 文档标 [受限]：受限窗口里一行都不做，别让它替我们撞墙。
-        if ns:IsRestricted() then return end
-        local C_Map = _G.C_Map
-        if C_Map and type(C_Map.OpenWorldMap) == "function" then C_Map.OpenWorldMap() end
-      end },
-    { label = "日历", luaAction = function()
-        -- 11-05 实测：本客户端的纯 C_* 开窗动词只有 `OpenWorldMap`/`OpenCalendar`/`OpenTradeSkill(要 skillLineID)`/
-        -- `OpenSettingsPanel` 这一小撮（`/run` 扫遍所有 `C_*.Open*`）。日历是其中唯一无参、能直接加进行里的。
-        if ns:IsRestricted() then return end
-        local C_Calendar = _G.C_Calendar
-        if C_Calendar and type(C_Calendar.OpenCalendar) == "function" then C_Calendar.OpenCalendar() end
-      end },
-    { label = "设置", luaAction = function()
-        -- `Settings.OpenToCategory` 是客户端 C 侧 API，不会把暴雪的 Lua 面板链拉进我们的执行环境
-        -- （对比：`ToggleGameMenu` 是暴雪 Lua 函数，已撤掉）。
-        local settings = _G.Settings
-        if settings and type(settings.OpenToCategory) == "function" and settings.INTERFACE_CATEGORY_ID then
-            return settings.OpenToCategory(settings.INTERFACE_CATEGORY_ID)
-        end
-      end },
+    { label = "背包", luaAction = OpenBags },
+    { label = "地图", luaAction = OpenMap },
+    { label = "日历", luaAction = OpenCalendar },
+    { label = "设置", luaAction = OpenSettings },
+}
+
+-- 导出给信息栏用（同一个函数对象，不是复制一份实现）。
+M.actions = {
+    bags     = OpenBags,
+    map      = OpenMap,
+    calendar = OpenCalendar,
+    settings = OpenSettings,
+    dock     = OpenMicroDock,
 }
 
 --- 曾经这里按名字取暴雪那颗微按钮、把行做成安全按钮去代点它。11-05 实测：那些行锚进面板

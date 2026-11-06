@@ -251,9 +251,11 @@ end
 --- `ToggleTalentFrame` / `ToggleFriends` / `ToggleQuestLog`），栈会一路跑到
 --- `TextStatusBar.lua:110` 的机密值比较并按 MonetUI 的名义记账。别再把它当"备用开关"加回来。
 ---
---- 替代方案（安全转接到暴雪微按钮）**也已下线**：和 `SecureActionButtonTemplate` 建立锚定关系
---- 会把我们逐拍排版的框标成受保护，后果见 `BuildBlockFrame` 上方那段。要恢复"点一格开面板"，
---- 只能换不碰信息栏布局的载体（任务 #43），不要在这一格上重试第二种安全模板写法。
+--- 11-07 更新：**格子现在可点**（`Blocks.lua` 的 `BlockClick`，动作单源在 `MicroMenu.lua` 的 `M.actions`）：
+--- 要开暴雪面板的那几格走**先弹微菜单代点坞**（`MicroMenuSecure`）这条两击路线。
+--- 信息栏本身**永远不能挂安全模板** —— 它是"内容驱动排版"的框，安全模板一进家族就全族被拒
+--- （§8.37 实测、§8.64 判定；上面 `BuildBlockFrame` 那段注释里两条失败写法仍是活教训）。
+--- 即将来的人：这条边界**不会**因为找到新写法而改变，别再试第三种。
 
 --- Fit a block to its text; an empty block is hidden instead of left as a hollow gap, so a missing API costs one number, not a stripe of the bar.
 function M:SetText(block, text)
@@ -417,8 +419,16 @@ function M:RemoveDecorations()
     end
 end
 
---- 这一格**不打开任何暴雪面板**。今天试过两条路，两条都以拦截收尾（判据见下面两段），
---- 只保留悬停出数字/提示；要恢复"点一下开面板"必须换载体，别在这里再动一次。
+--- **这一格永远不做"点开暴雪面板"（11-06 判定，别再回来试）**。两条试过都以拦截收尾（判据见下面两段），
+--- 而第三条路（#43 的代点载体）也在今天被判定**与本框的机制互斥**，原因是一个数字就能看懂的事实：
+--- 本模块是**内容驱动排版** —— `SetBlockText`（本文件 267-278 行）在每次值变化时都要
+--- `GetStringWidth` → `block.frame:SetWidth(...)` → `Relayout()`（逐格 `ClearAllPoints/SetPoint`），
+--- 而金钱 / 公会 / 威胁这些值**战斗中也在变** ⇒ 排版不能停。
+--- §8.37 的雷正是：安全模板控件一旦与格子或 `bar` 建立锚定关系，整族被标成受保护，
+--- 之后这些高频写入**全部被拒**（实测每 10 秒上百条 `ADDON_ACTION_BLOCKED`）。
+--- ⇒ 判据（已写进 AGENTS）：**内容驱动排版的框，永远不能碰安全模板**；
+---   要"点一格开面板"只能把信息栏改成固定宽度网格（损失"读数字"的性格，已否决）。
+--- **入口不缺**：右键小地图的微型菜单（`MicroMenuSecure.lua`，#43 已转正）一行就开对应面板。
 ---
 --- ⚠ 11-05 开服实机判例（日志 id 1441 有完整栈）：以前这里是 `M:OpenPanel("ToggleCharacter", …)`，
 --- 也就是**在我们的 Lua 里调用暴雪的 FrameXML 全局**。栈一路走到
@@ -434,10 +444,6 @@ end
 ---      于是 `SetPoint/ClearAllPoints/SetWidth/SetShown` 全部被拒，实测每 10 秒上百条
 ---      `ADDON_ACTION_BLOCKED MonetUI Button:…`，而且 `当前受限：无 · InCombatLockdown=false`
 ---      照样拒（taint.log 对 ADDON_ACTION_BLOCKED 零记录，只能按"无名 Button + 这一组写入"归因）。
---- ⇒ 逐拍排版的框**永远不能和安全模板控件建立锚定关系**。点一格开面板这条路先下线，
----    等找到不碰我们布局的合法载体（任务 #43）再谈：本客户端只有
----    `C_Map.OpenWorldMap` / `C_Calendar.OpenCalendar` / `C_TradeSkillUI.OpenTradeSkill` 这类纯 C_* 开窗，
----    角色 / 天赋 / 好友 / 任务日志**没有**对应的 C 侧开口。
 local function BuildBlockFrame(block)
     if block.frame or not bar then return end
 
@@ -457,6 +463,12 @@ local function BuildBlockFrame(block)
         M:ShowTooltip(frame)
         if block.tooltip then pcall(block.tooltip, block) end
         local tip = _G.GameTooltip
+        -- 可发现性：带点击动作的格子，在提示末尾补一行"点击：…"。
+        -- 文案集中存在返回函数身上（`BlockClick` 返回的 fn.hint），免得 7 个提示函数各抄一句。
+        if block.onClick and block.onClick.hint and tip and type(tip.AddLine) == "function" then
+            local cr, cg, cb = Color:GetBorder()
+            pcall(tip.AddLine, tip, "点击：" .. block.onClick.hint, cr, cg, cb)
+        end
         if tip then pcall(tip.Show, tip) end
     end)
 
