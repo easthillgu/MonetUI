@@ -46,6 +46,17 @@
   `C:/Users/EastHillGu/Documents/wowaddonsdev/MonetUI-prelaunch-1104/` 兜底 —— 若要改主意，
   动作是把这几行加进 `.gitignore` 白名单并单独一笔提交。
 
+## 三·五、待实机欠账（2026-11-06 起，作者说"先放着，处理别的"）
+
+代码已入库、已部署、闸门全绿，但**只有实机能判**，别当"已验"：
+
+| # | 要验的事 | 判据（客观数字，不看"看着正常"） | 状态 |
+|---|---|---|---|
+| W1 | `bank:free` 标题行两颗钮（`一键存入` / `栏位管理`） | `/mui bags layout` 读两行 `标题钮…：显示=true · 鼠标=true · 父=bank:free`；点「一键存入」必须有回执行（调用=成功/失败 + 画出 N→M）；点「栏位管理」⇒ `BankFrame` 变 `alpha=1 · 鼠标=true` | 未验 |
+| W2 | 单行口径下的「背 → 银第一行」拖放 | 银行 `6` 件数 +1、背包对应索引 −1、且**新占用槽号 = 你落的那一格**（首格 `slot=27`） | 未验（上一趟实测到的是反方向：银→背） |
+| W3 | 空仓库时标题行保留（`keepTitle`） | 银行 48/48 满或数据没跟上时，`bank:free` 仍显示、高度 = `TITLE_H+PAD`、两颗钮可点 | 未验 |
+| W4 | `hidebliz off` 的持久化（默认值是 `true` 之后新引入的风险） | `/mui bags hidebliz off` ⇒ `接管=false · alpha=1`；**再重载一次**仍 `alpha=1`（写的是显式 `false`，不是删键） | 未验 |
+
 ## 四、验收节奏（别一次性做完）
 
 每完成一项就：`luac -p` → `api-audit` → `audit-taint` → `audit-locals` → `check-frame-list` →

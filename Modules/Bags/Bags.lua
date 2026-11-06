@@ -764,11 +764,14 @@ local function FillWindow(win, items)
 end
 
 
---- 画「剩余空间」。规则改过两次：玩家 2026-11-03 定"最多一行 + `+N`"；
+--- 画「剩余空间」。规则改过三次：玩家 2026-11-03 定"最多一行 + `+N`"；
 --- 2026-11-04 作者改判成**真槽位、最多 84 格**（多行），因为占位壳没有容器身份、
---- 拖放落不到空位上 —— 一行 12 格的老规则连同它的 `+N` 一起作废，溢出提示改挂在最后一格。
--- 空格子显示上限（作者 11-04 定：84 个足够，再多是浪费框体）。
-local FREE_MAX = 84
+--- 拖放落不到空位上；**2026-11-06 作者再改回"一行 + `+N`"** —— 前提已经变了：
+--- 空格是真 ItemButton（绑 bag/slot，三向拖放实机验过，见 HANDOFF §8.57），所以"单行"
+--- 不再等于"没有落点"，代价只剩一条：**第 N+1 个之后的空位看不见、也够不到**。
+--- 那个代价是作者明确接受的（多行 84 格会把银行窗撑成 3 行、比所有分类窗高一大截）。
+-- 只画几行（1 = 玩家 11-06 定的口径）。`columns * FREE_ROWS` 就是可视空位数。
+local FREE_ROWS = 1
 
 --- 「剩余空间」窗：格子里放的是**真 ItemButton**（绑 bag/slot），不是占位壳。
 --- 占位壳没有容器身份 ⇒ 拖放没有落点，玩家"能拖出来、放不进空格"（11-04 实机报的缺陷，
@@ -777,7 +780,9 @@ local FREE_MAX = 84
 --- `return self.bagID or self:GetParent():GetID()` —— 壳就是父级、`UpdateButton` 里
 --- `shell:SetID(rec.bag)` + `btn:SetID(rec.slot)` 正好喂到它读的那两个口。
 --- 兼容旧调用：传数字（`HideModeWindows` 传 0）= 全清。
-local function FillFreeWindow(win, empties)
+--- `keepTitle` = **银行模式**：一个空格都没有时仍留标题行（那行挂着"一键存入 / 栏位管理"，
+--- 银行满的时候恰恰是最想点"一键存入"的时候）。此时窗宽按满行算，空/不空之间不跳宽度。
+local function FillFreeWindow(win, empties, keepTitle)
     local size    = Setting("iconSize")
     local gap     = Setting("gap")
     local columns = Setting("columns")
@@ -785,7 +790,7 @@ local function FillFreeWindow(win, empties)
     local list
     if type(empties) == "table" then list = empties else list = {} end
     local total = #list
-    local draw = math.min(total, FREE_MAX)
+    local draw = math.min(total, columns * FREE_ROWS)
     local hidden = total - draw
 
     for i = 1, draw do
@@ -810,6 +815,9 @@ local function FillFreeWindow(win, empties)
         local count = Marked(shell, "countF")
         if count then
             -- 溢出提示写在最后一格正中（我们没有 markF 了，countF 在空格上没人用）。
+            -- **这一格仍是真槽位**：`+N` 只是它的说明文字，拖进去照样落到它绑的 bag/slot。
+            -- N = `total - draw` = **没画出来的**空位数；11-03 那版写的是 `total - draw + 1`
+            -- （它把最后一格当纯指示器、自身也算进去），现在最后一格可落东西，不能再算进去。
             count:SetPoint("CENTER", shell, "CENTER", 0, 0)
             count:SetText((i == draw and hidden > 0) and ("+" .. tostring(hidden)) or "")
         end
@@ -823,6 +831,15 @@ local function FillFreeWindow(win, empties)
     local perRow = math.min(draw, columns)
     local w = PAD * 2 + perRow * size + math.max(0, perRow - 1) * gap
     local h = TITLE_H + rows * size + math.max(0, rows - 1) * gap + PAD
+    if keepTitle then
+        -- 银行模式：宽度按**满一行**算（空/不空之间不跳），没有空格时高度只留标题行。
+        local fullW = PAD * 2 + columns * size + math.max(0, columns - 1) * gap
+        w = math.max(w, fullW)
+        if rows == 0 then h = TITLE_H + PAD end
+        win:SetSize(w, h)
+        win:SetShown(true)
+        return
+    end
     win:SetSize(w, h)
     win:SetShown(draw > 0)
 end
@@ -980,7 +997,11 @@ local bankDrawn = 0
 -- （银行工具那一段），而 Rebuild 在上面就 `bankFree = free` 了 —— 那个赋值落到**全局**上，
 -- 本地这份永远是 0（2026-11-06 `wuxian check` 的 `global-write` 警告抓出来的）。
 local bankFree = 0
-local EnsureBankTools, ParkBlizzardBank, LayoutBankTools   -- 前置声明：函数体排在 CloseAllBags 之后（依赖那条链）
+local ParkBlizzardBank   -- 前置声明：函数体排在 CloseAllBags 之后（依赖那条链）
+-- `EnsureBankTitleTools` 也一样：它定义在银行工具件那一段（Rebuild 之后），
+-- 而 Rebuild 要调它 ⇒ 必须先在这儿占位，后面用**赋值**写（写 `local function` 等于另建一个
+-- 同名局部，Rebuild 抓到的仍是全局 nil —— AGENTS 那条判例，2026-11-06 又被探针抓了一次）。
+local EnsureBankTitleTools
 
 --- 关掉某一模式的全部窗口（银行关闭只收银行那几扇，背包窗一张都不动）。
 local function HideModeWindows(mode)
@@ -1032,17 +1053,20 @@ local function Rebuild(bagType)
     -- 传**真实坐标表**而不是数量：那些格子得是能落东西的真槽位。
     -- 2026-11-06：**银行侧也开了** —— 索引语义已定性（`6..14` = CharacterBankTab_1..9、
     -- 与物理格子 1:1、钥匙扣 `-1` 已从扫描里剔除），原先"银行索引没定性、真槽位可能绑错格"
-    -- 这条阻塞消失。上限仍是 FREE_MAX=84（9 个标签页全买满时 432 个空格只画前 84 个，
-    -- 溢出数写在最后一格，见 FillFreeWindow）。
-    FillFreeWindow(EnsureWindow(WinKey(FREE_CAT.key)), empties)
+    -- 这条阻塞消失。显示口径（2026-11-06 作者定）= **只画一行**（`FREE_ROWS = 1` × `columns`），
+    -- 其余空位在最后一格写 `+N`（见 FillFreeWindow）。代价：第 N+1 个之后够不到 —— 已接受。
+    -- 银行模式：这扇窗是**银行那一列的第一扇**，标题行右端挂两颗动作钮（一键存入 / 栏位管理）。
+    -- 所以银行开着时即使一个空格都没有，也要把标题行留着（作者 2026-11-06 定）——
+    -- 否则"银行满了想存东西"恰好是按钮消失的时刻。
+    local freeWin = EnsureWindow(WinKey(FREE_CAT.key))
+    FillFreeWindow(freeWin, empties, activeMode == "bank")
 
     LayoutBothModes()
     RestoreDragged()
     DesignateMaster()
 
     if activeMode == "bank" then
-        EnsureBankTools()
-        LayoutBankTools()
+        EnsureBankTitleTools(freeWin)
         -- 接管**默认 on**（2026-11-06 作者拍板，DEFAULTS.bags.hideBlizzardBank = true）：
         -- 空格子是真 ItemButton、三向拖放已逐格实测（HANDOFF §8.57）。前提不变 ——
         -- 只有**真画出银行物品**时才停车（`bankDrawn > 0`），零物品时绝不接管（否则等于藏了个空框）。
@@ -1090,7 +1114,6 @@ end
 CloseAllBags = function(mode)
     if mode == "bank" then
         HideModeWindows("bank")
-        if bankTools then bankTools:Hide() end
         ParkBlizzardBank(false)
         -- 暴雪银行交互本身交给客户端：`C_Bank.CloseBankFrame` 文档无限制标记。
         if C_Bank and C_Bank.CloseBankFrame then pcall(C_Bank.CloseBankFrame) end
@@ -1204,7 +1227,7 @@ end
 -- LoD 没到位 —— 那一刻一个字节都不许动暴雪的框：**宁可屏幕上两套并存，也不能让玩家打不开银行**。
 -- 手法沿用背包：alpha 0 + 整树关鼠标，绝不 `Hide`（Hide 会被暴雪自己的 Show 顶回来，见 AGENTS）。
 -- ⚠ 放开（`park = false`）就是"把暴雪那块管理区还给你"的通道：买栏位与背包↔银行包互换都只能
---   在那块上做（理由见下面包裹管理面板那段）。
+--   （2026-11-06 起：`bank:free` 标题行上的「栏位管理」钮就是这条通道，原来那个「包裹管理」面板已删）。
 local function BankFrameCandidates()
     local out = {}
     -- 名字只走 Skin:Need 这一个漏斗（取不到 = 账本里的一行 ✗，不静默跳过）；
@@ -1233,196 +1256,84 @@ ParkBlizzardBank = function(park)
     end
 end
 
--- ---- 包裹管理折叠面板（作者 11-04 的 ①A：只放没有[受限]标记的动作） --------------
--- 面板里三样：一键存入（`C_Bank.AutoDepositItemsIntoBank`）、关闭银行（`C_Bank.CloseBankFrame`）、
--- 一行账（已购栏位 n/max + 银行空格 + 画出的物品数）。
--- **故意不做**的两件事，理由钉在这儿免得下次有人手滑：
---   ① 买银行栏位 = `C_Bank.PurchaseBankTab`，快照标 **[受限]** —— 我们的 Lua 点它就是
---      历史 `UseContainerItem` 那一族越权（拦下并归到 MonetUI 名下）；
---   ② 背包 ↔ 银行包互换要靠 Pickup 一族，而本客户端 `PickupInventoryItem` /
---      `PutItemInBackpack` / `BuyBankSlot` / `GetNumBankSlots` **全部不存在**（逐个查过快照）。
--- ⇒ 这两件事留在暴雪自己那块管理区上，`/mui bags bank off` 或 ✕ 关闭即放开。
-local bankTools, bankToolsBody, bankToolsInfo, bankToolsArrow
-
-local function BankToolsSetting(key)
-    local db = ns:DB().bags or {}
-    return db[key]
-end
-
-local function SetBankToolsSetting(key, value)
-    local db = ns:DB()
-    db.bags = db.bags or {}
-    db.bags[key] = value
-end
-
-local function BankToolButton(parent, label, y, onClick)
-    -- kind 必须是 "Button"：`Widget:CreateFrame` 不传 kind 默认建 Frame，
-    -- 而 Frame 没有 RegisterForClicks / OnClick —— 建面板那一刻就会 attempt to call nil。
-    local button = Widget:CreateFrame(nil, parent, 88, 20, nil, "Button")
+-- ---- 银行标题行工具件（2026-11-06 作者定：动作从「包裹管理」面板搬进标题行） --------
+-- 两件事各一颗钮，挂在「银行 · 剩余空间」窗的**标题行右端**：
+--   ① 一键存入（`C_Bank.AutoDepositItemsIntoBank`，文档无 [受限] 标记）；
+--   ② 栏位管理 —— 只做"把暴雪银行框还给你"，**不代调 `C_Bank.PurchaseBankTab`**
+--      （快照标 [受限]，我们点它 = 历史 `UseContainerItem` 那一族越权）。
+-- 原来的「包裹管理」折叠面板整块删除（作者 11-06 拍板）：两个动作只剩这一处入口，
+-- 一行账（栏位 n/max · 空格 · 物品）在 `/mui bags probe` 里已经有，不再占一扇窗。
+local bankFreeWin, bankDepositBtn, bankTabBtn
+local function BankHeadButton(parent, label, width, onClick)
+    -- kind 必须是 "Button"：`Widget:CreateFrame` 不传 kind 默认建 Frame，Frame 没有
+    -- RegisterForClicks / OnClick（建出来那一刻就 attempt to call nil）。
+    local button = Widget:CreateFrame(nil, parent, width, 18, nil, "Button")
     Widget:Theme(button, { thickness = 1, bgAlpha = 0.9 })
     Widget:ButtonMaterial(button, { alpha = 0, weaveAlpha = 0.25 })
-    -- y 传进来是"往下多少像素"，所以这里取负：TOP 系锚点的 y 只有负数才向下
-    -- （写成 +y 会把整块内容顶到面板上方，压住上一扇窗 —— 11-04 实机报的那个重叠）。
-    button:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, -y)
     button:EnableMouse(true)
     button:RegisterForClicks("AnyUp")
+    -- 色键是 bright：`edge` 摆在 bgAlpha 0.9 的深底板上会读成"禁用"（11-04 的实测判例）。
     local text = Widget:Font(button, 10, "pixel", "bright", "CENTER")
-    -- 色键是 bright 不是 edge：`edge` 是边框那一支中调，摆在 bgAlpha 0.9 的深色底板上
-    -- 就是"文字和底色一个亮度"（11-04 实机报的"一键存入按钮看不到"，钮是建出来的，读不出来
-    -- 等于没建）。本仓为这种大按钮文字专门加过 `bright` 档（Utils/Widget.lua:1208 那段注释：
-    -- neutral 摆在大按钮上读成"禁用"，highlight 是职业色不许进通用静态文字）。
     text:SetAllPoints()
     text:SetText(label)
     button:SetScript("OnClick", onClick)
     return button
 end
 
---- 一行账：栏位数与空格数都来自 C_Bank / Scan，读不出就写 "-"（绝不猜）。
-local function UpdateBankToolsInfo()
-    if not bankToolsInfo then return end
+--- 一键存入。必须留回执：玩家点了没反应时，"钮没接上鼠标"和"API 静默无操作"分不出来。
+--- 正式服语义 = 只存"打了自动存入标记"的物品；一个标记都没有时静默不动，不报错。
+local function DepositAllBank()
     local bt = (Enum and Enum.BankType and Enum.BankType.Character) or 0
-    local got, max
-    if C_Bank and C_Bank.FetchNumPurchasedBankTabs then
-        local ok, v = pcall(C_Bank.FetchNumPurchasedBankTabs, bt)
-        got = ok and Secrets.Number(v) or nil
+    if not (C_Bank and C_Bank.AutoDepositItemsIntoBank) then
+        ns:Print("[mui bags] 一键存入：本客户端没有 C_Bank.AutoDepositItemsIntoBank —— 这颗钮在此无效")
+        return
     end
-    if C_Bank and C_Bank.FetchMaxNumBankTabs then
-        local ok, v = pcall(C_Bank.FetchMaxNumBankTabs, bt)
-        max = ok and Secrets.Number(v) or nil
+    local support = "?"
+    if C_Bank.DoesBankTypeSupportAutoDeposit then
+        local okS, v = pcall(C_Bank.DoesBankTypeSupportAutoDeposit, bt)
+        support = okS and tostring(v) or "读不出"
     end
-    bankToolsInfo:SetText(string.format("栏位 %s/%s · 空格 %s · 物品 %s",
-        got and tostring(got) or "-",
-        max and tostring(max) or "-",
-        tostring(bankFree or 0),
-        tostring(bankDrawn or 0)))
+    local before = bankDrawn or 0
+    local ok, err = pcall(C_Bank.AutoDepositItemsIntoBank, bt)
+    M:Refresh()
+    ns:Print(("[mui bags] 一键存入：调用=%s · 支持自动存入=%s · 画出 %d → %d 件%s")
+        :format(ok and "成功" or ("失败（" .. tostring(err) .. "）"), support,
+            before, bankDrawn or 0,
+            (ok and before == (bankDrawn or 0))
+                and "｜数量没变 = 客户端只存「打了自动存入标记」的物品，没标记就是这种静默无操作（不是被拦）"
+                or ""))
 end
 
-local function ApplyBankToolsFold()
-    local minimized = BankToolsSetting("bankToolsMinimized") and true or false
-    if bankToolsBody then
-        if minimized then bankToolsBody:Hide() else bankToolsBody:Show() end
-    end
-    if bankToolsArrow then
-        bankToolsArrow:SetText(minimized and "+" or "-")
-    end
-    if bankTools then
-        -- 折起来只留标题行；展开带按钮 + 账一行。高度变化会让"银行自由格"列重排，
-        -- 所以显式重排一次（拖过的窗不受影响）。
-        bankTools:SetHeight(minimized and 26 or 74)
-    end
+--- 栏位管理 = 把暴雪银行框还回去（买栏位 / 换银行包只能在它那块面上做）。
+--- 只动 alpha / 鼠标（AGENTS 允许的隐藏路子），不写暴雪框字段、不代调受保护 API。
+local function ReleaseBlizzardBank()
+    ParkBlizzardBank(false)
+    Skin:WarnOnce("bankToolsRelease",
+        "暴雪银行框已放开：栏位与换包请在那块上操作；重新开银行即恢复接管。")
 end
 
-EnsureBankTools = function()
-    if bankTools then
-        -- **必须显式 Show**：`/mui bags bank off` 和关银行都会把它 Hide 掉，而这个早退路径
-        -- 以前只更新内容不显示 ⇒ 一次收起之后再没打开过银行，面板就永远看不见
-        -- （11-04 实机 "一键存入按钮看不到" 的主因；`显示=false · 体显示=true` 是它的指纹）。
-        bankTools:Show()
-        UpdateBankToolsInfo()
-        ApplyBankToolsFold()
-        return bankTools
+--- 在「银行 · 剩余空间」的标题行右端懒建两颗钮（幂等；窗是复用对象，只建一次）。
+--- **赋值不是 `local function`**：上面第 ~1000 行有前置声明，Rebuild 抓的是那个上值。
+EnsureBankTitleTools = function(win)
+    if not win then return end
+    if bankFreeWin == win and bankDepositBtn then return end
+    bankFreeWin = win
+    if not bankDepositBtn then
+        bankTabBtn = BankHeadButton(win, "栏位管理", 58, ReleaseBlizzardBank)
+        bankTabBtn:SetPoint("TOPRIGHT", win, "TOPRIGHT", -4, -6)
+        bankDepositBtn = BankHeadButton(win, "一键存入", 58, DepositAllBank)
+        bankDepositBtn:SetPoint("TOPRIGHT", bankTabBtn, "TOPLEFT", -4, 0)
     end
-
-    bankTools = Widget:CreateFrame("MonetUIBankTools", UIParent, 200, 74)
-    bankTools.catKey = "bankTools"   -- 位置账走 SaveWindowPosition / WindowPosition（键不能是 nil）
-    Widget:Theme(bankTools, { thickness = 1, bgAlpha = 0.92 })
-    Widget:Shadow(bankTools, { size = 6, alpha = 0.5 })
-    Widget:Corners(bankTools)
-    bankTools:SetMovable(true)
-    bankTools:SetClampedToScreen(true)
-    bankTools:RegisterForDrag("LeftButton")
-    bankTools:SetScript("OnDragStart", function(self) self:StartMoving() end)
-    bankTools:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        SaveWindowPosition(self)
-    end)
-
-    local header = Widget:Font(bankTools, 12, "pixel", "edge", "LEFT")
-    header:SetPoint("TOPLEFT", bankTools, "TOPLEFT", 26, -5)
-    header:SetText("包裹管理")
-    Widget:Rule(bankTools, header)
-
-    -- 折叠钮：`+` / `-` 像素字（点它整块收起，只留标题行）。
-    bankToolsArrow = Widget:Font(bankTools, 12, "pixel", "bright", "CENTER")
-    bankToolsArrow:SetPoint("TOPLEFT", bankTools, "TOPLEFT", 8, -5)
-    bankToolsArrow:SetWidth(12)
-    local fold = Widget:CreateFrame(nil, bankTools, 18, 18, nil, "Button")
-    fold:SetPoint("LEFT", bankToolsArrow, "CENTER", 0, 0)
-    fold:EnableMouse(true)
-    fold:RegisterForClicks("AnyUp")
-    fold:SetScript("OnClick", function()
-        SetBankToolsSetting("bankToolsMinimized", not (BankToolsSetting("bankToolsMinimized") and true or false))
-        ApplyBankToolsFold()
-    end)
-
-    bankToolsBody = Widget:CreateFrame(nil, bankTools, 200, 48)
-    bankToolsBody:SetPoint("TOPLEFT", bankTools, "TOPLEFT", 0, -24)
-    pcall(bankToolsBody.EnableMouse, bankToolsBody, false)
-
-    BankToolButton(bankToolsBody, "一键存入", 2, function()
-        -- 必须留回执。作者 11-04 实测「点了没反应、也没有报错」——这句话分不出两种完全不同的情况：
-        -- ① OnClick 压根没跑到（钮没接上鼠标）；② 跑到且 API 被接受，但它本身什么都不做
-        -- （正式服语义：只存"打了自动存入标记"的物品，角色一个标记都没打时就是静默无操作，
-        --   既不报错也不动数量）。三种结局各打一行，一眼分辨，别靠猜。
-        local bt = (Enum and Enum.BankType and Enum.BankType.Character) or 0
-        local support = "?"
-        if C_Bank and C_Bank.DoesBankTypeSupportAutoDeposit then
-            local okS, v = pcall(C_Bank.DoesBankTypeSupportAutoDeposit, bt)
-            support = okS and tostring(v) or "读不出"
-        end
-        if not (C_Bank and C_Bank.AutoDepositItemsIntoBank) then
-            ns:Print("[mui bags] 一键存入：OnClick 收到了，但本客户端没有 C_Bank.AutoDepositItemsIntoBank —— 这颗钮在此无效")
-            return
-        end
-        local before = bankDrawn or 0
-        local ok, err = pcall(C_Bank.AutoDepositItemsIntoBank, bt)
-        M:Refresh()
-        ns:Print(("[mui bags] 一键存入：OnClick 收到 · 调用=%s · 支持自动存入=%s · 画出 %d → %d 件%s")
-            :format(ok and "成功" or ("失败（" .. tostring(err) .. "）"), support,
-                before, bankDrawn or 0,
-                (ok and before == (bankDrawn or 0))
-                    and "｜数量没变 = 客户端只存「打了自动存入标记」的物品，没标记就是这种静默无操作（不是被拦）"
-                    or ""))
-    end)
-    BankToolButton(bankToolsBody, "放开暴雪", 2, function()
-        -- 买栏位 / 背包↔银行包互换只能在暴雪那块管理区上做（见上面那段理由），
-        -- 这颗就是"把那块还给你"的开关；再开一次银行（或 /mui bags bank）即收回去。
-        ParkBlizzardBank(false)
-        Skin:WarnOnce("bankToolsRelease",
-            "暴雪银行框已放开：栏位与换包请在那块上操作；重新开银行即恢复接管。")
-    end)
-    local buttons = { bankToolsBody:GetChildren() }
-    if #buttons >= 2 then
-        buttons[2]:ClearAllPoints()
-        buttons[2]:SetPoint("TOPLEFT", buttons[1], "TOPRIGHT", 6, 0)
-    end
-
-    bankToolsInfo = Widget:Font(bankToolsBody, 10, "pixel", "neutral", "LEFT")
-    bankToolsInfo:SetPoint("TOPLEFT", bankToolsBody, "TOPLEFT", 10, -26)
-
-    ApplyBankToolsFold()
-    UpdateBankToolsInfo()
-    return bankTools
+    -- 标题文字别伸到钮底下：标题是 FontString，限宽即可（Rule 仍按标题宽度画）。
+    if win.title then win.title:SetWidth(math.max(60, win:GetWidth() - 132)) end
 end
 
--- LayoutBankTools —— 折叠面板贴在银行列的最下面一扇（"bank:free"）之下；
--- 那一扇不在（银行没货）就贴任务追踪左边同一列，再不在就退回屏幕左上。
--- 注意这里**不能**写 `local function`：上面有前置声明 `local EnsureBankTools, ParkBlizzardBank,
--- LayoutBankTools`，再写 local 就是新建一个同名局部，`Rebuild` 抓住的那个上值永远是 nil。
-LayoutBankTools = function()
-    if not bankTools then return end
-    if WindowPosition(bankTools.catKey or "bankTools") then return end
-    local anchorWin = windows["bank:" .. FREE_CAT.key]
-    local anchor = Setting("anchor") or {}
-    bankTools:ClearAllPoints()
-    if anchorWin and anchorWin:IsShown() then
-        bankTools:SetPoint("TOPLEFT", anchorWin, "BOTTOMLEFT", 0, -14)
-    elseif _G[anchor.frame] then
-        bankTools:SetPoint("TOPRIGHT", _G[anchor.frame], "TOPLEFT", (anchor.x or -18) - 340, (anchor.y or -28))
-    else
-        bankTools:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 40, -120)
-    end
+local SetBankToolsSetting = function(key, value)
+    local db = ns:DB()
+    db.bags = db.bags or {}
+    db.bags[key] = value
 end
+
 
 
 --- 玩家又按了 B（关我们的窗）。一次开背包暴雪会 Show 好几个框，边沿天然合并成一次；
@@ -1637,10 +1548,9 @@ function M:Initialize()
     end)
     EventBus:Register("BANKFRAME_CLOSED", function()
         bankOpen = false
-        -- 银行关了：只收银行那几扇 + 折叠面板，并把暴雪框放开（停车是"我们接管"的
-        -- 那半边，接管结束就该还回去 —— 留着 alpha 0 的框下次进银行前没人能看见它）。
+        -- 银行关了：只收银行那几扇，并把暴雪框放开（停车是"我们接管"的那半边，
+        -- 接管结束就该还回去 —— 留着 alpha 0 的框下次进银行前没人能看见它）。
         HideModeWindows("bank")
-        if bankTools then bankTools:Hide() end
         ParkBlizzardBank(false)
         -- 背包那几扇窗放回去（原来这里一关就再也不回来了）。
         -- 暴雪框的显隐归暴雪管（停车不碰它），这里只管我们自己的窗口。
@@ -1869,29 +1779,21 @@ function M:HandleCommand(rest)
                 ns:Print(("  空位窗[%s]：没建过（本会话没进过这一侧）"):format(key))
             end
         end
-        if bankTools then
-            local vis = bankTools:IsShown()
-            local okR, l2, btm2, w2, h2 = pcall(function() return bankTools:GetRect() end)
-            local body = bankToolsBody and bankToolsBody:IsShown()
-            -- `GetChildren()` 是**变长返回**，`#frame:GetChildren()` 取的是第一个子件的长度
-            -- （上一版就这么读出"子控件 0 个"）。数子件要 `select("#", ...)` 或 GetNumChildren。
-            local kids = (bankToolsBody and bankToolsBody.GetNumChildren)
-                and select(2, pcall(bankToolsBody.GetNumChildren, bankToolsBody)) or "?"
-            ns:Print(("  包裹管理面板：显示=%s · 体显示=%s · 子控件 %s 个 · 左%.0f 右%.0f 下%.0f 上%.0f")
-                :format(tostring(vis), tostring(body), tostring(kids),
-                    okR and l2 or 0, okR and (l2 + (w2 or 0)) or 0,
-                    okR and btm2 or 0, okR and (btm2 + (h2 or 0)) or 0))
-            if vis and okR and (tonumber(kids) or 0) >= 2 then
-                local pl, pr, pb, pt = l2, l2 + (w2 or 0), btm2, btm2 + (h2 or 0)
-                for _, a in ipairs(rects) do
-                    if pl < a.r and a.l < pr and a.b < pt and pb > a.t then
-                        ns:Print(("  ⚠ 面板与 %s 压叠（横向 %.0fpx）")
-                            :format(a.key, math.min(pr, a.r) - math.max(pl, a.l)))
-                    end
-                end
+        -- 标题行动作钮（2026-11-06 起：原「包裹管理」面板已删，两个动作搬到这里）。
+        -- 判据 = 钮在、显、可点、且挂在 `bank:free` 这扇窗上（不是别处）。
+        if bankDepositBtn and bankTabBtn then
+            local function btnLine(label, b)
+                local okR, l2, btm2, w2, h2 = pcall(function() return b:GetRect() end)
+                return ("  %s：显示=%s · 鼠标=%s · 父=%s · 左%.0f 右%.0f 下%.0f 上%.0f")
+                    :format(label, tostring(try(b, "IsShown")), tostring(try(b, "IsMouseEnabled")),
+                        tostring(b:GetParent() == bankFreeWin and "bank:free" or "别处"),
+                        okR and l2 or 0, okR and (l2 + (w2 or 0)) or 0,
+                        okR and btm2 or 0, okR and (btm2 + (h2 or 0)) or 0)
             end
+            ns:Print(btnLine("标题钮「一键存入」", bankDepositBtn))
+            ns:Print(btnLine("标题钮「栏位管理」", bankTabBtn))
         else
-            ns:Print("  包裹管理面板：还没创建（bankTools=nil）")
+            ns:Print("  标题行动作钮：还没创建（本会话没进过银行侧）")
         end
         return true
     end
@@ -1916,7 +1818,6 @@ function M:SetEnabled(enabled)
     if not enabled then
         StopPolling()
         for _, win in pairs(windows) do win:Hide() end
-        if bankTools then bankTools:Hide() end
         shown = false
         bagsVisualOpen = false
         -- 模块关掉：取回停车（alpha 1 + 鼠标还回去），玩家继续用原生背包 / 银行。

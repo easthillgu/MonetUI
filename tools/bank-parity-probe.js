@@ -50,8 +50,13 @@ ok(!/masterKey\s*=\s*nil\b/.test(SRC),
 ok((SRC.match(/masterKey = \{ bags = nil, bank = nil \}/g) || []).length >= 2,
   'A8 声明处与 Toggle(false) 的重置处都用同一份表形状');
 // A9/A10/A11：11-04 harness 银行阶段打出来的三个真错，全是本次改动自己引入的。
-ok(!/local function LayoutBankTools/.test(SRC) && /LayoutBankTools = function\(\)/.test(SRC),
-  'A9 LayoutBankTools 用赋值不是 `local function`（前置声明被 local 遮蔽 = Rebuild 里永远 nil）');
+// 2026-11-06 面板删除后 A9 的对象变成了标题行工具件 —— 同一类错（`local function` 遮蔽前置声明）
+// 在新代码里也要守住：必须"先前置声明、后用赋值"，且声明在 Rebuild 之前。
+const declIdx = SRC.indexOf('local EnsureBankTitleTools');
+const rebuildIdx = SRC.indexOf('local function Rebuild(');
+ok(declIdx >= 0 && rebuildIdx > declIdx && !/local function EnsureBankTitleTools/.test(SRC)
+  && /EnsureBankTitleTools = function\(win\)/.test(SRC),
+  'A9 EnsureBankTitleTools 先前置声明再赋值（写 `local function` = Rebuild 抓到全局 nil）');
 ok(!/\(\(isBank and "银行 · "\) \.\. ""\)/.test(SRC) && /isBank and "银行 · " or ""/.test(SRC),
   'A10 标题前缀写成 `and ... or ""`（`(x and "串") .. ""` 在 x=false 时是 concat boolean）');
 const ensureWin = (SRC.match(/local function EnsureWindow\(key\)[\s\S]*?\nend/) || [''])[0];
@@ -82,8 +87,8 @@ ok(/local num = Secrets\.Number\(C_Container\.GetContainerNumSlots\(bag\)\)/.tes
 // 但 11-06 起默认就是接管（空格已做成真 ItemButton），两套并存改成可选项。
 ok(/ParkBlizzardBank\(\(Setting\("hideBlizzardBank"\).*?and bankDrawn > 0\)/.test(SRC),
   'C2 停车前置 = hideBlizzardBank 且真画出银行物品（开关默认值见 Core.lua DEFAULTS）');
-ok(/EnsureBankTools\(\)[\s\S]{0,260}LayoutBankTools\(\)[\s\S]{0,260}ParkBlizzardBank\(\(Setting\("hideBlizzardBank"\)/.test(SRC),
-  'C2b 重绘末尾顺序：面板 → 排版 → 停车');
+ok(/EnsureBankTitleTools\(freeWin\)[\s\S]{0,300}ParkBlizzardBank\(\(Setting\("hideBlizzardBank"\)/.test(SRC),
+  'C2b 重绘末尾顺序：标题行工具件 → 停车（工具件先建好再决定停不停）');
 ok(/if rest == "hidebliz on" or rest == "hidebliz off" then/.test(SRC),
   'C2c `/mui bags hidebliz on|off` 在（作者要单套观感时的开关，代价写在输出里）');
 ok(/local bank = Skin:Need\("BankFrame"\)/.test(SRC) && /Skin:Need\("WarbandBankFrame"\)/.test(SRC),
@@ -113,19 +118,28 @@ ok(/if rest == "bank off" then[\s\S]{0,120}CloseAllBags\("bank"\)/.test(SRC),
   'E2 `/mui bags bank off` = 放开暴雪那块（买栏位/换包的唯一出路）');
 ok(/EventBus:Register\("BANKFRAME_CLOSED"[\s\S]{0,600}HideModeWindows\("bank"\)[\s\S]{0,300}ParkBlizzardBank\(false\)/.test(SRC),
   'E3 银行关闭：只收银行窗 + 放开停车（不会把 alpha 0 的框留到下趟）');
-ok(/SetBankToolsSetting\("bankToolsMinimized"/.test(SRC),
-  'E4 折叠状态进 SavedVariables（下次开银行保持玩家的选择）');
-ok(/local button = Widget:CreateFrame\(nil, parent, 88, 20, nil, "Button"\)/.test(SRC),
-  'E5 面板钮建成 Button（`Widget:CreateFrame` 不传 kind 默认 Frame，Frame 没有 RegisterForClicks）');
+// 2026-11-06 作者改判：「包裹管理」折叠面板整块删除，两个动作搬到 `bank:free` 的**标题行**
+//（一键存入 / 栏位管理）。E4/E5 因此改测标题行那一对钮，而不是面板与折叠状态。
+ok(/EnsureBankTitleTools = function\(win\)/.test(SRC) && /BankHeadButton\(win, "一键存入"/.test(SRC)
+  && /BankHeadButton\(win, "栏位管理"/.test(SRC),
+  'E4 标题行两颗动作钮（一键存入 / 栏位管理）由 EnsureBankTitleTools 懒建');
+ok(/local button = Widget:CreateFrame\(nil, parent, width, 18, nil, "Button"\)/.test(SRC),
+  'E5 标题钮建成 Button（`Widget:CreateFrame` 不传 kind 默认 Frame，Frame 没有 RegisterForClicks）');
+ok(!/bankToolsBody|bankToolsInfo|bankToolsArrow|EnsureBankTools|LayoutBankTools|"包裹管理"/.test(SRC),
+  'E5b 旧面板已彻底删除（body/info/arrow/Ensure/Layout/标题字 全无，避免第二处入口分叉）');
+ok(/if keepTitle then[\s\S]{0,400}win:SetShown\(true\)/.test(SRC) && /if rows == 0 then h = TITLE_H \+ PAD end/.test(SRC),
+  'F7 银行空仓库时仍显示标题行（只有标题 + 两颗钮，高度 TITLE_H+PAD）');
 
 // ---------------------------------------------------------------- F 空格真槽位（#25 背包侧）
 // 玩家 11-04 实机："能拖出来、放不进空格"，背包→背包同样坏 —— 占位壳没有容器身份。
-const FREEFN = (SRC.match(/local function FillFreeWindow\(win, empties\)[\s\S]*?\nend\n/) || [''])[0];
+const FREEFN = (SRC.match(/local function FillFreeWindow\(win, empties, keepTitle\)[\s\S]*?\nend\n/) || [''])[0];
 ok(FREEFN !== '', 'F0 FillFreeWindow 函数体可定位（定位不到则 F3/F4 全是空判）');
 ok(/empties\[#empties \+ 1\] = \{ bag = bag, slot = slot \}/.test(SRC),
   'F1 Scan 收集空格的真实坐标 (bag,slot)，不再只报数量');
-ok(/local FREE_MAX = 84/.test(SRC) && /math.min\(total, FREE_MAX\)/.test(SRC),
-  'F2 显示上限 84（作者定的数），超出走 +N，不再最多一行');
+ok(/local FREE_ROWS = 1/.test(SRC) && /math\.min\(total, columns \* FREE_ROWS\)/.test(SRC),
+  'F2 空格只画一行（FREE_ROWS=1 × columns），其余走 +N —— 11-06 作者定（旧 84 格多行作废）');
+ok(/count:SetText\(\(i == draw and hidden > 0\) and \("\+" \.\. tostring\(hidden\)\) or ""\)/.test(SRC),
+  'F2b +N 写在最后一格、且 N = total - draw（最后一格仍是真槽位，不把自己算进去）');
 ok(/shell = AcquireButton\(win\)/.test(FREEFN) && /UpdateButton\(shell, \{ bag = list\[i\]\.bag, slot = list\[i\]\.slot \}\)/.test(FREEFN),
   'F3 空格用真 ItemButton + UpdateButton 绑身份（落点靠 GetBagID 的父级 GetID 兜底）');
 ok(FREEFN !== '' && !/AcquireFreeSlot/.test(FREEFN),
@@ -133,8 +147,8 @@ ok(FREEFN !== '' && !/AcquireFreeSlot/.test(FREEFN),
 // 2026-11-06：银行侧**已接**（原先"索引语义未定性就不接"的临时口径作废）。
 // 定性的硬证据：`Enum.BagIndex` 里 6..14 = CharacterBankTab_1..9；站银行 NPC 前实测
 // `6:48 槽 / 26 件 / 22 空`、7..14 全 0 槽 ⇒ 索引与物理格子 1:1，不存在"同一格多个索引"。
-ok(/FillFreeWindow\(EnsureWindow\(WinKey\(FREE_CAT\.key\)\), empties\)/.test(SRC),
-  'F5 银行侧也传真槽位坐标（定性结论就是这行的依据）');
+ok(/FillFreeWindow\(freeWin, empties, activeMode == "bank"\)/.test(SRC),
+  'F5 银行侧也传真槽位坐标 + keepTitle（空银行也留标题行，见 F7）');
 ok(/Skin:ApplySlotCooldown\(cd, rec\.itemID\)/.test(SRC) && /if not rec\.itemID then return end/.test(SRC),
   'F6 空格复用清冷却遮罩（共用 Skin:ApplySlotCooldown，nil itemID 也显式收）+ 空槽悬停不弹提示');
 
