@@ -18,9 +18,10 @@
 | 插件安装目录 | `...\WOWFOREVER\World of Warcraft\_forever_\Interface\AddOns\MonetUI`（由 `tools/deploy-retail.ps1` 从仓库拷过去，裸跑就是这里；同目录还装着 Aurora，两者重叠面见 `docs/AURORA-COVERAGE.md`） |
 | 客户端日志 | `...\_forever_\Logs\`（`taint.log` 是污染日志，`EditMode.log` 是编辑模式布局的二进制转储） |
 | 版本 | `MonetUI.toc` 0.12.0，`## Interface: 16001`（部署脚本会按客户端改写） |
-| 当前 HEAD | `cd1f6d7`（2026-11-03），按本地记录的 `origin/main` 领先 **103** 个提交（未 fetch 核过，上线前一律不 push）。**11-03 各道改动全部未提交**：25 个已跟踪文件被改 + 9 个新文件未跟踪，且都在**同一棵 detached HEAD 的 worktree 工作区**里（`git branch` = `* (no branch)`），主目录那份 `main` 是干净旧态 —— 详见 8.29 部署态基线与"先开分支再提交"那条 |
+| 当前 HEAD | **`1fae0b0`（2026-11-06 12:40，`main`，工作区干净）**；本地 `origin/main` 引用也停在同一提交 ⇒ 与上文"不 push"口径有出入，**待作者确认是推过还是只 fetch 过**。11-03 那批"103 个未提交改动 + detached worktree"已随 11-04 / 11-06 的提交合并收口（历史见 8.29） |
 | 远端 | `origin` = github.com/easthillgu/MonetUI，**私有备份**。**在游戏上线并通过初步测试之前一律不 push**（作者定的，见 `TODO.md` 末尾） |
 | 参考插件（只读） | `../EllesmereUI-v9.4`（开发根在位，是**这个客户端**的实机皮肤代码，优先级最高）；**Andromeda 不在开发根** —— `../Andromeda` 这个路径不存在（11-03 核实），现存唯一拷贝 = `C:/Users/EastHillGu/Documents/Blizzards/WOWFOREVER/World of Warcraft/_classic_titan_/Interface/AddOns/Andromeda`（`.toc` 38001 / v11.01，旧客户端残留目录）。比对走 `tools/compare-andromeda-close.js`，不手抠字节 |
+| 文档单源 | **本仓 `docs/`**（2026-11-06 合并订正：worktree `02efb0` 里更新的 `ANALYSIS-*.md` ×3、`PRECHECK-RETAIL-120105.md`、`VERIFY-1.60-CHECKLIST.md`、`PRELAUNCH-RUN-1105.md` 已拷入；worktree 同名 docs 现在是落后副本）。`docs/` 被 `.gitignore` 排除，仓外快照 `../MonetUI-prelaunch-1104/` **早于本次合并**。已知失效引用：`docs/api/FUNCTIONS_INDEX.md` 已改名 `FUNCTIONS.md` |
 
 改完一轮的标准动作：
 
@@ -65,7 +66,15 @@ node tools/sync-check.js         # 仓库 vs 已安装副本（退出码 0 = 游
 
 ### 2.0 交付位置与口径（先读这条，别在错的地方找）
 
-- 一切交付在 worktree `~/.qoder-cn/worktrees/app/02efb0/MonetUI`，分支 **`lane/prelaunch-1105`**，
+> **2026-11-06 订正（本节以下三条已失效，保留作历史）**：交付已回到**主仓**
+> `~/Documents/wowaddonsdev/MonetUI`，`main` @ `1fae0b0`（11-06 12:40），工作区干净；
+> 两个 worktree（`02efb0` / `81dc1b`）均 **detached 在同一提交、工作区干净** ⇒ **没有待合并分支**。
+> 实际现状（闸门、部署态、待办）见本文 §8.53–§8.56 与 `docs/POSTLAUNCH-WEEK1.md`，不要按本节判断。
+> **文档单源也改回主仓 `docs/`**：11-06 已把 worktree 里更新的 `ANALYSIS-{INSTALLED-ADDONS,TWEAKSFOREVER,RURUTIASUITE}.md`、
+> `PRECHECK-RETAIL-120105.md`、`VERIFY-1.60-CHECKLIST.md`、`PRELAUNCH-RUN-1105.md` 合并进来；
+> worktree 里的同名 docs 现在是落后副本。仓外快照 `../MonetUI-prelaunch-1104/` **早于这次合并**，别再当最新。
+
+- ~~一切交付在 worktree `~/.qoder-cn/worktrees/app/02efb0/MonetUI`，分支 **`lane/prelaunch-1105`**，
   **36 个提交全在 11-04 这一天**（起点 `8e7dd88`，最新 `f2a2e1d`）。主仓
   `~/Documents/wowaddonsdev/MonetUI` 停在 `cd1f6d7`，**是一份静默过期的旧副本**——别拿它判断现状。
 - **不 push**（作者 11-04 定）：`origin` 只作私有备份，仓库保持 private，转公开由作者手动且在
