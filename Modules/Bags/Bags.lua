@@ -477,13 +477,10 @@ local function AcquireButton(parent)
     Mark(shell, "cdF", cd)
 
     -- 物品等级：左上角 10px 点阵 + 描边，走主题亮色（不是品质色 —— 紫装上的紫字读不出来，
-    -- 而边框已经替品质说过一次话了）。右下已被数量占（-2,2 / OVERLAY 9），等级走左上同层。
+    -- 而边框已经替品质说过一次话了）。字体档与 CharacterFrame / 交易格共用 `Skin:SlotInfoFont`。
     -- ilvl 只有 `C_Item.GetItemInfo` 第 4 返回有（本客户端**没有** GetInventoryItemLevel 一族），
-    -- 材料/布料的 ilvl 是 0 或 nil ⇒ 一个字都不写，不画"0"。
-    local ilvl = Widget:Font(btn, 10, "pixel", "bright", "LEFT", "OVERLAY",
-                             "THICKOUTLINE, MONOCHROME")
-    ilvl:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -2)
-    ilvl:SetDrawLayer("OVERLAY", 9)
+    -- 材料/布料的 ilvl 是 0 或 nil ⇒ 一个字都不写，不画"0"（取词走共享 `Skin:SlotInfoText`）。
+    local ilvl = Skin:SlotInfoFont(btn)
     Mark(shell, "ilvlF", ilvl)
 
     btn:SetScript("OnEnter", function(self)
@@ -594,11 +591,10 @@ local function UpdateButton(shell, rec)
             count:SetText("")
         end
     end
-    -- 等级：`rec.ilvl` 来自 C_Item.GetItemInfo 第 4 返回，受限环境里可能是机密值 ⇒
-    -- 过 Secrets.Number 再比较（和上面数量同一口径）；读不到或 <=0 就清空，不写 0。
+    -- 等级：取词口径（过 Secrets.Number、>0 才写、floor、<=0 或读不到清空不写 0）与
+    -- CharacterFrame / 交易格共用 `Skin:SlotInfoText`；这里 `rec.ilvl` 已是权威值。
     if ilvlFs then
-        local lv = Secrets.Number(rec.ilvl)
-        ilvlFs:SetText((lv and lv > 0) and tostring(math.floor(lv)) or "") -- TAINT-OK: Secrets.Number 守卫
+        ilvlFs:SetText(Skin:SlotInfoText(rec.ilvl))
     end
     pcall(SetItemButtonDesaturated, btn, rec.locked and true or false)
     -- SetItemButton* 会把蒙版/顶点色/槽底美术重新带上（实机：蒙版回来了就是缺纹理
@@ -617,23 +613,11 @@ local function UpdateButton(shell, rec)
     if qc then Widget:SetBorderState(shell, qc.r, qc.g, qc.b, 1)
     else Widget:SetBorderState(shell, nil) end
 
-    -- GetItemCooldown 的返回值在受限环境里**可能是机密值**（实测报 "bad argument ... SetCooldown:
-    -- Secret values are only allowed during untainted execution"）。一律过 Secrets.Number：
-    -- 拿不到明文就不画冷却，绝不把机密值拿去比较或塞进 SetCooldown。
-    if cd and rec.itemID and C_Container.GetItemCooldown then
-        local ok, start, duration, enable = pcall(C_Container.GetItemCooldown, rec.itemID)
-        start, duration, enable = Secrets.Number(start), Secrets.Number(duration), Secrets.Number(enable)
-        if ok and start and duration and duration > 0 and enable ~= 0 then -- TAINT-OK: 上一行 Secrets.Number 守卫
-            cd:Show()
-            if not pcall(cd.SetCooldown, cd, start, duration) then cd:Hide() end -- TAINT-OK: Secrets.Number 守卫 + pcall 兜底
-        else
-            cd:Hide()
-        end
-    elseif cd then
-        -- 没有 itemID（空格子也走这个函数）时必须显式收：按钮是**复用池**，
-        -- 上一件留下的冷却遮罩不清掉就会画在一个空位上。
-        cd:Hide()
-    end
+    -- 冷却遮罩走共享原语 `Skin:ApplySlotCooldown`：GetItemCooldown 的返回值在受限环境里
+    -- **可能是机密值**（实测报 "bad argument ... SetCooldown: Secret values are only allowed
+    -- during untainted execution"），原语内部三个数全过 Secrets.Number、拿不到明文就不画；
+    -- 没有 itemID（空格子）时也显式收 —— 按钮是**复用池**，上一件留下的遮罩不清就会画在空位上。
+    Skin:ApplySlotCooldown(cd, rec.itemID)
 
     -- 实机父链探针实锤：模板按钮**出生即隐藏**（btn shown=false、icon vis=false 但几何/贴图 ATP 全通
     -- ——那是图标全黑 + tooltip 失联的真凶：按钮藏着，OnEnter 也不会触发）。壳 Show 不带上按钮，

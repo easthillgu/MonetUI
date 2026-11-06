@@ -2062,7 +2062,49 @@ local function ItemIDOf(key)
     return tonumber(key:match("item(%d+)"))
 end
 
---- 等级 + 冷却（人物面板装备格用；背包 / 我们自己的银行格走 Modules/Bags 那条）。
+--- 物品格三件套里"等级数字"字体的统一创建：10px 点阵 + 描边、主题亮色（不是品质色 ——
+--- 紫装上的紫字读不出来，边框已经替品质说过一次话），压在 OVERLAY 9 层（图标被抬到
+--- OVERLAY 7，数字要盖过它）。共享原语（CharacterFrame / 交易）与背包 / 银行格（Modules/Bags）
+--- 都走这一档，字体口径不再各写各的。
+function Skin:SlotInfoFont(btn)
+    local fs = Widget:Font(btn, 10, "pixel", "bright", "LEFT", "OVERLAY",
+                            "THICKOUTLINE, MONOCHROME")
+    fs:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -2)
+    fs:SetDrawLayer("OVERLAY", 9)
+    return fs
+end
+
+--- 等级数字的统一取词口径：过 `Secrets.Number`（受限环境 `C_Item.GetItemInfo` 第 4 返回
+--- 可能是机密值），>0 才写（材料 / 布料的 ilvl 是 0 或 nil ⇒ 一个字都不写，不画"0"），
+--- floor 成整数。吃"已经拿到的原始值"，不管它是 rec.ilvl 还是 GetItemInfo 返回值。
+function Skin:SlotInfoText(raw)
+    local n = Secrets.Number(raw)
+    if n and n > 0 then return tostring(math.floor(n)) end -- TAINT-OK: Secrets.Number 守卫
+    return ""
+end
+
+--- 物品冷却遮罩的统一绘制：三个返回值全过 `Secrets.Number`，拿不到明文就不画；
+--- `duration > 0` 且 `enable ~= 0` 才 Show + SetCooldown，否则 Hide。itemID / getter 缺失
+--- 同样 Hide（背包格子是**复用池**，上一件留下的遮罩不显式收就会画在空位上）。
+--- 两边都只吃 `C_Container.GetItemCooldown`，所以 getter 固定，不再参数化。
+function Skin:ApplySlotCooldown(cd, itemID)
+    if not cd then return end
+    local getter = C_Container and C_Container.GetItemCooldown
+    local start, duration, enable
+    if itemID and getter then
+        local ok, s, d, e = pcall(getter, itemID)
+        start, duration, enable = ok and Secrets.Number(s) or nil, Secrets.Number(d), Secrets.Number(e)
+    end
+    if start and duration and duration > 0 and enable ~= 0 then -- TAINT-OK: 三个数全过 Secrets.Number
+        cd:Show()
+        if not pcall(cd.SetCooldown, cd, start, duration) then cd:Hide() end -- TAINT-OK: Secrets.Number + pcall 兜底；物品冷却没有 duration-object API（那条只服务 GetActionCooldownDuration 的动作槽）
+    else
+        cd:Hide()
+    end
+end
+
+--- 等级 + 冷却（人物面板装备格用；背包 / 我们自己的银行格也共用上面那三个 `Skin:Slot*` 原语，
+--- 差别只在身份来源：这里从按钮字段反推，那边从 `bagRec` 权威 rec 直取）。
 --- 等级只在 itemKey 变化时取一次（`C_Item.GetItemInfo` 的第 4 返回），冷却每拍重算
 --- ——时长在走，但只在拿得到明文数字时才画（同 Bags 的守卫口径）。
 local function UpdateSlotInfo(btn, entry)
@@ -2076,8 +2118,7 @@ local function UpdateSlotInfo(btn, entry)
                 local info = (C_Item and C_Item.GetItemInfo) or _G.GetItemInfo
                 if info then
                     local ok, _, _, lv = pcall(info, key)
-                    local n = ok and Secrets.Number(lv) or nil
-                    if n and n > 0 then text = tostring(math.floor(n)) end -- TAINT-OK: Secrets.Number 守卫
+                    text = Skin:SlotInfoText(ok and lv or nil)
                 end
             end
             if text ~= entry.ilvlText then
@@ -2088,19 +2129,7 @@ local function UpdateSlotInfo(btn, entry)
     end
     local cd = entry.cd
     if cd then
-        local id = ItemIDOf(entry.itemKey)
-        local getter = C_Container and C_Container.GetItemCooldown
-        local start, duration, enable
-        if id and getter then
-            local ok, s, d, e = pcall(getter, id)
-            start, duration, enable = ok and Secrets.Number(s) or nil, Secrets.Number(d), Secrets.Number(e)
-        end
-        if start and duration and duration > 0 and enable ~= 0 then -- TAINT-OK: 三个数全过 Secrets.Number
-            cd:Show()
-            if not pcall(cd.SetCooldown, cd, start, duration) then cd:Hide() end -- TAINT-OK: 三个数全过 Secrets.Number；物品冷却没有 duration-object API（那条只服务 GetActionCooldownDuration 的动作槽），Bags 同款
-        else
-            cd:Hide()
-        end
+        Skin:ApplySlotCooldown(cd, ItemIDOf(entry.itemKey))
     end
 end
 
@@ -2208,11 +2237,7 @@ function Skin:ItemQualityBorder(btn, withInfo)
         EnsureQualityDriver()
     end
     if withInfo and not entry.ilvl then
-        local fs = Widget:Font(btn, 10, "pixel", "bright", "LEFT", "OVERLAY",
-                               "THICKOUTLINE, MONOCHROME")
-        fs:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -2)
-        fs:SetDrawLayer("OVERLAY", 9)      -- 图标被抬到 OVERLAY 7，数字要压在它上面
-        entry.ilvl = fs
+        entry.ilvl = Skin:SlotInfoFont(btn)
         local cd = Widget:Cooldown(btn)
         cd:SetHideCountdownNumbers(true)   -- 装备格不到 40px：遮罩够了，倒计时数字会挤
         cd:Hide()
