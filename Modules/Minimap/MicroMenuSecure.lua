@@ -58,6 +58,7 @@ local TARGETS = {
 
 local frame
 local rows
+local catcher
 local built   -- 只在脱战建一次；建失败（受限窗口 / 模板缺失）保持 false，下次脱战再试
 
 -- 建行时跳过的原生入口（"标签：原因"），`/mui minimap securemenu` 把它报出来。
@@ -198,6 +199,8 @@ local function Build()
             row:SetScript("OnClick", function(_, button)
                 if button ~= "LeftButton" then return end
                 pcall(e.luaAction)
+                -- 自有动作行点完就收（与 4 行版一致）；代点行不能这么做，原因见下面 catcher 的注释。
+                M:Close()
             end)
         else
             skipped[#skipped + 1] = e.label .. "：入口没有 luaAction（不该发生）"
@@ -259,6 +262,20 @@ local function Build()
 
     container:SetHeight(math.abs(y) + 10)
 
+    -- **点外面就关**：整屏 catcher，层级比菜单低（菜单容器 level 30，这里 10），
+    -- 所以行上的点击不会被它吃掉（做法与 `MicroMenu.lua:130` 那版完全一致）。
+    -- 它是我们的普通框、不在安全钮的锚定家族里 ⇒ 不受那条"面板被标成受保护"的雷。
+    -- 说明一处不一致：**自有动作行点完会自己关**（那一行的 OnClick 是我们写的），
+    -- 而代点行**做不到**——给 `SecureActionButtonTemplate` 挂 OnClick 会顶掉模板的引擎处理，
+    -- 代点就废了。所以代点完留菜单开着，点别处再关。
+    catcher = CreateFrame("Frame", nil, UIParent)
+    catcher:SetAllPoints(UIParent)
+    catcher:SetFrameStrata("DIALOG")
+    catcher:SetFrameLevel(10)
+    catcher:EnableMouse(true)
+    catcher:SetScript("OnMouseDown", function() M:Close() end)
+    catcher:Hide()
+
     container:Hide()
     frame = container
     built = true
@@ -272,8 +289,15 @@ function M:Toggle()
     end
     -- 受限窗口里 Show 受保护框会被拦 ⇒ 这一拍不开（右键是脱战手势，真在战斗中按就当没这菜单）。
     if ns:IsRestricted() then return end
+    -- 已经有别的菜单开着就别抢（单源：`MicroMenu.lua` 导出的 `anyMenuOpen`）。
+    -- 同一次右键里暴雪的追踪菜单 / LibDBPanel 这类也可能开菜单，我们再开一次就等于把人家关掉，
+    -- 玩家看到的是"右键没反应"，而实际是"开了又立刻被关掉"。
+    local minimapModule = ns:GetModule("Minimap")
+    local anyMenuOpen = minimapModule and minimapModule.microMenu and minimapModule.microMenu.anyMenuOpen
+    if type(anyMenuOpen) == "function" and anyMenuOpen() then return end
     if not Build() then return end
     M.ensureVisible()
+    if catcher then pcall(catcher.Show, catcher) end
     frame:Show()
 end
 
@@ -281,6 +305,7 @@ function M:Close()
     if not frame then return end
     -- 战斗中 Hide 受保护框会被拦：那一拍关不掉，留到脱战补（见文件头"代价"）。
     if ns:IsRestricted() then return end
+    if catcher then pcall(catcher.Hide, catcher) end
     frame:Hide()
 end
 

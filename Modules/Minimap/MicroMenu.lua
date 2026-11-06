@@ -160,6 +160,10 @@ local function AnyMenuOpen()
     return false
 end
 
+-- 11-06：`MicroMenuSecure.lua`（#43 全量载体）也要同一道判断，导出给那边读 ——
+-- 单源，不在第二个文件里抄一份"什么叫别的菜单开着"。
+M.anyMenuOpen = AnyMenuOpen
+
 --- 在小地图旁边弹出（anchor 一般是小地图面板）。
 function M:Toggle(anchor)
     if frame and frame:IsShown() then
