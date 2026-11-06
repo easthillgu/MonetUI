@@ -100,7 +100,7 @@ local function DarkenSpellbookPage()
             if key ~= "Bookmark" and t and t.SetAlpha then pcall(t.SetAlpha, t, 0) end
         end
     end
-    -- 法术格美术（backplate 归零 / 金环留半）—— 这一步只碰格子，不动页签。
+    -- 法术格美术（backplate 归零 / 金环整圈归零 / 图标方角裁切）—— 这一步只碰格子，不动页签。
     Skin:SpellbookItemArt(f)
     -- 页签：**只做纯文字页签**（专精 / 天赋 / 法术书）。
     -- `CategoryTabSystem`（法术书里那排分类图标）**整档不碰** —— 2026-11-06 实机：

@@ -4362,7 +4362,7 @@ API：`Each(list, perItem, onDone)`（万次扫描最常用形状）、`Run(body
 **做了的（已验）**：
 - `Skin:BrightenDarkText`：只提亮"暗且近中性"的字（`max<0.5` 且 `max-min<0.18`），放过职业/品质这类饱和色；`等级 N` → neutral，名字/标题 → bright；
 - 行底两层 backplate 加入剥除名单；页底按 **EUI 口径留 0.1 淡纸**（`BookBGLeft/Right/Halved` + `spellbook-page-*`），`TopBar`/`BookCornerFlipbook` 压 0；
-- `Skin:SpellbookItemArt`（照 EUI `FadeSpellItem`）：`Backplate`→0、`Button.Border`→α0.5+去饱和0.5、`BorderSheen`/`IconHighlight`→0；
+- `Skin:SpellbookItemArt`（照 EUI `FadeSpellItem`，2026-11-06 玩家两次点名后偏离 EUI）：`Backplate`→0、`Button.Border`→**0**（EUI 原为 α0.5+去饱和0.5：金环是圆角 9-slice，图标方角化后它的圆角内沿压在图标四角上 = 玩家报的"图标上的圆形材质"；"技能格"信息由我们 `ItemQualityBorder` 的 1px 方框承接，Aurora 同样整摘）、`BorderSheen`/`IconHighlight`→0；`btn.Icon` 走 `Skin:CropIcon(0.08..0.92)` 摘 `IconMask` + 方角裁切（`spellCrop` 旁表键登记一次，补摘靠 CropIcon 驱动帧）。字段结算按各自当前值（`press()`），不用整组前置 —— 暴雪 `UpdateVisuals` 会单独把金环抬回 α1、backplate 还是 0，整组前置会永远跳过（2026-11-06 实机复验抓到）；
 - `Skin:AdoptTopTitle`：标题挂在**匿名子帧**上、`Dress` 的字段通道认不到，改按几何认领（宽≥窗宽55%、顶边距窗顶26px内）后排成我们的样式 + 发丝线；
 - 2 秒轮询（EUI 用 `hooksecurefunc`，我们的规矩不许给暴雪窗口挂钩子），窗关着不跑。
 

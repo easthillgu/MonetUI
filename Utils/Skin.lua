@@ -536,9 +536,18 @@ end
 
 --- 法术格的美术口径（照 `EllesmereUIBlizzardSkin_WindowPacks.lua:308-330` 的 FadeSpellItem）：
 ---   `item.Backplate` 归零（每次 populate/hover 都会被暴雪抬回来，所以这一趟要反复跑）；
----   图标金环 `Button.Border` **留但压半**（α0.5 + 去饱和 0.5，EUI 的判断：它承载"这是个技能格"的信息）；
----   `BorderSheen` / `IconHighlight` 归零（那两样是羊皮纸底上的高光）。
+---   图标金环 `Button.Border` **整圈归零**（2026-11-06 玩家两次点名后改的口径，原 EUI"留半"作废）：
+---   金环是圆角 9-slice，图标方角化（下面的 CropIcon）之后它的圆角内沿正好压在图标四角上，
+---   玩家看到的就是"图标上的圆形材质"；而"这是个技能格"的信息由我们自己的 1px 方框
+---   （`M:IconWidgetsIn` → `ItemQualityBorder`）承接，Aurora 同样把这圈整摘。
+---   `BorderSheen` / `IconHighlight` 归零（那两样是羊皮纸底上的高光，同为圆角美术）。
 --- 判据只看字段是否存在（EUI 用同一套名字，本客户端实测齐全），不按贴图猜。
+---
+--- **图标必须自己裁**（2026-11-06 玩家报"图标没有裁切好，只加了一层框"）：EUI 那版只压金环、
+--- 不碰 `Button.Icon`，而暴雪给每格图标挂了 `IconMask`（atlas `spellbook-item-spellicon-mask`，
+--- 实测 masks=1）—— 带 mask 的贴图 `SetTexCoord` 会被客户端拒绝，图标就永远停在"圆角原样"，
+--- 与我们背包/动作条的方角 0.08 裁切对不上。走 `Skin:CropIcon`（先 `StripMasks` 摘 mask 再裁），
+--- 驱动帧之后每 0.5 秒补摘一次，暴雪 `UpdateVisuals` 把 mask 挂回来也压得住。
 function Skin:SpellbookItemArt(frame, depth)
     if not frame or (depth or 0) > 10 or type(frame.GetChildren) ~= "function" then return end
     depth = depth or 0
@@ -549,20 +558,29 @@ function Skin:SpellbookItemArt(frame, depth)
     local okB, backplate = pcall(function() return frame.Backplate end)
     local okBtn, btn = pcall(function() return frame.Button end)
     if okB and okBtn and backplate and btn then
-        -- 廉价前置：backplate 已经被压过就不用再写五项（每 2 秒一趟，几十个格）。
-        local raised = true
-        if backplate.GetAlpha then
-            local okA, a = pcall(function() return backplate:GetAlpha() end)
-            if okA and type(a) == "number" and a <= 0.01 then raised = false end
+        -- **每个字段按自己的当前值结算，不要"backplate 压过就整组跳过"的整组前置**
+        -- （2026-11-06 实机复验抓到的）：暴雪 `UpdateVisuals` 会**单独**把金环抬回 α1，
+        -- 而 backplate 还是 0 —— 整组前置从此永远跳过，金环就停在 α1。
+        -- 读 alpha 比写便宜不了多少，但能省掉"值没变也写"的那部分。
+        local function press(tex, want)
+            if not tex or not tex.GetAlpha then return end
+            local ok, a = pcall(function() return tex:GetAlpha() end)
+            if ok and type(a) == "number" and math.abs(a - want) < 0.02 then return end
+            pcall(tex.SetAlpha, tex, want)
         end
-        if raised then
-            pcall(backplate.SetAlpha, backplate, 0)
-            if btn.Border then
-                pcall(btn.Border.SetAlpha, btn.Border, 0.5)
-                pcall(btn.Border.SetDesaturation, btn.Border, 0.5)
-            end
-            if btn.BorderSheen then pcall(btn.BorderSheen.SetAlpha, btn.BorderSheen, 0) end
-            if btn.IconHighlight then pcall(btn.IconHighlight.SetAlpha, btn.IconHighlight, 0) end
+        press(backplate, 0)
+        -- 金环整圈归零（圆角美术，压方角图标四角）；去饱和不再需要（alpha 0 没有颜色可谈）。
+        press(btn.Border, 0)
+        press(btn.BorderSheen, 0)
+        press(btn.IconHighlight, 0)
+        -- 图标裁切：暴雪 `UpdateVisuals` 会把 `IconMask` 挂回来，补摘靠 `CropIcon` 的
+        -- 驱动帧做（每 0.5 秒），这里只负责"第一次登记"。`spellCrop` 旁表键去重，
+        -- 2 秒轮询不会反复 SetTexture 重写。
+        local okIcon, icon = pcall(function() return btn.Icon end)
+        if okIcon and icon and type(icon.SetTexCoord) == "function" and not Marked(icon, "spellCrop") then
+            self:CropIcon(icon, 0.08, 0.92, 0.08, 0.92)
+            Mark(icon, "spellCrop", true)
+            self:Record(function() Mark(icon, "spellCrop", nil) end)
         end
     end
     local okC, kids = pcall(function() return { frame:GetChildren() } end)
@@ -2082,6 +2100,38 @@ end
 local cropped = setmetatable({}, { __mode = "k" })
 local cropDriver, cropAcc
 
+--- 摘掉一张贴图上的**全部**遮罩，返回被摘掉的清单（供回滚重新挂回）。
+-- 2026-11-06 补：客户端**拒绝给带遮罩的贴图 SetTexCoord**（"Cannot set tex coords when
+-- texture has mask"），于是 CropIcon 里那个 `pcall(SetTexCoord)` 一直静默失败 —— 裁剪
+-- 从来没生效过，而驱动帧每 0.5s 重试也永远失败。本客户端的物品格 `IconMask`、动作条
+-- `IconFrame` 遮罩都会触发；对齐 Aurora 12.1.5.3 的同一处修复（`Base.CropIcon` 先倒序
+-- 摘遮罩）。**倒序**是必须的：摘掉一个会让后面的索引整体前移。
+-- 只调方法、不写字段，符合 AGENTS 的污染纪律；读写全部 pcall（forbidden 对象上连
+-- `GetNumMaskTextures` 都可能抛）。
+-- @return table 被摘下的遮罩数组（可能为空）
+function Skin:StripMasks(tex)
+    local removed = {}
+    if not tex
+        or type(tex.GetNumMaskTextures) ~= "function"
+        or type(tex.RemoveMaskTexture) ~= "function" then
+        return removed
+    end
+    local ok, n = pcall(tex.GetNumMaskTextures, tex)
+    if not ok or type(n) ~= "number" then return removed end
+    for i = n, 1, -1 do
+        local okM, mask = pcall(tex.GetMaskTexture, tex, i)
+        if okM and mask then
+            local okR = pcall(tex.RemoveMaskTexture, tex, mask)
+            if okR then removed[#removed + 1] = mask end
+        end
+    end
+    return removed
+end
+
+--- 裁剪时摘下的遮罩（弱键），驱动帧每拍先补摘一次再上裁剪 —— 有些模板会在贴图更新时
+--- 把遮罩挂回来，只摘一次会被顶掉。
+local stripped = setmetatable({}, { __mode = "k" })
+
 local function EnsureCropDriver()
     if cropDriver then return end
     cropDriver = CreateFrame("Frame")
@@ -2091,6 +2141,10 @@ local function EnsureCropDriver()
         cropAcc = 0
         for icon, c in pairs(cropped) do
             if type(icon.SetTexCoord) == "function" then
+                if stripped[icon] == nil then
+                    stripped[icon] = true
+                    Skin:StripMasks(icon)
+                end
                 pcall(icon.SetTexCoord, icon, c[1], c[2], c[3], c[4])
             end
         end
@@ -2102,6 +2156,20 @@ function Skin:CropIcon(icon, x0, x1, y0, y1)
     x0, x1 = x0 or 0, x1 or 1
     y0, y1 = y0 or 0, y1 or 1
 
+    -- **先摘遮罩再裁剪**（顺序反了 SetTexCoord 会被拒）。摘下的留着，关掉美化时挂回去。
+    local removed = Skin:StripMasks(icon)
+    if #removed > 0 and not Marked(icon, "cropMasks") then
+        Mark(icon, "cropMasks", removed)
+        self:Record(function()
+            if type(icon.AddMaskTexture) == "function" then
+                for i = #removed, 1, -1 do pcall(icon.AddMaskTexture, icon, removed[i]) end
+            end
+            Mark(icon, "cropMasks", nil)
+            stripped[icon] = nil
+        end)
+    end
+    stripped[icon] = true
+
     cropped[icon] = { x0, x1, y0, y1 }
     EnsureCropDriver()
 
@@ -2112,6 +2180,18 @@ function Skin:CropIcon(icon, x0, x1, y0, y1)
     end
     pcall(icon.SetTexCoord, icon, x0, x1, y0, y1)
     return icon
+end
+
+--- 方形裁剪的**圆形**版：清掉贴图自身的 mask、藏掉框上的 `CircleMask`，再走方形裁剪。
+-- 与 Aurora `Base.CropCircularIcon` 同语义；本客户端没有 `SetMask("")` 时靠 StripMasks 兜底。
+function Skin:CropCircularIcon(icon, parent)
+    if not icon then return icon end
+    if type(icon.SetMask) == "function" then pcall(icon.SetMask, icon, "") end
+    local frame = parent or (type(icon.GetParent) == "function" and icon:GetParent())
+    if frame and frame.CircleMask and type(frame.CircleMask.Hide) == "function" then
+        pcall(frame.CircleMask.Hide, frame.CircleMask)
+    end
+    return self:CropIcon(icon)
 end
 
 -- ---------------------------------------------------------------------------
