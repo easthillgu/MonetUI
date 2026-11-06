@@ -4383,6 +4383,35 @@ API：`Each(list, perItem, onDone)`（万次扫描最常用形状）、`Run(body
 ⇒ **规矩（已写进 `docs/CHECKS.md` A 段）：部署前必须跑 `tools.wuxian.check`（`live:false` 也算），
 它是唯一会做 Lua 语法解析的闸门。闸门绿 ≠ 能加载。**
 
+## 8.59 2026-11-06 「其他页面不必要材质」全量复扫：真缺口只有天赋节点投影（`talents-node*-shadow`）
+
+**方法（下次直接抄）**：`EnumerateFrames` 全量 + 每框 `GetRegions()`，按装饰 atlas 关键词表筛，
+**再加"祖先链 `IsShown`"过滤** —— 上一版没有这层，46 个窗口"有残留"里绝大多数是**窗口没开的假阳性**
+（region 自己 `IsShown=true`，父窗却是隐藏的）。窗口互斥、一次只能开一个，所以逐窗开、逐窗扫。
+扫描器还有两个坑：① `table[tostring(机密 fileID)]` 当键会被拦（键只用 atlas 名）；
+② 客户端没有 `Frame:GetChild(i)`，子帧要走 `GetChildren()`，而且 `local ok, v = pcall(f.GetChildren, f)`
+**只接得到第一个返回值**（多返回值要 `select("#")` 或在函数里 `return { ... }`）。
+
+**逐窗结论（1.60 · 70790 实机，每窗都截图看过）**：
+- 角色面板 / 好友（本客户端实名 `SocialUIFrame`，`FriendsFrame` 不开）/ 专业 / 世界地图：真可见装饰 = 0；
+- `UI-Frame-PortraitMetal-CornerTopLeft`（每个窗口都有一条，α1、`IsShown`）挂在 1×1 的
+  `*.PortraitContainer` 里被裁掉，截图不可辨 ⇒ **判噪声，不追**；
+- 世界地图的 `MapCornerShadow-Right` 贴在地图美术上是正常渐晕（内容）⇒ 保留；
+- 动作条 / 载入 spinner（`Spinner_Ring`、`casting-complete-glow` 族、`search-highlight`、
+  `common-radiobutton-circle`）= 功能件 ⇒ 永不进剥除名单；
+- `spellbook-item-backplate` 复扫时又抓到 ×1（食尸）：宿主演示是**开窗瞬间、2 秒轮询还没跑第一趟**
+  的瞬态，复扫归零 ⇒ 不是缺陷；
+- **真缺口 = 天赋页 `talents-node-square-shadow` ×54**（每个天赋按钮 BACKGROUND 层一块 78×78 投影，
+  节点本身 40×40）：暴雪 `UpdateVisualState` 会把 α 抬回来，所以**不能走 `Skin:Fade` 的"隐藏一次"旁表标记**
+  —— 走 `FadeAtlasBackdrop(..., alpha=0)` 的显式写值分支（每趟 HookShow + 2 秒轮询重写，幂等）。
+  名单一条 Lua 模式 `talents%-node.-shadow`（square/pvp/未来的同族一起盖住，且只在 `PlayerSpellsFrame`
+  子树里跑）。Aurora 的口径相同（`button.Shadow:SetAlpha(0)`，它用 hook，我们用轮询）。
+
+**验收数字**：修后同窗复扫 `shadowTotal=108 shadowVisible=0`；visibleKinds 只剩噪声金属角；
+原生天赋页截图节点干净；`logs ERR` 在 reload 后窗口内零新增
+（那串 `ActionButton.lua:891 SetCooldown` 报错的时间戳比 reload 早 ~40 分钟，是先前战斗中
+`=run` 探针的 ForceTaint 打到暴雪主按钮条，与本改动无关）。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 

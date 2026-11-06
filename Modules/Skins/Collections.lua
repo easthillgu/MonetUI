@@ -78,6 +78,12 @@ local SPELLBOOK_BACKDROP_ATLAS = {
 }
 -- 页底（羊皮纸）**不归零**：照 EUI 口径留 0.1 淡纸 —— 全 0 会让整页纯黑、丢掉"书"的感觉。
 local SPELLBOOK_PAGE_ATLAS = { "spellbook%-page" }
+-- 天赋节点下的方形投影（11-06 实机：天赋页 54 个常显 α1，挂在各天赋按钮的 BACKGROUND 层）。
+-- 不走 `Fade` 的"隐藏一次"标记：暴雪 `UpdateVisualState` 会把 α 抬回来，被标记挡住就永远压不回
+-- （Aurora 也是在 `UpdateVisualState` 里反复 `Shadow:SetAlpha(0)`）。所以传显式 alpha=0，
+-- 让 `FadeAtlasBackdrop` 每趟（HookShow + 2 秒轮询）都写一遍，幂等。
+-- 两个模式都是 Lua .lazy 匹配："node.-shadow" = "node" 后任意串到 "shadow"（square / pvp / 未来的都盖住）。
+local TALENT_SHADOW_ATLAS = { "talents%-node.-shadow" }
 
 -- 模块级稳定引用：M:HookShow / Widget:PollWatch 都按引用去重，在 Apply 里现造闭包会每次多挂一条。
 --- 法术书 / 天赋页的"全暗化"一趟：剥背景 + 提亮为浅底配的深色字 + 压掉页内装饰纹样。
@@ -86,6 +92,7 @@ local function DarkenSpellbookPage()
     if not f then return end
     Skin:FadeAtlasBackdrop(f, SPELLBOOK_BACKDROP_ATLAS)
     Skin:FadeAtlasBackdrop(f, SPELLBOOK_PAGE_ATLAS, nil, 0.1)
+    Skin:FadeAtlasBackdrop(f, TALENT_SHADOW_ATLAS, nil, 0)
     Skin:BrightenDarkText(f)
     -- EUI 口径的字段通道（比按 atlas 认更稳，名字与 `EllesmereUIBlizzardSkin_WindowPacks.lua` 同源）。
     local sb = f.SpellBookFrame
