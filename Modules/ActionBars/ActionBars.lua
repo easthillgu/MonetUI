@@ -29,6 +29,8 @@ local ADDON_NAME, ns = ...
 -- 否则那个框体之后跑的暴雪代码会被判成“被 MonetUI 污染”。
 local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
 local Marked = function(o, k) return ns:Marked(o, k) end
+-- 模块私有的幂等守卫键走 per-module 弱旁表（ns:NewFrameData）；activeOverlay/iconCrop*（与 PetBar 共享）仍走 Mark/Marked。
+local FFD, GetFFD = ns:NewFrameData()
 local Widget   = ns.Widget
 local Color    = ns.Color
 local Media    = ns.Media
@@ -590,8 +592,8 @@ end
 --- 画一个按钮的自绘部分（底板、图标、数字、宏名、热键、冷却）。
 -- 装配顺序：图标件 → 文本 → 冷却 → 按下/悬停反馈 → 描边状态。
 local function SkinButton(button)
-    if Marked(button, "skinned") then return end
-    Mark(button, "skinned", true)
+    if GetFFD(button).skinned then return end
+    GetFFD(button).skinned = true
 
     BuildButtonIcon(button)
     BuildButtonFonts(button)
@@ -652,13 +654,13 @@ local function UpdateButtonContent(button, slot)
     -- 这一格现在画的是哪个槽：距离检测靠它（**不读**安全属性 action，那个可能机密）。
     -- 槽位换了就是内容换了，先清掉旧的"超距变暗"（回白）：不清的话翻页 / 拖放之后这一格
     -- 还挂着上一个法术的灰，而战斗里重读距离又是机密值（只能保留上次），等于要等脱战才纠正。
-    if Marked(button, "slot") ~= slot then
-        Mark(button, "rangeDim", nil)
+    if GetFFD(button).slot ~= slot then
+        GetFFD(button).rangeDim = nil
         if button.icon and button.icon.SetVertexColor then
             pcall(button.icon.SetVertexColor, button.icon, 1, 1, 1)
         end
     end
-    Mark(button, "slot", slot)
+    GetFFD(button).slot = slot
 end
 
 -- CreateFrame 的第 5 个参数（id）只有直接调用才能给，所以按钮不走 NewFrame。
@@ -749,8 +751,8 @@ local function EnsureFlyoutMixin(button)
     end
     -- 条隐藏 / 换页 / 上载具时按钮会被藏起来：托盘不能留在我们身上，
     -- 否则下一次别人（包括暴雪自己的 ActionButton）要弹托盘就撞断言。
-    if not Marked(button, "flyoutHooked") then
-        Mark(button, "flyoutHooked", true)
+    if not GetFFD(button).flyoutHooked then
+        GetFFD(button).flyoutHooked = true
         button:HookScript("OnHide", function(self) -- TAINT-OK: button 是自建动作按钮（托盘 FlyoutMixin 的旧版残留收尾），实机案已入 AGENTS/PLAN
             local popup = _G.SpellFlyout
             if popup and popup.flyoutButton == self then
@@ -763,8 +765,8 @@ end
 -- 按钮鼠标提示：走轮询（Widget:HoverWatch），**不挂任何脚本钩子**（见 AGENTS 的皮肤原则）。
 -- GameTooltip:SetAction 在本客户端可用（实测 function）。
 local function EnsureButtonTooltip(button, bar, index)
-    if Marked(button, "tooltip") then return end
-    Mark(button, "tooltip", true)
+    if GetFFD(button).tooltip then return end
+    GetFFD(button).tooltip = true
     Widget:HoverWatch(button, function(self)
         local slot = SlotOf(self, bar, index)
         if not slot then return end
@@ -923,8 +925,8 @@ end
 local function ApplyRangeTint(button, outOfRange)
     local icon = button and button.icon
     if not icon or not icon.SetVertexColor then return end
-    if Marked(button, "rangeDim") == outOfRange then return end
-    Mark(button, "rangeDim", outOfRange)
+    if GetFFD(button).rangeDim == outOfRange then return end
+    GetFFD(button).rangeDim = outOfRange
     if outOfRange then
         pcall(icon.SetVertexColor, icon, RANGE_DIM, RANGE_DIM, RANGE_DIM)
     else
@@ -952,7 +954,7 @@ local function ApplyRangeToSlot(slot, outOfRange)
     for _, bar in pairs(bars) do
         if not IsAdopted(bar) then
             for _, button in ipairs(bar.buttons) do
-                if Marked(button, "slot") == slot then
+                if GetFFD(button).slot == slot then
                     ApplyRangeTint(button, outOfRange)
                 end
             end
@@ -973,7 +975,7 @@ local function RefreshRanges()
     for _, bar in pairs(bars) do
         if not IsAdopted(bar) then
             for _, button in ipairs(bar.buttons) do
-                local slot = Marked(button, "slot")
+                local slot = GetFFD(button).slot
                 if slot then
                     EnsureRangeCheck(slot)
                     if not hasTarget then
@@ -1070,7 +1072,7 @@ end
 --- 先 RemoveMaskTexture；摘不掉就把遮罩缩到按钮大小兜底。
 --- 成功才写 `adoptedIcon` 标记，图标晚到（或当时还没建出来）会由下面的轮询重试。
 local function EnsureAdoptedIcon(btn)
-    if not btn or Marked(btn, "adoptedIcon") then return end
+    if not btn or GetFFD(btn).adoptedIcon then return end
 
     local icon = btn.icon
     if not icon and btn.GetName and type(btn.GetName) == "function" then
@@ -1113,7 +1115,7 @@ local function EnsureAdoptedIcon(btn)
     local middle = (v0 + v1) / 2
     local span = (v1 - v0) * vfrac
     pcall(Skin.CropIcon, Skin, icon, u0, u1, middle - span / 2, middle + span / 2)
-    Mark(btn, "adoptedIcon", icon)
+    GetFFD(btn).adoptedIcon = icon
 end
 
 --- 暴雪在动作按钮上叠的**全部**美术层：把它们全压成 alpha 0（只压、不 Hide、不写字段）。
@@ -1137,7 +1139,7 @@ local function FadeAdoptedArt(btn)
     if not btn then return end
     -- 我们认作图标的那张贴图不能压：EnsureAdoptedIcon 的第三级兜底就是 GetNormalTexture()，
     -- 压了它等于把刚裁好的图标抹没（宠物图标整格消失）。
-    local iconRegion = Marked(btn, "adoptedIcon")
+    local iconRegion = GetFFD(btn).adoptedIcon
     for _, key in ipairs(ADOPTED_ART) do
         local region = btn[key]
         if region and region ~= iconRegion and type(region.SetAlpha) == "function" then
@@ -1147,8 +1149,8 @@ local function FadeAdoptedArt(btn)
 end
 
 local function SkinAdoptedButton(btn)
-    if not btn or Marked(btn, "adoptedSkinned") then return end
-    Mark(btn, "adoptedSkinned", true)
+    if not btn or GetFFD(btn).adoptedSkinned then return end
+    GetFFD(btn).adoptedSkinned = true
 
     -- 先认图标、再压美术层：FadeAdoptedArt 要靠 adoptedIcon 这个标记避开"我们认作图标"
     -- 的那张贴图（GetNormalTexture 兜底路径），顺序反过来就会先把图标压成 alpha 0。
@@ -1163,7 +1165,7 @@ local function SkinAdoptedButton(btn)
     well:SetPoint("TOPLEFT", btn, "TOPLEFT", BORDER, -BORDER)
     well:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -BORDER, BORDER)
     well:SetColorTexture(0, 0, 0, 0.25)
-    Mark(btn, "adoptedWell", well)
+    GetFFD(btn).adoptedWell = well
 
     -- 边框：收养来的按钮**图标是铺满整格的**（我们不能像自绘那样把图标内缩 1px），
     -- 所以底板/边框不能垫在下面（会被图标完全盖住）——改成在按钮**上方**画一圈 1px 的边框。
@@ -1174,7 +1176,7 @@ local function SkinAdoptedButton(btn)
     border:SetFrameLevel(btn:GetFrameLevel() + 1)
     border:EnableMouse(false)
     Widget:Theme(border, { thickness = 1, bgAlpha = 0 })
-    Mark(btn, "adoptedBorder", border)
+    GetFFD(btn).adoptedBorder = border
 
     -- 「当前生效的宠物动作」的金色蒙版（照 Andromeda：checked 用 (1,0.8,0,0.35) 平涂）。
     -- 我们压掉了暴雪的 CheckedTexture，所以状态信号由这块盖上去代替。
@@ -1187,8 +1189,8 @@ local function SkinAdoptedButton(btn)
         Mark(btn, "activeOverlay", active)
     end
 
-    if not Marked(btn, "adoptedWatch") then
-        Mark(btn, "adoptedWatch", true)
+    if not GetFFD(btn).adoptedWatch then
+        GetFFD(btn).adoptedWatch = true
         -- 2 秒一次的低频维护：补图标（晚生）/ 补遮罩摘除、重压暴雪美术层
         -- （暴雪自己的刷新偶尔会把 alpha 写回 1，尤其是勾选态与悬停层）。
         -- 按钮隐藏时 PollWatch 不跑，所以收起宠物条时等于零开销，也就永不注销。
@@ -1303,7 +1305,7 @@ local function AdoptStanceButtons(bar)
         if forms >= 1 and i > forms then pcall(btn.Hide, btn) else pcall(btn.Show, btn) end
         SkinAdoptedButton(btn)
         -- 放开过一次（ReleaseStance 藏了边框）再收养回来时，边框要重新露出来。
-        local border = Marked(btn, "adoptedBorder")
+        local border = GetFFD(btn).adoptedBorder
         if border then pcall(border.Show, border) end
     end
     -- pcall 的第一个参数是**函数**，`self` 还得显式再传一遍（漏了就是静默失败：实机表现为
@@ -1344,7 +1346,7 @@ local function ReleaseStance(bar)
     if bar then
         for i, btn in ipairs(bar.buttons) do
             -- 我们自己的边框子框体藏起来（按钮回到原生样子时不该多一圈）。
-            local border = Marked(btn, "adoptedBorder")
+            local border = GetFFD(btn).adoptedBorder
             if border then pcall(border.Hide, border) end
             -- 容器优先用按钮自己记的（`ActionBarMixin:ActionBar_OnLoad` 写的 `actionButton.container`），
             -- 名字只是兜底：`StanceBarButtonContainer1..10`。

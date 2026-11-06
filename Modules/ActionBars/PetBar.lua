@@ -27,6 +27,8 @@ local Media   = ns.Media
 -- （2026-10-30 实机：PetBar.lua:83，动作条整模块初始化失败）。
 local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
 local Marked = function(o, k) return ns:Marked(o, k) end
+-- 模块私有的幂等守卫键走 per-module 弱旁表（ns:NewFrameData）；activeOverlay/iconCrop*（与主文件共享）仍走 Mark/Marked。
+local FFD, GetFFD = ns:NewFrameData()
 
 -- 宠物条按钮的**高度**是宽度的 75%（玩家 2026-10-30 要求，让这条比自绘动作条矮一档）。
 -- 图标同时按同一比例做竖向裁切（取样区变扁），所以画面不会被压扁 —— 见
@@ -200,8 +202,8 @@ local function SetActiveLook(button, active)
     if not button then return end
     local tex = Marked(button, "activeOverlay")
     if not tex then return end
-    if Marked(button, "activeOn") == active then return end
-    Mark(button, "activeOn", active)
+    if GetFFD(button).activeOn == active then return end
+    GetFFD(button).activeOn = active
     if active then
         pcall(tex.Show, tex)
     else
@@ -241,8 +243,8 @@ end
 --- 状态信号只有两个：金色蒙版 = "当前生效的宠物动作"，像素环 = "这个技能已开自动施法"。
 local function SetAutoCastLook(button, enabled)
     if not button then return end
-    if Marked(button, "autoCastLook") == enabled then return end
-    Mark(button, "autoCastLook", enabled)
+    if GetFFD(button).autoCastLook == enabled then return end
+    GetFFD(button).autoCastLook = enabled
 end
 
 --- 开着自动施法的按钮上跑一圈像素环，其余的干净。

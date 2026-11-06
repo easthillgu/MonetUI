@@ -16,6 +16,8 @@ if not M then return end
 
 local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
 local Marked = function(o, k) return ns:Marked(o, k) end
+-- 模块私有的幂等守卫键走 per-module 弱旁表（ns:NewFrameData）；hidden（与 Skin 共享）仍走 Mark/Marked。
+local FFD, GetFFD = ns:NewFrameData()
 local Widget = ns.Widget
 
 -- 8 条动作条：暴雪那几条只做 alpha 0（见 Park），点击板盖住它们看不见的裸按钮；
@@ -133,7 +135,7 @@ local function KeepParked()
     if InCombatLockdown() then return end
     for i = 1, #parkedList do
         local frame = parkedList[i]
-        if Marked(frame, "parked") then
+        if GetFFD(frame).parked then
             if Marked(frame, "hidden") then
                 -- ParkBag 那条路：暴雪把它 Show 回来就再藏一次。
                 if frame:IsShown() then pcall(frame.Hide, frame) end
@@ -166,9 +168,9 @@ end
 
 local function Park(name)
     local frame = _G[name]
-    if not frame or Marked(frame, "parked") then return false end
-    Mark(frame, "parked", true)
-    Mark(frame, "parent", frame:GetParent())
+    if not frame or GetFFD(frame).parked then return false end
+    GetFFD(frame).parked = true
+    GetFFD(frame).parent = frame:GetParent()
 
     -- **一律留在暴雪的父链上，只做"看不见 + 不吃鼠标"。**
     --
@@ -223,10 +225,10 @@ end
 --- 背包条不是动作条那种"被 SetShownBase 复活"的框体，Hide 之后不会再自己冒出来。
 local function ParkBag(name)
     local frame = _G[name]
-    if not frame or Marked(frame, "parked") then return false end
-    Mark(frame, "parked", true)
+    if not frame or GetFFD(frame).parked then return false end
+    GetFFD(frame).parked = true
     Mark(frame, "hidden", true)
-    Mark(frame, "alpha", frame:GetAlpha())
+    GetFFD(frame).alpha = frame:GetAlpha()
     -- 同样不挂 Show 后钩（会夹在暴雪调用链里）：交给 0.5s 的驱动再藏一次。
     ParkWatch(frame)
     pcall(frame.Hide, frame)
@@ -235,12 +237,12 @@ end
 
 local function Restore(name)
     local frame = _G[name]
-    if not frame or not Marked(frame, "parked") then return false end
-    Mark(frame, "parked", nil)
+    if not frame or not GetFFD(frame).parked then return false end
+    GetFFD(frame).parked = nil
     if Marked(frame, "hidden") then
         Mark(frame, "hidden", nil)
         pcall(frame.Show, frame)
-        pcall(frame.SetAlpha, frame, Marked(frame, "alpha") or 1)
+        pcall(frame.SetAlpha, frame, GetFFD(frame).alpha or 1)
         return true
     end
     -- alpha 与整棵子树的鼠标状态由 Mute 记在旁表里的那一份还原。
@@ -248,10 +250,10 @@ local function Restore(name)
     if Marked(frame, "leftManager") then
         frame.ignoreFramePositionManager = nil    -- 交还：让编辑模式的托管系统重新接管它
     end
-    if Marked(frame, "parent") and Marked(frame, "parent") ~= hiddenParent then
-        pcall(frame.SetParent, frame, Marked(frame, "parent"))
+    if GetFFD(frame).parent and GetFFD(frame).parent ~= hiddenParent then
+        pcall(frame.SetParent, frame, GetFFD(frame).parent)
     end
-    Mark(frame, "parent", nil)
+    GetFFD(frame).parent = nil
     if type(frame.actionButtons) == "table" then
         for _, button in pairs(frame.actionButtons) do
             pcall(button.EnableMouse, button, true)

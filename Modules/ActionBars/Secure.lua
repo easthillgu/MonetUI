@@ -18,6 +18,8 @@ if not M then return end
 
 local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
 local Marked = function(o, k) return ns:Marked(o, k) end
+-- 模块私有的幂等守卫键走 per-module 弱旁表（ns:NewFrameData）。
+local FFD, GetFFD = ns:NewFrameData()
 
 M.secure = M.secure or {}
 
@@ -75,8 +77,8 @@ end
 
 --- 给按钮装翻页子片段（幂等）：客户端换页时由 ChildUpdate 触发，跑在安全环境里。
 local function InstallPageChild(button, index)
-    if Marked(button, "pageChild") then return end
-    Mark(button, "pageChild", true)
+    if GetFFD(button).pageChild then return end
+    GetFFD(button).pageChild = true
     pcall(button.SetAttributeNoHandler, button, "_childupdate-" .. PAGE_CHILD, PageChildSnippet(index))
 end
 
@@ -113,8 +115,8 @@ local KEYDOWN_SNIPPET = [[
 
 --- 给一个按钮装上"类型 / 按下抬起"两条子片段（幂等）。
 local function InstallSecureInit(button)
-    if Marked(button, "secureInit") then return end
-    Mark(button, "secureInit", true)
+    if GetFFD(button).secureInit then return end
+    GetFFD(button).secureInit = true
     pcall(button.SetAttributeNoHandler, button, "_childupdate-" .. KIND_CHILD, KIND_SNIPPET)
     pcall(button.SetAttributeNoHandler, button, "_childupdate-" .. KEYDOWN_CHILD, KEYDOWN_SNIPPET)
 end
