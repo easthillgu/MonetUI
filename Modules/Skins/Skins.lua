@@ -16,6 +16,10 @@ local Widget   = ns.Widget
 -- Core.lua 的 ns:Mark / ns:Marked（以对象为弱键的旁表）。
 local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
 local Marked = function(o, k) return ns:Marked(o, k) end
+-- 模块私有的幂等守卫键走 per-module 弱旁表（ns:NewFrameData，Ellesmere 同款）：
+-- `deepSweep`/`extrasSweep`/`showHook` 只在本文件读写，迁到这里就不再占全局键名空间。
+-- 跨文件共享的键（art/hidden/skinBg…）仍走上面的 Mark/Marked。
+local FFD, GetFFD = ns:NewFrameData()
 
 local M = { name = "Skins" }
 ns.Skins = M
@@ -333,8 +337,9 @@ function M:SweepDeep(frame, controlOpts, withInfo, rowDepth)
         end
     end
     sweep()
-    if Marked(frame, "deepSweep") then return end
-    Mark(frame, "deepSweep", true)
+    local fd = GetFFD(frame)
+    if fd.deepSweep then return end
+    fd.deepSweep = true
     Widget:PollWatch(frame, sweep)
 
     M:SweepTemplates(frame, controlOpts)
@@ -347,9 +352,10 @@ end
 --- 回调必须是稳定引用（AGENTS：在 Apply 里现造闭包会每触发一次多挂一条轮询）。
 function M:SweepTemplates(frame, controlOpts)
     if not frame or type(frame.GetChildren) ~= "function" then return end
-    if Marked(frame, "extrasSweep") then return end
+    local fd = GetFFD(frame)
+    if fd.extrasSweep then return end
     if not Widget:Readable(frame) then return end
-    Mark(frame, "extrasSweep", true)
+    fd.extrasSweep = true
 
     local extras = function()
         if not M.active then return end
@@ -754,10 +760,11 @@ end
 --- 每触发一次 Apply 就多挂一条 —— 需要补扫子控件时用 M:SweepDeep，别在这里造闭包。
 function M:HookShow(frame, fn)
     if not frame or type(fn) ~= "function" then return end
-    local list = Marked(frame, "showHook")
+    local fd = GetFFD(frame)
+    local list = fd.showHook
     if not list then
         list = {}
-        Mark(frame, "showHook", list)
+        fd.showHook = list
         ns.Widget:ShowWatch(frame, function()
             if not M.active then return end
             for i = 1, #list do pcall(list[i]) end

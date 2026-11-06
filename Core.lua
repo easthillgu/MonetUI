@@ -496,6 +496,21 @@ function ns:Marked(object, key)
     return t and t[key]
 end
 
+--- 每模块一对的弱键旁表（Ellesmere `NewFrameData` 结构，2026-11-06 提取自 9.7.6）。
+--- 调用方 `local FFD, GetFFD = ns:NewFrameData()`：FFD 以对象为弱键，框体销毁/池回收自动除名；
+--- GetFFD(frame) 首次访问建行表，之后 `d.x` 直接字段读写——字段按文件天然隔离，两个模块
+--- 各自 `d.done` 互不可见，不用给键加全仓前缀。
+--- **与 ns:Mark 并存**：跨文件共享的键（如 `art` 由 Widget 与 Skin 共写、`hidden` 由 Skin
+--- 与 ActionBars 共用）仍走 ns:Mark 全局表；只有模块私有的幂等守卫键迁到 NewFrameData。
+function ns:NewFrameData()
+    local FFD = setmetatable({}, { __mode = "k" })
+    return FFD, function(frame)
+        local d = FFD[frame]
+        if not d then d = {}; FFD[frame] = d end
+        return d
+    end
+end
+
 -- ------------------------------------------------------------------ 战斗延迟队列
 
 -- 战斗里对受保护对象的操作（属性 / 换父 / 显隐 / 建容器）会被无声拒绝。各模块以前
