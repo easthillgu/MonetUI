@@ -4412,6 +4412,35 @@ API：`Each(list, perItem, onDone)`（万次扫描最常用形状）、`Run(body
 （那串 `ActionButton.lua:891 SetCooldown` 报错的时间戳比 reload 早 ~40 分钟，是先前战斗中
 `=run` 探针的 ForceTaint 打到暴雪主按钮条，与本改动无关）。
 
+## 8.60 2026-11-06 「动作条战斗中切姿态偶尔映射到另一姿态的技能」未复现 + 顺手抓到两条真错
+
+**动作条那条**：装了时序探针（`UPDATE_SHAPESHIFT_FORM` 后 0/0.06/0.12/0.2/0.3/0.5/1/2 秒各记一行
+`form / bonusbar / 条的 actionpage / 按钮的 action 属性 / InCombatLockdown`），玩家操作后
+**一直没再出现**，探针已撤（`_G.MonetUIProbe` 留了个 `__newindex` 空表兜住未到期定时器，
+`/reload` 后彻底干净）。**留一个结构性解释**（下次再报就从这儿查）：页号来自
+`RegisterStateDriver` → 客户端**每 0.2 秒**才结算一次，然后才由 `_onstate-page` →
+`ChildUpdate("mui-page")` 写 `action`；我们的图标走 `SlotOf`（优先读那颗按钮自己的 `action`
+属性，和点击路径同源），所以**切换后 0.2–0.4 秒内点击仍会打出旧姿态的槽位** —— 这是这套
+"页号只能由片段写"契约的固有延迟，暴雪自己的条同样吃这个 tick。要判定"是不是只是这个滞后"，
+就记探针里 `page` 与 `btnAct` 哪一格先跟上、跟上之后是否一直一致。
+
+**探针撤除时踩到的坑（记下来别再踩）**：匿名帧（`CreateFrame` 不给父）不在 `UIParent` 的孩子里，
+`EnumerateFrames` 全扫 + `GetName()==nil` 筛也**认不出它**（`GetRegisteredEventHandlers` 在
+本客户端返回的不是可用表）⇒ 想可靠地撤探针，**必须一开始就把帧句柄存进自己的名单**
+（`_G.MonetUIProbeFrames = { f }`），别指望事后扫描。
+
+**探针期间日志里的两条新错（同一次受限换边一起刷）**：
+1. `Utils/Widget.lua:235 MouseOver`：`over and true` 对**机密布尔**做真值测试
+   ⇒ "attempt to perform boolean test on local 'over' (a secret boolean value, tainted by MonetUI)"
+   ×14/轮。**已修**：`IsMouseOver` 的返回值先过 `Secrets.IsSecret`，是机密就当作"这一拍读不出来"
+   往下退（AGENTS 的"布尔同理 + 值级前置"，本仓唯一漏斗）。
+2. `Blizzard_SharedXML/Backdrop.lua:226`：`SetupTextureCoordinates` 对**机密的 `GetWidth()`**
+   做算术（同一时刻 1–2 条）。形状：暴雪 `OnBackdropSizeChanged` 自己触发、栈里没有我们的帧
+   ⇒ 是"我们给某个框 `SetBackdrop` 过，之后它自己的尺寸变化以 MonetUI 的名义执行"这一类
+   （嫌疑 = 收养按钮上方那块 `BackdropTemplate` 边框子框体，战斗中它的尺寸是机密）。
+   **本轮未追**（每次受限换边只 1–2 条、无功能损失）；下次要追就先按"哪个框"取证，
+   别改 `Skin:ApplyBackdrop` 的通用路径。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 

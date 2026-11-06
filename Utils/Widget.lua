@@ -231,11 +231,16 @@ end
 local function MouseOver(frame)
     -- 本客户端没有 MouseIsOver / GetMouseFocus（实测都是 nil），但有 frame:IsMouseOver()。
     -- 顺序：先按最可靠的 frame 方法，再退到全局函数。
+    -- **`IsMouseOver` 在受限状态下返回的是机密布尔**（11-06 实机：`over and true` 抛
+    -- "attempt to perform boolean test on a secret boolean value (tainted by MonetUI)" ×14，
+    -- 就在悬停轮询这一条上，每次进出战斗/受限换边都刷一轮）。值级前置：先 `IsSecret`，
+    -- 是机密就当作"这一拍读不出来"往下退，别做真值测试（AGENTS 的"布尔同理 + 值级前置"）。
     local okFrame, over = pcall(frame.IsMouseOver, frame)
-    if okFrame then return over and true or false end
+    if okFrame and not Secrets.IsSecret(over) then return over and true or false end
     if _G.MouseIsOver then
         local ok, value = pcall(_G.MouseIsOver, frame)
-        return ok and value
+        if not ok or Secrets.IsSecret(value) then return false end
+        return value and true or false
     end
     local focus = _G.GetMouseFocus and _G.GetMouseFocus()
     local guard = 0
