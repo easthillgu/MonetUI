@@ -1429,50 +1429,91 @@ function Skin:ScrollArrowButton(button)
     return false
 end
 
+--- 逐帧处理一个候选：ScrollBox 细把手 + 步进/关闭按钮。
+--- 从 ScanScrollArrows 抽出来，让同步整扫与 Async 切片走同一份逻辑（一处判据，不抄两遍）。
+local function ScanArrowFrame(self, frame)
+    if not Widget:Readable(frame) then return end
+    pcall(function()
+        if frame.Thumb and Widget:Readable(frame.Thumb) then
+            self:ScrollThumb(frame.Thumb)
+        end
+        -- ⚠ 11-05 实机判例：`/mui skins arrows` 扫 15306 框、命中 400，**我们的箭头 0**，
+        -- 而箭头 region 已被 Strip 压成 α0 ⇒ "压掉没人补图"。根因就在这一行：
+        -- `MinimalScrollBar` 的步进钮是 **`EventButton`**（`Blizzard_SharedXML/Shared/Scroll/
+        -- MinimalScrollBar.xml:101/120`），`GetObjectType()` 返回的是最派生类型名，
+        -- 精确比较 `== "Button"` 一条都不命中。⇒ 必须用 `IsObjectType("Button")`
+        -- （它认 Button 与 EventButton 两支），老式 `ScrollUpButton` 那些照旧命中。
+        local isButton = false
+        if frame.IsObjectType then
+            local okT, t = pcall(frame.IsObjectType, frame, "Button")
+            isButton = (okT and t) or false
+        elseif frame.GetObjectType then
+            local okK, kind = pcall(frame.GetObjectType, frame)
+            isButton = okK and kind == "Button" or false
+        end
+        if isButton then
+            self:ScrollArrowButton(frame)
+            -- 关闭按钮按**美术签名**兜底：名字不可靠（12.x 有匿名的、也有不叫 CloseButton 的），
+            -- 12.1.5 实测 53 只里 32 只还是暴雪原样（历史证据，5bc814e 正文）；
+            -- 1.60 上这个数要重数才算，待 1.60 复验。见 Skin:CloseButtonByArt。
+            self:CloseButtonByArt(frame)
+        end
+    end)
+end
+
+-- 当前在跑的切片句柄：ScanScrollArrows 重触发时先取消它，绝不让两片重叠（§8.56 的 cancel 守卫）。
+local scrollScanJob = nil
+
 --- 全局兜底：扫一遍所有帧，把 ScrollBox 的细把手 + 上下箭头都换上。
 --- ScrollBox 的滚动条是匿名 Frame + .Thumb + 无名 atlas 箭头，而且标签页懒创建 ——
---- 逐帧换肤（SkinScrollsIn）常常赶不上。登录后延迟扫几遍兜底（EnumerateFrames 一遍几十毫秒）。
+--- 逐帧换肤（SkinScrollsIn）常常赶不上。登录后延迟扫几遍兜底。
 ---
 --- **必须跳过读不了的帧**：`EnumerateFrames` 会把这个客户端里所有帧都交给我们，其中包含
 --- 被引擎接管的安全框（forbidden 对象，任何 `IsVisible` / `GetRegions` / `GetName` 都直接抛）。
 --- 以前把它们一路喂下去，最后连 `HoverWatch` 都挂在了 forbidden 对象上（实机：一个匿名框每拍
 --- 抛一条，暂停后 5 秒复检一次，全程只是噪声）。这个扫尾本来就是"能扫到就扫"，读不到直接放手。
+---
+--- **切片跑（#38 / §8.56）**：EnumerateFrames 全量 ~1.5 万框，同步整扫是"唯一真常驻掉帧点"。
+--- 有 Async 任务器时把整扫包进协程、每 64 框 Checkpoint 一次（超帧预算即 yield 到下帧），箭头
+--- 陆续涂好、肉眼无感；重触发先 Cancel 上一片再起新的。没有任务器（离线 harness / 老构建）退回
+--- 同步整扫，行为与迁移前逐位一致。
 function Skin:ScanScrollArrows()
     if type(EnumerateFrames) ~= "function" then return end
-    local frame = EnumerateFrames()
-    local guard = 0
-    while frame and guard < 200000 do
-        guard = guard + 1
-        if Widget:Readable(frame) then
-            pcall(function()
-                if frame.Thumb and Widget:Readable(frame.Thumb) then
-                    self:ScrollThumb(frame.Thumb)
-                end
-                local kind = frame.GetObjectType and frame:GetObjectType()
-                -- ⚠ 11-05 实机判例：`/mui skins arrows` 扫 15306 框、命中 400，**我们的箭头 0**，
-                -- 而箭头 region 已被 Strip 压成 α0 ⇒ "压掉没人补图"。根因就在这一行：
-                -- `MinimalScrollBar` 的步进钮是 **`EventButton`**（`Blizzard_SharedXML/Shared/Scroll/
-                -- MinimalScrollBar.xml:101/120`），`GetObjectType()` 返回的是最派生类型名，
-                -- 精确比较 `== "Button"` 一条都不命中。⇒ 必须用 `IsObjectType("Button")`
-                -- （它认 Button 与 EventButton 两支），老式 `ScrollUpButton` 那些照旧命中。
-                local isButton = false
-                if frame.IsObjectType then
-                    local okT, t = pcall(frame.IsObjectType, frame, "Button")
-                    isButton = (okT and t) or false
-                elseif kind == "Button" then
-                    isButton = true
-                end
-                if isButton then
-                    self:ScrollArrowButton(frame)
-                    -- 关闭按钮按**美术签名**兜底：名字不可靠（12.x 有匿名的、也有不叫 CloseButton 的），
-                    -- 12.1.5 实测 53 只里 32 只还是暴雪原样（历史证据，5bc814e 正文）；
-                    -- 1.60 上这个数要重数才算，待 1.60 复验。见 Skin:CloseButtonByArt。
-                    self:CloseButtonByArt(frame)
-                end
-            end)
-        end
-        frame = EnumerateFrames(frame)
+
+    -- 防两次切片重叠：先取消还在跑的上一片（Cancel 只摘句柄、不触发 onDone）。
+    if scrollScanJob then
+        pcall(scrollScanJob.Cancel)
+        scrollScanJob = nil
     end
+
+    local Async = ns.Async
+    if not (Async and type(Async.Run) == "function") then
+        local frame = EnumerateFrames()
+        local guard = 0
+        while frame and guard < 200000 do
+            guard = guard + 1
+            ScanArrowFrame(self, frame)
+            frame = EnumerateFrames(frame)
+        end
+        return
+    end
+
+    local self_ref = self
+    local job
+    job = Async:Run(function()
+        local frame = EnumerateFrames()
+        local guard = 0
+        while frame and guard < 200000 do
+            guard = guard + 1
+            ScanArrowFrame(self_ref, frame)
+            frame = EnumerateFrames(frame)
+            if guard % 64 == 0 then Async.Checkpoint() end
+        end
+    end, function()
+        -- 只清自己这片：若期间已被重触发换成了新句柄，别把新的误清掉。
+        if scrollScanJob == job then scrollScanJob = nil end
+    end, "ScanScrollArrows")
+    scrollScanJob = job
 end
 
 --- 按**美术签名**找关闭按钮并换肤，给全游戏一个统一的 ✕（2026-11-03 玩家定的口径：
