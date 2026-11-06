@@ -100,6 +100,14 @@ local function WriteCVar(cvar, value)
     local rec = CVarRecord(cvar)
     rec.want, rec.got = want, cur
 
+    -- 两个 getter 都答 nil ⇒ 本客户端没这个 CVar（名字错 / 不存在）。不拦的话会一路走到
+    -- SetCVar（不报错）+ 复验读回 nil（不是 string，旧判据放过）⇒ 假记"已写"。
+    -- 实机判例 1.60：autoLootRange 不存在，旧版就把它记成了"已写"。
+    if cur == nil and (not info or info.value == nil) then
+        CVarFlag(cvar, "本客户端没有这个 CVar（名字不存在）")
+        return false
+    end
+
     -- 先读后写：常态下值没变就不该落一笔。
     if type(cur) == "string" and not Secrets.IsSecret(cur) and cur == want then
         rec.note = "已是"
@@ -123,6 +131,10 @@ local function WriteCVar(cvar, value)
 
     -- 不报错不等于写进去了：secure / read-only 可能"静默收下、值不动"。复验一次。
     local after = ReadCVar(cvar)
+    if after == nil then
+        CVarFlag(cvar, "写了复验读不到（值没落地）")
+        return false
+    end
     if type(after) == "string" and not Secrets.IsSecret(after) and after ~= want then
         CVarFlag(cvar, "写了没生效（复验仍是 " .. Text(after) .. "）")
         return false
