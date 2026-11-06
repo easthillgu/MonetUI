@@ -74,12 +74,14 @@ ok(/local num = Secrets\.Number\(C_Container\.GetContainerNumSlots\(bag\)\)/.tes
   'B3 槽数过 Secrets.Number 且 >0 才收（读不出/为 0 绝不画假空页）');
 
 // ---------------------------------------------------------------- C 停车纪律
-// ⚠ 11-04 改判：接管的前置从"画出银行物品"收紧成"**并且** hideBlizzardBank 开着"，默认 off。
+// ⚠ 11-04 改判：接管的前置从"画出银行物品"收紧成"**并且** hideBlizzardBank 开着"。
+// 2026-11-06 作者拍板把该项**默认改 on**（空格已是真槽位 + 三向拖放实测通过，HANDOFF §8.57），
+// 所以这里断言的是"停车前置 = 开关 且 真画出物品"，**不是**默认值本身（默认值在 Core.lua DEFAULTS）。
 // 原因是玩家实机报的功能回退：我们的空格子是占位壳、不是真容器槽，把暴雪银行框 alpha 0 +
 // 关鼠标收掉 = 拿走唯一能落东西的面 ⇒ 背包↔银行"能拖不能放"。②A 的保险逻辑仍然成立，
-// 但默认路径不再接管（观感代价：两套并存），正解是把空格做成真 ItemButton。
+// 但 11-06 起默认就是接管（空格已做成真 ItemButton），两套并存改成可选项。
 ok(/ParkBlizzardBank\(\(Setting\("hideBlizzardBank"\).*?and bankDrawn > 0\)/.test(SRC),
-  'C2 停车前置 = hideBlizzardBank（默认 off）且真画出银行物品');
+  'C2 停车前置 = hideBlizzardBank 且真画出银行物品（开关默认值见 Core.lua DEFAULTS）');
 ok(/EnsureBankTools\(\)[\s\S]{0,260}LayoutBankTools\(\)[\s\S]{0,260}ParkBlizzardBank\(\(Setting\("hideBlizzardBank"\)/.test(SRC),
   'C2b 重绘末尾顺序：面板 → 排版 → 停车');
 ok(/if rest == "hidebliz on" or rest == "hidebliz off" then/.test(SRC),

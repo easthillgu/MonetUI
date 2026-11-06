@@ -59,6 +59,12 @@ local DEFAULTS = {
         windowsPerRow  = 1,
         showReagentBag = true,
         showBank       = true,
+        -- 银行：**接管暴雪银行框**（alpha 0 + 关鼠标），只留我们的窗。2026-11-06 作者拍板默认 on ——
+        -- 依据 HANDOFF §8.57：银行空格已是真 ItemButton（绑 bag/slot），三条拖放（背→银 / 银→背 /
+        -- 背→背）逐格实测通过。代价写清：买栏位 / 换银行包要走 `/mui bags bank off`（或面板里的
+        -- 「放开暴雪」钮），因为 `C_Bank.PurchaseBankTab` 是受限 API，我们不做。
+        -- ⚠ 关掉时必须写**显式 false**（见 `/mui bags hidebliz off` 分支），写 nil 会被默认值顶回来。
+        hideBlizzardBank = true,
         anchor         = { frame = "MonetUIQuestTracker", side = "right", x = -18, y = -28 },
         positions      = {},   -- per-category window spots the user dragged to
     },

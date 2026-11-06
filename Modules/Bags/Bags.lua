@@ -1043,10 +1043,9 @@ local function Rebuild(bagType)
     if activeMode == "bank" then
         EnsureBankTools()
         LayoutBankTools()
-        -- ⚠ 接管默认**关**（`hideBlizzardBank` 未设 = false）。11-04 当时的理由是我们"空格子"
-        -- 是占位壳（能拖不能放），**11-06 这条已不成立**：空格子改成真 ItemButton 后，
-        -- 银行侧也走同一条路径（见 FillFreeWindow 的调用点）。保持 off 的两个现由：
-        -- ① 银行侧拖放**还没实机验过**；② "两套并存"是当前口径（暴雪框拖放原生可靠）。
+        -- 接管**默认 on**（2026-11-06 作者拍板，DEFAULTS.bags.hideBlizzardBank = true）：
+        -- 空格子是真 ItemButton、三向拖放已逐格实测（HANDOFF §8.57）。前提不变 ——
+        -- 只有**真画出银行物品**时才停车（`bankDrawn > 0`），零物品时绝不接管（否则等于藏了个空框）。
         ParkBlizzardBank((Setting("hideBlizzardBank") and true or false) and bankDrawn > 0)
     end
 end
@@ -1657,13 +1656,12 @@ end
 
 function M:HandleCommand(rest)
     if rest == "hidebliz on" or rest == "hidebliz off" then
-        -- 接管暴雪银行框的开关。**默认仍 off**（11-06 起理由变了）：我们的空格子从 11-06
-        -- 起是**真 ItemButton**（绑 bag/slot，银行索引语义已定性），所以"接管后不能拖放"
-        -- 那条旧理由不再成立；现在保持 off 是因为**银行侧拖放还没实机验过**，
-        -- 而且"两套并存"本身是当前口径（§8.34 三条"预期不是缺陷"之一）。
-        -- 想只留我们的窗就 on —— 但 on 之前先跑一次"背包↔银行三向拖放"探针。
+        -- 接管暴雪银行框的开关，**默认 on**（2026-11-06 作者拍板；依据 HANDOFF §8.57：空格已是
+        -- 真 ItemButton、三向拖放逐格实测通过）。关掉的理由仍然是"要买栏位 / 换银行包"——
+        -- 那两件事必须回到暴雪那块面（`C_Bank.PurchaseBankTab` 受限，我们不做）。
+        -- ⚠ 写的是**显式布尔**：写 nil 等于删键，而默认值是 true，`off` 会被默认顶回来。
         local on = (rest == "hidebliz on")
-        SetBankToolsSetting("hideBlizzardBank", on or nil)
+        SetBankToolsSetting("hideBlizzardBank", on)
         if on then
             ParkBlizzardBank(bankDrawn > 0)
         else
@@ -1774,11 +1772,11 @@ function M:HandleCommand(rest)
         local verdict
         -- 第一分叉必须是"接管开关 + 银行现在开没开"，不是上一次重绘的计数：11-04 实测就是
         -- 拿陈旧的 `bankDrawn>0` 当现状，印出"应当接管"而同一行观测写着 `接管=false`。
-        -- 开关默认 off（11-06 起空格子已是真槽位，off 的理由变成"银行侧拖放未实机验 + 两套并存是口径"）。
+        -- 开关**默认 on**（11-06 作者拍板）；这一支覆盖的是"玩家显式关掉"。
         if not (Setting("hideBlizzardBank") and true or false) then
-            verdict = "接管开关 off（默认）→ 不该接管：两条路都有人要 —— 暴雪框拖放原生可靠，"
-                .. "我们的空格子 11-06 起也是真槽位（银行索引语义已定性），但**银行侧拖放还没实机验过**，"
-                .. "所以先两套并存。想单套观感：`/mui bags hidebliz on`（开之前先拖一次验落点）。"
+            verdict = "接管开关被**显式关掉**（默认是 on）→ 不该接管：暴雪银行框照旧可见可用，"
+                .. "买栏位 / 换银行包就在它上面做。想要单套观感：`/mui bags hidebliz on`"
+                .. "（11-06 起空格已是真槽位，三条拖放已实测通过）。"
         elseif not bankOpen then
             verdict = "接管开着但银行没开 → 不该接管：每行都该是 接管=false · alpha=1"
                 .. "（IsShown 归暴雪自己，不是判据）"
