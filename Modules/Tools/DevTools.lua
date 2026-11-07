@@ -234,6 +234,22 @@ function DevTools:Perf(arg)
         end
     end
 
+    -- `/mui perf diag`：诊断能力自检。本客户端上一版按栈层取注册点返回空，事后只能猜，
+    -- 以后「诊断字段是空的」先跑这一条，看客户端到底给了什么。
+    if type(arg) == "string" and string.find(string.lower(arg), "diag", 1, true) then
+        if type(S.ProbeDebug) == "function" then
+            local okD, d = pcall(S.ProbeDebug, S)
+            if okD and type(d) == "table" then
+                ns:Print(("debug 能力：debug=%s · getinfo=%s · 按函数取=%s · 按栈层取=%s"):format(
+                    tostring(d.hasDebug), tostring(d.hasGetinfo), tostring(d.fn), tostring(d.level)))
+            else
+                ns:Print("ProbeDebug 调用失败：" .. tostring(d))
+            end
+        else
+            ns:Print("这个版本的 Scheduler 没有 ProbeDebug。")
+        end
+    end
+
     local totals, rows
     if type(S.Count) == "function" then
         local okC, _, t = pcall(S.Count, S)
@@ -917,7 +933,7 @@ function DevTools:HandleCommand(rest)
         return true
     end
     if arg == "" then
-        ns:Print("用法：/mui perf [reset] · /mui skins closes|inset|arrows ·（同义：/mui devtools <子命令>）。")
+        ns:Print("用法：/mui perf [reset|diag] · /mui skins closes|inset|arrows ·（同义：/mui devtools <子命令>）。")
         return true
     end
     return false

@@ -1169,7 +1169,7 @@ local function PrintHelp()
     ns:Print("  |cffffd100/mui skins layers <窗口名> [片段]|r 这个窗口的底有几层、每层谁能碰（region / 字段可剥 / 要点名；全量存 MonetUIDB.layerReport）")
     ns:Print("  |cffffd100/mui skins templates [片段]|r 模板库账本：多少个模板 / 映射到 skinAs / Camelot 覆盖；带片段查\"这个控件被认成什么\"")
     -- 上线日验收用的只读探针（一个字节都不写，全量都落 SavedVariables）：
-    ns:Print("  |cffffd100/mui perf [reset]|r 调度器总账：订阅数 / 逐路耗时排序 / 失败计数 + 外部驱动账 + Lua 内存 + 当前被暂停的轮询框；带 reset 先清零再计时（账本 MonetUIDB.perfReport）")
+    ns:Print("  |cffffd100/mui perf [reset|diag]|r 调度器总账：订阅数 / 逐路耗时排序 / 失败计数 + 外部驱动账 + Lua 内存 + 当前被暂停的轮询框；带 reset 先清零再计时，带 diag 打调试能力自检（账本 MonetUIDB.perfReport）")
     ns:Print("  |cffffd100/mui skins closes|r 关闭按钮换皮覆盖面：按图集全量扫，已换皮/仍是暴雪原样/读不出三档（closeReport）")
     ns:Print("  |cffffd100/mui skins inset|r 换皮容器的有效 alpha（父链连乘，不是单点 GetAlpha），α<0.99 全列（insetReport）")
     ns:Print("  |cffffd100/mui skins arrows|r 滚动条/步进器箭头逐对象：旋转角 + UV 翻转 + stepper 属性，用来定左右方向（arrowReport）")

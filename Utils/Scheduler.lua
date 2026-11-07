@@ -188,25 +188,46 @@ end
 --- 等于"250 秒一次"：姓名板守卫和鼠标提示兜底扫描都写的是 250，实际几分钟才跑一拍，
 --- 而且不报错、看起来还在工作（AGENTS：单位混用的症状不是"差一点"）。
 --- 注册点来源（`文件:行`），只用于诊断：`/mui perf` 里 `#5` 这种编号本身说明不了任何事
----（2026-11-07 实机：#5 635 次调用累计 0.68s、平均 1.08ms/次，全仓没人知道它是谁）。
---- 注册发生在加载期/低频路径，一次 debug.getinfo 的成本可以忽略；拿不到就留 nil。
-local SELF_SOURCE = (type(debug) == "table" and type(debug.getinfo) == "function")
-    and debug.getinfo(1, "S").source or nil
+---（2026-11-07 实机：#5 640 次调用累计 0.70s、平均 1.1ms/次，全仓没人知道它是谁）。
+--- 实现走「对**函数**取定义位置」而不是「取栈层」：客户端 1.60 实测
+--- `debug.getinfo(2, "Sl")` 拿不到调用者（where 全 nil），按函数取则拿到闭包的定义行 ——
+--- 对定位一样够用（甚至更准：指向回调本体，而不是注册那一句）。
+--- 仍然全程 pcall：拿不到就留 nil，绝不让诊断把注册流程带崩。
+local function WhereOf(fn)
+    if type(debug) ~= "table" or type(debug.getinfo) ~= "function" then return nil end
+    local ok, info = pcall(debug.getinfo, fn, "S")
+    if not ok or type(info) ~= "table" then return nil end
+    local src = info.short_src or info.source
+    if type(src) ~= "string" or src == "" then return nil end
+    -- 只留文件名，路径对读日志的人没有价值
+    local name = src:match("[^\\/]+$") or src
+    local line = tonumber(info.linedefined) or tonumber(info.currentline)
+    if not line or line <= 0 then return name end
+    return string.format("%s:%d", name, line)
+end
 
-local function CallerWhere()
-    if not SELF_SOURCE then return nil end
-    for level = 2, 6 do
-        local info = debug.getinfo(level, "Sl")
-        if not info then return nil end
-        -- 跳过调度器自己这几层（Every / EveryFrame 互相调用）
-        if info.source ~= SELF_SOURCE then
-            local src = info.short_src or info.source or "?"
-            -- 只留文件名，路径对读日志的人没有价值
-            local name = src:match("[^\\/]+$") or src
-            return string.format("%s:%d", name, info.currentline or 0)
-        end
+--- 诊断能力自检（`/mui perf diag`）。上面那版按栈层取来源在本客户端返回空，
+--- 事后靠猜；以后遇到「诊断字段是空的」，先跑这个看客户端到底给了什么。
+function Scheduler:ProbeDebug()
+    local out = {
+        hasDebug = type(debug) == "table",
+        hasGetinfo = (type(debug) == "table" and type(debug.getinfo) == "function"),
+    }
+    if not out.hasGetinfo then return out end
+    local sample = function() return 1 end
+    local okF, infoF = pcall(debug.getinfo, sample, "S")
+    if okF and type(infoF) == "table" then
+        out.fn = string.format("%s:%s", tostring(infoF.short_src), tostring(infoF.linedefined))
+    else
+        out.fn = "失败：" .. tostring(infoF)
     end
-    return nil
+    local okL, infoL = pcall(debug.getinfo, 1, "Sl")
+    if okL and type(infoL) == "table" then
+        out.level = string.format("%s:%s", tostring(infoL.short_src), tostring(infoL.currentline))
+    else
+        out.level = "失败：" .. tostring(infoL)
+    end
+    return out
 end
 
 function Scheduler:Every(intervalMs, fn)
@@ -218,7 +239,7 @@ function Scheduler:Every(intervalMs, fn)
         fn = fn,
         acc = 0,
         active = true,
-        where = CallerWhere(),
+        where = WhereOf(fn),
     }
     if ticking then
         -- 遍历中插键是未定义行为：延后一拍生效（纪律 2）。
