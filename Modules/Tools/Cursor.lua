@@ -177,7 +177,7 @@ local function UpdateTrail(now)
     end
 end
 
-local function OnUpdate(_, elapsed)
+local function OnUpdate(elapsed)   -- 由 Scheduler:EveryFrame 驱动，只收一个 elapsed（不是 SetScript 的 self, elapsed）
     if not host then return end
 
     local x, y = CursorUI()
