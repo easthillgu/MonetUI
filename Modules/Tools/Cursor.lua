@@ -33,7 +33,9 @@ local SPARK_TAU    = 0.09    -- 速度指数平滑的时间常数，秒（越小
 local host                       -- 挂在 UIParent 上的透明框（TOOLTIP 层）
 local lines = {}                 -- 拖尾段 [1] 是最新的一段
 local sparkH, sparkV             -- 速度光的横 / 竖线
-local samples = {}               -- 采样点，[1] 最新：{ x, y, t }
+local samples = {}               -- 采样点环形池：[1..SEGMENTS] 为预分配固定槽，运行期永不新建表
+for _ = 1, SEGMENTS do samples[#samples + 1] = { x = 0, y = 0, t = 0 } end
+local sHead, sCount = 0, 0      -- 环形写指针（指向最新槽）、有效样本次数
 local enabled, trailOn, glowOn, cursorSubId
 local acc                        -- 采样累加器
 local clock = 0                  -- 自己的秒表（累加 OnUpdate 的 elapsed，不依赖 GetTime）
@@ -147,10 +149,14 @@ local function UpdateSpark(x, y, elapsed)
     sparkV:Show()
 end
 
+-- 逻辑位置 j（1=最新，j 越大越旧）映射到环形池的物理槽。
+local function Phys(j) return ((sHead - j) % SEGMENTS) + 1 end
+
 local function UpdateTrail(now)
-    -- 段 i 连 samples[i]（新）和 samples[i+1]（旧）；没有采样点就把线收起来。
+    -- 段 i 连逻辑位置 i（新）和 i+1（旧）；没有采样点就把线收起来。
     for i = 1, #lines do
-        local a, b = samples[i], samples[i + 1]
+        local a = (i <= sCount) and samples[Phys(i)] or nil
+        local b = (i + 1 <= sCount) and samples[Phys(i + 1)] or nil
         local line = lines[i]
         if a and b and Span(line, b.x, b.y, a.x, a.y) then
             -- 按"较新那条"的年龄淡出，尾端再乘一个线性衰减，形成拖尾。
@@ -180,22 +186,22 @@ local function OnUpdate(_, elapsed)
         -- 只在"真的动了"时压新采样点：否则鼠标一停，同样的点会把整条尾巴顶掉、拖尾瞬间消失。
         if acc >= SAMPLE then
             acc = 0
-            local tail = samples[1]
+            local tail = sCount > 0 and samples[Phys(1)] or nil
             local moved = true
             if tail then
                 local dx, dy = x - tail.x, y - tail.y
                 moved = (dx * dx + dy * dy) >= (MIN_LEN * MIN_LEN)
             end
             if moved then
-                table.insert(samples, 1, { x = x, y = y, t = clock })
-                while #samples > SEGMENTS do table.remove(samples) end
+                sHead = (sHead % SEGMENTS) + 1
+                local s = samples[sHead]
+                s.x, s.y, s.t = x, y, clock
+                if sCount < SEGMENTS then sCount = sCount + 1 end
             end
         end
-        -- 按年龄淘汰：停下后整条尾巴会自己淡没，最后清空。
-        while #samples > 1 and (clock - samples[#samples].t) > LIFETIME do table.remove(samples) end
-        if samples[1] and (clock - samples[1].t) > LIFETIME then
-            for i = #samples, 1, -1 do samples[i] = nil end   -- 复用同一张表，别每轮新建
-        end
+        -- 按年龄淘汰：停下后整条尾巴会自己淡没，最后清空。环形池不删表，只缩有效计数。
+        while sCount > 1 and (clock - samples[Phys(sCount)].t) > LIFETIME do sCount = sCount - 1 end
+        if sCount > 0 and (clock - samples[Phys(1)].t) > LIFETIME then sCount = 0 end
         UpdateTrail(clock)
     else
         for i = 1, #lines do lines[i]:Hide() end
@@ -239,7 +245,7 @@ end
 function M:Initialize()
     enabled = true
     if not Build() then return end
-    samples = {}
+    sHead, sCount = 0, 0
     acc, clock, speed, lastX, lastY = 0, 0, 0, nil, nil
     Paint()
     self:Apply()
@@ -255,7 +261,7 @@ function M:SetEnabled(value)
     else
         if cursorSubId then Scheduler:Unregister(cursorSubId); cursorSubId = nil end
         HideAll()
-        samples = {}
+        sHead, sCount = 0, 0
         speed, lastX, lastY, acc = 0, nil, nil, 0
     end
 end
