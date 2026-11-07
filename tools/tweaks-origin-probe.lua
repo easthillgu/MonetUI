@@ -173,5 +173,29 @@ check("all 0 之后值全还原",
     CVARS.ResampleAlwaysSharpen.value == "0" and CVARS.volumefog.value == "1",
     CVARS.ResampleAlwaysSharpen.value .. "/" .. CVARS.volumefog.value)
 
+print("== 7) set <key> 0 也要能救遗留（账上没有、值还是目标值）==")
+Reset()
+CVARS.volumefog.value = "0"        -- 旧版写的，账上没有
+DB.tweaks = { noFog = false }
+DB.tweakOrigin = {}
+local M8 = Load()
+out = {}
+M8:HandleCommand("set noFog 0")
+check("set noFog 0 把遗留值推回默认 1", CVARS.volumefog.value == "1", CVARS.volumefog.value)
+check("命令打出了「值 0 → 1」", table.concat(out, "\n"):find("值 0 → 1", 1, true) ~= nil,
+    table.concat(out, " / "))
+
+print("== 8) set <key> 0 不许误伤玩家自己设的值 ==")
+Reset()
+CVARS.particleDensity.value = "55" -- 既不是我们的目标 0，也不是默认 100
+DB.tweaks = { fewParticles = false }
+DB.tweakOrigin = {}
+local M9 = Load()
+out = {}
+M9:HandleCommand("set fewParticles 0")
+check("玩家的 55 原封不动", CVARS.particleDensity.value == "55", CVARS.particleDensity.value)
+check("命令明确说「值没变」", table.concat(out, "\n"):find("值没变", 1, true) ~= nil,
+    table.concat(out, " / "))
+
 print(fail == 0 and "\n全部通过" or ("\n失败 " .. fail .. " 项"))
 os.exit(fail == 0 and 0 or 1)

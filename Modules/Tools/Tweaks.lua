@@ -25,7 +25,11 @@ local TWEAKS = {
     { key = "combatText",  cvar = "WorldTextScale_v2",                     value = "2", label = "放大伤害数字（打击感更明显）" },
     { key = "questGlow",   cvar = "outlineModeShowLootEffectWhenDisabled", value = "1", label = "任务物品发光（关掉高亮也发光）" },
     { key = "noDeathGray", cvar = "ffxDeath",                              value = "0", label = "复活不灰屏（死亡后屏幕不变灰）" },
-    { key = "sharpen",     cvar = "ResampleAlwaysSharpen",                 value = "1", label = "画面锐化（更清晰锐利）" },
+    -- 2026-11-07 实测：RenderScale = 1（1:1 像素映射）时这条**完全无效** ——
+    -- `ResampleAlwaysSharpen` 只在发生重采样（渲染比例 < 100%）时才起作用，
+    -- 玩家实测开/关画面零差异。留着是因为它仍会在「渲染比例拉低」的配置上有用，
+    -- 但标签必须说实话，不能让 100% 渲染的人以为开了就更清晰。
+    { key = "sharpen",     cvar = "ResampleAlwaysSharpen",                 value = "1", label = "画面锐化（仅渲染比例 <100% 时有效）" },
     { key = "noWeather",   cvar = "weatherDensity",                        value = "0", label = "关闭雨雪天气（画面干净、帧数更稳）" },
     { key = "fewParticles",cvar = "particleDensity",                       value = "0", label = "降低法术粒子" },
     { key = "noFog",       cvar = "volumefog",                             value = "0", label = "去体积雾（远景不蒙灰）" },
@@ -179,6 +183,33 @@ function M:IsOn(key)
     return self:Settings()[key] and true or false
 end
 
+--- 还原单条（`set <key> 0` / `restore` / `all 0` 走的就是它）。
+--- 两档：有账 → 玩家原值；没账（旧版遗留）→ 只在「当前值 == 我们的目标值、且 ≠ 客户端默认值」
+--- 时推回默认值，绝不碰玩家自己设的值（他设 55，既非目标也非默认，一个字节不动）。
+---
+--- **为什么不并进 Apply 的逐条循环**（2026-11-07 判例）：Apply 每次都会遍历九条，
+--- 若关着的条目也走「没账就推默认值」这档，玩家自己把 volumefog 设成 0 之后，
+--- 只是去开另一条开关，就会被顺手改成 1 —— 这不是还原，是误伤。
+--- 所以兜底只在**玩家显式关这一条**时发生。
+--- @return string|nil before, string|nil after
+local function RestoreOne(t)
+    local origin = OriginStore()
+    local before = ReadCVar(t.cvar)
+    local back = origin[t.cvar]
+    if back ~= nil then
+        WriteCVar(t.cvar, back)
+        origin[t.cvar] = nil
+    elseif before ~= nil and not Secrets.IsSecret(before) then
+        local def = DefaultOf(t.cvar)
+        if def ~= nil
+            and tostring(before) == tostring(t.value)
+            and tostring(def) ~= tostring(t.value) then
+            WriteCVar(t.cvar, def)
+        end
+    end
+    return before, ReadCVar(t.cvar)
+end
+
 --- 逐条对齐：开的写入目标值（先存原值），关的若之前写过就还原成原值。
 function M:Apply()
     local origin = OriginStore()
@@ -204,29 +235,10 @@ function M:Apply()
     end
 end
 
---- 关掉某条 / 整个模块时，把动过的都还原回去。
---- 两档：
----   有账 → 还原成玩家原值；
----   没账 → 只在「当前值恰好是我们的目标值、且不是客户端默认值」时用默认值兜底。
----         这一档专门救旧版遗留（原值没落库那批），又不会误伤玩家自己设的值：
----         他若设成 55，既不是目标值也不是默认值，这里一个字节都不碰。
+--- 关掉整个模块 / `/mui tweaks all 0`：九条全部走 RestoreOne。
 function M:RestoreAll()
-    local origin = OriginStore()
     for i = 1, #TWEAKS do
-        local t = TWEAKS[i]
-        local back = origin[t.cvar]
-        if back ~= nil then
-            WriteCVar(t.cvar, back)
-            origin[t.cvar] = nil
-        else
-            local cur = ReadCVar(t.cvar)
-            local def = DefaultOf(t.cvar)
-            if cur ~= nil and def ~= nil
-                and tostring(cur) == tostring(t.value)
-                and tostring(def) ~= tostring(t.value) then
-                WriteCVar(t.cvar, def)
-            end
-        end
+        RestoreOne(TWEAKS[i])
     end
 end
 
@@ -286,10 +298,13 @@ end
 --- 只有前三条是本模块会写的；其余是玩家自己或在设置里可能被动过的，一起列出来才能对照。
 --- `note` 写的是「偏离默认后往哪个方向变」，判读时不至于看数字猜。
 local VISION = {
-    { cvar = "ResampleAlwaysSharpen", key = "sharpen",      note = "强制锐化重采样：暗部被提亮、边缘出白边 → 整体发灰发脏" },
+    { cvar = "gamma",                 key = nil,            note = "伽马：>1 = 整体提亮发白，暗部被拉起来 → 「灰蒙蒙」的头号嫌疑" },
+    { cvar = "brightness",            key = nil,            note = "亮度：调太高会让整屏发白、黑变灰" },
+    { cvar = "contrast",              key = nil,            note = "对比度：偏低 = 黑的不黑、画面糊成一片灰" },
+    { cvar = "ResampleAlwaysSharpen", key = "sharpen",      note = "强制锐化重采样：只在渲染比例 <100%（发生重采样）时起作用；100% 下开关无差异" },
     { cvar = "particleDensity",       key = "fewParticles", note = "粒子密度：0 = 光效/尘埃/萤火全灭，画面发平" },
     { cvar = "volumefog",             key = "noFog",        note = "体积雾：关掉失去大气透视，远景发平" },
-    { cvar = "ffxGlow",               key = nil,            note = "全屏泛光：开 = 整屏蒙一层白雾" },
+    { cvar = "ffxGlow",               key = nil,            note = "全屏泛光：关掉亮部不再溢光，画面发闷发灰" },
     { cvar = "ffxDeath",              key = "noDeathGray",  note = "死亡灰度（0 = 复活不灰屏）" },
     { cvar = "weatherDensity",        key = "noWeather",    note = "天气密度（0 = 无雨雪）" },
     { cvar = "ResampleQuality",       key = nil,            note = "重采样质量：偏低 = 放大糊" },
@@ -305,6 +320,17 @@ end
 
 --- 画面观感诊断：当前值 vs 客户端默认值，偏离的标出来，并指出哪几条是本插件写的。
 --- 只读，不改任何 CVar（报告命令不许有副作用）。
+--- 值比较：两边都能当数字看就按数字比。
+--- 客户端把 default 给成 number 时是 `0.5`，给成 string 时是 `"0.500000"` —— 直接 tostring
+--- 比会把这两个判成「偏离默认」，于是 brightness / contrast / gamma 这类浮点 CVar 永远
+--- 假报偏离（2026-11-07：vision 探针在数字型 default 形态下报 9 条，真值 7 条）。
+local function SameValue(a, b)
+    if a == nil or b == nil then return false end
+    local na, nb = tonumber(tostring(a)), tonumber(tostring(b))
+    if na ~= nil and nb ~= nil then return na == nb end
+    return tostring(a) == tostring(b)
+end
+
 function M:Vision()
     ns:Print("|cffffd100画面观感诊断|r（当前值 vs 客户端默认值，只读）")
 
@@ -319,7 +345,7 @@ function M:Vision()
             local diff = ""
             if info and info.default ~= nil then
                 local d = tostring(info.default)
-                if tostring(cur) ~= d then
+                if not SameValue(cur, info.default) then
                     deviated = deviated + 1
                     diff = "  默认 " .. d
                 end
@@ -331,7 +357,7 @@ function M:Vision()
             local state
             if v.key then
                 local want = TweakValue(v.key)
-                local looksWritten = want ~= nil and tostring(cur) == tostring(want)
+                local looksWritten = want ~= nil and SameValue(cur, want)
                 if M:IsOn(v.key) then
                     state = "|cff00ff00本插件写|r"
                     ours = ours + 1
@@ -381,11 +407,12 @@ function M:Vision()
         ns:Print("  一条命令全推回去：/mui tweaks restore")
     end
     if ours > 0 then
-        ns:Print("  先关最像的那条看 10 秒（即时生效，不用 reload）：/mui tweaks set sharpen 0")
-        ns:Print("  全关：/mui tweaks set <key> 0（key 见 /mui tweaks status）　或 /mui tweaks all 0")
+        ns:Print("  逐条关着试（即时生效，不用 reload）：/mui tweaks set <key> 0 —— 会打出「值 A → B」，值没变就是这条本来没生效")
+        ns:Print("  全关：/mui tweaks all 0　｜　全推回原值：/mui tweaks restore")
     end
     if deviated > ours + stuck then
-        ns:Print("  其余偏离项不是本插件写的 —— 那是游戏设置/其他插件改的，去「选项 → 图形」看。")
+        ns:Print("  其余偏离项不是本插件写的（gamma / brightness / contrast / ffxGlow 这类）——")
+        ns:Print("  去「选项 → 图形」调回默认，或用 /console <名字> <默认值> 直接写。")
     end
 end
 
@@ -444,9 +471,28 @@ function M:HandleCommand(rest)
             return true
         end
         local on = (flag == "1" or flag == "on" or flag == "true")
+        local before = ReadCVar(t.cvar)
         self:Settings()[t.key] = on
-        self:Apply()
-        ns:Print(("%s %s：%s"):format(t.label, on and "已开" or "已关", t.cvar))
+        if on then
+            self:Apply()
+        else
+            -- 关：先按这一条显式还原（含「旧版遗留、账上没有」的兜底），再跑一遍全量对齐。
+            RestoreOne(t)
+            self:Apply()
+        end
+        -- 打印**写前 / 写后**的实际值：以前只打「已关」，玩家无从判断到底写没写进去。
+        -- 2026-11-07 判例：这一条在账上没记录时 Apply 会整条跳过，命令照样回「已关」，
+        -- 画面一点没变 —— 玩家只会以为「这个开关没用」。值一打出来就无处可藏。
+        local after = ReadCVar(t.cvar)
+        ns:Print(("%s：%s｜%s　值 %s → %s"):format(
+            t.label, on and "已开" or "已关", t.cvar, Text(before), Text(after)))
+        if Text(before) == Text(after) then
+            if on then
+                ns:Print("  值没变 —— 本来就是这个值，或者写入被客户端拒了（/mui tweaks status 看账本）。")
+            else
+                ns:Print("  值没变 —— 本来就在你的原值上，这一条没有需要还原的东西。")
+            end
+        end
         return true
     end
 
