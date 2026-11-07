@@ -89,6 +89,10 @@ check("Profile 无 key 原样返回", S:Profile(nil, "x", function() end) ~= nil
 
 -- 6) ResetCosts：清零外部账与聚合，不动订阅
 local hadSubId = S:Every(200, function() end)
+local subRows = S:Snapshot()
+check("注册点来源被记下（R: where 带文件名与行号）",
+  subRows[1] and type(subRows[1].where) == "string" and subRows[1].where:find("%.lua:%d+") ~= nil,
+  subRows[1] and subRows[1].where)
 S:ResetCosts()
 local _, st = S:Count()
 check("ResetCosts 清空外部账", #S:ExternalSnapshot() == 0, #S:ExternalSnapshot())

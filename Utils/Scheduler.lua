@@ -180,11 +180,39 @@ end
 --- 所以在这里换算一次存成秒。以前直接把 250 当阈值存进去，和秒级累加器比，
 --- 等于"250 秒一次"：姓名板守卫和鼠标提示兜底扫描都写的是 250，实际几分钟才跑一拍，
 --- 而且不报错、看起来还在工作（AGENTS：单位混用的症状不是"差一点"）。
+--- 注册点来源（`文件:行`），只用于诊断：`/mui perf` 里 `#5` 这种编号本身说明不了任何事
+---（2026-11-07 实机：#5 635 次调用累计 0.68s、平均 1.08ms/次，全仓没人知道它是谁）。
+--- 注册发生在加载期/低频路径，一次 debug.getinfo 的成本可以忽略；拿不到就留 nil。
+local SELF_SOURCE = (type(debug) == "table" and type(debug.getinfo) == "function")
+    and debug.getinfo(1, "S").source or nil
+
+local function CallerWhere()
+    if not SELF_SOURCE then return nil end
+    for level = 2, 6 do
+        local info = debug.getinfo(level, "Sl")
+        if not info then return nil end
+        -- 跳过调度器自己这几层（Every / EveryFrame 互相调用）
+        if info.source ~= SELF_SOURCE then
+            local src = info.short_src or info.source or "?"
+            -- 只留文件名，路径对读日志的人没有价值
+            local name = src:match("[^\\/]+$") or src
+            return string.format("%s:%d", name, info.currentline or 0)
+        end
+    end
+    return nil
+end
+
 function Scheduler:Every(intervalMs, fn)
     if type(fn) ~= "function" then return nil end
     local id = nextSubId
     nextSubId = nextSubId + 1
-    local sub = { intervalSec = (tonumber(intervalMs) or 0) / 1000, fn = fn, acc = 0, active = true }
+    local sub = {
+        intervalSec = (tonumber(intervalMs) or 0) / 1000,
+        fn = fn,
+        acc = 0,
+        active = true,
+        where = CallerWhere(),
+    }
     if ticking then
         -- 遍历中插键是未定义行为：延后一拍生效（纪律 2）。
         pending[id] = sub
@@ -295,6 +323,7 @@ function Scheduler:Snapshot()
             cost = st.cost,
             max = st.max,
             failures = failures[id] or 0,
+            where = sub.where,
         }
     end
     table.sort(rows, function(a, b) return a.cost > b.cost end)
@@ -317,10 +346,11 @@ function Scheduler:PrintStats()
     for i = 1, #rows do
         local row = rows[i]
         -- 峰值六位小数：单次常在几十微秒，三位会全打成 0.000s（11-05 实测）
-        print(("  #%d %s · 调用 %d · 累计 %0.4fs · 峰值 %0.6fs · 失败 %d"):format(
+        print(("  #%d %s · 调用 %d · 累计 %0.4fs · 峰值 %0.6fs · 失败 %d%s"):format(
             row.id,
             row.everyFrame and "每帧" or ("%0.3fs"):format(row.intervalSec),
-            row.calls, row.cost, row.max, row.failures))
+            row.calls, row.cost, row.max, row.failures,
+            row.where and ("  @ " .. row.where) or ""))
     end
     local ext = self:ExternalSnapshot()
     if #ext > 0 then
