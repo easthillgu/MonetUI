@@ -53,6 +53,8 @@ docs/*
 !docs/REVIEW-2026-10-29.md
 !docs/PLAN-refactor-2026-10-29.md
 !docs/MULTI-HARNESS.md
+# README 头图（tools/make-banner.ps1 由 Assets-src 的 TGA 合成，克隆者可复现）
+!docs/monet_logo_240x40.png
 
 # ---- 过程产物 / 中间文件 ----
 *.tmp
