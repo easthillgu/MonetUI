@@ -212,11 +212,26 @@ local DevTools = { name = "DevTools" }
 -- pollDriver 门命中数读 `Widget:PrintStalled()` 的**返回值**（此刻暂停中的框数），
 -- 它会顺带把自己那本清单打到聊天框——照旧，不劫持它的输出。
 
-function DevTools:Perf()
+function DevTools:Perf(arg)
     local S = ns.Scheduler
     if type(S) ~= "table" then
         ns:Print("Scheduler 没加载，perf 读不到。")
         return
+    end
+
+    -- `/mui perf reset` 先清零再打账：峰值是历史最高，不清零就永远读的是旧尖峰
+    -- （2026-11-07：改完一处想看"现在多少钱"，这个是唯一手段）。
+    if type(arg) == "string" and string.find(string.lower(arg), "reset", 1, true) then
+        if type(S.ResetCosts) == "function" then
+            local okR, errR = pcall(S.ResetCosts, S)
+            if okR then
+                ns:Print("调度器账本已清零（订阅明细 / 聚合 / 外部驱动），从现在重新计时。")
+            else
+                ns:Print("|cffff6b6b清零失败：|r" .. tostring(errR))
+            end
+        else
+            ns:Print("这个版本的 Scheduler 没有 ResetCosts。")
+        end
     end
 
     local totals, rows
@@ -887,6 +902,10 @@ end
 --- 和顶层 `/mui perf`、`/mui skins <探针>` 互为别名（本体只有一份）。
 function DevTools:HandleCommand(rest)
     local arg = string.lower(rest or "")
+    if arg == "perf reset" then
+        self:Perf("reset")
+        return true
+    end
     if arg == "perf" then
         self:Perf()
         return true
@@ -896,7 +915,7 @@ function DevTools:HandleCommand(rest)
         return true
     end
     if arg == "" then
-        ns:Print("用法：/mui perf · /mui skins closes|inset|arrows ·（同义：/mui devtools <子命令>）。")
+        ns:Print("用法：/mui perf [reset] · /mui skins closes|inset|arrows ·（同义：/mui devtools <子命令>）。")
         return true
     end
     return false

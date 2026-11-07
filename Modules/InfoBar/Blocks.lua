@@ -329,8 +329,12 @@ local function SystemOnUpdate(block, elapsed)
     if block.tick < 1 then return end
     block.tick = 0
 
-    block.memoryTick = (block.memoryTick or 4) + 1
-    if block.memoryTick >= 5 then
+    -- 内存每 15 秒算一次（原为 5 秒）。2026-11-07 实测：`UpdateAddOnMemoryUsage()`
+    -- 让引擎重算全部插件，单次 24.5ms —— /mui perf 里累计 47.7ms / 542 次调用，
+    -- 两次尖峰就吃掉了全部耗时（其余 540 帧近乎 0），等于每 5 秒固定掉一帧。
+    -- 内存不是突变量，15 秒粒度够用；摊薄成本从 4.8ms/s 降到 1.6ms/s。
+    block.memoryTick = (block.memoryTick or 14) + 1
+    if block.memoryTick >= 15 then
         block.memoryTick = 0
         block.memory = MemoryUsage()
     end

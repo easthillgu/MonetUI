@@ -87,5 +87,14 @@ check("PrintStats 不抛错（含外部驱动段）", ok, err)
 check("Profile 收到非函数原样返回", S:Profile("x", "x", nil) == nil)
 check("Profile 无 key 原样返回", S:Profile(nil, "x", function() end) ~= nil)
 
+-- 6) ResetCosts：清零外部账与聚合，不动订阅
+local hadSubId = S:Every(200, function() end)
+S:ResetCosts()
+local _, st = S:Count()
+check("ResetCosts 清空外部账", #S:ExternalSnapshot() == 0, #S:ExternalSnapshot())
+check("ResetCosts 清空聚合调用数", st.calls == 0, st.calls)
+check("ResetCosts 不动订阅（在册仍 1）", st.running == 1, st.running)
+S:Unregister(hadSubId)
+
 print(fail == 0 and "\n全部通过" or ("\n失败 " .. fail .. " 项"))
 os.exit(fail == 0 and 0 or 1)

@@ -269,6 +269,17 @@ function Scheduler:ExternalSnapshot()
     return rows
 end
 
+--- 清零全部计时账（订阅明细 + 聚合 + 外部驱动），**不动订阅本身**。
+--- 为什么需要：峰值（max）是历史最高，改完一处想看"现在多少钱"时不清零就永远读的是旧尖峰。
+--- 2026-11-07 InfoBar 内存块那次 24.5ms 就是靠清零前后对比才确认是它（累计约 2×24ms、
+--- 其余 540 帧近乎 0 ⇒ 每 5 秒固定掉一帧）。
+function Scheduler:ResetCosts()
+    for id in pairs(timings) do timings[id] = nil end
+    for id in pairs(failures) do failures[id] = nil end
+    for key in pairs(external) do external[key] = nil end
+    totals.calls, totals.cost, totals.failures = 0, 0, 0
+end
+
 --- 逐路数据面（`/mui perf` 命令本体不在这次范围内，先把账做出来）。
 --- 按累计耗时排序，最贵的在最前面；只读，不改任何状态。
 function Scheduler:Snapshot()
