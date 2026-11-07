@@ -335,6 +335,9 @@ function M:Vision()
     ns:Print("|cffffd100画面观感诊断|r（当前值 vs 客户端默认值，只读）")
 
     local deviated, ours, stuck = 0, 0, 0
+    -- 偏离默认、又不归我们管的条目：末尾直接给可抄的 /console 行。
+    -- 报告命令本身仍然只读（不改 CVar），只是把「照着敲什么」算给玩家看。
+    local fixes = {}
     for i = 1, #VISION do
         local v = VISION[i]
         local info = CVarInfo(v.cvar)
@@ -354,15 +357,15 @@ function M:Vision()
             -- 归属三态。中间那一档是 2026-11-07 判例：开关已关、值却还是我们的目标值
             -- （旧版原值只存运行期，reload 后"还原"还原到自己写的值）。以前这里打
             -- 「不是本插件」，等于把真问题盖住了 —— 玩家会觉得"关了没用，不是它"。
-            local state
+            local state, isOurs, isStuck
             if v.key then
                 local want = TweakValue(v.key)
                 local looksWritten = want ~= nil and SameValue(cur, want)
                 if M:IsOn(v.key) then
-                    state = "|cff00ff00本插件写|r"
+                    state, isOurs = "|cff00ff00本插件写|r", true
                     ours = ours + 1
                 elseif looksWritten then
-                    state = "|cffffa940已关·值没还原|r"
+                    state, isStuck = "|cffffa940已关·值没还原|r", true
                     stuck = stuck + 1
                 else
                     state = "|cff808080不是本插件|r"
@@ -374,6 +377,11 @@ function M:Vision()
             ns:Print(("  %-22s 当前 %-6s %s%s"):format(v.cvar, Text(cur), state, diff))
             if diff ~= "" then
                 ns:Print("      └ " .. v.note)
+                -- 只给「不归我们管」的条目出 /console：我们写的那些由开关负责，
+                -- 已关没还原的由 restore 负责，混进去只会互相打架。
+                if not isOurs and not isStuck and info and info.default ~= nil then
+                    fixes[#fixes + 1] = { v.cvar, tostring(info.default) }
+                end
             end
         end
     end
@@ -410,9 +418,15 @@ function M:Vision()
         ns:Print("  逐条关着试（即时生效，不用 reload）：/mui tweaks set <key> 0 —— 会打出「值 A → B」，值没变就是这条本来没生效")
         ns:Print("  全关：/mui tweaks all 0　｜　全推回原值：/mui tweaks restore")
     end
-    if deviated > ours + stuck then
-        ns:Print("  其余偏离项不是本插件写的（gamma / brightness / contrast / ffxGlow 这类）——")
-        ns:Print("  去「选项 → 图形」调回默认，或用 /console <名字> <默认值> 直接写。")
+    if #fixes > 0 then
+        ns:Print(("  另有 %d 条不是本插件写的，想回默认照着敲（即时生效，不用 reload）："):format(#fixes))
+        local cap = #fixes < 6 and #fixes or 6
+        for i = 1, cap do
+            ns:Print(("    /console %s %s"):format(fixes[i][1], fixes[i][2]))
+        end
+        if #fixes > cap then
+            ns:Print(("    …另有 %d 条，见上面标「偏离」的行"):format(#fixes - cap))
+        end
     end
 end
 

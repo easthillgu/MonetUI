@@ -111,6 +111,9 @@ check("偏离条数 = 7（10 条里 7 条偏离）", n == 7, n)
 check("指出了「本插件写」", text:find("本插件写", 1, true) ~= nil)
 check("打出了伽马行（2026-11-07 新增的灰屏三行之一）", text:find("gamma", 1, true) ~= nil)
 check("给了逐条关的命令", text:find("/mui tweaks set <key> 0", 1, true) ~= nil)
+check("给可抄的 /console 行（ffxGlow 不归我们管）", text:find("/console ffxGlow 1", 1, true) ~= nil,
+    text:match("[^\n]*/console[^\n]*"))
+check("我们写的那些不出 /console（ffxDeath 由开关负责）", text:find("/console ffxDeath", 1, true) == nil)
 
 print("== 2) 客户端没有这个 CVar ==")
 local saved = CVARS[MISSING]
