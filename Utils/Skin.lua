@@ -2363,13 +2363,19 @@ end
 --- 品质多路解析（模板不齐，按特征不按名字）：`btn.link` 字段（商人 / 交易窗模板常写）
 --- → `btn.itemID` 字段 → ItemButtonMixin 的 `GetItemID()` / `GetItem()`（ItemLocation）。
 --- 全程 pcall，读不出就 nil（素边），绝不抛。
+--- 取值函数提出去复用：`pcall(function() return btn.link end)` 这种写法每次调用都新建
+--- 一个闭包 —— 品质驱动每 0.5 秒扫一遍所有格子（背包 100+ 格），一秒就是几百次分配。
+local function ReadLink(btn) return btn.link end
+local function ReadItemID(btn) return btn.itemID end
+local function LocIsValid(loc) return loc:IsValidItem() end
+
 local function ResolveQuality(btn)
-    local okLink, link = pcall(function() return btn.link end)
+    local okLink, link = pcall(ReadLink, btn)
     if okLink and type(link) == "string" and link ~= "" then
         local q = QualityOf(link)
         if q then return q end
     end
-    local okID, itemID = pcall(function() return btn.itemID end)
+    local okID, itemID = pcall(ReadItemID, btn)
     if okID and type(itemID) == "number" and itemID > 0 then
         local q = QualityOf(itemID)
         if q then return q end
@@ -2384,7 +2390,7 @@ local function ResolveQuality(btn)
     if type(btn.GetItem) == "function" and C_Item and C_Item.GetItemQuality then
         local ok, loc = pcall(btn.GetItem, btn)
         if ok and type(loc) == "table" then
-            local okV, valid = pcall(function() return loc:IsValidItem() end)
+            local okV, valid = pcall(LocIsValid, loc)
             if okV and valid then
                 local okQ, q = pcall(C_Item.GetItemQuality, loc)
                 if okQ and type(q) == "number" then return q end
@@ -2511,7 +2517,7 @@ local function AbsRectUnits(fr)
     return nil
 end
 
-local function SnapQualityBorder(btn, border)
+local function SnapQualityBorder(btn, border, entry)
     local okS, s = pcall(btn.GetEffectiveScale, btn)
     if not okS or type(s) ~= "number" or s <= 0 then return end
     local absL, absB = AbsRectUnits(btn)
@@ -2527,9 +2533,24 @@ local function SnapQualityBorder(btn, border)
     local xr = W + (math.floor(pxR + 0.5) + 1 - pxR) / s
     local yb = (math.floor(pxB + 0.5) - 1 - pxB) / s
     local yt = H + (math.floor(pxT + 0.5) + 1 - pxT) / s
+    -- 算出来的四个偏移没变就别重设锚点（ClearAllPoints + 2×SetPoint = 3 次 pcall，
+    -- 而格子不动的时候这个结果是不变的 —— 见 EnsureQualityDriver 的注释）。
+    if entry then
+        if entry.xl == xl and entry.xr == xr and entry.yb == yb and entry.yt == yt then return end
+        entry.xl, entry.xr, entry.yb, entry.yt = xl, xr, yb, yt
+    end
     pcall(border.ClearAllPoints, border)
     pcall(border.SetPoint, border, "BOTTOMLEFT", btn, "BOTTOMLEFT", xl, yb)
     pcall(border.SetPoint, border, "TOPRIGHT", btn, "BOTTOMLEFT", xr, yt)
+end
+
+--- 边框在不在屏幕上（品质驱动用来跳过藏着的格子）。读不出来 / 机密值一律按"显示着"
+--- 处理 —— 保守方向：宁可多算一次，也不要因为读不到就漏掉一个真在屏幕上的格子。
+local function BorderShown(border)
+    local ok, vis = pcall(border.IsVisible, border)
+    if not ok then return true end
+    if Secrets and Secrets.IsSecret and Secrets.IsSecret(vis) then return true end
+    return vis and true or false
 end
 
 local function EnsureQualityDriver()
@@ -2538,21 +2559,29 @@ local function EnsureQualityDriver()
         for btn, entry in pairs(qualityBorders) do
             local border = entry.frame
             if border and border.GetAlpha then
-                SnapQualityBorder(btn, border)
-                local q = ResolveQuality(btn)
-                local color = Skin:QualityColor(q)
-                if color ~= entry.last then
-                    entry.last = color
-                    if color then
-                        Widget:SetBorderState(border, color.r, color.g, color.b, 1)
-                    else
-                        Widget:SetBorderState(border, nil)
+                -- 藏着的格子整条跳过。2026-11-07 实机 `/mui perf`：这一路每次 2.57ms
+                -- （每 0.5 秒一记尖峰，占 16% 帧预算），而当时背包是关着的 —— 也就是
+                -- 100 多个看不见的格子在白算像素对齐（AbsRectUnits 每层父链两次 pcall）
+                -- 和品质解析。边框藏着自己会跟着藏，状态留着不动没有副作用；重新显示后
+                -- 下一拍（≤0.5 秒）补算一次。
+                local shown = BorderShown(border)
+                if shown then
+                    SnapQualityBorder(btn, border, entry)
+                    local q = ResolveQuality(btn)
+                    local color = Skin:QualityColor(q)
+                    if color ~= entry.last then
+                        entry.last = color
+                        if color then
+                            Widget:SetBorderState(border, color.r, color.g, color.b, 1)
+                        else
+                            Widget:SetBorderState(border, nil)
+                        end
                     end
+                    -- 等级 + 冷却只在显式开过格（CharacterFrame 的装备格）上跑：
+                    -- 商人 / 邮件那些同走这条扫描的窗口一个字节都不多写。
+                    if entry.ilvl or entry.cd then UpdateSlotInfo(btn, entry) end
                 end
             end
-            -- 等级 + 冷却只在显式开过格（CharacterFrame 的装备格）上跑：
-            -- 商人 / 邮件那些同走这条扫描的窗口一个字节都不多写。
-            if entry.ilvl or entry.cd then UpdateSlotInfo(btn, entry) end
         end
     end, "皮肤:品质染色")
 end
@@ -2586,7 +2615,7 @@ function Skin:ItemQualityBorder(btn, withInfo)
         self:Track(border)
         entry = { frame = border }
         qualityBorders[btn] = entry
-        SnapQualityBorder(btn, border)
+        SnapQualityBorder(btn, border, entry)
         EnsureQualityDriver()
     end
     if withInfo and not entry.ilvl then

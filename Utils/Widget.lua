@@ -36,6 +36,8 @@ Widget.TEXT_GAP = 3   -- 文字行与条顶边之间的空隙
 
 -- 弱键：自建框体被丢弃后条目跟着回收（以前是强引用，永不释放）。
 local hoverWatch, hoverId = setmetatable({}, { __mode = "k" }), nil
+--- 悬停轮询里"这个框现在显示着吗"的缓存寿命（秒）。见 EnsureHoverDriver。
+local HOVER_VIS_TTL = 0.3
 
 --- 驱动循环遇到暂停中的框时用它替下监听表：状态照常推进，但一个回调都不跑。
 local idleList = {}
@@ -256,8 +258,19 @@ local function EnsureHoverDriver()
     if hoverId then return end
     hoverId = Scheduler:Every(100, function()
         local down = _G.IsMouseButtonDown and _G.IsMouseButtonDown("LeftButton")
+        local now = GetTime()
         for frame, st in pairs(hoverWatch) do
-            local shown, readable = VisibilityOf(frame, "hover")
+            -- 可见性缓存 0.3 秒（实机这一路每次 1.07ms，几乎全是 VisibilityOf 的两次 pcall）。
+            -- 缓存不改变判定：框藏起来时 `IsMouseOver` 本来就返回 false，`inside` 照样会翻成
+            -- false、leave 照样立刻跑；唯一的代价是"框在光标底下凭空出现"这种情形最多晚
+            -- 0.3 秒亮起来 —— 而那个框基本要等鼠标动一下才会被真正指到。
+            local shown, readable
+            if st.visUntil and now < st.visUntil then
+                shown, readable = st.visShown, st.visReadable
+            else
+                shown, readable = VisibilityOf(frame, "hover")
+                st.visShown, st.visReadable, st.visUntil = shown, readable, now + HOVER_VIS_TTL
+            end
             -- 暂停中的框：shown=false → inside=false，状态照常推进但 list 是空的，
             -- 一个回调都不跑（那些回调全是往这个框写东西，跑了也只是多一条拦截）。
             -- 复检到可读时按真实悬停重来一次 enter。
@@ -381,7 +394,12 @@ local POLL_INTERVAL = 0.2
 --- 面板挂在账上时，这就是几十次/帧的 pcall，可回调最快也只 0.2 秒跑一次。
 --- 门槛 0.1 秒是仓内最小登记间隔（0.2）的一半，精度不受影响；
 --- 真要挂比 0.1 更密的轮询，把这里一起调小，不然会被量化成 0.1。
+--- 2026-11-07 起驱动改用**绝对到期时间**（`cb.due`）：不在期的框连可见性都不读，
+--- 门槛只决定"多久看一次到期表"，不再决定回调精度。
 local POLL_TICK = 0.1
+--- 到期却发现框是藏着的：隔这么久再看一次。以前是顺着 0.1 秒的拍子每拍都读一次
+--- 可见性，框藏着的时段全白付；留 0.3 秒是"一显示就很快跟上"和"别白读"的折中。
+local POLL_HIDDEN_RETRY = 0.3
 
 --- 一个框体可以挂**多个**回调：早先这里是 `pollWatch[frame] = fn`（一个框只能一个回调），
 --- 而四个模块都拿 UIParent 当锚点（Skins/System、Nameplates、Cooldown、QuestTracker）——
@@ -398,27 +416,46 @@ function Widget:PollWatch(frame, fn, interval)
     end
     for i = 1, #list do
         if list[i].fn == fn then
-            -- 同一回调重复登记只更新间隔，不重复执行。
-            list[i].interval = tonumber(interval) or POLL_INTERVAL
+            -- 同一回调重复登记只更新间隔，不重复执行（到期时间跟着收：登记处从 2 秒改 0.2 秒
+            -- 时不用等满旧周期）。
+            local iv = tonumber(interval) or POLL_INTERVAL
+            list[i].interval = iv
+            local now = GetTime() or 0
+            if not list[i].due or list[i].due > now + iv then list[i].due = now + iv end
             return list[i]
         end
     end
-    local entry = { fn = fn, interval = tonumber(interval) or POLL_INTERVAL, acc = 0 }
+    local entry = { fn = fn, interval = tonumber(interval) or POLL_INTERVAL,
+                    due = (GetTime() or 0) + (tonumber(interval) or POLL_INTERVAL) }
     list[#list + 1] = entry
     if pollId then return entry end
-    pollId = Scheduler:Every(100, function()
-        local tick = POLL_TICK
+    pollId = Scheduler:Every(POLL_TICK * 1000, function()
+        local now = GetTime()
         for f, cbs in pairs(pollWatch) do
-            -- 隐藏的框不累加时间：等它显示时再从 0 开始算，不会"一显示就补执行一堆"。
-            local shown, readable
-            if type(f) == "table" and f.IsVisible then shown, readable = VisibilityOf(f, "poll") end
-            if shown and readable then
+            -- 先问"这一拍有没有到期的回调"：没到期就连可见性都不读。
+            -- 2026-11-07 实机（`/mui perf` 已带标签）：这一路每次 0.97ms、每 0.1 秒一次，
+            -- 而回调最快也只 0.2 秒跑一次、多数登记写的是 2 秒 —— 以前的写法是每拍对
+            -- **每个**框做两次 pcall（CanBeAccessedInContext + IsVisible），为一次 2 秒
+            -- 回调白付 20 拍的可见性检查。改成绝对到期时间后，不在期的框一拍都不碰。
+            local due = false
+            for i = 1, #cbs do
+                if now >= cbs[i].due then due = true break end
+            end
+            if due then
+                local shown, readable
+                if type(f) == "table" and f.IsVisible then shown, readable = VisibilityOf(f, "poll") end
                 for i = 1, #cbs do
                     local cb = cbs[i]
-                    cb.acc = cb.acc + tick
-                    if cb.acc >= cb.interval then
-                        cb.acc = 0
-                        pcall(cb.fn, f)
+                    if now >= cb.due then
+                        if shown and readable then
+                            cb.due = now + cb.interval
+                            pcall(cb.fn, f)
+                        else
+                            -- 隐藏 / 读不出来：**不累加间隔**，0.3 秒后再看一次。
+                            -- 既不会"一显示就补执行一堆"（到期时间没有攒），也不会拖满
+                            -- 一整个周期才发现框已经能读了。
+                            cb.due = now + POLL_HIDDEN_RETRY
+                        end
                     end
                 end
             end
