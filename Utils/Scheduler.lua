@@ -14,6 +14,10 @@
 --   2) 回调里再注册订阅 = 遍历中往表里插键，Lua 5.1 明说是未定义行为。新订阅先攒进
 --      `pending`，下一拍并入，本拍不跑。
 --   3) 单位只在入口换算一次：`intervalMs` 收毫秒、`elapsed` 是秒（历史 bug 745164a）。
+--   4) 回调签名只能是 `(elapsed)` —— 本调度器投**一个**参数，不像 SetScript 的
+--      `(self, elapsed)`。2026-11-07 判例：Cursor 把 OnUpdate 换成 EveryFrame 时签名没跟着改，
+--      `_` 吃掉 dt、`elapsed` 恒 nil、`clock` 永不前进，拖尾整条消失、零报错零卡顿。
+--      闸门：`node tools/scheduler-callback-probe.js`（R1 形参 ≤1 / R2 冒号方法不许裸名传）。
 
 local ADDON_NAME, ns = ...
 
@@ -33,6 +37,14 @@ local timings = {}    -- id -> { calls, cost, max }（秒）
 -- 聚合账：逐路明细在注销时删掉（id 单调递增，留着就是每次注册攒一行垃圾永不回收），
 -- 总数留在 totals 里，`Scheduler:Count()` 的第二返回值读它。
 local totals = { calls = 0, cost = 0, failures = 0 }
+
+--- 外部计时账（#42 收尾，2026-11-07）。Widget 的三张 watch 表（hover / show / poll）
+--- 不是本表的订阅 —— 它们各自建帧、没有 id 也没有 intervalSec —— 但同样要能在
+--- `/mui perf` 里看到。**以前它们完全不可见**，于是"找最贵的一路"这个用途只对
+--- 在册的几路成立（实测在册 3 路，而全仓自建 OnUpdate 驱动 50 处）。
+--- 为什么另开一本而不是塞进 timings：Snapshot 的行格式按订阅写死（intervalSec /
+--- everyFrame），混进字符串 key 会让 PrintStats 的 `%d` 直接抛错。数据面分开、打印时合并。
+local external = {}   -- key -> { label, calls, cost, max }（秒）
 
 local function HasWork()
     return next(subs) ~= nil or next(pending) ~= nil
