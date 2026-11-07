@@ -944,7 +944,7 @@ end
 --- 容器里的暴雪美术件已被上面 Strip 逐件压掉（region + 名单内字段），容器亮回不会漏原美术；
 --- 回滚不用另记 —— Fade 自己的 Record 存的是 Fade **之前**的原始 alpha。
 --- （QuestFrame 的 inset 懒建、躲过了根窗 Strip，所以那一处此前看着是好的 —— 同一套修复对它无操作。）
--- @param opts { bgSurface = "lost", bgAlpha = 0.965, borderKey =, thickness = }
+-- @param opts { bgSurface = "lost", bgAlpha = 0.96, borderKey =, thickness = }
 --- Resolve a named content region of a window: the `frame[suffix]` field first, then the
 --- global `<frameName>..suffix`, then the **exact global name**（暴雪三种命名混用：
 --- `CollectionsJournal.MountDisplay` 是字段；`TabardFrameMoneyBg` 带窗口前缀；
@@ -1019,7 +1019,7 @@ function Skin:Well(frame, region, opts)
     return self:Panel(region, {
         host        = frame,
         bgSurface   = opts.bgSurface or "lost",
-        bgAlpha     = opts.bgAlpha or 0.965,
+        bgAlpha     = opts.bgAlpha or 0.96,
         borderKey   = opts.borderKey,
         borderAlpha = opts.borderAlpha,
         thickness   = opts.thickness or 1,

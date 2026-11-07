@@ -38,7 +38,7 @@ local function SkinPopups()
         local popup = Skin:Need("StaticPopup" .. index)
         if popup then
             M:Dress(popup, {
-                panel = { bgAlpha = 0.97 },
+                panel = { bgAlpha = 0.96 },
                 buttons = {
                     "StaticPopup" .. index .. "Button1",
                     "StaticPopup" .. index .. "Button2",
@@ -50,15 +50,15 @@ local function SkinPopups()
     end
 
     -- 数量拆分框：顶部金色条是帧自己的美术，去掉；内容（加减号、输入框）保留。
-    M:Dress("StackSplitFrame", { panel = { bgAlpha = 0.97 }, deep = true })
+    M:Dress("StackSplitFrame", { panel = { bgAlpha = 0.96 }, deep = true })
     M:Dress({
         "StackSplitFrame.SingleItemSplitBackground",
         "StackSplitFrame.MultiItemSplitBackground",
     }, { as = "fade" })
 
-    M:Dress(POPUP_FRAMES, { panel = { bgAlpha = 0.97 }, deep = true })
-    M:Dress(READYCHECK_FRAMES, { panel = { bgAlpha = 0.97 }, deep = true })
-    M:Dress(NOTICE_FRAMES, { panel = { bgAlpha = 0.97 } })
+    M:Dress(POPUP_FRAMES, { panel = { bgAlpha = 0.96 }, deep = true })
+    M:Dress(READYCHECK_FRAMES, { panel = { bgAlpha = 0.96 }, deep = true })
+    M:Dress(NOTICE_FRAMES, { panel = { bgAlpha = 0.96 } })
 end
 
 -- 老版本客户端（12.1.5 之前）的主菜单按钮还带这些全局名，本客户端已改成匿名按钮：
@@ -90,13 +90,13 @@ end
 local function SkinGameMenu()
     local frame = Skin:Need("GameMenuFrame")
     if not frame then return end
-    M:Dress(frame, { panel = { bgAlpha = 0.97 } })
+    M:Dress(frame, { panel = { bgAlpha = 0.96 } })
     DressMenuButtons(frame)
     M:HookShow(frame, function() DressMenuButtons(frame) end)
 end
 
 local function SkinSettings()
-    M:Dress("SettingsPanel", { window = true, inset = true, panel = { bgAlpha = 0.97 }, deep = true })
+    M:Dress("SettingsPanel", { window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true })
 end
 
 -- Edit Mode: the manager bar plus the three dialogs it opens.  Without this, moving a bar leaves you
@@ -111,9 +111,9 @@ local EDITMODE_DIALOGS = {
 }
 
 local function SkinEditMode()
-    M:Dress(EDITMODE_DIALOGS, { panel = { bgAlpha = 0.97 }, deep = true })
+    M:Dress(EDITMODE_DIALOGS, { panel = { bgAlpha = 0.96 }, deep = true })
     -- 系统设置对话框的行由按钮池懒建，所以单独走 deep：显示时把行 / 滑块 / 滚动区补扫一遍。
-    M:Dress("EditModeSystemSettingsDialog", { panel = { bgAlpha = 0.97 }, deep = true })
+    M:Dress("EditModeSystemSettingsDialog", { panel = { bgAlpha = 0.96 }, deep = true })
 end
 
 local function SkinAddonList()
@@ -122,7 +122,7 @@ local function SkinAddonList()
     M:Dress("AddonList", {
         window = true,
         inset = true,
-        panel = { bgAlpha = 0.97 },
+        panel = { bgAlpha = 0.96 },
         deep = true,
     })
 end
@@ -277,7 +277,7 @@ local function MenuPlate(menu, s)
     plate:SetAllPoints(menu)
     plate:SetFrameLevel(menu:GetFrameLevel())
     pcall(plate.EnableMouse, plate, false)
-    ns.Widget:Theme(plate, { thickness = 1, bgAlpha = 0.97 })
+    ns.Widget:Theme(plate, { thickness = 1, bgAlpha = 0.96 })
     s.plate = plate
     return plate
 end
@@ -615,7 +615,7 @@ local function SkinMacroPopup()
     local popup = Skin:Need("MacroPopupFrame")
     if not popup or Marked(popup, "macroPopupSkinned") then return end
     Mark(popup, "macroPopupSkinned", true)
-    M:Dress(popup, { window = true, inset = true, panel = { bgAlpha = 0.97 }, deep = true })
+    M:Dress(popup, { window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true })
 end
 
 local function SkinMacros()
@@ -682,7 +682,7 @@ M:Panel("help", { label = "帮助", group = "系统", apply = SkinHelp,
 local function SkinColorPicker()
     M:Dress("ColorPickerFrame", {
         window = true,
-        panel = { bgAlpha = 0.97 },
+        panel = { bgAlpha = 0.96 },
         buttons = {
             "ColorPickerFrameOkay", "ColorPickerFrameCancel",
             "ColorPickerOkayButton", "ColorPickerCancelButton",

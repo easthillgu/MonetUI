@@ -105,7 +105,7 @@ local function SkinCommunities()
         window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true,
     })
     M:Dress(COMMUNITIES_DIALOGS, {
-        window = true, inset = true, panel = { bgAlpha = 0.97 }, deep = true,
+        window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true,
     })
 end
 
@@ -283,7 +283,7 @@ local function SkinChat()
     end
 
     -- Channel management: the popup list, and the two create/edit dialogs it opens.
-    M:Dress(CHAT_CHANNEL_POPUPS, { window = true, inset = true, panel = { bgAlpha = 0.97 } })
+    M:Dress(CHAT_CHANNEL_POPUPS, { window = true, inset = true, panel = { bgAlpha = 0.96 } })
     M:Dress(CHAT_CHANNEL_BUTTONS, { as = "button" })
 
     -- **A 档覆盖率补（11-05 skin-coverage 实机核对：客户端真存在、没美化）**：

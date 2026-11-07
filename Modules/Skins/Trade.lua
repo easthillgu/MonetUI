@@ -184,7 +184,7 @@ local function SkinMerchant()
                     Skin:Strip(cs[i])
                 end
             end
-            Skin:Panel(box, { bgSurface = "lost", bgAlpha = 0.965, thickness = 1, borderAlpha = 0, host = root })
+            Skin:Panel(box, { bgSurface = "lost", bgAlpha = 0.96, thickness = 1, borderAlpha = 0, host = root })
         end
     end
     -- 金框的另一层真身（2026-11-02 实机判例）：MoneyInset / ExtraCurrencyInset 之外，
@@ -205,7 +205,7 @@ local function SkinMerchant()
     local buyback = Skin:Need("MerchantBuyBackItem")
     if buyback and root then
         Skin:Strip(buyback)
-        Skin:Panel(buyback, { bgSurface = "lost", bgAlpha = 0.965, thickness = 1, borderAlpha = 0, host = root })
+        Skin:Panel(buyback, { bgSurface = "lost", bgAlpha = 0.96, thickness = 1, borderAlpha = 0, host = root })
     end
 
     -- **格子边框 + 回购格小图（11-05 作者报"回购物品的按钮比修理/全修/出售大"）**：
@@ -226,13 +226,13 @@ local function SkinMerchant()
         local tile = Skin:Need("MerchantItem" .. i)
         if tile and root then
             Skin:Strip(tile)
-            Skin:Panel(tile, { bgSurface = "lost", bgAlpha = 0.965, thickness = 1, borderAlpha = 0, host = root })
+            Skin:Panel(tile, { bgSurface = "lost", bgAlpha = 0.96, thickness = 1, borderAlpha = 0, host = root })
         end
     end
     local buyback = Skin:Need("MerchantBuyBackItem")
     if buyback and root then
         Skin:Strip(buyback)
-        Skin:Panel(buyback, { bgSurface = "lost", bgAlpha = 0.965, thickness = 1, borderAlpha = 0, host = root })
+        Skin:Panel(buyback, { bgSurface = "lost", bgAlpha = 0.96, thickness = 1, borderAlpha = 0, host = root })
     end
 
     -- 商品格是**首次显示才创建**的（11-05 实测：登录 Apply 时 `MerchantItem1ItemButton` 还不存在，

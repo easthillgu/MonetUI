@@ -15,7 +15,7 @@ local Skin = ns.Skin
 -- 阶梯一个值一个语义，多出来的小数点只会让下一个人猜。
 -- 声明摆在文件最前面：Show 回调也要用它，而 Lua 的 local 必须先声明后引用 —— 摆在下面不会报错，
 -- 只会让引用它的那一行拿到全局 nil（AGENTS 记过这条静默失败）。
-local READ_ALPHA = 0.965
+local READ_ALPHA = 0.96
 
 -- 任务对话框分两档底色（2026-11-01 B 档）：**窗口那一层（frame.bg）**用皮肤背板（Skin:Panel，
 -- 走阶梯 panel 档 #1c1c1c + 主题边框），**正文凹槽那一层（insetFrame.bg）**用 surface `lost`
