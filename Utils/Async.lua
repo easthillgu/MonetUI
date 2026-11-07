@@ -74,7 +74,7 @@ local function EnsureDriver()
             if NowMs() >= frameDeadline then break end
         end
         if #jobs == 0 then StopDriver() end
-    end)
+    end, "异步:任务驱动")
 end
 
 --- 通用作业：body 是个会在合适处调 Checkpoint() 的函数，用协程切片跑。

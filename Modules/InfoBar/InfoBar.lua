@@ -163,7 +163,7 @@ local function Kick()
     if not bar then return end
     if blockAlpha ~= targetBlockAlpha or barAlpha ~= targetBarAlpha or pulseColor then
         if not infobarSubId then
-            infobarSubId = Scheduler:EveryFrame(function(elapsed) M:Tick(elapsed) end)
+            infobarSubId = Scheduler:EveryFrame(function(elapsed) M:Tick(elapsed) end, "信息条:淡入淡出")
         end
     end
 end

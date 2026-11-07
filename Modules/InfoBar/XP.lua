@@ -404,7 +404,7 @@ local function StartAnim(spec)
     if not root then return end
     anim = spec
     anim.t = 0
-    if not xpSubId then xpSubId = Scheduler:EveryFrame(Tick) end
+    if not xpSubId then xpSubId = Scheduler:EveryFrame(Tick, "信息条:经验动画") end
 end
 
 --- 涨了：从当前画到的值滑到新值。动画中途又涨一次就从半路接着滑。

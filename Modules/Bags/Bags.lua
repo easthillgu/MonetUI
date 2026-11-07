@@ -1355,7 +1355,7 @@ local function StartBlizzardGuard()
         elseif shown then
             M:Toggle(false)
         end
-    end)
+    end, "背包:暴雪窗口看守")
     -- 脱战后补一刀：战斗中跳过的鼠标屏蔽在这里补做（受保护子按钮在战斗里动不得）。
     EventBus:Register("PLAYER_REGEN_ENABLED", function()
         if not ns:IsModuleEnabled("Bags") then return end
@@ -1426,7 +1426,7 @@ local function StartPolling()
                     Rebuild("bank")
                 end
             end
-        end)
+        end, "背包:格数轮询")
     end
 end
 
@@ -1505,7 +1505,7 @@ function M:Initialize()
         coalesceSubId = Scheduler:EveryFrame(function()
             FlushMarks()
             if coalesceSubId then Scheduler:Unregister(coalesceSubId); coalesceSubId = nil end
-        end)
+        end, "背包:重建合并")
     end
 
     local function Mark()

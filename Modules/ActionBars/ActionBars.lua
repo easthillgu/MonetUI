@@ -1061,7 +1061,7 @@ local function WatchPages(show)
                         RefreshBar(bar)
                     end
                 end
-            end)
+            end, "动作条:翻页看守")
         end
     else
         if pageSubId then Scheduler:Unregister(pageSubId); pageSubId = nil end

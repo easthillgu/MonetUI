@@ -101,7 +101,75 @@ function checkParams(params) {
 // ---------- 调用形态 ----------
 // EveryFrame(fn) / EveryFrame(function(...)) / Every(ms, fn) / Every(ms, function(...))
 
-const NAMED_RE = /\bScheduler\s*:\s*Every(?:Frame)?\s*\(\s*(?:[\w.()\s]+?,\s*)?([A-Za-z_][\w.:]*)\s*\)/g;
+// ---------- R4：标签覆盖 ----------
+// 把注释和字符串内容抹成空格（保留引号），这样括号匹配不会被标签/注释里的括号带偏。
+function maskSource(src) {
+  const out = src.split("");
+  const strings = []; // { start, end } 字符串字面量（含引号）
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    if (src.startsWith("--", i)) {
+      let j = src.indexOf("\n", i);
+      if (j < 0) j = n;
+      for (let k = i; k < j; k++) if (out[k] !== "\n") out[k] = " ";
+      i = j;
+      continue;
+    }
+    const c = src[i];
+    if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < n) {
+        if (src[j] === "\\") { j += 2; continue; }
+        if (src[j] === c) { j += 1; break; }
+        if (src[j] === "\n") break;
+        j += 1;
+      }
+      strings.push({ start: i, end: j });
+      for (let k = i + 1; k < j - 1; k++) out[k] = " ";
+      i = j;
+      continue;
+    }
+    i += 1;
+  }
+  return { masked: out.join(""), strings };
+}
+
+function checkTags(file, violations) {
+  const src = fs.readFileSync(file, "utf8");
+  const rel = path.relative(ROOT, file);
+  const { masked } = maskSource(src);
+  const re = /\bScheduler\s*:\s*(Every|EveryFrame)\s*\(/g;
+  let m;
+  while ((m = re.exec(masked))) {
+    // 跳过定义本身：`function Scheduler:Every(intervalMs, fn, label)`
+    const head = masked.slice(0, m.index).replace(/\s+$/, "");
+    if (head.endsWith("function")) continue;
+    const open = m.index + m[0].length - 1;
+    let depth = 0;
+    let close = -1;
+    for (let i = open; i < masked.length; i++) {
+      if (masked[i] === "(") depth += 1;
+      else if (masked[i] === ")") {
+        depth -= 1;
+        if (depth === 0) { close = i; break; }
+      }
+    }
+    if (close < 0) continue;
+    // 标签是最后一个实参：右括号前应当是闭合引号（字符串内容已被抹成空格，引号还在）
+    const before = src.slice(open + 1, close);
+    if (!/["']\s*$/.test(before)) {
+      violations.push({
+        file: rel,
+        line: lineOf(src, m.index),
+        rule: "R4",
+        detail: `${m[1]} 缺显式标签 —— 本客户端没有 debug 表，标签是唯一能说清编号是谁的东西`,
+      });
+    }
+  }
+}
+
+const NAMED_RE = /\bScheduler\s*:\s*Every(?:Frame)?\s*\(\s*(?:[\w.()\s]+?,\s*)?([A-Za-z_][\w.:]*)\s*(?:,\s*(?:"[^"]*"|'[^']*')\s*)?\)/g;
 const INLINE_RE = /\bScheduler\s*:\s*Every(?:Frame)?\s*\(\s*[^()]*?function\s*([\w.:]*)\s*\(([^)]*)\)/g;
 
 function checkFile(file, violations, notes) {
@@ -165,7 +233,10 @@ function checkFile(file, violations, notes) {
 const files = collectLua(ROOT, []);
 const violations = [];
 const notes = [];
-for (const f of files) checkFile(f, violations, notes);
+for (const f of files) {
+  checkFile(f, violations, notes);
+  checkTags(f, violations);
+}
 
 console.log(`scheduler-callback-probe · 扫描 ${files.length} 个 lua 文件 · 根目录 ${ROOT}`);
 

@@ -107,7 +107,7 @@ local function Fill(entry)
     -- 提醒类（战斗进出）用 entry.hold 覆盖停留时间，不跟普通通知的 5 秒走。
     holdFor = entry.hold or math.max(1, tonumber(M:GetSetting("duration")) or 5)
     phase, t = "in", 0
-    if not toastSubId then toastSubId = Scheduler:EveryFrame(M.Tick) end
+    if not toastSubId then toastSubId = Scheduler:EveryFrame(M.Tick, "提示条:动画") end
 end
 
 local function Next()

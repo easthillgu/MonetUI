@@ -64,7 +64,7 @@ local function EnsurePetCooldownDriver()
         elseif _G.PetActionBar_UpdateCooldowns then
             pcall(_G.PetActionBar_UpdateCooldowns)
         end
-    end)
+    end, "动作条:宠物冷却")
 end
 
 -- 宠物条本体。

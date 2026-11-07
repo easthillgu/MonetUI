@@ -157,7 +157,7 @@ local function ParkWatch(frame)
     parkedList[#parkedList + 1] = frame
 
     if parkSubId then return end
-    parkSubId = Scheduler:Every(500, KeepParked)
+    parkSubId = Scheduler:Every(500, KeepParked, "动作条:暴雪框停靠")
 end
 
 local function Park(name)

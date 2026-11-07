@@ -248,6 +248,19 @@ function DevTools:Perf(arg)
         else
             ns:Print("这个版本的 Scheduler 没有 ProbeDebug。")
         end
+        -- 标签覆盖：本客户端没有 debug 表，标签是唯一能说清编号的东西。
+        -- 覆盖不满说明有注册点没写标签（闸门 R4 也会在提交前拦下）。
+        if type(S.Snapshot) == "function" then
+            local okR, r = pcall(S.Snapshot, S)
+            if okR and type(r) == "table" then
+                local named, bare = 0, {}
+                for i = 1, #r do
+                    if r[i].tag then named = named + 1 else bare[#bare + 1] = "#" .. tostring(r[i].id) end
+                end
+                ns:Print(("标签覆盖：%d/%d 路%s"):format(
+                    named, #r, #bare > 0 and ("　缺：" .. table.concat(bare, " ")) or ""))
+            end
+        end
     end
 
     local totals, rows
@@ -311,10 +324,10 @@ function DevTools:Perf(arg)
         local row = rows[i]
         -- 峰值用六位：单次调用常在几十微秒级，三位小数会全打成 0.000s（11-05 实测），
         -- 而"找最贵的一路"恰恰要看这个数。
-        ns:Print(("  #%s %s · 调用 %s · 累计 %.4fs · 峰值 %.6fs · 失败 %s%s"):format(
+        ns:Print(("  #%s %s · 调用 %s · 累计 %.4fs · 峰值 %.6fs · 失败 %s   %s"):format(
             tostring(row.id), row.everyFrame and "每帧" or (("%.3fs"):format((row.intervalSec or 0))),
             tostring(row.calls), (row.cost or 0), (row.max or 0), tostring(row.failures),
-            row.where and ("  @ " .. row.where) or ""))
+            row.tag or "（未标名）"))
     end
     if #rows > PRINT_CAP then
         ns:Print(("  …另有 %d 路，全量在账本"):format(#rows - PRINT_CAP))

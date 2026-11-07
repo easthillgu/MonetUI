@@ -147,7 +147,7 @@ end
 local pinsSubId
 local function EnsureDriver()
     if pinsSubId then return end
-    pinsSubId = Scheduler:Every(500, Sweep)
+    pinsSubId = Scheduler:Every(500, Sweep, "小地图:图钉扫描")
 end
 
 --- 每次套皮都调（幂等）：找库、启动驱动、把现有 pin 扫一遍。

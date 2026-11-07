@@ -306,7 +306,7 @@ local function EnsureHoverDriver()
                 end
             end
         end
-    end)
+    end, "控件:悬停轮询")
 end
 
 --- 轮询式 hover。onEnter/onLeave/onDown/onUp 都只收到 frame。
@@ -351,7 +351,7 @@ local function EnsureShowDriver()
                 st.shown = shown
             end
         end
-    end)
+    end, "控件:显示轮询")
 end
 
 function Widget:ShowWatch(frame, fn)
@@ -423,7 +423,7 @@ function Widget:PollWatch(frame, fn, interval)
                 end
             end
         end
-    end)
+    end, "控件:自定轮询")
     return entry
 end
 
@@ -1567,7 +1567,7 @@ SyncPulse = function()
             pulseSubId = nil
         end
     elseif not pulseSubId then
-        pulseSubId = Scheduler:EveryFrame(PulseTick)
+        pulseSubId = Scheduler:EveryFrame(PulseTick, "控件:呼吸边框")
     end
 end
 
@@ -1904,7 +1904,7 @@ function Widget:PixelGlow(frame, opts)
     end
 
     Widget:RefreshPixelGlow(frame)
-    if st.animated and not pixelGlowId then pixelGlowId = Scheduler:EveryFrame(PixelGlowTick) end
+    if st.animated and not pixelGlowId then pixelGlowId = Scheduler:EveryFrame(PixelGlowTick, "控件:像素环") end
 end
 
 --- 停掉像素环：方块藏起来，登记也撤掉。

@@ -811,7 +811,7 @@ local function SyncJobs()
     local needContent = enrich or idsByAlt or neutralText
 
     if needFrame then
-        if not placeJob then placeJob = ns.Scheduler:EveryFrame(PlaceTick) end
+        if not placeJob then placeJob = ns.Scheduler:EveryFrame(PlaceTick, "提示框:跟随") end
     elseif placeJob then
         ns.Scheduler:Unregister(placeJob)
         placeJob = nil
@@ -820,7 +820,7 @@ local function SyncJobs()
     end
 
     if needContent then
-        if not contentJob then contentJob = ns.Scheduler:Every(CONTENT_INTERVAL_MS, RedrawNow) end
+        if not contentJob then contentJob = ns.Scheduler:Every(CONTENT_INTERVAL_MS, RedrawNow, "提示框:内容重绘") end
     elseif contentJob then
         ns.Scheduler:Unregister(contentJob)
         contentJob = nil

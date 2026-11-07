@@ -131,7 +131,7 @@ local function EnsureDropCatcher(bar)
             catcher.holding = active
             pcall(catcher.EnableMouse, catcher, active)
         end
-    end)
+    end, "动作条:拖放接收器")
     dropCatchers[bar] = catcher
     return catcher
 end

@@ -372,7 +372,7 @@ local function EnsureTicker()
     if tickerSubId then return end
     tickerSubId = Scheduler:Every(1000, function()
         if enabled then SuppressBlizzard() end
-    end)
+    end, "任务栏:刷新")
 end
 
 function M:Skin()

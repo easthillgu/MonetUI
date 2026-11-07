@@ -1300,7 +1300,7 @@ local function EnsureTabDriver(Skin)
         for tab in pairs(tabWatch) do
             pcall(Skin.UpdateTabState, Skin, tab)
         end
-    end)
+    end, "皮肤:Tab指示")
 end
 
 local function WatchTab(Skin, tab)
@@ -1640,7 +1640,7 @@ local function EnsureArrowDriver()
                 if ok and type(a) == "number" and a > 0 then pcall(reg.SetAlpha, reg, 0) end
             end
         end
-    end)
+    end, "皮肤:箭头")
 end
 
 function Skin:ScrollArrowButton(button)
@@ -2201,7 +2201,7 @@ local function EnsureCropDriver()
                 pcall(icon.SetTexCoord, icon, c[1], c[2], c[3], c[4])
             end
         end
-    end)
+    end, "皮肤:裁切")
 end
 
 function Skin:CropIcon(icon, x0, x1, y0, y1)
@@ -2554,7 +2554,7 @@ local function EnsureQualityDriver()
             -- 商人 / 邮件那些同走这条扫描的窗口一个字节都不多写。
             if entry.ilvl or entry.cd then UpdateSlotInfo(btn, entry) end
         end
-    end)
+    end, "皮肤:品质染色")
 end
 
 --- Draw a quality-coloured 1px border around a flattened item button.  The border starts

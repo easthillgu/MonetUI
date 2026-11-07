@@ -18,6 +18,9 @@
 --      `(self, elapsed)`。2026-11-07 判例：Cursor 把 OnUpdate 换成 EveryFrame 时签名没跟着改，
 --      `_` 吃掉 dt、`elapsed` 恒 nil、`clock` 永不前进，拖尾整条消失、零报错零卡顿。
 --      闸门：`node tools/scheduler-callback-probe.js`（R1 形参 ≤1 / R2 冒号方法不许裸名传）。
+--   5) 注册必须带显式标签：`Every(ms, fn, "模块:用途")`。本客户端没有 `debug` 表（1.60.1 实测
+--      `debug=false`），拿不到源码位置，标签是 `/mui perf` 里唯一能回答「#5 是谁」的东西。
+--      同一条闸门的 R4 会拦下匿名注册。
 
 local ADDON_NAME, ns = ...
 
@@ -29,7 +32,8 @@ ns.Scheduler = Scheduler
 ---（凭证：输出里没有新增的 `@ 文件:行` 字段）。有版本号就不必靠猜字段。
 ---   1 = 只有订阅明细 + 聚合
 ---   2 = 加外部驱动账（Profile / ExternalSnapshot）+ Snapshot 行带 where 来源
-Scheduler.diagRev = 2
+---   3 = where 换成注册处显式传的 tag（本客户端无 debug 表，自动取源不可行，见下）
+Scheduler.diagRev = 3
 
 local masterFrame = nil
 local masterRunning = false
@@ -187,12 +191,14 @@ end
 --- 所以在这里换算一次存成秒。以前直接把 250 当阈值存进去，和秒级累加器比，
 --- 等于"250 秒一次"：姓名板守卫和鼠标提示兜底扫描都写的是 250，实际几分钟才跑一拍，
 --- 而且不报错、看起来还在工作（AGENTS：单位混用的症状不是"差一点"）。
---- 注册点来源（`文件:行`），只用于诊断：`/mui perf` 里 `#5` 这种编号本身说明不了任何事
+--- 订阅标签，只用于诊断：`/mui perf` 里 `#5` 这种编号本身说明不了任何事
 ---（2026-11-07 实机：#5 640 次调用累计 0.70s、平均 1.1ms/次，全仓没人知道它是谁）。
---- 实现走「对**函数**取定义位置」而不是「取栈层」：客户端 1.60 实测
---- `debug.getinfo(2, "Sl")` 拿不到调用者（where 全 nil），按函数取则拿到闭包的定义行 ——
---- 对定位一样够用（甚至更准：指向回调本体，而不是注册那一句）。
---- 仍然全程 pcall：拿不到就留 nil，绝不让诊断把注册流程带崩。
+---
+--- 为什么最终走「注册处显式传标签」而不是自动取源码位置：本客户端（1.60.1 / build 70862）
+--- **根本没有 `debug` 表** —— `/mui perf diag` 实测 `debug=false · getinfo=false`。
+--- 先前两版分别试过「按栈层取」和「按函数取」，都只返回 nil，白花了两轮实机验证。
+--- 所以标签改由调用点写：`Scheduler:Every(100, fn, "控件:悬停轮询")`。
+--- 下面 WhereOf 只作为「有 debug 的客户端」的兜底，本客户端恒 nil，不要再指望它。
 local function WhereOf(fn)
     if type(debug) ~= "table" or type(debug.getinfo) ~= "function" then return nil end
     local ok, info = pcall(debug.getinfo, fn, "S")
@@ -230,7 +236,7 @@ function Scheduler:ProbeDebug()
     return out
 end
 
-function Scheduler:Every(intervalMs, fn)
+function Scheduler:Every(intervalMs, fn, label)
     if type(fn) ~= "function" then return nil end
     local id = nextSubId
     nextSubId = nextSubId + 1
@@ -239,7 +245,7 @@ function Scheduler:Every(intervalMs, fn)
         fn = fn,
         acc = 0,
         active = true,
-        where = WhereOf(fn),
+        tag = label or WhereOf(fn),
     }
     if ticking then
         -- 遍历中插键是未定义行为：延后一拍生效（纪律 2）。
@@ -251,8 +257,8 @@ function Scheduler:Every(intervalMs, fn)
     return id
 end
 
-function Scheduler:EveryFrame(fn)
-    return self:Every(0, fn)
+function Scheduler:EveryFrame(fn, label)
+    return self:Every(0, fn, label)
 end
 
 function Scheduler:Unregister(id)
@@ -351,7 +357,7 @@ function Scheduler:Snapshot()
             cost = st.cost,
             max = st.max,
             failures = failures[id] or 0,
-            where = sub.where,
+            tag = sub.tag,
         }
     end
     table.sort(rows, function(a, b) return a.cost > b.cost end)
@@ -374,11 +380,11 @@ function Scheduler:PrintStats()
     for i = 1, #rows do
         local row = rows[i]
         -- 峰值六位小数：单次常在几十微秒，三位会全打成 0.000s（11-05 实测）
-        print(("  #%d %s · 调用 %d · 累计 %0.4fs · 峰值 %0.6fs · 失败 %d%s"):format(
+        print(("  #%d %s · 调用 %d · 累计 %0.4fs · 峰值 %0.6fs · 失败 %d   %s"):format(
             row.id,
             row.everyFrame and "每帧" or ("%0.3fs"):format(row.intervalSec),
             row.calls, row.cost, row.max, row.failures,
-            row.where and ("  @ " .. row.where) or ""))
+            row.tag or "（未标名）"))
     end
     local ext = self:ExternalSnapshot()
     if #ext > 0 then

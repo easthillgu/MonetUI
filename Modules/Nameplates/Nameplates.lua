@@ -921,7 +921,7 @@ function M:SyncGuard()
             guardJob = nil
         end
     elseif not guardJob then
-        guardJob = ns.Scheduler:Every(GUARD_INTERVAL_MS, GuardTick)
+        guardJob = ns.Scheduler:Every(GUARD_INTERVAL_MS, GuardTick, "姓名板:守卫")
     end
 end
 

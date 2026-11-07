@@ -87,12 +87,23 @@ check("PrintStats 不抛错（含外部驱动段）", ok, err)
 check("Profile 收到非函数原样返回", S:Profile("x", "x", nil) == nil)
 check("Profile 无 key 原样返回", S:Profile(nil, "x", function() end) ~= nil)
 
--- 6) ResetCosts：清零外部账与聚合，不动订阅
-local hadSubId = S:Every(200, function() end)
+-- 6) 订阅标签：注册时显式传的 label 要原样落到 Snapshot 行（本客户端无 debug 表，
+--    标签是唯一能说清「#5 是谁」的东西，不能丢）
+local hadSubId = S:Every(200, function() end, "探针:带标签")
+local untaggedId = S:Every(200, function() end)
 local subRows = S:Snapshot()
-check("注册点来源被记下（R: where 带文件名与行号）",
-  subRows[1] and type(subRows[1].where) == "string" and subRows[1].where:find("%.lua:%d+") ~= nil,
-  subRows[1] and subRows[1].where)
+local tagged, untagged
+for i = 1, #subRows do
+  if subRows[i].id == hadSubId then tagged = subRows[i] end
+  if subRows[i].id == untaggedId then untagged = subRows[i] end
+end
+check("显式标签落到 Snapshot 行", tagged and tagged.tag == "探针:带标签", tagged and tagged.tag)
+-- 不传标签时：有 debug 的客户端回落到 `文件:行`，没有（本客户端 1.60 连 debug 表都没有）
+-- 就留 nil，打印侧兜底成「（未标名）」。
+local fallbackOk = (untagged ~= nil) and (untagged.tag == nil
+  or (type(untagged.tag) == "string" and untagged.tag:find("%.lua:%d+") ~= nil))
+check("不传标签：回落 文件:行 或留 nil，不报错", fallbackOk, untagged and tostring(untagged.tag))
+S:Unregister(untaggedId)
 S:ResetCosts()
 local _, st = S:Count()
 check("ResetCosts 清空外部账", #S:ExternalSnapshot() == 0, #S:ExternalSnapshot())

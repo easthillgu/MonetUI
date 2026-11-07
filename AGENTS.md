@@ -434,7 +434,11 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   白查了两轮缓冲结构。迁移三件事必须一起做：换驱动 → 改签名 → 把 stop 侧的 `SetScript(..., nil)`
   换成 `Scheduler:Unregister(id)`（id 存模块级局部，`if not id then id = ... end` 防重复注册）。
   `function M:Tick(elapsed)` 这种冒号方法**不许**裸名传给 Scheduler（`elapsed` 会被当 `self` 吃掉）。
-  闸门：`node tools/scheduler-callback-probe.js`（形参 ≤1 + 冒号方法检查，退出码 0 才算完）。
+  **注册时必须带显式标签**：`Scheduler:Every(100, fn, "控件:悬停轮询")`。
+  本客户端（1.60.1 / build 70862）**没有 `debug` 表**（`/mui perf diag` 实测 `debug=false · getinfo=false`），
+  自动取源码位置这条路不存在 —— 先后试过「按栈层取」和「按函数取」，都只返回 nil，白花两轮实机。
+  没有标签，`/mui perf` 就只有 `#5` 这种编号，全仓没人知道它是谁（实机：#5 640 次调用累计 0.70s）。
+  闸门：`node tools/scheduler-callback-probe.js`（形参 ≤1 + 冒号方法 + 标签覆盖，退出码 0 才算完）。
   自测 headless 时也要按真实投参方式 `fn(dt)` 驱动 —— 写成 `fn(nil, dt)` 会把这类 bug 遮掉。
 - **按需挂 / 摘的每帧驱动用 `Scheduler:Profile(key, label, fn)` 包一层**（2026-11-07）：
   施法条、名板投射条、属性面板、信息栏逐块、滚动条拖动这些**只在干活时**挂 `SetScript("OnUpdate")`

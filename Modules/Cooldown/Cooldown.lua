@@ -374,7 +374,7 @@ local function EnsureDriver()
         for cd, state in pairs(attached) do
             if state then Tick(cd, dt) end
         end
-    end)
+    end, "冷却:扫描")
 end
 
 --- 外部（ActionBars 的 PaintCooldown）拿到明文 start/duration 时告诉我们，

@@ -582,7 +582,7 @@ local function QueueUpdate()
         if buffSubId then Scheduler:Unregister(buffSubId); buffSubId = nil end
         pending = false
         M:Update()
-    end)
+    end, "光环:布局重排")
 end
 
 function SuppressBlizzard()

@@ -242,7 +242,7 @@ function M:Apply()
 
     if not (enabled and host) then return end
     if trailOn or glowOn then
-        if not cursorSubId then cursorSubId = Scheduler:EveryFrame(OnUpdate) end
+        if not cursorSubId then cursorSubId = Scheduler:EveryFrame(OnUpdate, "光标:拖尾") end
     else
         if cursorSubId then Scheduler:Unregister(cursorSubId); cursorSubId = nil end
         HideAll()
