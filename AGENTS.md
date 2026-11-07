@@ -446,8 +446,17 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   —— 而它们恰恰是战斗中最密的每帧路径）。`Profile` 返回的壳不改实参、不吞错、不改返回值，只往
   `external` 账记一笔（与订阅表分开：`Snapshot` 的行格式按 `intervalSec` 写死，字符串 key 混进去
   会让 `PrintStats` 的 `%d` 抛错）。`key` 要全局唯一且有意义（`infobar:<块名>` / `nameplates:cast`
-  / `unitframes:cast` / `config:scroll`）；同一 key 的多实例会合成一路（名板所有 plate 共用
+  / `unitframes:cast` / `config:scroll`）；  同一 key 的多实例会合成一路（名板所有 plate 共用
   `nameplates:cast` 是有意的）。闸门：`lua tools/external-ledger-probe.lua`。
+- **默认画面快照的对齐顺序不许反**（2026-11-08）：`Tweaks:Initialize` 必须是
+  `Apply()` → stuck 遗留检查 → `AlignVision()`。三个理由：①对齐排在 Apply 之前，
+  开着的开关会被快照顶掉，玩家拨开关没反应；②对齐必须**跳过开关开着的条目**
+  （`noWeather` 写 0 而快照要 3，两边每登录各写一次，谁赢全看顺序）；③对齐排在
+  stuck 检查之后，否则「开关关但值没还原」这个查灰屏的关键信号会被快照自己抹掉。
+  出厂快照值取自 `WTF/Config.wtf` 的落盘读数，可能比游戏内当前值旧 —— 所以它只是
+  seed：实机值一律 `/mui tweaks snapshot` 重采（逐条打「旧 → 新」供核对），
+  没证据的条目（如 `ResampleQuality`）留空、对齐时跳过，**不许瞎填一个数**。
+  闸门：`lua tools/tweaks-defaults-probe.lua`。
 - 小步改动、可回滚；不顺手重构无关代码。
 - **多行文本替换一律用 `split(/\r?\n/)` + `splice`，严禁 `string.replace()` 做多行匹配。** 本仓文件混用 CRLF 与 LF，源码里写死的 `\n` 字面量跟 CRLF 文件比不上，`replace()` 静默失配，报错信息还只说"未找到"，看不出是行尾问题。写回时先探测原行尾（`raw.includes('\r\n')`），切片用 `split(/\r?\n/)`，拼接用同一个 `eol`。
 

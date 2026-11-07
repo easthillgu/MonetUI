@@ -9,6 +9,10 @@
 -- 名单来自 2026-11-06 的常用优化截图。`nameplateMaxDistance`（姓名板可视距离）已由姓名板模块
 -- 负责（Core.lua 的 viewDistance），这里不重复。**默认全关**：这些是画质 / 手感取向的改动，
 -- 开哪条是玩家的选择，不是缺省。
+--
+-- 2026-11-08 作者拍板：另加一层「默认画面快照」—— 把当时调好的整套观感 CVar 设为出厂默认，
+-- 每次登录自动对齐。快照只裁决插件不管的 CVar，开着的开关优先级更高（见 AlignVision）。
+-- 记录当前画面用 /mui tweaks snapshot，查看 / 停掉自动对齐用 /mui tweaks defaults。
 
 local ADDON_NAME, ns = ...
 
@@ -41,6 +45,36 @@ local function TweakByKey(key)
     end
     return nil
 end
+
+-- 出厂默认「画面快照」（2026-11-08 作者拍板：把当时调好的那套设为默认，登录自动对齐）。
+-- 值来自本机 `_forever_/WTF/Config.wtf` 的实盘读数，不是猜的、也不是客户端默认值：
+--   Brightness 55 / Contrast 75 / ffxGlow 0 / particleDensity 80 / Gamma 1 /
+--   RenderScale 1 / ResampleAlwaysSharpen 1 / ffxDeath 0 / weatherDensity 3 /
+--   volumefog 未写 = 默认 1
+-- ⚠ Config.wtf 是落盘值，可能比游戏内当前值旧（刚 /console 改过还没写盘）。所以这只是 seed：
+--   进游戏敲一次 `/mui tweaks snapshot` 用实机值覆盖，命令会逐条打「旧 → 新」供核对。
+--   没证据的条目（ResampleQuality）留空，对齐时跳过，等 snapshot 补 —— 不瞎填一个数。
+-- 快照只裁决「插件不管」的 CVar；开关开着的条目一律交给开关，见 AlignVision。
+local FACTORY_VISION = {
+    gamma                 = "1",
+    brightness            = "55",
+    contrast              = "75",
+    ResampleAlwaysSharpen = "1",
+    particleDensity       = "80",
+    volumefog             = "1",
+    ffxGlow               = "0",
+    ffxDeath              = "0",
+    weatherDensity        = "3",
+}
+
+-- 出厂默认开关组合（同上，来自实盘 MonetUI.lua 的 db.tweaks：5 开 4 关）。
+-- 只用于**新存档**（db.tweaks 还不存在时）；老存档已经有玩家显式拨过的开关，一个键都不动。
+-- 稀疏存：关着的键不写，IsOn 判 nil 就是关，跟 Core 的 StripDefaults 不冲突（这个表不在 DEFAULTS 里）。
+local DEFAULT_SWITCHES = {
+    cameraZoom = true, lootRange = false, combatText = true, questGlow = true,
+    noDeathGray = true, sharpen = false, noWeather = true,
+    fewParticles = false, noFog = false,
+}
 
 -- 每个 CVar 一行账，`/mui tweaks status` 读的就是它。
 local cvarLedger = {}
@@ -170,7 +204,13 @@ end
 function M:Settings()
     local db = ns:DB()
     if type(db) ~= "table" then return {} end
-    if type(db.tweaks) ~= "table" then db.tweaks = {} end
+    if type(db.tweaks) ~= "table" then
+        db.tweaks = {}
+        -- 新存档铺一遍出厂开关组合；老存档原样保留（玩家自己拨过的不许被默认顶回去）。
+        for k, v in pairs(DEFAULT_SWITCHES) do
+            if v then db.tweaks[k] = true end
+        end
+    end
     return db.tweaks
 end
 
@@ -284,6 +324,14 @@ function M:Initialize()
             :format(#stuck, table.concat(stuck, ", ")))
         ns:Print("  旧版没把原值记下来造成的。一条命令全推回去：/mui tweaks restore")
     end
+
+    -- 默认画面对齐放在最后（2026-11-08）：
+    -- ① 必须在 Apply 之后 —— 开着的开关才会赢过快照；
+    -- ② 必须在 stuck 检查之后 —— 否则快照把值一写，这条诊断就被自己抹掉了
+    --    （「开关关但值没还原」是查灰屏的关键信号，不能因为加了默认就看不见）。
+    -- AlignVision 定义在文件后半，这里走 self: 表查找：chunk 整份加载完才轮到 Initialize，
+    -- 不会踩「引用了还没声明的 local」那种静默失效。
+    self:AlignVision()
 end
 
 function M:SetEnabled(value)
@@ -329,6 +377,63 @@ local function SameValue(a, b)
     local na, nb = tonumber(tostring(a)), tonumber(tostring(b))
     if na ~= nil and nb ~= nil then return na == nb end
     return tostring(a) == tostring(b)
+end
+
+--- 默认画面快照的存档（`db.tweakDefaults`）。
+--- **不进 Core.DEFAULTS**：那样 StripDefaults 会在落盘前把「等于默认值」的键删掉，
+--- 而且改出厂值得 bump schema + Migrate 才能传给老玩家。这里自己管：缺什么补什么，
+--- 玩家用 `/mui tweaks snapshot` 覆盖后就以他的为准。
+--- @return table { vision = { [cvar]=value }, switches = {...}, auto = boolean }
+local function VisionStore()
+    local db = ns:DB()
+    if type(db) ~= "table" then return { vision = {}, auto = true } end
+    if type(db.tweakDefaults) ~= "table" then db.tweakDefaults = {} end
+    local store = db.tweakDefaults
+    if type(store.vision) ~= "table" then
+        store.vision = {}
+        for k, v in pairs(FACTORY_VISION) do store.vision[k] = v end
+    end
+    if store.auto == nil then store.auto = true end  -- 作者拍板：登录自动对齐
+    return store
+end
+
+--- 登录自动对齐：把快照写回「插件不管」的 CVar。
+---
+--- 两条纪律（2026-11-08）：
+--- ① 顺序在 Apply() **之后** —— Apply 会按开关写目标值 / 还原原值，快照最后裁决。
+---    反过来（快照先、Apply 后）玩家拨开关那一拍会被 Apply 顶掉，开关看起来失灵。
+--- ② **跳过开关开着的条目** —— 那是玩家显式表达的画面取向，快照不许抢。
+---    否则 noWeather 开着写 0、快照又要 3，每次登录两边各写一次，谁赢全看顺序。
+--- 只写确实不同的值；零写入不打印，避免每次登录刷一行。
+--- @param quiet boolean|nil true = 不打印汇总（命令里自己打）
+--- @param force boolean|nil true = 忽略 auto 开关（`/mui tweaks defaults apply` 用）
+--- @return number 实际写入条数, number 由开关接管的条数
+function M:AlignVision(quiet, force)
+    local store = VisionStore()
+    if store.auto == false and not force then return 0, 0 end
+    local snap = store.vision
+    local wrote, skipped = 0, 0
+    for i = 1, #VISION do
+        local v = VISION[i]
+        if v.key and self:IsOn(v.key) then
+            skipped = skipped + 1
+        else
+            local want = snap[v.cvar]
+            if want ~= nil then
+                local cur = ReadCVar(v.cvar)
+                -- 读不到 / 是机密值就跳过：不比较、不写，也不让 WriteCVar 落一笔"空转"警告。
+                if cur ~= nil and not Secrets.IsSecret(cur) and not SameValue(cur, want) then
+                    if WriteCVar(v.cvar, want) then wrote = wrote + 1 end
+                end
+            end
+        end
+    end
+    if not quiet and wrote > 0 then
+        ns:Print(("|cff00ff00默认画面对齐|r：写入 %d 条（另有 %d 条由开着的开关接管）。")
+            :format(wrote, skipped))
+        ns:Print("  想把新画面留作默认：/mui tweaks snapshot　｜　不想自动对齐：/mui tweaks defaults off")
+    end
+    return wrote, skipped
 end
 
 function M:Vision()
@@ -440,6 +545,7 @@ function M:HandleCommand(rest)
         ns:Print(("已把控制台优化全部推回原值（%d 条写成功）。"):format(n))
         ns:Print("  记过原值的还原成你原来的值；没记账的（旧版写过的）还原成客户端默认值。")
         ns:Print("  再跑 /mui tweaks vision 对照一眼。")
+        ns:Print("  |cffffa940注意|r：登录自动对齐开着的话，/reload 后会按默认快照写回；要彻底停掉 /mui tweaks defaults off")
         return true
     end
 
@@ -463,6 +569,86 @@ function M:HandleCommand(rest)
         return true
     end
 
+    if arg == "snapshot" then
+        local store = VisionStore()
+        local old = store.vision or {}
+        local nextSnap, n, changed = {}, 0, 0
+        ns:Print("|cffffd100把当前画面记为默认|r（实机采样，逐条核对出厂值）")
+        for i = 1, #VISION do
+            local cvar = VISION[i].cvar
+            local cur = ReadCVar(cvar)
+            if cur == nil or Secrets.IsSecret(cur) then
+                ns:Print(("  %-22s 读不到（本客户端没有 / 是机密），跳过"):format(cvar))
+            else
+                local s = tostring(cur)
+                nextSnap[cvar] = s
+                n = n + 1
+                local prev = old[cvar]
+                local same = prev ~= nil and SameValue(prev, s)
+                if not same then changed = changed + 1 end
+                ns:Print(("  %-22s %-8s → %-8s %s"):format(
+                    cvar, prev or "未采样", s, same and "相同" or "更新"))
+            end
+        end
+        store.vision = nextSnap
+        store.switches = {}
+        for i = 1, #TWEAKS do
+            store.switches[TWEAKS[i].key] = self:IsOn(TWEAKS[i].key)
+        end
+        ns:Print(("已记下 %d 条（其中 %d 条与出厂快照不同）。"):format(n, changed))
+        ns:Print("  登录自动对齐：" .. (store.auto ~= false
+            and "|cff00ff00开|r" or "|cff808080关|r（/mui tweaks defaults on 打开）"))
+        -- 开关开着的条目不受快照管辖，得说清楚，否则玩家会以为快照没生效。
+        for i = 1, #VISION do
+            local v = VISION[i]
+            if v.key and self:IsOn(v.key) then
+                ns:Print(("  |cffffa940注意|r：%s 由开着的开关 %s 接管，快照值不参与对齐；想让它生效就 /mui tweaks set %s 0")
+                    :format(v.cvar, v.key, v.key))
+            end
+        end
+        ns:Print("  查看：/mui tweaks defaults　｜　停掉自动对齐：/mui tweaks defaults off")
+        return true
+    end
+
+    if arg == "defaults" then
+        local flag = string.match(value or "", "^(%S+)$")
+        local store = VisionStore()
+        if flag == "on" or flag == "1" or flag == "off" or flag == "0" then
+            store.auto = (flag == "on" or flag == "1")
+            ns:Print(("默认画面：登录自动对齐已%s"):format(
+                store.auto and "|cff00ff00打开|r" or "|cff808080关闭|r"))
+            ns:Print(store.auto
+                and "  之后每次 /reload 会按快照写回；手动改的画面设置会被顶回去。"
+                or "  之后登录不再写任何 CVar，画面交给客户端自己持久化。")
+            return true
+        end
+        if flag == "apply" then
+            local w, s = self:AlignVision(true, true)
+            ns:Print(("已按默认画面对齐：写入 %d 条，跳过 %d 条（开着的开关接管）。"):format(w, s))
+            return true
+        end
+        ns:Print("|cffffd100默认画面快照|r（登录自动对齐：" ..
+            (store.auto ~= false and "|cff00ff00开|r" or "|cff808080关|r") .. "）")
+        for i = 1, #VISION do
+            local v = VISION[i]
+            local want = store.vision[v.cvar]
+            local owned = v.key and self:IsOn(v.key)
+            ns:Print(("  %-22s 默认 %-8s %s"):format(
+                v.cvar, want or "未采样",
+                owned and ("|cffffa940由开关 " .. v.key .. " 接管|r") or "|cff00ff00快照对齐|r"))
+        end
+        if type(store.switches) == "table" then
+            local on = {}
+            for i = 1, #TWEAKS do
+                if store.switches[TWEAKS[i].key] then on[#on + 1] = TWEAKS[i].key end
+            end
+            ns:Print("  记快照时的开关：" .. (#on > 0 and table.concat(on, ", ") or "全关"))
+        end
+        ns:Print("  改这套值：/mui tweaks snapshot（实机重采）　｜　立刻应用：/mui tweaks defaults apply")
+        ns:Print("  自动对齐开关：/mui tweaks defaults on|off")
+        return true
+    end
+
     if not arg or arg == "status" then
         ns:Print("控制台优化（开=写入，关=还原你原来的值）：")
         for i = 1, #TWEAKS do
@@ -474,6 +660,7 @@ function M:HandleCommand(rest)
         end
         ns:Print("开关：/mui tweaks set <key> 1|0（如 /mui tweaks set noFog 1）")
         ns:Print("画面发灰/发白：/mui tweaks vision（当前值 vs 默认值，只读）")
+        ns:Print("默认画面：/mui tweaks defaults　｜　把当前画面记为默认：/mui tweaks snapshot")
         return true
     end
 
