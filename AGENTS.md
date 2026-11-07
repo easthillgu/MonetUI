@@ -23,6 +23,9 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   返回游戏数据时**先 `issecretvalue` 再 `tostring`**，否则机密值会让 `table.concat` 直接抛 `invalid value (secret)`。
 
 - 每次改完 Lua/TOC：跑 `tools.wuxian.check`（离线用 `live: false`），0 错误 0 警告才算完成。
+- 碰过 **Scheduler 订阅**（`Every` / `EveryFrame` / 把 `SetScript("OnUpdate")` 换掉）就在 `wuxian.check`
+  之后补跑 `node tools/scheduler-callback-probe.js`：它是唯一能抓「回调多收参数」这类
+  **不报错的静默失效**的闸门（判例见下「代码风格」那条；2026-11-07 Cursor 拖尾整条消失就栽在这）。
 - **静态闸门抓不到"引用了还没声明的 local"**（2026-10-31 实证）：把 helper 写在它引用的
   `local`（如 `local Secrets = ns.Secrets`）**之前**，函数体里的名字会变成**全局 nil**，
   只在运行到那一刻才抛 `attempt to index global 'X'`；`audit-locals` / `audit-taint` / 语法检查
@@ -424,6 +427,15 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   当成 self，参数全丢，且不会报错。
 - OnShow 重涂一律走 `M:HookShow`（引擎带幂等守卫），调用处勿自行 `HookScript("OnShow")`。
 - 高频事件用 `M:Debounce`；LoD 窗口在面板声明 `addons = { ... }` 门控。
+- **`Scheduler:Every(ms, fn)` / `EveryFrame(fn)` 的回调签名只能是 `fn(elapsed)`**（2026-11-07 判例）：
+  调度器只投**一个**秒级 `elapsed`，不像 `SetScript("OnUpdate")` 投 `(self, elapsed)`。
+  Cursor 拖尾就是把 `host:SetScript("OnUpdate", OnUpdate)` 换成 `EveryFrame(OnUpdate)` 时签名还留着
+  `(_, elapsed)` —— `_` 吃掉 dt、`elapsed` 恒 nil、`clock/acc` 永不前进，拖尾整条消失、**零报错零卡顿**，
+  白查了两轮缓冲结构。迁移三件事必须一起做：换驱动 → 改签名 → 把 stop 侧的 `SetScript(..., nil)`
+  换成 `Scheduler:Unregister(id)`（id 存模块级局部，`if not id then id = ... end` 防重复注册）。
+  `function M:Tick(elapsed)` 这种冒号方法**不许**裸名传给 Scheduler（`elapsed` 会被当 `self` 吃掉）。
+  闸门：`node tools/scheduler-callback-probe.js`（形参 ≤1 + 冒号方法检查，退出码 0 才算完）。
+  自测 headless 时也要按真实投参方式 `fn(dt)` 驱动 —— 写成 `fn(nil, dt)` 会把这类 bug 遮掉。
 - 小步改动、可回滚；不顺手重构无关代码。
 - **多行文本替换一律用 `split(/\r?\n/)` + `splice`，严禁 `string.replace()` 做多行匹配。** 本仓文件混用 CRLF 与 LF，源码里写死的 `\n` 字面量跟 CRLF 文件比不上，`replace()` 静默失配，报错信息还只说"未找到"，看不出是行尾问题。写回时先探测原行尾（`raw.includes('\r\n')`），切片用 `split(/\r?\n/)`，拼接用同一个 `eol`。
 

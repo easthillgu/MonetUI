@@ -22,6 +22,12 @@ node tools/api-audit.js
 #    **传仓库绝对路径**：按 addon 名查的是"已安装副本"，审不到还没部署的源码
 #    tools.wuxian.check({ target = "C:\\Users\\EastHillGu\\Documents\\wowaddonsdev\\MonetUI", live = false })
 #    （按名字跑会多一条 toc-interface 警告：部署脚本才会把 ## Interface 改成客户端号，不是缺陷）
+
+# 4) Scheduler 订阅回调签名闸门（2026-11-07 Cursor 拖尾判例）
+#    Scheduler 只投一个 elapsed；从 SetScript("OnUpdate") 迁移过来的回调若留着
+#    (self, elapsed) / (_, elapsed)，`elapsed` 恒 nil ⇒ 计时永不前进 ⇒ 功能静默死亡（零报错）。
+#    R1 形参必须 ≤1；R2 冒号方法（function M:Tick）不许裸名传给 Scheduler。
+node tools/scheduler-callback-probe.js
 ```
 
 改了材质还要跑：
