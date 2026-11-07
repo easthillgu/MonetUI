@@ -518,11 +518,14 @@ local function BuildBlockFrame(block)
     end
 
     if block.onUpdate then
-        frame:SetScript("OnUpdate", function(_, elapsed)
+        -- 逐块每帧回调：块一直在，所以是常驻驱动，但同样要进 /mui perf 的外部账
+        -- （key 按块区分，账能指到是哪一块贵）。
+        frame:SetScript("OnUpdate", Scheduler:Profile("infobar:" .. tostring(block.key),
+            "InfoBar " .. tostring(block.key), function(_, elapsed)
             if not M.active then return end
             if not M:BlockEnabled(block.key) then return end
             pcall(block.onUpdate, block, elapsed)
-        end)
+        end))
     end
 
     local text = Widget:Font(frame, 12, "pixel", "border", "CENTER", nil, Media.outlineFlags)

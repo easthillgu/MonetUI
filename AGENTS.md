@@ -436,6 +436,14 @@ WoW Forever 客户端插件（Interface 16001，Lua 5.1）。以下为硬性约�
   `function M:Tick(elapsed)` 这种冒号方法**不许**裸名传给 Scheduler（`elapsed` 会被当 `self` 吃掉）。
   闸门：`node tools/scheduler-callback-probe.js`（形参 ≤1 + 冒号方法检查，退出码 0 才算完）。
   自测 headless 时也要按真实投参方式 `fn(dt)` 驱动 —— 写成 `fn(nil, dt)` 会把这类 bug 遮掉。
+- **按需挂 / 摘的每帧驱动用 `Scheduler:Profile(key, label, fn)` 包一层**（2026-11-07）：
+  施法条、名板投射条、属性面板、信息栏逐块、滚动条拖动这些**只在干活时**挂 `SetScript("OnUpdate")`
+  的驱动，搬进订阅表是错的（空闲也每帧空转），裸挂 `SetScript` 也是错的（`/mui perf` 里完全看不见
+  —— 而它们恰恰是战斗中最密的每帧路径）。`Profile` 返回的壳不改实参、不吞错、不改返回值，只往
+  `external` 账记一笔（与订阅表分开：`Snapshot` 的行格式按 `intervalSec` 写死，字符串 key 混进去
+  会让 `PrintStats` 的 `%d` 抛错）。`key` 要全局唯一且有意义（`infobar:<块名>` / `nameplates:cast`
+  / `unitframes:cast` / `config:scroll`）；同一 key 的多实例会合成一路（名板所有 plate 共用
+  `nameplates:cast` 是有意的）。闸门：`lua tools/external-ledger-probe.lua`。
 - 小步改动、可回滚；不顺手重构无关代码。
 - **多行文本替换一律用 `split(/\r?\n/)` + `splice`，严禁 `string.replace()` 做多行匹配。** 本仓文件混用 CRLF 与 LF，源码里写死的 `\n` 字面量跟 CRLF 文件比不上，`replace()` 静默失配，报错信息还只说"未找到"，看不出是行尾问题。写回时先探测原行尾（`raw.includes('\r\n')`），切片用 `split(/\r?\n/)`，拼接用同一个 `eol`。
 

@@ -643,6 +643,11 @@ local function CastTick(plate)
     end
 end
 
+-- 投射条驱动只在"有条在走"的那段时间挂在 plate 上（HideCast 摘掉），常驻订阅会让空闲
+-- 名板也每帧空转。所以它走外部账：所有 plate 共用一个 key，账合成一路。
+local CastTickTracked = ns.Scheduler and ns.Scheduler:Profile("nameplates:cast", "名板投射条", CastTick)
+    or CastTick
+
 local function HideCast(plate)
     local cast = plate.cast
     if not cast then return end
@@ -718,7 +723,7 @@ local function UpdateCast(plate)
     end
 
     plate.cast:Show()
-    plate:SetScript("OnUpdate", CastTick)
+    plate:SetScript("OnUpdate", CastTickTracked)
 end
 
 local function UpdateHealth(plate)

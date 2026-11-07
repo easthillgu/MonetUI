@@ -183,7 +183,7 @@ local function UpdateCast(frame)
     -- 单位框现在是受保护的安全单位按钮，战斗中改它的脚本会被拒，
     -- 而战斗恰恰是施条动画最要紧的时候。
     local castFrame = frame.cast
-    castFrame:SetScript("OnUpdate", function(self, elapsed)
+    local castTick = function(self, elapsed)
         local cast = castFrame
         if not cast or not cast.endTimeMS then
             self:SetScript("OnUpdate", nil)
@@ -226,7 +226,12 @@ local function UpdateCast(frame)
             cast.spark:Hide()
             self:SetScript("OnUpdate", nil)
         end
-    end)
+    end
+
+    -- 施法条只在施法中挂着每帧回调（结束自己摘掉），常驻订阅等于空闲也空转 ⇒ 走外部账：
+    -- 挂上期间每拍记一笔，/mui perf 能看到施法条这一路的真实开销。
+    castFrame:SetScript("OnUpdate", ns.Scheduler and ns.Scheduler:Profile("unitframes:cast",
+        "单位框施法条", castTick) or castTick)
 end
 
 --- Hide cast bar (called on STOP/FAILED/INTERRUPTED/CHANNEL_STOP).

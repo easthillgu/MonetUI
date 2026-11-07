@@ -46,6 +46,18 @@ local totals = { calls = 0, cost = 0, failures = 0 }
 --- everyFrame），混进字符串 key 会让 PrintStats 的 `%d` 直接抛错。数据面分开、打印时合并。
 local external = {}   -- key -> { label, calls, cost, max }（秒）
 
+local function RecordExternal(key, label, dt)
+    local st = external[key]
+    if not st then
+        st = { label = label or tostring(key), calls = 0, cost = 0, max = 0 }
+        external[key] = st
+    end
+    if not dt or dt <= 0 then dt = 0 end
+    st.calls = st.calls + 1
+    st.cost = st.cost + dt
+    if dt > st.max then st.max = dt end
+end
+
 local function HasWork()
     return next(subs) ~= nil or next(pending) ~= nil
 end
@@ -223,6 +235,40 @@ function Scheduler:Count()
     }
 end
 
+--- 给「按需挂 / 摘的 OnUpdate 驱动」套一层计时壳（#42 收尾，2026-11-07）。
+--- 为什么这些驱动不搬进订阅表：施法条、名板投射条、属性面板、滚动条拖动都是
+--- **只在干活的那段时间存在**的每帧回调，搬成常驻订阅就变成空闲也每帧空转；
+--- 但它们恰恰是战斗中最密的每帧路径，在 `/mui perf` 里完全看不见同样说不过去。
+--- 于是：驱动照旧自己 `SetScript("OnUpdate", Scheduler:Profile(key, label, fn))`，
+--- 挂上期间每一拍记一笔到 `external` 账（数据面与订阅表分开 —— Snapshot 的行格式
+--- 按 intervalSec 写死，字符串 key 混进去会让 PrintStats 的 `%d` 直接抛错）。
+--- 壳**不 pcall、不吞错、不改参数**：原回调抛错照旧冒到客户端，那是既有行为。
+function Scheduler:Profile(key, label, fn)
+    if not key or type(fn) ~= "function" then return fn end
+    return function(...)
+        local before = Now()
+        fn(...)
+        local after = Now()
+        RecordExternal(key, label, (before and after) and (after - before) or nil)
+    end
+end
+
+--- 外部驱动的数据面（`/mui perf` 与 PrintStats 读它）。按累计耗时排序。
+function Scheduler:ExternalSnapshot()
+    local rows = {}
+    for key, st in pairs(external) do
+        rows[#rows + 1] = {
+            key = key,
+            label = st.label,
+            calls = st.calls,
+            cost = st.cost,
+            max = st.max,
+        }
+    end
+    table.sort(rows, function(a, b) return a.cost > b.cost end)
+    return rows
+end
+
 --- 逐路数据面（`/mui perf` 命令本体不在这次范围内，先把账做出来）。
 --- 按累计耗时排序，最贵的在最前面；只读，不改任何状态。
 function Scheduler:Snapshot()
@@ -264,6 +310,15 @@ function Scheduler:PrintStats()
             row.id,
             row.everyFrame and "每帧" or ("%0.3fs"):format(row.intervalSec),
             row.calls, row.cost, row.max, row.failures))
+    end
+    local ext = self:ExternalSnapshot()
+    if #ext > 0 then
+        print(("  — 外部驱动 %d 路（按需挂摘，不进订阅表）—"):format(#ext))
+        for i = 1, #ext do
+            local row = ext[i]
+            print(("  %s · 调用 %d · 累计 %0.4fs · 峰值 %0.6fs"):format(
+                row.label, row.calls, row.cost, row.max))
+        end
     end
     return #rows
 end

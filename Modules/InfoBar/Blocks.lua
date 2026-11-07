@@ -723,7 +723,8 @@ local function BuildStatsPanel()
     end
 
     -- 关窗即停表：OnUpdate 只在 Show 期间跑；隐藏后什么都不做。
-    frame:SetScript("OnUpdate", function(self, elapsed)
+    -- 只在面板显示期间挂着的每帧回调 ⇒ 不进订阅表（空闲不空转），但记进外部账。
+    local statsTickRaw = function(self, elapsed)
         local b = M:GetBlock("stats")
         if not b or not b.frame or not b.frame:IsShown() then self:Hide() return end
         local parent = b.frame:GetParent()
@@ -733,7 +734,9 @@ local function BuildStatsPanel()
             statsTick = 0
             FillStatsPanel()
         end
-    end)
+    end
+    frame:SetScript("OnUpdate", ns.Scheduler and ns.Scheduler:Profile("infobar:stats-panel",
+        "InfoBar 属性面板", statsTickRaw) or statsTickRaw)
 
     -- 条本体在宠物对战 / 关模块时会被 SetShown(false)；面板此时也要跟着收，不然会残留一个 DIALOG 层的框体。
     if block.frame.SetScript then

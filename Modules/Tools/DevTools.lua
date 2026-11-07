@@ -230,6 +230,15 @@ function DevTools:Perf()
     end
     if type(rows) ~= "table" then rows = {} end
 
+    -- 外部驱动账（按需挂摘的 OnUpdate：施法条 / 名板投射 / 属性面板 / 滚动条拖动）。
+    -- 它们不在订阅表里（常驻订阅会空闲空转），但同样是每帧路径，必须能看到。
+    local ext
+    if type(S.ExternalSnapshot) == "function" then
+        local okE, e = pcall(S.ExternalSnapshot, S)
+        if okE then ext = e end
+    end
+    if type(ext) ~= "table" then ext = {} end
+
     local okKb, kb = pcall(_G.collectgarbage, "count")
     local stalled, stallErr
     if type(Widget) == "table" and type(Widget.PrintStalled) == "function" then
@@ -249,6 +258,7 @@ function DevTools:Perf()
         when = Stamp(),
         totals = totals,
         subs = rows,
+        external = ext,
         luaKB = (okKb and type(kb) == "number") and kb or nil,
         stalledFrames = stalled,
         stallError = stallErr,
@@ -275,6 +285,17 @@ function DevTools:Perf()
     end
     if #rows > PRINT_CAP then
         ns:Print(("  …另有 %d 路，全量在账本"):format(#rows - PRINT_CAP))
+    end
+    if #ext > 0 then
+        ns:Print(("外部驱动 %d 路（按需挂摘，不进订阅表）："):format(#ext))
+        for i = 1, math.min(#ext, PRINT_CAP) do
+            local row = ext[i]
+            ns:Print(("  %s · 调用 %s · 累计 %.4fs · 峰值 %.6fs"):format(
+                tostring(row.label or row.key), tostring(row.calls), (row.cost or 0), (row.max or 0)))
+        end
+        if #ext > PRINT_CAP then
+            ns:Print(("  …另有 %d 路，全量在账本"):format(#ext - PRINT_CAP))
+        end
     end
     if saved then SaySaved("perfReport") else ns:Print("|cffff6b6b账本落盘失败|r") end
 end

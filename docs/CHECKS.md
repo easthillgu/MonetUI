@@ -28,6 +28,11 @@ node tools/api-audit.js
 #    (self, elapsed) / (_, elapsed)，`elapsed` 恒 nil ⇒ 计时永不前进 ⇒ 功能静默死亡（零报错）。
 #    R1 形参必须 ≤1；R2 冒号方法（function M:Tick）不许裸名传给 Scheduler。
 node tools/scheduler-callback-probe.js
+
+# 5) 外部驱动账行为闸门（碰过 Scheduler:Profile / 外部 OnUpdate 驱动时跑）
+#    这批驱动只在干活时挂 SetScript，不进订阅表 —— 壳写错同样是"/mui perf 里什么都没有"。
+#    断言：实参不被改写 / 不吞错 / 真记账 / 排序正确 / PrintStats 不抛。
+lua tools/external-ledger-probe.lua
 ```
 
 改了材质还要跑：

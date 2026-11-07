@@ -1696,12 +1696,15 @@ function SimpleConfig:Build()
         SetOffset(dragStartOffset + (my - dragStartY) * Media:Mult())
     end
 
+    -- 拖动期间才挂着的每帧回调（松手即摘）⇒ 走外部账，不进订阅表（否则面板一开就常驻空转）。
+    local DragTracked = ns.Scheduler and ns.Scheduler:Profile("config:scroll", "配置滚动条拖动", Drag) or Drag
+
     scrollThumb:SetScript("OnMouseDown", function()
         -- GetCursorPosition is the documented cursor API on this client; it reports
         -- physical pixels, so the delta is converted to UI units with Media:Mult().
         local _, my = GetCursorPosition()
         dragging, dragStartY, dragStartOffset = true, my, scrollOffset
-        scrollThumb:SetScript("OnUpdate", Drag)
+        scrollThumb:SetScript("OnUpdate", DragTracked)
     end)
     scrollThumb:SetScript("OnMouseUp", function()
         dragging = false
