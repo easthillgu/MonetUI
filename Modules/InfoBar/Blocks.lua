@@ -33,15 +33,15 @@ local CLICK_HINT = {
 }
 
 local function BlockClick(actionName)
-    local fn = function(_, button)
-        if button ~= "LeftButton" then return end
-        local minimap = ns:GetModule("Minimap")
-        local actions = minimap and minimap.microMenu and minimap.microMenu.actions
-        local fn2 = actions and actions[actionName]
-        if type(fn2) == "function" then pcall(fn2) end
-    end
-    fn.hint = CLICK_HINT[actionName] or actionName
-    return fn
+    return setmetatable({ hint = CLICK_HINT[actionName] or actionName }, {
+        __call = function(_, _, button)
+            if button ~= "LeftButton" then return end
+            local minimap = ns:GetModule("Minimap")
+            local actions = minimap and minimap.microMenu and minimap.microMenu.actions
+            local fn = actions and actions[actionName]
+            if type(fn) == "function" then pcall(fn) end
+        end,
+    })
 end
 
 -- `GetMoneyString` is not in this client's API manual, so the formatting is done here rather than assumed.
