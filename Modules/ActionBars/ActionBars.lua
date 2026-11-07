@@ -333,14 +333,25 @@ local function RefreshRing(button)
     local r, g, b = Color:GetBorder()
     parts.ring:SetColorTexture(r, g, b, 0.9)
 
-    -- 空槽底色参考 NDui：纯黑 0.25，比灰底更通透、不泛白。
-    parts.well:SetColorTexture(0, 0, 0, 0.25)
+    -- 空槽底色与背包空格同款：主题 panel 档 · 0.8（Modules/Bags 壳框的 bgAlpha）。
+    local pr, pg, pb = Color:GetSurface("panel")
+    parts.well:SetColorTexture(pr, pg, pb, 0.8)
+end
+
+local ADOPTED_WELLS = setmetatable({}, { __mode = "k" })
+
+local function RefreshAdoptedWells()
+    local pr, pg, pb = Color:GetSurface("panel")
+    for well in pairs(ADOPTED_WELLS) do
+        well:SetColorTexture(pr, pg, pb, 0.8)
+    end
 end
 
 local function RefreshRings()
     for button in pairs(RINGS) do
         RefreshRing(button)
     end
+    RefreshAdoptedWells()
 end
 
 --- 当前这一格对应哪个槽位。
@@ -1159,12 +1170,14 @@ local function SkinAdoptedButton(btn)
 
     -- 空槽底色：收养来的按钮图标是**铺满整格**的，暴雪自己的灰底（SlotBackground / NormalTexture）
     -- 又被上面几行关掉了 —— 于是没有动作的槽位（宠物条 8..10 格）整格透明，实机就是玩家说的
-    -- "空白按钮看不到"。补一块和自绘槽位同色的 well（纯黑 0.25，见 RefreshRing），垫在图标
+    -- "空白按钮看不到"。补一块和背包空格同色的 well（主题 panel · 0.8，见 RefreshRing），垫在图标
     -- **下面**：暴雪图标是 BACKGROUND 层，我们取更低的子层级（-8），有图标时被完全盖住，空槽时露出来。
     local well = btn:CreateTexture(nil, "BACKGROUND", nil, -8)
     well:SetPoint("TOPLEFT", btn, "TOPLEFT", BORDER, -BORDER)
     well:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -BORDER, BORDER)
-    well:SetColorTexture(0, 0, 0, 0.25)
+    local pr, pg, pb = Color:GetSurface("panel")
+    well:SetColorTexture(pr, pg, pb, 0.8)
+    ADOPTED_WELLS[well] = true
     GetFFD(btn).adoptedWell = well
 
     -- 边框：收养来的按钮**图标是铺满整格的**（我们不能像自绘那样把图标内缩 1px），
