@@ -465,7 +465,7 @@ local function BuildBlockFrame(block)
         local tip = _G.GameTooltip
         -- 可发现性：带点击动作的格子，在提示末尾补一行"点击：…"。
         -- 文案集中存在返回函数身上（`BlockClick` 返回的 fn.hint），免得 7 个提示函数各抄一句。
-        if block.onClick and block.onClick.hint and tip and type(tip.AddLine) == "function" then
+        if type(block.onClick) == "table" and block.onClick.hint and tip and type(tip.AddLine) == "function" then
             local cr, cg, cb = Color:GetBorder()
             pcall(tip.AddLine, tip, "点击：" .. block.onClick.hint, cr, cg, cb)
         end
