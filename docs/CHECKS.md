@@ -33,6 +33,11 @@ node tools/scheduler-callback-probe.js
 #    这批驱动只在干活时挂 SetScript，不进订阅表 —— 壳写错同样是"/mui perf 里什么都没有"。
 #    断言：实参不被改写 / 不吞错 / 真记账 / 排序正确 / PrintStats 不抛。
 lua tools/external-ledger-probe.lua
+
+# 6) 画面观感诊断闸门（碰过 Modules/Tools/Tweaks.lua 或"画面发灰/发白"报障时跑）
+#    风险全在格式化：客户端把 default 回成 number / 根本不回 default / 没有这个 CVar，
+#    三种形态下 %d、%.2f、字符串比较都可能当场抛错 —— 这条命令崩了就等于没有诊断。
+lua tools/tweaks-vision-probe.lua
 ```
 
 改了材质还要跑：

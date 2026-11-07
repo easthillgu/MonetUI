@@ -199,10 +199,93 @@ function M:SetEnabled(value)
     end
 end
 
+--- 「画面整体发灰 / 发白」这一类观感问题，能改它的 CVar 就这几个（2026-11-07 排查用）。
+--- 只有前三条是本模块会写的；其余是玩家自己或在设置里可能被动过的，一起列出来才能对照。
+--- `note` 写的是「偏离默认后往哪个方向变」，判读时不至于看数字猜。
+local VISION = {
+    { cvar = "ResampleAlwaysSharpen", key = "sharpen",      note = "强制锐化重采样：暗部被提亮、边缘出白边 → 整体发灰发脏" },
+    { cvar = "particleDensity",       key = "fewParticles", note = "粒子密度：0 = 光效/尘埃/萤火全灭，画面发平" },
+    { cvar = "volumefog",             key = "noFog",        note = "体积雾：关掉失去大气透视，远景发平" },
+    { cvar = "ffxGlow",               key = nil,            note = "全屏泛光：开 = 整屏蒙一层白雾" },
+    { cvar = "ffxDeath",              key = "noDeathGray",  note = "死亡灰度（0 = 复活不灰屏）" },
+    { cvar = "weatherDensity",        key = "noWeather",    note = "天气密度（0 = 无雨雪）" },
+    { cvar = "ResampleQuality",       key = nil,            note = "重采样质量：偏低 = 放大糊" },
+}
+
+--- 画面观感诊断：当前值 vs 客户端默认值，偏离的标出来，并指出哪几条是本插件写的。
+--- 只读，不改任何 CVar（报告命令不许有副作用）。
+function M:Vision()
+    ns:Print("|cffffd100画面观感诊断|r（当前值 vs 客户端默认值，只读）")
+
+    local deviated, ours = 0, 0
+    for i = 1, #VISION do
+        local v = VISION[i]
+        local info = CVarInfo(v.cvar)
+        local cur = (info and info.value) or ReadCVar(v.cvar)
+        if cur == nil then
+            ns:Print(("  %-22s 本客户端没有这个 CVar"):format(v.cvar))
+        else
+            local mark, diff = "", ""
+            if info and info.default ~= nil then
+                local d = tostring(info.default)
+                local c = tostring(cur)
+                if c ~= d then
+                    deviated = deviated + 1
+                    mark = "|cffffa940偏离|r"
+                    diff = "  默认 " .. d
+                    if v.key and M:IsOn(v.key) then ours = ours + 1 end
+                end
+            end
+            local owned = (v.key and M:IsOn(v.key)) and "|cff00ff00本插件写|r" or "|cff808080-|r"
+            ns:Print(("  %-22s 当前 %-6s %s %s%s"):format(v.cvar, Text(cur), mark, owned, diff))
+            if mark ~= "" then
+                ns:Print("      └ " .. v.note)
+            end
+        end
+    end
+
+    -- 渲染比例：锐化重采样的影响完全取决于它。1:1 时锐化本该没有意义，低于 1 就是
+    -- 「先缩小再锐化放大」，最容易看出灰和脏。
+    local scale = ReadCVar("RenderScale")
+    if scale ~= nil then
+        local lo, hi = "?", "?"
+        if type(_G.GetMinRenderScale) == "function" then
+            local ok, a = pcall(_G.GetMinRenderScale)
+            if ok then lo = tostring(a) end
+        end
+        if type(_G.GetMaxRenderScale) == "function" then
+            local ok, b = pcall(_G.GetMaxRenderScale)
+            if ok then hi = tostring(b) end
+        end
+        ns:Print(("  %-22s 当前 %-6s 范围 %s–%s"):format("RenderScale", Text(scale), lo, hi))
+    end
+
+    local atmo = ns:GetModule("Atmosphere")
+    if atmo then
+        local on = ns:IsModuleEnabled("Atmosphere")
+        ns:Print(("  %-22s %s｜强度 %.2f｜只压四周，中心不压"):format(
+            "氛围暗角", on and "|cff00ff00开|r" or "|cff808080关|r", atmo:Tier().alpha))
+    end
+
+    ns:Print(("判读：偏离默认 %d 条，其中本插件写的 %d 条。"):format(deviated, ours))
+    if ours > 0 then
+        ns:Print("  先关最像的那条看 10 秒（即时生效，不用 reload）：/mui tweaks set sharpen 0")
+        ns:Print("  全关：/mui tweaks set <key> 0（key 见 /mui tweaks status）")
+    end
+    if deviated > ours then
+        ns:Print("  其余偏离项不是本插件写的 —— 那是游戏设置/其他插件改的，去「选项 → 图形」看。")
+    end
+end
+
 --- `/mui tweaks status` —— 逐条读账本：开关、目标值、当前值、写没写成。
 --- `/mui tweaks set <key> 1|0` —— 不开面板逐条换，方便对着截图点名。
 function M:HandleCommand(rest)
     local arg, value = string.match(rest or "", "^(%a+)%s*(.*)$")
+
+    if arg == "vision" then
+        self:Vision()
+        return true
+    end
 
     if not arg or arg == "status" then
         ns:Print("控制台优化（开=写入，关=还原你原来的值）：")
@@ -214,6 +297,7 @@ function M:HandleCommand(rest)
                 on, t.key, t.cvar, Text(rec.got), rec.note or "-"))
         end
         ns:Print("开关：/mui tweaks set <key> 1|0（如 /mui tweaks set noFog 1）")
+        ns:Print("画面发灰/发白：/mui tweaks vision（当前值 vs 默认值，只读）")
         return true
     end
 
