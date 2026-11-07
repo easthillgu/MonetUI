@@ -38,11 +38,6 @@ local function TweakByKey(key)
     return nil
 end
 
--- saved[cvar]  = 第一次动这个 CVar 之前玩家的原值（关回去时用）
--- written[cvar]= 我们确实为它写过（决定关的时候要不要还原）
-local saved   = {}
-local written = {}
-
 -- 每个 CVar 一行账，`/mui tweaks status` 读的就是它。
 local cvarLedger = {}
 local cvarWarned = {}
@@ -78,6 +73,31 @@ local function CVarInfo(cvar)
     if not ok then return nil end
     return { value = value, default = default, locked = locked,
              secure = secure, readonly = readonly }
+end
+
+-- 原值账：`origin[cvar]` = 第一次动这个 CVar 之前玩家的原值（关回去时用）。
+--
+-- **必须跨 `/reload` 活着**（2026-11-07 判例）：原值以前只存在运行期局部表里，reload 后
+-- 重新采样时读到的是「我们上个会话写进去的值」，于是关掉开关等于把自己写的值再写一遍 ——
+-- 玩家看到勾已经取消、画面一点没变（"灰蒙蒙关不掉"就是这么来的）。
+-- 现在落库到 `db.tweakOrigin`，一个 CVar 一条。
+local function OriginStore()
+    local db = ns:DB()
+    if type(db) ~= "table" then return {} end
+    if type(db.tweakOrigin) ~= "table" then db.tweakOrigin = {} end
+    return db.tweakOrigin
+end
+
+--- 没记过原值时的兜底：用客户端默认值。
+--- 只在玩家显式要求还原（`/mui tweaks restore`）时用，不在 Apply 里自动套 ——
+--- 玩家若真自己设过目标值，自动改成默认值就是误伤。
+local function DefaultOf(cvar)
+    local info = CVarInfo(cvar)
+    if info and info.default ~= nil then
+        local d = tostring(info.default)
+        if d ~= "" then return d end
+    end
+    return nil
 end
 
 --- 同一个 CVar 只印一条（失败一次性警告，不刷屏）；细账在 status 里随时能重看。
@@ -161,34 +181,97 @@ end
 
 --- 逐条对齐：开的写入目标值（先存原值），关的若之前写过就还原成原值。
 function M:Apply()
+    local origin = OriginStore()
     for i = 1, #TWEAKS do
         local t = TWEAKS[i]
         if self:IsOn(t.key) then
-            if saved[t.cvar] == nil then saved[t.cvar] = ReadCVar(t.cvar) end
-            if WriteCVar(t.cvar, t.value) then
-                written[t.cvar] = true
+            if origin[t.cvar] == nil then origin[t.cvar] = ReadCVar(t.cvar) end
+            WriteCVar(t.cvar, t.value)
+        elseif origin[t.cvar] ~= nil then
+            local cur = ReadCVar(t.cvar)
+            if cur == nil then
+                -- 读不到值，这条账没有意义
+                origin[t.cvar] = nil
+            elseif tostring(cur) == tostring(t.value) then
+                -- 值还是我们写进去的 → 还原成玩家的原值
+                WriteCVar(t.cvar, origin[t.cvar])
+                origin[t.cvar] = nil
+            else
+                -- 玩家中途自己改过：不抢他的值，只清账
+                origin[t.cvar] = nil
             end
-        elseif written[t.cvar] then
-            local back = saved[t.cvar]
-            if back ~= nil then WriteCVar(t.cvar, back) end
-            written[t.cvar] = nil
         end
     end
 end
 
---- 关掉某条 / 整个模块时把动过的都还原回去。
+--- 关掉某条 / 整个模块时，把动过的都还原回去。
+--- 两档：
+---   有账 → 还原成玩家原值；
+---   没账 → 只在「当前值恰好是我们的目标值、且不是客户端默认值」时用默认值兜底。
+---         这一档专门救旧版遗留（原值没落库那批），又不会误伤玩家自己设的值：
+---         他若设成 55，既不是目标值也不是默认值，这里一个字节都不碰。
 function M:RestoreAll()
+    local origin = OriginStore()
     for i = 1, #TWEAKS do
         local t = TWEAKS[i]
-        if written[t.cvar] and saved[t.cvar] ~= nil then
-            WriteCVar(t.cvar, saved[t.cvar])
-            written[t.cvar] = nil
+        local back = origin[t.cvar]
+        if back ~= nil then
+            WriteCVar(t.cvar, back)
+            origin[t.cvar] = nil
+        else
+            local cur = ReadCVar(t.cvar)
+            local def = DefaultOf(t.cvar)
+            if cur ~= nil and def ~= nil
+                and tostring(cur) == tostring(t.value)
+                and tostring(def) ~= tostring(t.value) then
+                WriteCVar(t.cvar, def)
+            end
         end
     end
+end
+
+--- `/mui tweaks restore`：九条全部推回原值；没记账的用客户端默认值。
+--- 这是「画面调不回来」时的最后一道 —— 旧版没记账、值却被写过的那批，只有这条能救。
+--- @return number 实际写成功的条数
+function M:RestoreToDefault()
+    local origin = OriginStore()
+    local n = 0
+    for i = 1, #TWEAKS do
+        local t = TWEAKS[i]
+        local back = origin[t.cvar] or DefaultOf(t.cvar)
+        if back ~= nil then
+            if WriteCVar(t.cvar, back) then n = n + 1 end
+            origin[t.cvar] = nil
+        end
+    end
+    return n
 end
 
 function M:Initialize()
     self:Apply()
+
+    -- 历史遗留检查（2026-11-07 判例）：开关是关的、账上没有原值，值却还是我们的目标值 ——
+    -- 旧版把原值只存在运行期，reload 后"还原"还原到自己写的值，于是这个状态会一直留着。
+    -- 不自动改（玩家可能自己就喜欢那个值），只点名 + 给一条命令。
+    local origin = OriginStore()
+    local stuck = {}
+    for i = 1, #TWEAKS do
+        local t = TWEAKS[i]
+        if not self:IsOn(t.key) and origin[t.cvar] == nil then
+            local cur = ReadCVar(t.cvar)
+            local def = DefaultOf(t.cvar)
+            if cur ~= nil and def ~= nil
+                and tostring(cur) == tostring(t.value)
+                and tostring(def) ~= tostring(t.value) then
+                stuck[#stuck + 1] = t.cvar
+            end
+        end
+    end
+    if #stuck > 0 then
+        ns:Print(("|cffffa940控制台优化：%d 条开关是关的，值却还留在打开时的状态|r（%s）")
+            :format(#stuck, table.concat(stuck, ", ")))
+        ns:Print("  旧版没把原值记下来造成的。一条命令全推回去：/mui tweaks restore")
+    end
 end
 
 function M:SetEnabled(value)
@@ -212,12 +295,20 @@ local VISION = {
     { cvar = "ResampleQuality",       key = nil,            note = "重采样质量：偏低 = 放大糊" },
 }
 
+--- key → 我们为它写的目标值（判「这条值是不是我们写的」用）。
+local function TweakValue(key)
+    for i = 1, #TWEAKS do
+        if TWEAKS[i].key == key then return TWEAKS[i].value end
+    end
+    return nil
+end
+
 --- 画面观感诊断：当前值 vs 客户端默认值，偏离的标出来，并指出哪几条是本插件写的。
 --- 只读，不改任何 CVar（报告命令不许有副作用）。
 function M:Vision()
     ns:Print("|cffffd100画面观感诊断|r（当前值 vs 客户端默认值，只读）")
 
-    local deviated, ours = 0, 0
+    local deviated, ours, stuck = 0, 0, 0
     for i = 1, #VISION do
         local v = VISION[i]
         local info = CVarInfo(v.cvar)
@@ -225,20 +316,37 @@ function M:Vision()
         if cur == nil then
             ns:Print(("  %-22s 本客户端没有这个 CVar"):format(v.cvar))
         else
-            local mark, diff = "", ""
+            local diff = ""
             if info and info.default ~= nil then
                 local d = tostring(info.default)
-                local c = tostring(cur)
-                if c ~= d then
+                if tostring(cur) ~= d then
                     deviated = deviated + 1
-                    mark = "|cffffa940偏离|r"
                     diff = "  默认 " .. d
-                    if v.key and M:IsOn(v.key) then ours = ours + 1 end
                 end
             end
-            local owned = (v.key and M:IsOn(v.key)) and "|cff00ff00本插件写|r" or "|cff808080-|r"
-            ns:Print(("  %-22s 当前 %-6s %s %s%s"):format(v.cvar, Text(cur), mark, owned, diff))
-            if mark ~= "" then
+
+            -- 归属三态。中间那一档是 2026-11-07 判例：开关已关、值却还是我们的目标值
+            -- （旧版原值只存运行期，reload 后"还原"还原到自己写的值）。以前这里打
+            -- 「不是本插件」，等于把真问题盖住了 —— 玩家会觉得"关了没用，不是它"。
+            local state
+            if v.key then
+                local want = TweakValue(v.key)
+                local looksWritten = want ~= nil and tostring(cur) == tostring(want)
+                if M:IsOn(v.key) then
+                    state = "|cff00ff00本插件写|r"
+                    ours = ours + 1
+                elseif looksWritten then
+                    state = "|cffffa940已关·值没还原|r"
+                    stuck = stuck + 1
+                else
+                    state = "|cff808080不是本插件|r"
+                end
+            else
+                state = "|cff808080不是本插件|r"
+            end
+
+            ns:Print(("  %-22s 当前 %-6s %s%s"):format(v.cvar, Text(cur), state, diff))
+            if diff ~= "" then
                 ns:Print("      └ " .. v.note)
             end
         end
@@ -268,11 +376,15 @@ function M:Vision()
     end
 
     ns:Print(("判读：偏离默认 %d 条，其中本插件写的 %d 条。"):format(deviated, ours))
+    if stuck > 0 then
+        ns:Print(("  |cffffa940注意：%d 条开关已关，但值还是我们的目标值 —— 那次关闭没有还原成功。|r"):format(stuck))
+        ns:Print("  一条命令全推回去：/mui tweaks restore")
+    end
     if ours > 0 then
         ns:Print("  先关最像的那条看 10 秒（即时生效，不用 reload）：/mui tweaks set sharpen 0")
-        ns:Print("  全关：/mui tweaks set <key> 0（key 见 /mui tweaks status）")
+        ns:Print("  全关：/mui tweaks set <key> 0（key 见 /mui tweaks status）　或 /mui tweaks all 0")
     end
-    if deviated > ours then
+    if deviated > ours + stuck then
         ns:Print("  其余偏离项不是本插件写的 —— 那是游戏设置/其他插件改的，去「选项 → 图形」看。")
     end
 end
@@ -281,6 +393,29 @@ end
 --- `/mui tweaks set <key> 1|0` —— 不开面板逐条换，方便对着截图点名。
 function M:HandleCommand(rest)
     local arg, value = string.match(rest or "", "^(%a+)%s*(.*)$")
+
+    if arg == "restore" then
+        local n = self:RestoreToDefault()
+        ns:Print(("已把控制台优化全部推回原值（%d 条写成功）。"):format(n))
+        ns:Print("  记过原值的还原成你原来的值；没记账的（旧版写过的）还原成客户端默认值。")
+        ns:Print("  再跑 /mui tweaks vision 对照一眼。")
+        return true
+    end
+
+    if arg == "all" then
+        local flag = string.match(value or "", "^(%S+)$")
+        local on = (flag == "1" or flag == "on" or flag == "true")
+        if flag == nil then
+            ns:Print("用法：/mui tweaks all 1|0")
+            return true
+        end
+        for i = 1, #TWEAKS do
+            self:Settings()[TWEAKS[i].key] = on
+        end
+        if on then self:Apply() else self:RestoreAll() end
+        ns:Print(on and "控制台优化：九条全部打开。" or "控制台优化：九条全部关闭并还原。")
+        return true
+    end
 
     if arg == "vision" then
         self:Vision()

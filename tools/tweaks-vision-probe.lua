@@ -54,17 +54,16 @@ local printed = {}
 local ns = {}
 ns.Secrets = { IsSecret = function() return false end }
 ns.Print = function(_, msg) printed[#printed + 1] = tostring(msg) end
-ns.DB = function()
-    -- 与用户存档一致：九条全开（2026-11-07 实机 MonetUI.lua 的 db.tweaks）
-    return {
-        tweaks = {
-            cameraZoom = true, lootRange = true, combatText = true, questGlow = true,
-            noDeathGray = true, sharpen = true, noWeather = true, fewParticles = true,
-            noFog = true,
-        },
-        atmosphere = { strength = 0.10 },
-    }
-end
+-- 与用户存档一致：九条全开（2026-11-07 实机 MonetUI.lua 的 db.tweaks）
+local DB = {
+    tweaks = {
+        cameraZoom = true, lootRange = true, combatText = true, questGlow = true,
+        noDeathGray = true, sharpen = true, noWeather = true, fewParticles = true,
+        noFog = true,
+    },
+    atmosphere = { strength = 0.10 },
+}
+ns.DB = function() return DB end
 ns.Register = function() end
 ns.GetModule = function(name)
     if name == "Atmosphere" then
@@ -146,6 +145,17 @@ ns.GetModule = function() return nil end
 ok, err, text = Run("no-atmosphere")
 check("暗角缺席时不抛", ok, err)
 ns.GetModule = oldGet
+
+print("== 6) 开关已关、值没还原（2026-11-07 判例的三态标注）==")
+DB.tweaks.sharpen = false                            -- 勾已经取消
+CVARS.ResampleAlwaysSharpen.value = "1"              -- 值却还是我们的目标值
+ok, err, text = Run("stuck")
+check("不抛", ok, err)
+local sharpenLine = text:match("[^\n]*ResampleAlwaysSharpen[^\n]*") or ""
+check("标成「已关·值没还原」，不冒充「不是本插件」",
+    sharpenLine:find("已关·值没还原", 1, true) ~= nil, sharpenLine)
+check("判读里给出 restore 命令", text:find("/mui tweaks restore", 1, true) ~= nil)
+check("判读里点出条数", text:find("条开关已关，但值还是我们的目标值", 1, true) ~= nil)
 
 print(fail == 0 and "\n全部通过" or ("\n失败 " .. fail .. " 项"))
 os.exit(fail == 0 and 0 or 1)

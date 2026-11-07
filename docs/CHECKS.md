@@ -38,6 +38,12 @@ lua tools/external-ledger-probe.lua
 #    风险全在格式化：客户端把 default 回成 number / 根本不回 default / 没有这个 CVar，
 #    三种形态下 %d、%.2f、字符串比较都可能当场抛错 —— 这条命令崩了就等于没有诊断。
 lua tools/tweaks-vision-probe.lua
+
+# 7) 控制台优化「原值账」状态机闸门（碰过 Tweaks.lua 的 origin / restore / all 时跑）
+#    核心是**跨 /reload**：原值只存运行期的话，reload 后重新采样读到的是自己上次写的值，
+#    "还原"就还原成自己写的 ⇒ 玩家勾了取消、画面一点没变（2026-11-07 判例）。
+#    探针用两个 chunk 实例共享同一份"存档"来复现这件事。
+lua tools/tweaks-origin-probe.lua
 ```
 
 改了材质还要跑：
