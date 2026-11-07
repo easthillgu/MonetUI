@@ -33,7 +33,8 @@ local rows       -- 已建的行
 --- 只有 `C_Map.OpenWorldMap` / `C_Calendar.OpenCalendar` / `C_TradeSkillUI.OpenTradeSkill` /
 --- `C_SettingsUtil.OpenSettingsPanel` 这一小撮），而调暴雪 Lua 全局是被禁止的 P0 写法。
 --- 要恢复它们走 #43 的独立安全载体，不要在这里重试第二种安全模板写法。
---- 四个动作抽成**函数**并导出（11-07）：信息栏的格子（`Blocks.lua`）也要用同一批动作，
+--- 动作抽成**函数**并导出（11-07；定向动作现为 `character` —— `questlog` / `talent` 随任务、专精两格删除撤掉）：
+--- 信息栏的格子（`Blocks.lua`）也要用同一批动作，
 --- 而 AGENTS 的规矩是"一处判据一份实现" —— 入口表可以各开各的，**开窗逻辑不能抄第二份**。
 local function OpenBags()
     -- 我们自己的背包窗口，动作全在我们名下（`ToggleAllBags` 是暴雪 Lua 全局，不许调）。
@@ -65,14 +66,50 @@ local function OpenSettings()
     end
 end
 
---- 打开 #43 那个代点坞（`MicroMenuSecure`）。信息栏里"需要代点才能开的暴雪面板"的格子
---- （专精 / 任务 / 好友…）点一下**先到这个坞**，第二击才到面板 ——
---- 信息栏本身**永远不能碰安全模板**（内容驱动排版，AGENTS 硬判据 / HANDOFF §8.64）。
---- 坞自己锚在小地图旁、不在信息栏的锚定家族里，所以这条路不会把信息栏标成受保护。
+--- 打开 #43 那个代点坞（`MicroMenuSecure`）的**全量菜单**。现在它是兜底：
+--- 信息栏里"需要代点才能开的暴雪面板"的格子优先走下面的 `OpenTargeted`（贴着格子、只留对应一行），
+--- 那条路拿不到东西时才退回这里开全量坞。
+--- 信息栏本身**永远不能碰安全模板**（内容驱动排版，AGENTS 硬判据 / HANDOFF §8.64），
+--- 所以这两条路都是"坞开在别处、第二击才到面板"，坞不在信息栏的锚定家族里，
+--- 不会把信息栏标成受保护。
 local function OpenMicroDock()
     local minimap = ns:GetModule("Minimap")
     local dock = minimap and minimap.microMenuSecure
     if dock and type(dock.Toggle) == "function" then dock:Toggle() end
+end
+
+--- 定向开（11-07，信息栏"点什么出什么"）：代点坞筛成只剩 `btnName` 那一行、贴着被点的格子开。
+--- `OpenTarget` 返回 false 的四种情况（受限窗口 / 载体没建成 / 那一行没建出来 / 锚点读不出）
+--- 一律由这里退回通用坞 —— **静默什么都不做**是本仓最难查的缺陷形态。
+local function OpenTargeted(anchor, btnName)
+    local minimap = ns:GetModule("Minimap")
+    local dock = minimap and minimap.microMenuSecure
+    if dock and type(dock.OpenTarget) == "function" and dock:OpenTarget(anchor, btnName) then
+        return
+    end
+    OpenMicroDock()
+end
+
+--- 耐久格 → 角色界面（11-07 作者指示）：代点坞只留「角色」一行（`CharacterMicroButton` 是
+--- 实机探针 12 颗原生微按钮之一），第二击由安全按钮代点开角色面板。
+--- **不要**改成直调 `_G.ToggleCharacter`：那条正是 `InfoBar.lua` 头上 11-05 开服 P0 的原路
+--- （ToggleCharacter → PaperDoll 读属性 → `TextStatusBar.lua:110` 机密值比较、按 MonetUI 记账）。
+--- 任务 / 专精 两个定向动作（`questlog` / `talent`）随两格删除一并撤掉（11-07）。
+local function OpenCharacter(anchor) OpenTargeted(anchor, "CharacterMicroButton") end
+
+--- 好友格（11-07）：本客户端**没有**好友/社交的原生微按钮（实机探针：`MicroMenu` 只有 12 颗，
+--- `FriendsMicroButton` / `SocialMicroButton` 都是 nil），定向代点坞对这格没有目标行；
+--- `C_FriendList.ShowFriends()` 实测只刷新数据、不开面板。唯一能开社交窗的入口是
+--- **暴雪 Lua 全局** `_G.ToggleFriendsFrame` —— 这是 AGENTS"暴雪 Lua 全局一律不碰"的
+--- **作者批准例外**（2026-11-07 拍板），接线前在 1.60.1.70840 实测过三条：
+---   ① 开窗成功：走 `SocialUIControl.IsEnabled()==true` → `SocialUIControl.Toggle()` → `SocialUIFrame`；
+---   ② 前置全放行：`Kiosk.IsEnabled()=false`、`IngameFriendsListDisabled`（GameRule 79）`=false`；
+---   ③ `taintLog=2` 下 open+close 各一次，`taint.log` **零新增**（SocialUI / FriendsFrame 关键字 0 条）。
+--- 出错由 `BlockClick` 外层的 pcall 兜住（格子点了没反应，不报错）。
+--- 若哪天它开始记 taint：撤回这里、退回 `dock`（改动只有 `Blocks.lua` 一行 + 本函数）。
+local function OpenFriends()
+    local fn = _G.ToggleFriendsFrame
+    if type(fn) == "function" then fn() end
 end
 
 local ENTRIES = {
@@ -83,12 +120,16 @@ local ENTRIES = {
 }
 
 -- 导出给信息栏用（同一个函数对象，不是复制一份实现）。
+-- 统一签名：`fn(anchor)`，anchor = 被点那格的帧（`Blocks.lua` 的 `block.frame`）。
+-- 只有定向的（现为 `character`）用它（菜单要贴着格子开），其余动作忽略这个参数。
 M.actions = {
     bags     = OpenBags,
     map      = OpenMap,
     calendar = OpenCalendar,
     settings = OpenSettings,
     dock     = OpenMicroDock,
+    character = OpenCharacter, -- 信息栏"耐久"格：只留「角色」一行，贴着格子开（两击）
+    friends  = OpenFriends,    -- 信息栏"好友"格：直开社交窗（作者批准的例外，见 OpenFriends 头注）
 }
 
 --- 曾经这里按名字取暴雪那颗微按钮、把行做成安全按钮去代点它。11-05 实测：那些行锚进面板

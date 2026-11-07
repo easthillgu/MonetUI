@@ -61,6 +61,12 @@ local rows
 local catcher
 local built   -- 只在脱战建一次；建失败（受限窗口 / 模板缺失）保持 false，下次脱战再试
 
+-- 定向菜单（11-07，信息栏"点什么出什么"）：代点行按原生按钮名登记，`OpenTarget` 只留那一行。
+-- 用模块级旁表而不是往行上写字段（AGENTS：别往框体上写字段，一律走旁表）。
+local rowByBtn = {}
+local rowHomeY = {} -- 行建出来时的槽位 y（旁表，11-07）：定向开把目标行挪到首行后，靠它归位
+local fullHeight -- 全量菜单（两组行）的高度，定向筛成一行后要靠它还原
+
 -- 建行时跳过的原生入口（"标签：原因"），`/mui minimap securemenu` 把它报出来。
 -- 为什么要有这本账：AGENTS 的教训是"点了没反应"这种**静默失败**最难查 ——
 -- 与其让玩家（和我）去猜哪行是死的，不如在建行那一刻就把"为什么没建行"写进台账。
@@ -165,6 +171,8 @@ local function Build()
 
     rows = {}
     skipped = {}
+    rowByBtn = {}
+    rowHomeY = {}
     local y = -4
 
     -- 行外壳：两组行的排版与悬停反馈**完全一样**，只有"点击做什么"不同
@@ -183,6 +191,7 @@ local function Build()
         row:SetScript("OnEnter", function() Widget:ColorText(label, "highlight") end)
         row:SetScript("OnLeave", function() Widget:ColorText(label, "neutral") end)
         rows[#rows + 1] = row
+        rowHomeY[row] = y -- 记建行槽位：`OpenTarget` 会把目标行挪走，`RestoreRows` 靠这个搬回来
         y = y - (ROW_H + 1)
         return row
     end
@@ -251,6 +260,8 @@ local function Build()
                 pcall(container.Hide, container)
                 return nil
             end
+            -- 定向菜单的索引：信息栏点哪格，`OpenTarget` 就按原生按钮名取这一行。
+            rowByBtn[t.btn] = row
         end
     end
 
@@ -261,6 +272,7 @@ local function Build()
     end
 
     container:SetHeight(math.abs(y) + 10)
+    fullHeight = math.abs(y) + 10
 
     -- **点外面就关**：整屏 catcher，层级比菜单低（菜单容器 level 30，这里 10），
     -- 所以行上的点击不会被它吃掉（做法与 `MicroMenu.lua:130` 那版完全一致）。
@@ -282,6 +294,73 @@ local function Build()
     return frame
 end
 
+--- 定向菜单的锚点：贴着信息栏那一格。下半屏向上开、上半屏向下开 —— 信息栏是贴屏幕边的整幅条，
+--- 不这么选就会把菜单顶出屏幕。读不出矩形就返回 false，让调用方退回通用坞（别硬开一个位置不对的菜单）。
+local function AnchorAt(anchor)
+    if not frame or type(anchor) ~= "table" or type(anchor.GetBottom) ~= "function" then return false end
+    local okB, bottom = pcall(anchor.GetBottom, anchor)
+    local okT, top = pcall(anchor.GetTop, anchor)
+    if not okB or not okT or not bottom or not top then return false end
+
+    local ph = 0
+    if type(UIParent) == "table" and type(UIParent.GetHeight) == "function" then
+        local okH, h = pcall(UIParent.GetHeight, UIParent)
+        if okH then ph = h or 0 end
+    end
+
+    frame:ClearAllPoints()
+    if ph > 0 and bottom < ph * 0.4 then
+        frame:SetPoint("BOTTOMLEFT", anchor, "TOPLEFT", 0, 3)
+    else
+        frame:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -3)
+    end
+    return true
+end
+
+--- 把所有行搬回建行时的槽位（旁表 `rowHomeY`）。定向开曾把目标行挪到首行，全量开（`Toggle`）
+--- 和下一次定向开（换一颗按钮）之前都必须先归位 —— 否则位移会叠加、行越挪越乱。
+--- 写的时机与 `AnchorAt` 同一族：只在脱战（`OpenTarget` / `Toggle` 的 `ns:IsRestricted()` 守门在前）。
+local function RestoreRows()
+    if not frame then return end
+    for _, r in ipairs(rows) do
+        local y0 = rowHomeY[r]
+        if y0 then
+            pcall(r.SetPoint, r, "TOPLEFT", frame, "TOPLEFT", 3, y0)
+            pcall(r.SetPoint, r, "TOPRIGHT", frame, "TOPRIGHT", -3, y0)
+        end
+    end
+end
+
+--- 定向开（11-07，信息栏"点什么出什么"）：把代点坞筛成只剩 `btnName` 那一行、贴着 anchor 开。
+--- 返回 false 的四种情况（受限窗口 / 载体没建成 / 这一行没建出来 / 锚点读不出）
+--- 一律由调用方退回通用坞 —— **静默什么都不做**是本仓最难查的缺陷形态。
+--- 排版纪律与 `Toggle` 相同：只在脱战写（`ns:IsRestricted()` 已经把战斗/地图/聊天窗口挡在外面）。
+function M:OpenTarget(anchor, btnName)
+    if ns:IsRestricted() then return false end
+    if not Build() or not frame then return false end
+    local row = rowByBtn[btnName]
+    if not row then return false end
+    if not AnchorAt(anchor) then return false end
+
+    M.ensureVisible()
+
+    -- 先全归位（上一次定向开可能挪过别的行），再把目标行挪到**首行槽位**（Build 的起始 y=-4）：
+    -- 11-07 实机缺陷 —— 只筛行不挪行，「角色」是第 5 行（y=-72），字留在小框外面看不清。
+    RestoreRows()
+    pcall(row.SetPoint, row, "TOPLEFT", frame, "TOPLEFT", 3, -4)
+    pcall(row.SetPoint, row, "TOPRIGHT", frame, "TOPRIGHT", -3, -4)
+
+    -- 只留目标行；高度按"一行"算（与 Build 同一套算式：起始 4 + 行高 ROW_H+1 + 底衬 10）。
+    for _, r in ipairs(rows) do
+        pcall(r.SetShown, r, r == row)
+    end
+    pcall(frame.SetHeight, frame, 4 + ROW_H + 1 + 10)
+
+    if catcher then pcall(catcher.Show, catcher) end
+    frame:Show()
+    return true
+end
+
 function M:Toggle()
     if frame and frame:IsShown() then
         self:Close()
@@ -296,6 +375,13 @@ function M:Toggle()
     local anyMenuOpen = minimapModule and minimapModule.microMenu and minimapModule.microMenu.anyMenuOpen
     if type(anyMenuOpen) == "function" and anyMenuOpen() then return end
     if not Build() then return end
+    -- 定向菜单（`OpenTarget`）可能把行筛成只剩一行、并把目标行挪到了首行槽位：
+    -- 全量菜单开之前先还原行位与行数 —— `Build` 只在第一次跑，不还原就会一直只有一行、位置也不对。
+    RestoreRows()
+    for _, r in ipairs(rows) do
+        pcall(r.SetShown, r, true)
+    end
+    if fullHeight then pcall(frame.SetHeight, frame, fullHeight) end
     M.ensureVisible()
     if catcher then pcall(catcher.Show, catcher) end
     frame:Show()

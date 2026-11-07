@@ -1,5 +1,5 @@
 -- Modules/InfoBar/InfoBar.lua
--- Info bar (信息栏): a full-width strip pinned to the top (or bottom) edge of the screen, carrying small data blocks -- money, latency, durability, spec, currencies, friends.
+-- Info bar (信息栏): a full-width strip pinned to the top (or bottom) edge of the screen, carrying small data blocks -- money, latency, durability, currencies, friends.
 -- The *shape* is the one Andromeda uses (container plus blocks accumulated alternately from each edge); nothing else is carried over -- this client's API differs from retail in several places, so every call is feature-detected and a failed one degrades to one hidden block (see `/mui infobar diagnose`).
 
 local ADDON_NAME, ns = ...
@@ -125,8 +125,11 @@ local function ApplyColors()
     end
 
     for i = 1, #blocks do
-        local frame = blocks[i].frame
-        if frame then frame:SetAlpha(blockAlpha) end
+        local block = blocks[i]
+        local frame = block.frame
+        -- `always` 档（11-07 系统块）不吃悬浮淡入淡出：mouseover 关着时全员本来就是 1，
+        -- 开着时其余格静息 = 0，它恒为 1（常显）。**判据只有这一处**，别在别处补 SetAlpha。
+        if frame then frame:SetAlpha(block.always and 1 or blockAlpha) end
     end
 
     -- 闪烁画在覆盖层上（见 EnsurePulseOverlay）：永远压在 XP 线与所有子框之上
@@ -252,7 +255,10 @@ end
 --- `TextStatusBar.lua:110` 的机密值比较并按 MonetUI 的名义记账。别再把它当"备用开关"加回来。
 ---
 --- 11-07 更新：**格子现在可点**（`Blocks.lua` 的 `BlockClick`，动作单源在 `MicroMenu.lua` 的 `M.actions`）：
---- 要开暴雪面板的那几格走**先弹微菜单代点坞**（`MicroMenuSecure`）这条两击路线。
+--- 要开暴雪面板的格子走**代点坞**这条两击路线，其中耐久格走**定向小菜单**
+--- （`MicroMenuSecure:OpenTarget`：贴着被点那格、只留「角色」一行），好友格是**作者批准的例外**
+--- 直调 `_G.ToggleFriendsFrame()`（实测证据见 `MicroMenu.lua` 的 `OpenFriends` 头注）；
+--- 任务 / 专精两格已按作者指示删除 —— 映射表见 `Blocks.lua` 头部。
 --- 信息栏本身**永远不能挂安全模板** —— 它是"内容驱动排版"的框，安全模板一进家族就全族被拒
 --- （§8.37 实测、§8.64 判定；上面 `BuildBlockFrame` 那段注释里两条失败写法仍是活教训）。
 --- 即将来的人：这条边界**不会**因为找到新写法而改变，别再试第三种。
@@ -281,14 +287,16 @@ function M:SetText(block, text)
 end
 
 --- Redistribute visible blocks: left-anchored grow rightwards, right-anchored leftwards, in registration order.
+--- `CENTER` blocks are collected and centred as a group afterwards (11-07: the system block lives there).
 --- Every block except the first of its side carries a 1px divider in the 2px gap before it, so the
---- strip reads as separate read-outs rather than one run-on string.
+--- strip reads as separate read-outs rather than one run-on string; centre blocks carry none.
 function M:Relayout()
     if not bar then return end
 
     local left, right = 0, 0
     local seenLeft, seenRight = false, false
     local dr, dg, db = Color:GetBorder()
+    local centers = {}   -- CENTER 档先收集、量总宽，循环跑完整组居中（现役只有系统块一格）
 
     for i = 1, #blocks do
         local block = blocks[i]
@@ -299,6 +307,8 @@ function M:Relayout()
             if block.position == "RIGHT" then
                 frame:SetPoint("RIGHT", bar, "RIGHT", -right, 0)
                 right = right + width + GAP
+            elseif block.position == "CENTER" then
+                centers[#centers + 1] = { frame = frame, width = width }
             else
                 frame:SetPoint("LEFT", bar, "LEFT", left, 0)
                 left = left + width + GAP
@@ -315,6 +325,8 @@ function M:Relayout()
                         draw = true
                     end
                     seenRight = true
+                elseif block.position == "CENTER" then
+                    -- 中间那格不属于左右两队，两侧都不画分隔线（画了也没有紧邻的邻居）。
                 else
                     if seenLeft then
                         divider:SetPoint("RIGHT", frame, "LEFT", -1, 0)
@@ -327,6 +339,22 @@ function M:Relayout()
                     divider:Show()
                 end
             end
+        end
+    end
+
+    -- CENTER 整组居中：单格 = 精确居中；多格按注册序排开、互不重叠。
+    -- 与左右两队**不做避让** —— 现役 6 格离中线远得很，真挤上了再谈（先加块、再谈避让）。
+    if #centers > 0 then
+        local total = 0
+        for i = 1, #centers do
+            total = total + centers[i].width
+            if i < #centers then total = total + GAP end
+        end
+        local x = -total / 2
+        for i = 1, #centers do
+            local c = centers[i]
+            c.frame:SetPoint("CENTER", bar, "CENTER", x + c.width / 2, 0)
+            x = x + c.width + GAP
         end
     end
 end
@@ -343,15 +371,18 @@ local function UpdateShown(block)
 end
 
 --- Record a block's spec; frames are built later in `M:Build` because blocks register at file load while the bar only exists at login.
--- @param spec { key, label, position="LEFT"|"RIGHT", update, tooltip, onClick, onUpdate }
---   `onClick` 只允许打开**我们自己的**面板（`Blocks.lua` 的 `ToggleStatsPanel` 那一类）；
---   暴雪面板没有合法开口，别再往这里加（见 `BuildBlockFrame` 上方的两段判例）。
+-- @param spec { key, label, position="LEFT"|"RIGHT"|"CENTER", always?, update, tooltip, onClick, onUpdate }
+--   `position="CENTER"` = 整组居中（`Relayout` 收集后摆，现役只有系统块）；`always = true` =
+--   不吃 mouseover 悬停淡出、**常显**（alpha 判据只在 `ApplyColors` 那一处）。
+--   `onClick` 只有两条合法路：打开**我们自己的**面板（`Blocks.lua` 的 `ToggleStatsPanel` 那一类），
+--   或走 `BlockClick(动作名)`（单源在 `MicroMenu.lua` 的 `M.actions`；要开暴雪面板的只能两击代点）。
+--   暴雪面板**没有**合法的直开入口，别再往这里加（见 `BuildBlockFrame` 上方的两段判例）。
 function M:RegisterBlock(spec)
     if type(spec) ~= "table" or type(spec.key) ~= "string" then return nil end
     for i = 1, #blocks do
         if blocks[i].key == spec.key then return blocks[i] end
     end
-    spec.position = (spec.position == "RIGHT") and "RIGHT" or "LEFT"
+    if spec.position ~= "RIGHT" and spec.position ~= "CENTER" then spec.position = "LEFT" end
     spec.hasText = false
     blocks[#blocks + 1] = spec
     return spec
@@ -464,7 +495,7 @@ local function BuildBlockFrame(block)
         if block.tooltip then pcall(block.tooltip, block) end
         local tip = _G.GameTooltip
         -- 可发现性：带点击动作的格子，在提示末尾补一行"点击：…"。
-        -- 文案集中存在返回函数身上（`BlockClick` 返回的 fn.hint），免得 7 个提示函数各抄一句。
+        -- 文案集中存在返回函数身上（`BlockClick` 返回的 fn.hint），免得各提示函数各抄一句。
         if type(block.onClick) == "table" and block.onClick.hint and tip and type(tip.AddLine) == "function" then
             local cr, cg, cb = Color:GetBorder()
             pcall(tip.AddLine, tip, "点击：" .. block.onClick.hint, cr, cg, cb)
@@ -708,18 +739,18 @@ function M:SetEnabled(enabled)
     end
 end
 
--- 每格的数据源 + 安全转发目标。缺名字是一份报告，不是错误 —— 数据源缺 ⇒ 那一格留空；
--- 转发目标缺 ⇒ 那一格点了没面板（**绝不会**退回"直接调暴雪 Lua 全局"，见 `SecureClickTarget`）。
+-- 每格的数据源。缺名字是一份报告，不是错误 —— 数据源缺 ⇒ 那一格留空。
+-- 点击动作不在这张表里：单源是 `MicroMenu.lua` 的 `M.actions`（好友格是**批准的直调例外**，
+-- 见 `MicroMenu.OpenFriends` 头注）。旧注释里的 `SecureClickTarget` 已不存在（上一版设计遗留）。
 local PROBED = {
     "GetMoney", "GetFramerate", "GetNetStats",
     "C_AddOns.GetNumAddOns", "C_AddOns.GetAddOnName",
     "GetAddOnMemoryUsage", "UpdateAddOnMemoryUsage",
     "C_CurrencyInfo.GetCurrencyListSize", "C_CurrencyInfo.GetCurrencyListInfo",
     "C_SpecializationInfo.GetSpecialization", "C_SpecializationInfo.GetSpecializationInfo",
-    "C_SpecializationInfo.GetNumSpecializationsForClassID",
     "GetInventoryItemDurability",
     "C_FriendList.GetNumFriends", "C_FriendList.GetNumOnlineFriends",
-    "UnitClass", "InCombatLockdown",
+    "InCombatLockdown",
     "UnitXP", "UnitXPMax", "GetXPExhaustion",
     "IsXPUserDisabled", "GetMaxLevelForPlayerExpansion", "BreakUpLargeNumbers",
 }

@@ -241,7 +241,7 @@ local DEFAULTS = {
         hideBorderTop   = true,
         hideMicroMenu   = true,
     },
-    -- Info bar (信息栏, Modules/InfoBar): one full-width strip along a screen edge carrying small data blocks.  anchorTop pins it to the top edge (so it clears the bottom action bars), height is the strip height (14 fits a 12px font), mouseover keeps the blocks invisible until hovered, combatPulse breathes red in combat / yellow with pending invites, xp draws the experience progress on the bottom hairline (hover the ▲ to read the numbers) and xpFaction hands that same line to the watched reputation at max level; blocks are one switch per data block.
+    -- Info bar (信息栏, Modules/InfoBar): one full-width strip along a screen edge carrying small data blocks.  anchorTop pins it to the top edge (so it clears the bottom action bars), height is the strip height (14 fits a 12px font), mouseover keeps the blocks invisible until hovered (except the system block: position="CENTER" + always=true, it stays lit -- 11-07 作者指示), combatPulse breathes red in combat / yellow with pending invites, xp draws the experience progress on the bottom hairline (hover the ▲ to read the numbers) and xpFaction hands that same line to the watched reputation at max level; blocks are one switch per data block.
     infobar = {
         anchorTop   = true,
         height      = 14,

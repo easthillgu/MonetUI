@@ -1,5 +1,6 @@
 -- Modules/InfoBar/Blocks.lua
--- The eight data blocks the strip can carry (money, durability, currency, system, spec, friends, quest, stats).
+-- The six data blocks the strip can carry (money, durability, currency, system, friends, stats).
+-- The quest and spec blocks were removed on 2026-11-07 by the author's instruction; `CurrentSpecIndex` stays because the stats category still reads it.
 -- Every value is read defensively: secret numbers go through Utils/Secrets.lua first, and a missing or unfit call simply leaves its block empty. Money formatting and the durability probe are ours, not copied from any reference addon.
 
 local ADDON_NAME, ns = ...
@@ -16,30 +17,41 @@ end
 --- 格子点击动作的**唯一入口**：动作本体住在 `MicroMenu.lua` 的 `M.actions`（11-07 抽成函数），
 --- 信息栏这里只按名字取，**不抄第二份开窗逻辑**（AGENTS：一处判据一份实现）。
 ---
---- 映射按"数据住在哪"来定，不是随手分配：
----   金钱 / 耐久 / 货币 → **我们自己的背包窗**（钱数就显示在背包窗底部，而耐久与代币的数据
----     本来就只能从背包物品读 —— 见本文件 `DurabilityUpdate` 上方那条 1.60 API 限制注释）；
+--- 映射按"数据住在哪 / 面板有没有合法开口"来定，不是随手分配（11-07 晚间按作者指示定稿）：
+---   金钱 / 货币 → **我们自己的背包窗**（钱数就显示在背包窗底部，代币的实物也在背包里）；
+---   耐久 → **角色界面**（定向代点小菜单 `OpenTargeted`：贴着被点那格、只留「角色」一行，
+---     第二击到面板 —— 数据本身仍只能从背包物品读，见 `DurabilityUpdate` 上方的 1.60 API 注释）。
+---     不许直调 `_G.ToggleCharacter`：那是 11-05 开服 P0 的原路（`InfoBar.lua` 头注有判例）；
 ---   延迟/帧率/内存 → **设置**（`Settings.OpenToCategory`，纯 C_*，无暴雪 Lua 链）；
----   专精 / 任务 / 好友 → **先开代点坞**（`MicroMenuSecure`），第二击才到面板。
----     这三格要开的暴雪面板**没有纯 C_* 开口**，而信息栏是"内容驱动排版"的框 ——
----     它永远不能挂安全模板（AGENTS 硬判据 / HANDOFF §8.64），所以走坞，不走格子直连。
---- 坞自己锚在小地图旁、与信息栏没有锚定关系 ⇒ 这条路不会把信息栏标成受保护。
+---   好友 → **直开社交窗**（`friends` → `_G.ToggleFriendsFrame()`）：本客户端没有好友/社交的
+---     原生微按钮（实机探针 12 颗里没有），也没有纯 C_* 开口（`C_FriendList.ShowFriends()` 实测
+---     只刷新数据），所以这格走**作者批准的例外**直调暴雪 Lua 全局 —— 实测证据与撤回办法
+---     见 `MicroMenu.lua` 的 `OpenFriends` 头注（taintLog=2 下 open+close 零新增）。
+---   任务 / 专精两格已删除（11-07 作者指示），对应动作 `questlog` / `talent` 一并撤掉。
+--- 走坞的那几格"永远不能挂安全模板"（信息栏是内容驱动排版的框，AGENTS 硬判据 / HANDOFF §8.64）：
+--- 坞不在信息栏的锚定家族里 ⇒ 这条路不会把信息栏标成受保护；菜单锚点上/下半屏分开
+--- （`MicroMenuSecure.AnchorAt`），不会被顶出屏幕。
 --- 提示行用的文案（动作名 → 一句话）。信息栏的提示层读 `block.onClick.hint`，
 --- 一处集中、不用给 7 个注册表各加一个字段。
 local CLICK_HINT = {
-    bags     = "打开背包",
-    settings = "打开设置",
-    dock     = "打开快捷入口（角色 / 任务 / 好友 / 天赋 …）",
+    bags      = "打开背包",
+    settings  = "打开设置",
+    character = "打开角色界面",
+    friends   = "打开好友列表",
+    dock      = "打开快捷入口（角色 / 任务 / 天赋 …）",
 }
 
 local function BlockClick(actionName)
     return setmetatable({ hint = CLICK_HINT[actionName] or actionName }, {
-        __call = function(_, _, button)
+        __call = function(_, block, button)
             if button ~= "LeftButton" then return end
             local minimap = ns:GetModule("Minimap")
             local actions = minimap and minimap.microMenu and minimap.microMenu.actions
             local fn = actions and actions[actionName]
-            if type(fn) == "function" then pcall(fn) end
+            -- 定向菜单要锚在"被点的那格"旁边 ⇒ 把格子帧递过去；其余动作忽略这个参数。
+            -- `block` 是本格的注册表（InfoBar 的 OnClick 第一个实参），没建帧时是 nil，下游会兜底。
+            local anchor = (type(block) == "table") and block.frame or nil
+            if type(fn) == "function" then pcall(fn, anchor) end
         end,
     })
 end
@@ -165,7 +177,7 @@ M:RegisterBlock({
     events   = { "UPDATE_INVENTORY_DURABILITY", "PLAYER_ENTERING_WORLD" },
     update   = DurabilityUpdate,
     tooltip  = DurabilityTooltip,
-    onClick  = BlockClick("bags"),   -- 耐久数据本来就只能从背包物品读
+    onClick  = BlockClick("character"),   -- 贴格小菜单只留「角色」一行，第二击开角色界面（直调 ToggleCharacter 是 P0 判例）
 })
 
 -- Retail's "watched" flag has no equivalent here; `isShowInBackpack` (the currency shown beside the gold in the bag bar) is the closest and is used instead.
@@ -343,7 +355,8 @@ end
 M:RegisterBlock({
     key      = "system",
     label    = "延迟 / 帧率 / 内存",
-    position = "RIGHT",
+    position = "CENTER",   -- 11-07 作者指示：放条中间（Relayout 对 CENTER 档整组居中）
+    always   = true,       -- 11-07 作者指示：常显，不吃 mouseover 悬停淡出（判据在 ApplyColors）
     events   = { "PLAYER_ENTERING_WORLD" },
     update   = SystemUpdate,
     tooltip  = SystemTooltip,
@@ -351,6 +364,8 @@ M:RegisterBlock({
     onClick  = BlockClick("settings"),   -- 纯 C_*：`Settings.OpenToCategory`
 })
 
+-- 当前专精序号。**专精块已删（11-07），这个函数留下** —— 属性块的 `CurrentSpecRole`（文件下方）
+-- 还要靠它定位当前专精，才能把玩家分成坦克 / 法系 / 物理三类。
 local function CurrentSpecIndex()
     local api = _G.C_SpecializationInfo
     if not api or type(api.GetSpecialization) ~= "function" then return nil end
@@ -361,81 +376,6 @@ local function CurrentSpecIndex()
     if not index or index < 1 then return nil end
     return index
 end
-
-local function ClassID()
-    -- Identity is one of the values the client may hide; without it the spec list cannot be enumerated, so the block degrades to just the current name.
-    if not Secrets.CanReadIdentity("player") then return nil end
-    if type(_G.UnitClass) ~= "function" then return nil end
-
-    local ok, _, _, id = pcall(_G.UnitClass, "player")
-    if not ok then return nil end
-    return Secrets.Number(id)
-end
-
-local function SpecUpdate(block)
-    local api = _G.C_SpecializationInfo
-    if not api or type(api.GetSpecializationInfo) ~= "function" then
-        M:SetText(block, "")
-        return
-    end
-
-    local index = CurrentSpecIndex()
-    if not index then M:SetText(block, "") return end
-
-    -- Returns: specId, name, description, icon, role, ...
-    local ok, _, name = pcall(api.GetSpecializationInfo, index, false, false)
-    if not ok or type(name) ~= "string" or name == "" then
-        M:SetText(block, "")
-        return
-    end
-
-    M:SetText(block, name)
-end
-
-local ROLE_TEXT = { TANK = "坦克", HEALER = "治疗", DAMAGER = "输出" }
-
-local function SpecTooltip()
-    local tip = Tip()
-    if not tip then return end
-
-    local api = _G.C_SpecializationInfo
-    local classID = ClassID()
-    if not api or not classID
-       or type(api.GetNumSpecializationsForClassID) ~= "function" then
-        pcall(tip.AddLine, tip, "专精", 0.6, 0.8, 1)
-        return
-    end
-
-    local okCount, count = pcall(api.GetNumSpecializationsForClassID, classID)
-    if not okCount then return end
-    count = Secrets.Number(count)
-    if not count or count < 1 then return end
-
-    local current = CurrentSpecIndex()
-    pcall(tip.AddLine, tip, "专精", 0.6, 0.8, 1)
-
-    for i = 1, count do
-        local ok, _, name, _, _, role = pcall(api.GetSpecializationInfo,
-            i, false, false, nil, nil, nil, classID)
-        if ok and type(name) == "string" then
-            local isCurrent = (i == current)
-            local r, g, b = isCurrent and 0 or 1, isCurrent and 1 or 1, isCurrent and 0 or 1
-            pcall(tip.AddDoubleLine, tip,
-                (isCurrent and "> " or "") .. name,
-                ROLE_TEXT[role] or "", r, g, b, 0.8, 0.8, 0.8)
-        end
-    end
-end
-
-M:RegisterBlock({
-    key      = "spec",
-    label    = "专精",
-    position = "RIGHT",
-    events   = { "ACTIVE_TALENT_GROUP_CHANGED", "PLAYER_ENTERING_WORLD" },
-    update   = SpecUpdate,
-    tooltip  = SpecTooltip,
-    onClick  = BlockClick("dock"),   -- 专精→天赋面板没有纯 C_* 开口：先开代点坞，第二击到面板
-})
 
 local function FriendsUpdate(block)
     local api = _G.C_FriendList
@@ -471,70 +411,7 @@ M:RegisterBlock({
     events   = { "FRIENDLIST_UPDATE", "PLAYER_ENTERING_WORLD" },
     update   = FriendsUpdate,
     tooltip  = FriendsTooltip,
-    onClick  = BlockClick("dock"),   -- 好友/社区窗没有纯 C_* 开口：先开代点坞
-})
-
--- =========================================================================
--- 任务（Quest）
--- =========================================================================
-
-local function QuestUpdate(block)
-    local api = _G.C_QuestLog
-    if not api or type(api.GetNumQuestLogEntries) ~= "function" then
-        M:SetText(block, "")
-        return
-    end
-    
-    local ok, numEntries = pcall(api.GetNumQuestLogEntries)
-    if not ok then
-        M:SetText(block, "")
-        return
-    end
-    
-    numEntries = Secrets.Number(numEntries)
-    if not numEntries then
-        M:SetText(block, "")
-        return
-    end
-    
-    M:SetText(block, string.format("%d", numEntries))
-end
-
-local function QuestTooltip()
-    local tip = Tip()
-    if not tip then return end
-    
-    local api = _G.C_QuestLog
-    if not api then return end
-    
-    pcall(tip.AddLine, tip, "任务日志", 0.6, 0.8, 1)
-    
-    local ok, numShown, numTotal = pcall(api.GetNumQuestLogEntries)
-    if ok then
-        numShown = Secrets.Number(numShown)
-        numTotal = Secrets.Number(numTotal)
-        
-        if numShown and numTotal then
-            pcall(tip.AddDoubleLine, tip, "显示任务", string.format("%d", numShown), 1, 1, 1, 1, 1, 1)
-            pcall(tip.AddDoubleLine, tip, "总任务数", string.format("%d", numTotal), 1, 1, 1, 1, 1, 1)
-        elseif numShown then
-            pcall(tip.AddLine, tip, string.format("当前任务: %d", numShown), 1, 1, 1)
-        else
-            pcall(tip.AddLine, tip, "没有活跃任务", 0.8, 0.8, 0.8)
-        end
-    else
-        pcall(tip.AddLine, tip, "无法读取任务日志", 0.8, 0.8, 0.8)
-    end
-end
-
-M:RegisterBlock({
-    key      = "quest",
-    label    = "任务",
-    position = "RIGHT",
-    events   = { "QUEST_LOG_UPDATE", "PLAYER_ENTERING_WORLD" },
-    update   = QuestUpdate,
-    tooltip  = QuestTooltip,
-    onClick  = BlockClick("dock"),   -- 任务日志没有纯 C_* 开口：先开代点坞
+    onClick  = BlockClick("friends"),   -- 直开社交窗（作者批准的例外：ToggleFriendsFrame，实测零 taint）
 })
 
 -- =========================================================================
