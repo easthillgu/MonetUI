@@ -24,6 +24,13 @@ local ADDON_NAME, ns = ...
 local Scheduler = {}
 ns.Scheduler = Scheduler
 
+--- 诊断数据面的版本号（`/mui perf` 会打出来）。每次改 Snapshot 行结构或账本语义就 +1，
+--- 用途很具体：2026-11-07 出现过「以为装上了新代码、其实客户端还在跑旧版」的一轮误读
+---（凭证：输出里没有新增的 `@ 文件:行` 字段）。有版本号就不必靠猜字段。
+---   1 = 只有订阅明细 + 聚合
+---   2 = 加外部驱动账（Profile / ExternalSnapshot）+ Snapshot 行带 where 来源
+Scheduler.diagRev = 2
+
 local masterFrame = nil
 local masterRunning = false
 local subs = {}   -- id -> { intervalSec, fn, acc, active }

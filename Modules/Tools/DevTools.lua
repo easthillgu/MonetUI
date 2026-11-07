@@ -282,7 +282,8 @@ function DevTools:Perf(arg)
     local saved = SaveLedger("perfReport", report)
 
     if type(totals) == "table" then
-        ns:Print(("调度器：在册 %s · 等一拍 %s · 累计调用 %s · 累计耗时 %s · 失败 %s"):format(
+        ns:Print(("调度器（账 v%s）：在册 %s · 等一拍 %s · 累计调用 %s · 累计耗时 %s · 失败 %s"):format(
+            tostring(S.diagRev or "?"),
             tostring(totals.running), tostring(totals.pending),
             tostring(totals.calls), tostring(totals.cost), tostring(totals.failures)))
     else
