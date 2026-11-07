@@ -14,6 +14,12 @@ local unitSets      = {}   -- event -> { unit -> refcount }
 local registered    = {}   -- event -> true (plain RegisterEvent already done)
 local frame
 
+-- 复用同一张 scratch 表，避免每次 Dispatch 都给快照新建表（UNIT_AURA / UNIT_POWER_UPDATE
+-- 等高频事件每派发一次就稳定分配 1~2 张表，是持续的 GC 压力）。dispatchDepth 防重入：
+-- 若回调里又触发了别的事件（重入 Dispatch），内层走"每次新建"分支，绝不污染外层正在用的 buffer。
+local dispatchScratch = {}
+local dispatchDepth = 0
+
 -- Report a handler failure, but only the FIRST time per event.  Without this a handler that throws on
 -- a high-frequency event (UPDATE_*, PLAYER_ENTERING_WORLD, ...) prints the same line on every single
 -- fire, which floods the chat log -- exactly what the project rule "失败一次性 print 警告，不刷屏" forbids.
@@ -63,8 +69,15 @@ end
 -- units, and drop the engine registration entirely once nothing listens --
 -- otherwise dead units would sit in RegisterUnitEvent's filter forever.
 local function ResyncUnitFilter(event)
+    local list = callbacks[event]
+    local plainCount = (list and #list) or 0
     local sets = unitSets[event]
-    if sets then
+    -- 关键边界（与 RegisterUnit:152 同一条规则，必须对称）：同一事件上只要还有普通
+    -- Register 回调，引擎就必须保持「全单位」投递（RegisterEvent），绝不能下推成单位过滤。
+    -- RegisterUnitEvent 会顶掉 RegisterEvent 的整事件投递，否则残留的普通回调只在注册过的
+    -- 那几个单位上触发（删掉其中一个普通回调触发本函数时就会踩到）。只有「没有任何普通回调、
+    -- 仅剩单位监听器」时，才把过滤下推给引擎。
+    if sets and plainCount == 0 then
         local units = {}
         for u in pairs(sets) do units[#units + 1] = u end
         if #units > 0 then
@@ -73,8 +86,13 @@ local function ResyncUnitFilter(event)
         end
         unitSets[event] = nil
     end
-    local list = callbacks[event]
-    if list and #list > 0 then return end
+    if plainCount > 0 then
+        if not registered[event] then
+            registered[event] = true
+            pcall(frame.RegisterEvent, frame, event)
+        end
+        return
+    end
     local listeners = unitListeners[event]
     if listeners and #listeners > 0 then return end
     unitListeners[event] = nil
@@ -199,27 +217,56 @@ function EventBus:UnregisterAll(event)
 end
 
 function EventBus:Dispatch(event, ...)
-    -- **先快照再派发**：回调里调 Unregister 会改列表，直接遍历会跳过后面几个回调。
+    -- **先快照再派发**：回调里调 Unregister 会改列表（table.remove 前移），直接遍历会跳过后面几个回调。
+    -- 热路径上复用模块级 dispatchScratch，不再每次新建快照表；重入时退回一次性分配。
     local list = callbacks[event]
     if list and #list > 0 then
-        local snapshot = {}
-        for i = 1, #list do snapshot[i] = list[i] end
-        for i = 1, #snapshot do
-            local ok, err = pcall(snapshot[i], event, ...)
-            if not ok then Report(event, err) end
+        if dispatchDepth == 0 then
+            dispatchDepth = dispatchDepth + 1
+            local n = #list
+            for i = 1, n do dispatchScratch[i] = list[i] end
+            for i = 1, n do
+                local cb = dispatchScratch[i]
+                dispatchScratch[i] = nil
+                local ok, err = pcall(cb, event, ...)
+                if not ok then Report(event, err) end
+            end
+            dispatchDepth = dispatchDepth - 1
+        else
+            local snapshot = {}
+            for i = 1, #list do snapshot[i] = list[i] end
+            for i = 1, #snapshot do
+                local ok, err = pcall(snapshot[i], event, ...)
+                if not ok then Report(event, err) end
+            end
         end
     end
 
     local listeners = unitListeners[event]
     if listeners and #listeners > 0 then
-        local snapshot = {}
-        for i = 1, #listeners do snapshot[i] = listeners[i] end
         local unit = ...
-        for i = 1, #snapshot do
-            local entry = snapshot[i]
-            if entry.unit == unit then
-                local ok, err = pcall(entry.cb, event, ...)
-                if not ok then Report(event, err) end
+        if dispatchDepth == 0 then
+            dispatchDepth = dispatchDepth + 1
+            local n = #listeners
+            for i = 1, n do dispatchScratch[i] = listeners[i] end
+            for i = 1, n do
+                local entry = dispatchScratch[i]
+                dispatchScratch[i] = nil
+                if entry.unit == unit then
+                    local ok, err = pcall(entry.cb, event, ...)
+                    if not ok then Report(event, err) end
+                end
+            end
+            dispatchDepth = dispatchDepth - 1
+        else
+            local snapshot = {}
+            for i = 1, #listeners do snapshot[i] = listeners[i] end
+            for i = 1, #snapshot do
+                local entry = snapshot[i]
+                if entry.unit == unit then
+                    local ok, err = pcall(entry.cb, event, ...)
+                    if not ok then Report(event, err) end
+                end
             end
         end
     end

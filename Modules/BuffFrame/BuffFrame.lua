@@ -9,6 +9,7 @@ local Widget   = ns.Widget
 local Color    = ns.Color
 local Math     = ns.Math
 local EventBus = ns.EventBus
+local Scheduler = ns.Scheduler
 
 local M = { name = "BuffFrame" }
 
@@ -570,15 +571,15 @@ function M:Update()
 end
 
 --- Throttled update: UNIT_AURA can fire very often during combat.
+--- 迁到 Scheduler：来一波就注册一个 0.25s 的一次性订阅（perf 可见），到点更新 + 注销
+--- （主帧随之自 Hide），窗口内的后续 UNIT_AURA 被 pending 拦掉只更新一次。
+local buffSubId = nil
 local function QueueUpdate()
     local frame = buffContainer
     if not frame or pending then return end
     pending = true
-    frame:SetScript("OnUpdate", function(self, elapsed)
-        self.__elapsed = (self.__elapsed or 0) + elapsed -- TAINT-OK: buffContainer 是自建容器（MonetUICombatBuffFrame），暴雪代码不在此框上运行
-        if self.__elapsed < 0.25 then return end
-        self.__elapsed = 0 -- TAINT-OK: 同上，自建节流计数
-        self:SetScript("OnUpdate", nil)
+    buffSubId = Scheduler:Every(250, function()
+        if buffSubId then Scheduler:Unregister(buffSubId); buffSubId = nil end
         pending = false
         M:Update()
     end)

@@ -35,7 +35,7 @@ Widget.BORDER   = 1   -- 1px Monet 发丝边（框 / 条 / 牌 / 按钮的内嵌
 Widget.TEXT_GAP = 3   -- 文字行与条顶边之间的空隙
 
 -- 弱键：自建框体被丢弃后条目跟着回收（以前是强引用，永不释放）。
-local hoverWatch, hoverDriver, hoverAcc = setmetatable({}, { __mode = "k" }), nil, 0
+local hoverWatch, hoverId = setmetatable({}, { __mode = "k" }), nil
 
 --- 驱动循环遇到暂停中的框时用它替下监听表：状态照常推进，但一个回调都不跑。
 local idleList = {}
@@ -253,12 +253,8 @@ local function MouseOver(frame)
 end
 
 local function EnsureHoverDriver()
-    if hoverDriver then return end
-    hoverDriver = CreateFrame("Frame")
-    hoverDriver:SetScript("OnUpdate", function(_, elapsed)
-        hoverAcc = hoverAcc + (elapsed or 0)
-        if hoverAcc < 0.1 then return end
-        hoverAcc = 0
+    if hoverId then return end
+    hoverId = Scheduler:Every(100, function()
         local down = _G.IsMouseButtonDown and _G.IsMouseButtonDown("LeftButton")
         for frame, st in pairs(hoverWatch) do
             local shown, readable = VisibilityOf(frame, "hover")
@@ -341,15 +337,11 @@ end
 
 --- 同样的轮询思路，观察"从隐藏变成显示"这一个瞬间（替掉 HookScript("OnShow")）。
 --- 同样支持一个框多个监听（以前后来的覆盖前面的）。
-local showWatch, showDriver, showAcc = setmetatable({}, { __mode = "k" }), nil, 0
+local showWatch, showId = setmetatable({}, { __mode = "k" }), nil
 
 local function EnsureShowDriver()
-    if showDriver then return end
-    showDriver = CreateFrame("Frame")
-    showDriver:SetScript("OnUpdate", function(_, elapsed)
-        showAcc = showAcc + (elapsed or 0)
-        if showAcc < 0.2 then return end
-        showAcc = 0
+    if showId then return end
+    showId = Scheduler:Every(200, function()
         for frame, st in pairs(showWatch) do
             local shown, readable = VisibilityOf(frame, "show")
             if readable then
@@ -382,7 +374,7 @@ end
 --- 通用轮询：默认每 0.2 秒对登记的框体调一次 fn(frame)；第三个参数可给每个回调
 --- **自己的间隔**（秒）—— 以前这里是全局 0.2 秒，调用处写的 "2 秒" 其实没生效。
 --- 用在"暴雪改了状态但没有任何 Lua 钩子"的场合（按钮 enabled、皮肤需要复检的东西…）。
-local pollWatch, pollDriver, pollAcc = {}, nil, 0
+local pollWatch, pollId = {}, nil
 local POLL_INTERVAL = 0.2
 --- 驱动帧自己的门。以前它**每帧**走一遍 pollWatch，而每拍对每个框都要问两次
 --- `CanBeAccessedInContext` + `IsVisible`（各带一次 pcall）——21 处登记、30 个 deep=true
@@ -413,14 +405,9 @@ function Widget:PollWatch(frame, fn, interval)
     end
     local entry = { fn = fn, interval = tonumber(interval) or POLL_INTERVAL, acc = 0 }
     list[#list + 1] = entry
-    if pollDriver then return entry end
-    pollDriver = CreateFrame("Frame")
-    pollDriver:SetScript("OnUpdate", function(_, elapsed)
-        elapsed = elapsed or 0
-        pollAcc = pollAcc + elapsed
-        if pollAcc < POLL_TICK then return end
-        local tick = pollAcc
-        pollAcc = 0
+    if pollId then return entry end
+    pollId = Scheduler:Every(100, function()
+        local tick = POLL_TICK
         for f, cbs in pairs(pollWatch) do
             -- 隐藏的框不累加时间：等它显示时再从 0 开始算，不会"一显示就补执行一堆"。
             local shown, readable
@@ -1810,10 +1797,10 @@ local function LayoutPixelGlow(st)
 end
 
 -- 一个驱动跑所有动画环：环自己在转，驱动只在有动画环的时候醒着（静态环铺一次就不再吃每帧开销）。
+-- 迁到 Scheduler：有动画环时 EveryFrame 醒来，环清零时退回（注销订阅、主帧随之自 Hide）。
 local animatedGlows = 0
-local pixelGlowDriver = CreateFrame("Frame")
-pixelGlowDriver:Hide()
-pixelGlowDriver:SetScript("OnUpdate", function(self, elapsed)
+local pixelGlowId = nil
+local function PixelGlowTick(elapsed)
     for frame, st in pairs(pixelGlows) do
         if not st.static then
             if not frame:IsShown() then
@@ -1827,9 +1814,9 @@ pixelGlowDriver:SetScript("OnUpdate", function(self, elapsed)
     end
     if animatedGlows <= 0 then
         animatedGlows = 0
-        self:Hide()
+        if pixelGlowId then Scheduler:Unregister(pixelGlowId); pixelGlowId = nil end
     end
-end)
+end
 
 --- 上色：调用方给了颜色就用给定的，否则取主题的 highlight 槽。
 function Widget:RefreshPixelGlow(frame)
@@ -1917,7 +1904,7 @@ function Widget:PixelGlow(frame, opts)
     end
 
     Widget:RefreshPixelGlow(frame)
-    if st.animated then pixelGlowDriver:Show() end
+    if st.animated and not pixelGlowId then pixelGlowId = Scheduler:EveryFrame(PixelGlowTick) end
 end
 
 --- 停掉像素环：方块藏起来，登记也撤掉。
@@ -1935,7 +1922,7 @@ function Widget:StopPixelGlow(frame)
         animatedGlows = animatedGlows - 1
         if animatedGlows <= 0 then
             animatedGlows = 0
-            pixelGlowDriver:Hide()
+            if pixelGlowId then Scheduler:Unregister(pixelGlowId); pixelGlowId = nil end
         end
     end
 end

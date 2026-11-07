@@ -4,6 +4,7 @@
 -- public C_QuestLog API only (the clamp/fold UI cannot overlay Blizzard's internals).
 
 local ADDON_NAME, ns = ...
+local Scheduler = ns.Scheduler
 
 -- 暴雪 HUD 的"收起来 / 还回去"统一走 Widget:Mute / Widget:Unmute（旁表标记在那边）。
 local Widget   = ns.Widget
@@ -366,15 +367,10 @@ function SuppressBlizzard()
 end
 
 --- 1 秒一次的低频兜底：上面那些时机都没赶上（或者框被谁重新显示）时补一刀。
-local ticker
+local tickerSubId
 local function EnsureTicker()
-    if ticker then return end
-    ticker = CreateFrame("Frame")
-    local acc = 0
-    ticker:SetScript("OnUpdate", function(_, elapsed)
-        acc = acc + (elapsed or 0)
-        if acc < 1 then return end
-        acc = 0
+    if tickerSubId then return end
+    tickerSubId = Scheduler:Every(1000, function()
         if enabled then SuppressBlizzard() end
     end)
 end

@@ -3,6 +3,7 @@
 -- The client keeps cooldown values secret in restricted states, so nothing here does arithmetic on a start/duration pair before Secrets.Number approves it.
 
 local ADDON_NAME, ns = ...
+local Scheduler = ns.Scheduler
 
 
 -- 旁表标记（见 Core.lua 的 ns:Mark）：不往暴雪的框体上写字段，
@@ -364,17 +365,12 @@ end
 --- 绝不 `cd:SetScript("OnUpdate", Tick)`：那等于改写暴雪冷却框的脚本 —— 写字段本身就是污染，
 --- 而且我们的代码会夹在暴雪的更新链里执行，链上后续的安全调用全被拒
 --- （实机：PetActionButton*:SetShown / PetActionBar:ClearAllPointsBase，就是这条链）。
-local driver
-local driverAcc = 0
+local cooldownSubId
 
 local function EnsureDriver()
-    if driver then return end
-    driver = CreateFrame("Frame")
-    driver:SetScript("OnUpdate", function(_, elapsed)
-        driverAcc = driverAcc + (elapsed or 0)
-        if driverAcc < 0.05 then return end
-        local dt = driverAcc
-        driverAcc = 0
+    if cooldownSubId then return end
+    cooldownSubId = Scheduler:Every(50, function()
+        local dt = 0.05
         for cd, state in pairs(attached) do
             if state then Tick(cd, dt) end
         end

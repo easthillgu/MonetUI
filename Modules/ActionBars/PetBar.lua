@@ -14,6 +14,7 @@
 --           M.petbar.SyncPetGlow(def, entry) / SyncPetGlowNow() / TeardownPetGlow()。
 
 local ADDON_NAME, ns = ...
+local Scheduler = ns.Scheduler
 
 local M = ns:GetModule("ActionBars")
 if not M then return end
@@ -49,15 +50,10 @@ local RegisterStateDriver = _G.RegisterStateDriver
 --- 宠物条的冷却：收养来的按钮，暴雪只在自己的事件里刷（切目标等），不主动更新 ——
 --- 实机表现就是"切个目标才看到冷却时间"。给它一个 0.5 秒的轻量驱动，只调冷却刷新函数
 --- （不调 PetActionBar:Update，那会连带 UpdateShownButtons → 那 10 条拦截）。
-local petCooldownDriver
+local petCooldownSubId
 local function EnsurePetCooldownDriver()
-    if petCooldownDriver then return end
-    petCooldownDriver = CreateFrame("Frame")
-    local acc = 0
-    petCooldownDriver:SetScript("OnUpdate", function(_, elapsed)
-        acc = acc + (elapsed or 0)
-        if acc < 0.5 then return end
-        acc = 0
+    if petCooldownSubId then return end
+    petCooldownSubId = Scheduler:Every(500, function()
         local bar = bars and bars.BarPet
         if not bar or not bar.frame:IsShown() then return end
         -- 本客户端没有全局 PetActionBar_UpdateCooldowns（实测 nil），但有方法

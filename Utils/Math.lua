@@ -33,15 +33,6 @@ function Math:SafeDiv(a, b, fallback)
     return a / b
 end
 
-function Math:LerpColor(c1, c2, t)
-    return {
-        r = self:Lerp(c1.r, c2.r, t),
-        g = self:Lerp(c1.g, c2.g, t),
-        b = self:Lerp(c1.b, c2.b, t),
-        a = self:Lerp(c1.a or 1, c2.a or 1, t),
-    }
-end
-
 -- Convert HSL to RGB (h: 0-360, s/l: 0-1)
 function Math:HSLToRGB(h, s, l)
     h = ((h or 0) % 360 + 360) % 360

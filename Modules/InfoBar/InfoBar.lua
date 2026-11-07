@@ -8,6 +8,8 @@ local Widget   = ns.Widget
 local EventBus = ns.EventBus
 local Color    = ns.Color
 local Media    = ns.Media
+local Scheduler = ns.Scheduler
+local infobarSubId = nil
 
 local M = { name = "InfoBar", blocks = {} }
 ns.InfoBar = M
@@ -160,8 +162,8 @@ end
 local function Kick()
     if not bar then return end
     if blockAlpha ~= targetBlockAlpha or barAlpha ~= targetBarAlpha or pulseColor then
-        if not bar:GetScript("OnUpdate") then
-            bar:SetScript("OnUpdate", function(_, elapsed) M:Tick(elapsed) end)
+        if not infobarSubId then
+            infobarSubId = Scheduler:EveryFrame(function(elapsed) M:Tick(elapsed) end)
         end
     end
 end
@@ -198,7 +200,7 @@ function M:Tick(elapsed)
     ApplyColors()
 
     if not running then
-        bar:SetScript("OnUpdate", nil)
+        if infobarSubId then Scheduler:Unregister(infobarSubId); infobarSubId = nil end
     end
 end
 

@@ -21,6 +21,8 @@ local EventBus = ns.EventBus
 -- 下面 Fill / Tick 里防机密值要用 Secrets.IsSecret —— 必须在这里声明：`Secrets` 只是 ns.Secrets，
 -- 没有全局同名对象；漏声明不会在加载期报错，只在第一条 toast 弹红字（AGENTS「静态闸门抓不到」那条）。
 local Secrets  = ns.Secrets
+local Scheduler = ns.Scheduler
+local toastSubId = nil
 
 local M = { name = "Toast" }
 ns.Toast = M
@@ -105,18 +107,18 @@ local function Fill(entry)
     -- 提醒类（战斗进出）用 entry.hold 覆盖停留时间，不跟普通通知的 5 秒走。
     holdFor = entry.hold or math.max(1, tonumber(M:GetSetting("duration")) or 5)
     phase, t = "in", 0
-    frame:SetScript("OnUpdate", M.Tick)
+    if not toastSubId then toastSubId = Scheduler:EveryFrame(M.Tick) end
 end
 
 local function Next()
     showing = nil
     frame:Hide()
-    frame:SetScript("OnUpdate", nil)
+    if toastSubId then Scheduler:Unregister(toastSubId); toastSubId = nil end
     if #queue > 0 then Fill(table.remove(queue, 1)) end
 end
 
 --- 动画步进：淡入 → 停留（排空线变短）→ 淡出 → 下一条。
-function M.Tick(self, elapsed)
+function M.Tick(elapsed)
     t = t + (elapsed or 0)
 
     if phase == "in" then
@@ -313,7 +315,7 @@ function M:SetEnabled(value)
     if not self.active then
         queue = {}
         showing = nil
-        frame:SetScript("OnUpdate", nil)
+        if toastSubId then Scheduler:Unregister(toastSubId); toastSubId = nil end
         frame:Hide()
     end
 end

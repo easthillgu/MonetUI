@@ -760,8 +760,7 @@ local function UpdateHealth(plate)
     -- 2026-11-01 副本内 26 块牌子 `CanMeasureHealth(nameplateN)=false`，于是百分比全空白）。
     -- 先试普通算术，拿不到就交给客户端的百分比曲线 —— 机密数字 SetFormattedText 吃得下。
     if Setting("showPercent") ~= false then
-        local written = Secrets.FormatHealthPercent(plate.percent, unit,
-            Query(UnitHealth, unit), Query(UnitHealthMax, unit))
+        local written = Secrets.FormatHealthPercent(plate.percent, unit, hp, hpMax)
         if not written then plate.percent:SetText("") end
     else
         plate.percent:SetText("")

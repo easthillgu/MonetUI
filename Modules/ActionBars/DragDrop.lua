@@ -6,6 +6,7 @@
 --   * 输出：M.dragdrop.EnsureDropCatcher(bar)。
 
 local ADDON_NAME, ns = ...
+local Scheduler = ns.Scheduler
 
 local M = ns:GetModule("ActionBars")
 if not M then return end
@@ -123,16 +124,12 @@ local function EnsureDropCatcher(bar)
     -- 它就永远停在 mouse=true。实机后果（2026-10-26）：bar4..8 只有 3 组却开着接住器，
     -- bar4 的接住器正好压在姿态条上，姿态那几格点下去变成"动作条第 1 格"。
     -- 所以每一拍都算出一个**期望状态**，和当前状态不一致就写过去（包括"关掉"）。
-    local acc = 0
-    catcher:SetScript("OnUpdate", function(self, elapsed)
-        acc = acc + (elapsed or 0)
-        if acc < 0.1 then return end
-        acc = 0
+    catcher.subId = Scheduler:Every(100, function()
         -- IsShown 在受限环境可能是机密值：走 Secrets.Bool，读不出来按"没显示"（= 关鼠标，更安全）。
         local active = Secrets.Bool(frame:IsShown(), false) and (GetCursorInfo() ~= nil)
-        if active ~= self.holding then
-            self.holding = active
-            pcall(self.EnableMouse, self, active)
+        if active ~= catcher.holding then
+            catcher.holding = active
+            pcall(catcher.EnableMouse, catcher, active)
         end
     end)
     dropCatchers[bar] = catcher

@@ -23,6 +23,8 @@ if not M then return end
 
 local EventBus = ns.EventBus
 local Color    = ns.Color
+local Scheduler = ns.Scheduler
+local xpSubId = nil
 local Secrets  = ns.Secrets
 local Media    = ns.Media
 
@@ -364,7 +366,7 @@ end
 
 local Apply   -- 前向声明：动画收尾要回头再对一次目标值
 
-local function Tick(_, elapsed)
+local function Tick(elapsed)
     if not anim or not root then return end
 
     anim.t = anim.t + elapsed
@@ -392,7 +394,7 @@ local function Tick(_, elapsed)
     end
 
     if t >= 1 then
-        root:SetScript("OnUpdate", nil)
+        if xpSubId then Scheduler:Unregister(xpSubId); xpSubId = nil end
         anim = nil
         Apply()
     end
@@ -402,7 +404,7 @@ local function StartAnim(spec)
     if not root then return end
     anim = spec
     anim.t = 0
-    root:SetScript("OnUpdate", Tick)
+    if not xpSubId then xpSubId = Scheduler:EveryFrame(Tick) end
 end
 
 --- 涨了：从当前画到的值滑到新值。动画中途又涨一次就从半路接着滑。
@@ -424,7 +426,7 @@ end
 --- 停下动画并把画布交回 Apply（它会把颜色重置回本色）。
 local function StopAnim()
     if not root then return end
-    root:SetScript("OnUpdate", nil)
+    if xpSubId then Scheduler:Unregister(xpSubId); xpSubId = nil end
     anim = nil
 end
 

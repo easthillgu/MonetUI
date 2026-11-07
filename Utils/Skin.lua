@@ -17,6 +17,7 @@ local Color    = ns.Color
 local Media    = ns.Media
 local Widget   = ns.Widget
 local EventBus = ns.EventBus
+local Scheduler = ns.Scheduler
 
 local Skin = {}
 ns.Skin = Skin
@@ -1291,16 +1292,11 @@ end
 --- "tainted by MonetUI"（实机：进入编辑模式时 Blizzard 自己的小队框 setup 因此抛
 --- "compare 'oldR' (secret ...)"）。改成 0.5 秒轮询所有装饰过的页签，重算选中态。
 local tabWatch = setmetatable({}, { __mode = "k" })
-local tabDriver
+local tabId
 
 local function EnsureTabDriver(Skin)
-    if tabDriver then return end
-    tabDriver = CreateFrame("Frame")
-    local acc = 0
-    tabDriver:SetScript("OnUpdate", function(_, elapsed)
-        acc = acc + (elapsed or 0)
-        if acc < 0.5 then return end
-        acc = 0
+    if tabId then return end
+    tabId = Scheduler:Every(500, function()
         for tab in pairs(tabWatch) do
             pcall(Skin.UpdateTabState, Skin, tab)
         end
@@ -1633,15 +1629,11 @@ local SCROLL_ARROW_ATLAS = {
     ["UI-ScrollBar-ClassicScrollDownButton-Up"] = "down",
 }
 local arrowRegions = setmetatable({}, { __mode = "k" })  -- [blizzardRegion] = true
-local arrowDriver, arrowAcc
+local arrowId
 
 local function EnsureArrowDriver()
-    if arrowDriver then return end
-    arrowDriver = CreateFrame("Frame")
-    arrowDriver:SetScript("OnUpdate", function(_, elapsed)
-        arrowAcc = (arrowAcc or 0) + (elapsed or 0)
-        if arrowAcc < 0.3 then return end
-        arrowAcc = 0
+    if arrowId then return end
+    arrowId = Scheduler:Every(300, function()
         for reg in pairs(arrowRegions) do
             if type(reg.GetAlpha) == "function" and type(reg.SetAlpha) == "function" then
                 local ok, a = pcall(reg.GetAlpha, reg)
@@ -2163,7 +2155,7 @@ end
 --- 连带 PetActionButton*:SetShown / PetActionBar:ClearAllPointsBase 刷屏。
 --- 改成：只记下裁剪参数，由我们自己的驱动帧每 0.5 秒重压一遍 texcoord。
 local cropped = setmetatable({}, { __mode = "k" })
-local cropDriver, cropAcc
+local cropId
 
 --- 摘掉一张贴图上的**全部**遮罩，返回被摘掉的清单（供回滚重新挂回）。
 -- 2026-11-06 补：客户端**拒绝给带遮罩的贴图 SetTexCoord**（"Cannot set tex coords when
@@ -2198,12 +2190,8 @@ end
 local stripped = setmetatable({}, { __mode = "k" })
 
 local function EnsureCropDriver()
-    if cropDriver then return end
-    cropDriver = CreateFrame("Frame")
-    cropDriver:SetScript("OnUpdate", function(_, elapsed)
-        cropAcc = (cropAcc or 0) + (elapsed or 0)
-        if cropAcc < 0.5 then return end
-        cropAcc = 0
+    if cropId then return end
+    cropId = Scheduler:Every(500, function()
         for icon, c in pairs(cropped) do
             if type(icon.SetTexCoord) == "function" then
                 if stripped[icon] == nil then
@@ -2354,7 +2342,7 @@ function Skin:QualityColor(q)
 end
 
 local qualityBorders = setmetatable({}, { __mode = "k" })   -- btn -> { frame, last }
-local qualityDriver, qualityAcc
+local qualityId
 
 --- 品质查询：本客户端（WOWFOREVER 12.1.5）把全局 `GetItemInfo` / `GetItemInfoInstant` /
 --- `GetItemQualityColor` 整族**砍了**（实机探针全 nil），但 `C_Item.*` 在——
@@ -2545,12 +2533,8 @@ local function SnapQualityBorder(btn, border)
 end
 
 local function EnsureQualityDriver()
-    if qualityDriver then return end
-    qualityDriver = CreateFrame("Frame")
-    qualityDriver:SetScript("OnUpdate", function(_, elapsed)
-        qualityAcc = (qualityAcc or 0) + (elapsed or 0)
-        if qualityAcc < 0.5 then return end
-        qualityAcc = 0
+    if qualityId then return end
+    qualityId = Scheduler:Every(500, function()
         for btn, entry in pairs(qualityBorders) do
             local border = entry.frame
             if border and border.GetAlpha then

@@ -13,6 +13,7 @@
 -- 也不改任何暴雪帧, 因此战斗 / 载具 / PvP 下都安全. 关掉模块时 OnUpdate 整个摘掉, 零开销.
 
 local ADDON_NAME, ns = ...
+local Scheduler = ns.Scheduler
 
 local Color = ns.Color
 local Media = ns.Media
@@ -33,7 +34,7 @@ local host                       -- 挂在 UIParent 上的透明框（TOOLTIP �
 local lines = {}                 -- 拖尾段 [1] 是最新的一段
 local sparkH, sparkV             -- 速度光的横 / 竖线
 local samples = {}               -- 采样点，[1] 最新：{ x, y, t }
-local enabled, trailOn, glowOn
+local enabled, trailOn, glowOn, cursorSubId
 local acc                        -- 采样累加器
 local clock = 0                  -- 自己的秒表（累加 OnUpdate 的 elapsed，不依赖 GetTime）
 local speed                      -- 平滑后的光标速度（UI 单位/秒）
@@ -228,9 +229,9 @@ function M:Apply()
 
     if not (enabled and host) then return end
     if trailOn or glowOn then
-        host:SetScript("OnUpdate", OnUpdate)
+        if not cursorSubId then cursorSubId = Scheduler:EveryFrame(OnUpdate) end
     else
-        host:SetScript("OnUpdate", nil)
+        if cursorSubId then Scheduler:Unregister(cursorSubId); cursorSubId = nil end
         HideAll()
     end
 end
@@ -252,7 +253,7 @@ function M:SetEnabled(value)
         Paint()
         self:Apply()
     else
-        host:SetScript("OnUpdate", nil)
+        if cursorSubId then Scheduler:Unregister(cursorSubId); cursorSubId = nil end
         HideAll()
         samples = {}
         speed, lastX, lastY, acc = 0, nil, nil, 0

@@ -4,6 +4,7 @@
 -- Client constants below were verified via wuxian api_get against the official manual, not from memory.
 
 local ADDON_NAME, ns = ...
+local Scheduler = ns.Scheduler
 
 
 -- 旁表标记（见 Core.lua 的 ns:Mark）：不往暴雪的框体上写字段，
@@ -1179,7 +1180,7 @@ end
 
 --- 扫一遍暴雪背包框：把漂移的停车状态按回去（暴雪重设 alpha / 重开鼠标就补一刀），
 --- 返回"是否有框在显示"。只读 IsShown / GetAlpha，**不 Hide** —— 显示状态归暴雪管，我们只看。
-local blizzardDriver, guardAcc, lastToggle = nil, 0, 0
+local blizzardSubId, lastToggle = nil, 0
 local bankOpen = false          -- 银行开合也会 Show/Hide 背包框：那段时间的边沿让给银行路径
 local GUARD_INTERVAL = 0.2
 local TOGGLE_DEBOUNCE = 0.12
@@ -1340,14 +1341,9 @@ end
 --- TOGGLE_DEBOUNCE 挡掉重载瞬间的抖动。**不再 toggle**：开/关都显式，免得"回光返照"
 --- 把我们自己切来切去（2026-10-26 实机 bug 的根）。
 local function StartBlizzardGuard()
-    if blizzardDriver then return end
-    blizzardDriver = CreateFrame("Frame")
-    blizzardDriver:SetScript("OnUpdate", function(_, elapsed)
+    if blizzardSubId then return end
+    blizzardSubId = Scheduler:Every(GUARD_INTERVAL * 1000, function()
         if not ns:IsModuleEnabled("Bags") then return end
-        guardAcc = guardAcc + (elapsed or 0)
-        if guardAcc < GUARD_INTERVAL then return end
-        guardAcc = 0
-
         local anyShown = SweepBlizzardBags(not InCombat())
         if anyShown == bagsVisualOpen then return end
         bagsVisualOpen = anyShown
@@ -1399,7 +1395,7 @@ local function BagSignature(indexes)
     return table.concat(parts, ",")
 end
 
-local pollDriver, pollAcc, bagSig, bankSig
+local pollSubId, bagSig, bankSig
 
 -- 战斗里 reload 的收尾：模板物品按钮不能出生（AcquireButton 返回 nil），窗口只剩标题；
 -- 而签名轮询只认"背包内容指纹"——空窗口和满窗口的指纹一样，所以脱战后**不会**自己补。
@@ -1413,13 +1409,9 @@ end)
 
 local function StartPolling()
     bagSig, bankSig = nil, nil      -- 重开窗口先强制对一次
-    if not pollDriver then
-        pollDriver = CreateFrame("Frame")
-        pollDriver:SetScript("OnUpdate", function(self, elapsed)
-            if not shown then self:Hide() return end
-            pollAcc = (pollAcc or 0) + (elapsed or 0)
-            if pollAcc < POLL_INTERVAL then return end
-            pollAcc = 0
+    if not pollSubId then
+        pollSubId = Scheduler:Every(POLL_INTERVAL * 1000, function()
+            if not shown then return end
             local indexes = Setting("showReagentBag")
                 and { 0, 1, 2, 3, 4, BAG_REAGENT } or BAGS_CARRIED
             local sig = BagSignature(indexes)
@@ -1436,11 +1428,10 @@ local function StartPolling()
             end
         end)
     end
-    pollDriver:Show()
 end
 
 local function StopPolling()
-    if pollDriver then pollDriver:Hide() end
+    if pollSubId then Scheduler:Unregister(pollSubId); pollSubId = nil end
     bagSig, bankSig = nil, nil
 end
 
@@ -1498,25 +1489,35 @@ function M:Initialize()
     -- 空闲时驱动器自 Hide 零开销）；CURSOR_CHANGED 本客户端 ×298 高频刷，挂上它等于
     -- 窗口开着时每次光标变化都全量重建 —— 不注册，兜底交给签名轮询。
     local pending, pendingBank = false, false
-    local driver = CreateFrame("Frame")
-    driver:SetScript("OnUpdate", function(self)
-        if not pending and not pendingBank then self:Hide() return end
+    local coalesceSubId
+
+    local function FlushMarks()
+        if not pending and not pendingBank then return end
         local doBags, doBank = pending, pendingBank
         pending, pendingBank = false, false
         if doBags and shown then Rebuild("bags") end
         if doBank and shown and bankOpen then Rebuild("bank") end
-    end)
+    end
+
+    -- 帧级合并：标脏后注册一个每帧订阅，下一拍合并重建一次即注销（主帧随之自 Hide）。
+    local function EnsureCoalesce()
+        if coalesceSubId then return end
+        coalesceSubId = Scheduler:EveryFrame(function()
+            FlushMarks()
+            if coalesceSubId then Scheduler:Unregister(coalesceSubId); coalesceSubId = nil end
+        end)
+    end
 
     local function Mark()
         if not shown then return end
         pending = true
-        driver:Show()
+        EnsureCoalesce()
     end
 
     local function MarkBank()
         if not shown or not bankOpen then return end
         pendingBank = true
-        driver:Show()
+        EnsureCoalesce()
     end
 
     -- ① 事件层：BAG_UPDATE 是主路径，再补几条本客户端可能单独发的（EventBus 对

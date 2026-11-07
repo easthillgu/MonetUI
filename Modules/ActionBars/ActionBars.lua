@@ -23,6 +23,7 @@
 -- 客户端在管），我们只搬位置、缩放、裁图标（见 ADOPTED_DEFS）。
 
 local ADDON_NAME, ns = ...
+local Scheduler = ns.Scheduler
 
 
 -- 旁表标记（见 Core.lua 的 ns:Mark）：不往暴雪的框体上写字段，
@@ -1047,25 +1048,24 @@ end
 -- 新页号写进条自己的 "actionpage" 属性。我们的事件（翻页 / 槽位变化）发生在
 -- 结算之前或之后都说不准，中间那一小段时间按钮显示的还是旧页的图标。
 -- 所以这里盯一次 actionpage：变了就重画（每 0.2 秒读 8 个属性，很便宜）。
-local pageWatcher
+local pageSubId
 
 local function WatchPages(show)
-    if not pageWatcher then
-        pageWatcher = CreateFrame("Frame")
-        pageWatcher:SetScript("OnUpdate", function(self, elapsed)
-            self.timer = (self.timer or 0) + (elapsed or 0)
-            if self.timer < 0.2 then return end
-            self.timer = 0
-            for _, bar in pairs(bars) do
-                local page = tonumber(bar.frame:GetAttribute("actionpage")) or bar.def.page
-                if page ~= bar.page then
-                    bar.page = page
-                    RefreshBar(bar)
+    if show then
+        if not pageSubId then
+            pageSubId = Scheduler:Every(200, function()
+                for _, bar in pairs(bars) do
+                    local page = tonumber(bar.frame:GetAttribute("actionpage")) or bar.def.page
+                    if page ~= bar.page then
+                        bar.page = page
+                        RefreshBar(bar)
+                    end
                 end
-            end
-        end)
+            end)
+        end
+    else
+        if pageSubId then Scheduler:Unregister(pageSubId); pageSubId = nil end
     end
-    if show then pageWatcher:Show() else pageWatcher:Hide() end
 end
 
 --- 给收养来的暴雪按钮"换皮"（宠物条 / 姿态条共用；ElvUI 的 StyleButton 同一思路，但只做最必要的几层）：
@@ -1651,11 +1651,16 @@ local SLOT_EVENTS = {
 }
 
 -- 冷却事件单独一条轻量路径：只重画冷却框，不重扫 96 个按钮的图标/文字。
+-- 仅放"纯冷却"事件：ACTIONBAR_UPDATE_COOLDOWN / SPELL_UPDATE_COOLDOWN / SPELL_UPDATE_CHARGES /
+-- SPELL_UPDATE_ICON / PET_BAR_UPDATE_COOLDOWN 只动冷却框、不重扫图标文字，单走这条轻量路径即可。
+-- 另三个（ACTIONBAR_UPDATE_USABLE / SPELLS_CHANGED / PET_BAR_UPDATE）刻意不放进来：它们在
+-- SLOT_EVENTS 里已经走 UpdateAll，而 UpdateAll 经 RefreshBar→UpdateButtonContent→PaintCooldown
+-- 已经把冷却画过一遍，这里再登记等于同一事件把冷却画两遍（PaintCooldown 双跑），纯浪费。
 local COOLDOWN_EVENTS = {
     "ACTIONBAR_UPDATE_COOLDOWN", "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_CHARGES",
-    "SPELL_UPDATE_ICON", "ACTIONBAR_UPDATE_USABLE", "SPELLS_CHANGED",
+    "SPELL_UPDATE_ICON",
     -- 宠物技能冷却
-    "PET_BAR_UPDATE_COOLDOWN", "PET_BAR_UPDATE",
+    "PET_BAR_UPDATE_COOLDOWN",
 }
 
 function M:RegisterEvents()

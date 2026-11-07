@@ -10,6 +10,7 @@
 --           以及仍然挂在模块上的 M:ParkBlizzard / M:RestoreBlizzard。
 
 local ADDON_NAME, ns = ...
+local Scheduler = ns.Scheduler
 
 local M = ns:GetModule("ActionBars")
 if not M then return end
@@ -125,7 +126,7 @@ end
 --- UpdateShownButtons → SetShown）就会整片被拒 —— taint.log 里宠物条那一串
 --- `PetActionButton*:SetShown()` 正是这么来的。定时驱动属于独立的一次执行，不夹在链里。
 local parkedList = {}
-local parkDriver
+local parkSubId
 
 local function KeepParked()
     -- **战斗里什么都不做。** 受保护的条/按钮上，战斗中写 alpha / 鼠标本身就是受限制的；
@@ -155,15 +156,8 @@ local function ParkWatch(frame)
     end
     parkedList[#parkedList + 1] = frame
 
-    if parkDriver then return end
-    parkDriver = CreateFrame("Frame")
-    local acc = 0
-    parkDriver:SetScript("OnUpdate", function(_, elapsed)
-        acc = acc + (elapsed or 0)
-        if acc < 0.5 then return end
-        acc = 0
-        KeepParked()
-    end)
+    if parkSubId then return end
+    parkSubId = Scheduler:Every(500, KeepParked)
 end
 
 local function Park(name)
