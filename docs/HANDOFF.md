@@ -4760,6 +4760,16 @@ data 行（其中 3 个 trip、6 个 game），故生效账是 15 / 1。覆盖�
 **闸门**：`env-source-check` PASS（17/15/1）、`api-audit` no hard finding、`coverage` exit 0、
 `luac -p` OK、`sync-check` in sync。引擎本身未改，色源审计仍在离线闸门。
 
+**实机验收（13:20，用户 `/reload` 后，PASS）**：wuxian CLI 起 companion 建链路后，可在游戏内
+直接跑 Lua 读 `LMC:GetMapEnv`。全 33 区逐区对账 **33/33 完全一致**（h/s/l + 生效来源），
+17 区 `src=override`（贴图）、16 区 `src=data`（15 trip + 1 game）；7 个新 trip 区实测
+1417 h89.2 / 1420 h22.1 / 1421 h84.7 / 1424 h83.9 / 1429 h59.4 / 1436 h61.4 / 1454 h18.7，
+灰谷 1440 h45.1、泽风岛 2521 h42.6 走 override，幽暗城 1458 h204.9 仍 game，
+银月城 2393 `src=fallback`（唯一缺口，既有）。`/mui colors` 的 `MonetUIDB.colorReport`：
+zone=贫瘠之地、envSource=override、**4/4 对比度过线**（1.702 / 1.552 / 1.929 / 3.284，
+阈值 1.4）。reload 后 `wuxian logs --kinds ERR,BLOCKED` 为空。⇒ 本轮色值改动已实机生效，
+不需再做验收。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 
