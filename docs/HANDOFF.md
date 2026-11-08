@@ -4859,8 +4859,10 @@ Files → **Add File**：
 ⇒ 发版时 **TOC `## Version` / `CHANGELOG.md` 顶部 / tag 三处写同一个数字**，忘了改会在 Actions 第一步红，
 不会发出「CF 显示 0.12.1、游戏里还是 0.12.0」的错包。
 
-另需在仓库 Settings → Actions → General → **Workflow permissions 设 Read and write**（建 GitHub Release 用）；
-workflow 里已声明 `permissions: contents: write`，若组织策略覆盖再检查这里。
+仓库 Settings → Actions → General → **Workflow permissions 已设为 Read and write**（2026-11-08 17:2x
+用内置浏览器代设并刷新复核；`Allow GitHub Actions to create and approve pull requests` 保持未勾）。
+严格说 workflow 里的 `permissions: contents: write` 已能覆盖仓库默认只读设置（GitHub Docs：有写权限者
+可用 `permissions` key 增删 GITHUB_TOKEN 权限），这一步只是双保险，防组织策略 / 后续 workflow 变化。
 
 **Forever flavor 已核实**（`BigWigsMods/packager` master `release.sh`，2026-11-08 拉取源码逐行确认）：
 
