@@ -1,8 +1,8 @@
 {
   "generated": "2026-11-08",
   "source": "https://wuxianwow.com/mcp (tool: trip, time=day)",
-  "purpose": "按色源优先级 贴图 > trip > 游戏截图，给仍用 game 色的区补 trip 取景点；只取点，未渲染截图",
-  "render_status": "BLOCKED: 本环境无法启动浏览器渲染 WebGL 场景；MCP trip 明确只给链接不渲染图",
+  "purpose": "按色源优先级 贴图 > trip > 游戏截图 的取点清单（历史档案）；出图已于 2026-11-08 下午完成",
+  "render_status": "RESOLVED: 用户开启浏览器控制后，用 WorkBuddy 内置浏览器渲染 WebGL 场景，按「风景模式 → 保存原图」出图；7 区已升级为 trip，幽暗城 1458 语义不符保留 game，银月城 2393 站点不覆盖",
   "ok_shots": 14,
   "zones": [
     {
@@ -225,5 +225,24 @@
       ]
     }
   ],
-  "retry_note": "2026-11-08 二次重试补齐阿拉希高地/银松森林；艾尔文森林 60,40 陡坡弃用；银月城 2393 旅拍站点不覆盖（只有东部王国/卡利姆多/泽风岛）"
+  "retry_note": "2026-11-08 二次重试补齐阿拉希高地/银松森林；艾尔文森林 60,40 陡坡弃用；银月城 2393 旅拍站点不覆盖（只有东部王国/卡利姆多/泽风岛）",
+  "resolved": {
+    "date": "2026-11-08",
+    "upgraded_zones": [
+      1417,
+      1420,
+      1421,
+      1424,
+      1429,
+      1436,
+      1454
+    ],
+    "skipped_zones": [
+      1458,
+      2393
+    ],
+    "output": "monetcolors/Gamepics/<zone>-trip1.jpg (1536x2048)",
+    "ledger": "monetcolors/data/trip_sources.json 的 format=v2 条目",
+    "handoff": "docs/HANDOFF.md §8.68"
+  }
 }
