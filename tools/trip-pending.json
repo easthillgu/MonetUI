@@ -1,0 +1,229 @@
+{
+  "generated": "2026-11-08",
+  "source": "https://wuxianwow.com/mcp (tool: trip, time=day)",
+  "purpose": "按色源优先级 贴图 > trip > 游戏截图，给仍用 game 色的区补 trip 取景点；只取点，未渲染截图",
+  "render_status": "BLOCKED: 本环境无法启动浏览器渲染 WebGL 场景；MCP trip 明确只给链接不渲染图",
+  "ok_shots": 14,
+  "zones": [
+    {
+      "mapID": 1417,
+      "zone": "阿拉希高地",
+      "shots": [
+        {
+          "point": "60,40",
+          "query": "阿拉希高地 60,40",
+          "url": "https://wuxianwow.com/trip?at=0,-1093.3,-3026.7&t=day",
+          "title": "阿拉希高地 60,40（重试取点）",
+          "ground_ok": true,
+          "stand": "地面",
+          "around": "重试补齐：开阔地面"
+        },
+        {
+          "point": "45,55",
+          "query": "阿拉希高地 45,55",
+          "url": "https://wuxianwow.com/trip?at=0,-1453.3,-2486.7&t=day",
+          "title": "阿拉希高地 45.0, 55.0，东部王国",
+          "ground_ok": true,
+          "stand": "地面",
+          "slope": 11,
+          "around": "地面（坡 11°）；阿拉希高地。四周：北 开阔 · 东北 开阔 · 东 开阔 · 东南 开阔 · 南 开阔 · 西南 开阔 · 西 陡坡 21 码 · 西北 开阔"
+        }
+      ]
+    },
+    {
+      "mapID": 1420,
+      "zone": "提瑞斯法林地",
+      "shots": [
+        {
+          "point": "45,55",
+          "query": "提瑞斯法林地 45,55",
+          "url": "https://wuxianwow.com/trip?at=0,2180.6,999.9&t=day",
+          "title": "提瑞斯法林地 45.0, 55.0（静水池附近），东部王国",
+          "ground_ok": true,
+          "stand": "地面",
+          "slope": 8,
+          "around": "地面（坡 8°）；静水池，提瑞斯法林地。四周：北 开阔 · 东北 树 9 码 · 东 开阔 · 东南 开阔 · 南 开阔 · 西南 树 6 码 · 西 树 21 码 · 西北 开阔"
+        },
+        {
+          "point": "60,40",
+          "query": "提瑞斯法林地 60,40",
+          "url": "https://wuxianwow.com/trip?at=0,2632.5,322.1&t=day",
+          "title": "提瑞斯法林地 60.0, 40.0（加伦鬼屋附近），东部王国",
+          "ground_ok": true,
+          "stand": "地面",
+          "slope": 0,
+          "around": "地面（坡 0°）；提瑞斯法林地。四周：北 开阔 · 东北 开阔 · 东 开阔 · 东南 陡坡 6 码 · 南 陡坡 6 码 · 西南 开阔 · 西 开阔 · 西北 开阔"
+        }
+      ]
+    },
+    {
+      "mapID": 1421,
+      "zone": "银松森林",
+      "shots": [
+        {
+          "point": "45,55",
+          "query": "银松森林 45,55",
+          "url": "https://wuxianwow.com/trip?at=0,126.7,1560.0&t=day",
+          "title": "银松森林 45.0, 55.0（奥森农场附近），东部王国",
+          "ground_ok": false,
+          "stand": "陡坡",
+          "slope": 72,
+          "around": "陡坡；奥森农场，银松森林；站不住：坡太陡（72°）",
+          "note": "取点站不住，已弃用；本区另有可用点"
+        },
+        {
+          "point": "60,40",
+          "query": "银松森林 60,40",
+          "url": "https://wuxianwow.com/trip?at=0,546.7,930.0&t=day",
+          "title": "银松森林 60,40（重试取点）",
+          "ground_ok": true,
+          "stand": "地面",
+          "around": "重试补齐：开阔地面"
+        }
+      ]
+    },
+    {
+      "mapID": 1424,
+      "zone": "希尔斯布莱德丘陵",
+      "shots": [
+        {
+          "point": "45,55",
+          "query": "希尔斯布莱德丘陵 45,55",
+          "url": "https://wuxianwow.com/trip?at=0,-773.3,-373.3&t=day",
+          "title": "希尔斯布莱德丘陵 45.0, 55.0（南海镇附近），东部王国",
+          "ground_ok": true,
+          "stand": "地面",
+          "slope": 10,
+          "around": "地面（坡 10°）；南海镇，希尔斯布莱德丘陵。四周：北 开阔 · 东北 开阔 · 东 开阔 · 东南 开阔 · 南 开阔 · 西南 开阔 · 西 开阔 · 西北 开阔"
+        },
+        {
+          "point": "60,40",
+          "query": "希尔斯布莱德丘陵 60,40",
+          "url": "https://wuxianwow.com/trip?at=0,-453.3,-853.3&t=day",
+          "title": "希尔斯布莱德丘陵 60.0, 40.0，东部王国",
+          "ground_ok": true,
+          "stand": "地面",
+          "slope": 19,
+          "around": "地面（坡 19°）；希尔斯布莱德丘陵。四周：北 摆件 24 码 · 东北 开阔 · 东 开阔 · 东南 开阔 · 南 开阔 · 西南 陡坡 12 码 · 西 陡坡 30 码 · 西北 开阔"
+        }
+      ]
+    },
+    {
+      "mapID": 1429,
+      "zone": "艾尔文森林",
+      "shots": [
+        {
+          "point": "60,40",
+          "query": "艾尔文森林 60,40",
+          "error": "empty / curl: (56) Recv failure: Connection was aborted\r\n",
+          "note": "网络抖动，本区另有可用点"
+        },
+        {
+          "point": "45,55",
+          "query": "艾尔文森林 45,55",
+          "url": "https://wuxianwow.com/trip?at=0,-9212.6,-26.5&t=day",
+          "title": "艾尔文森林 45.0, 55.0，东部王国",
+          "ground_ok": true,
+          "stand": "地面",
+          "slope": 8,
+          "around": "地面（坡 8°）；艾尔文森林。四周：北 开阔 · 东北 开阔 · 东 开阔 · 东南 开阔 · 南 开阔 · 西南 开阔 · 西 开阔 · 西北 开阔"
+        }
+      ]
+    },
+    {
+      "mapID": 1436,
+      "zone": "西部荒野",
+      "shots": [
+        {
+          "point": "45,55",
+          "query": "西部荒野 45,55",
+          "url": "https://wuxianwow.com/trip?at=0,-10683.3,1441.7&t=day",
+          "title": "西部荒野 45.0, 55.0，东部王国",
+          "ground_ok": true,
+          "stand": "地面",
+          "slope": 8,
+          "around": "地面（坡 8°）；斯特登的池塘，西部荒野。四周：北 开阔 · 东北 开阔 · 东 开阔 · 东南 开阔 · 南 开阔 · 西南 开阔 · 西 开阔 · 西北 开阔"
+        },
+        {
+          "point": "60,40",
+          "query": "西部荒野 60,40",
+          "url": "https://wuxianwow.com/trip?at=0,-10333.3,916.7&t=day",
+          "title": "西部荒野 60.0, 40.0，东部王国",
+          "ground_ok": true,
+          "stand": "地面",
+          "slope": 14,
+          "around": "地面（坡 14°）；西部荒野。四周：北 开阔 · 东北 开阔 · 东 开阔 · 东南 开阔 · 南 开阔 · 西南 开阔 · 西 开阔 · 西北 开阔"
+        }
+      ]
+    },
+    {
+      "mapID": 1454,
+      "zone": "奥格瑞玛",
+      "shots": [
+        {
+          "point": "45,55",
+          "query": "奥格瑞玛 45,55",
+          "url": "https://wuxianwow.com/trip?at=1,1759.4,-4311.8&t=day",
+          "title": "奥格瑞玛 45.0, 55.0，卡利姆多",
+          "ground_ok": true,
+          "stand": "建筑上的地面",
+          "slope": null,
+          "around": "建筑上的地面（离地形 31.4 码），头顶 28.9 码有遮挡；奥格瑞玛。四周：北 落差 27 码 · 东北 落差 18 码 · 东 落差 15 码 · 东南 落差 27 码 · 南 墙 18 码 · 西南 开阔 · 西 墙 30 码 · 西北 开阔"
+        },
+        {
+          "point": "60,40",
+          "query": "奥格瑞玛 60,40",
+          "url": "https://wuxianwow.com/trip?at=1,1899.7,-4522.2&t=day",
+          "title": "奥格瑞玛 60.0, 40.0，卡利姆多",
+          "ground_ok": true,
+          "stand": "建筑上的地面",
+          "slope": null,
+          "around": "建筑上的地面（离地形 20.1 码）；奥格瑞玛。四周：北 墙 24 码 · 东北 墙 30 码 · 东 开阔 · 东南 开阔 · 南 开阔 · 西南 开阔 · 西 开阔 · 西北 开阔"
+        }
+      ]
+    },
+    {
+      "mapID": 1458,
+      "zone": "幽暗城",
+      "shots": [
+        {
+          "point": "45,55",
+          "query": "幽暗城 45,55",
+          "url": "https://wuxianwow.com/trip?at=0,1525.9,441.5&t=day",
+          "title": "提瑞斯法林地 57.4, 76.7（洛丹伦废墟附近），东部王国",
+          "ground_ok": true,
+          "stand": "建筑上的地面",
+          "slope": null,
+          "around": "建筑上的地面；洛丹伦废墟，提瑞斯法林地。四周：北 开阔 · 东北 树 12 码 · 东 开阔 · 东南 开阔 · 南 开阔 · 西南 开阔 · 西 墙 3 码 · 西北 开阔"
+        },
+        {
+          "point": "60,40",
+          "query": "幽暗城 60,40",
+          "url": "https://wuxianwow.com/trip?at=0,1621.9,297.6&t=day",
+          "title": "提瑞斯法林地 60.5, 73.5（洛丹伦废墟附近），东部王国",
+          "ground_ok": true,
+          "stand": "建筑上的地面",
+          "slope": null,
+          "around": "建筑上的地面（离地形 26.7 码）；洛丹伦废墟，提瑞斯法林地。四周：北 落差 24 码 · 东北 落差 12 码 · 东 落差 9 码 · 东南 落差 9 码 · 南 开阔 · 西南 落差 6 码 · 西 落差 3 码 · 西北 落差 6 码"
+        }
+      ]
+    },
+    {
+      "mapID": 2393,
+      "zone": "银月城",
+      "shots": [
+        {
+          "point": "60,40",
+          "query": "银月城 60,40",
+          "error": "旅拍里没找到「银月城 60,40」"
+        },
+        {
+          "point": "45,55",
+          "query": "银月城 45,55",
+          "error": "旅拍里没找到「银月城 45,55」"
+        }
+      ]
+    }
+  ],
+  "retry_note": "2026-11-08 二次重试补齐阿拉希高地/银松森林；艾尔文森林 60,40 陡坡弃用；银月城 2393 旅拍站点不覆盖（只有东部王国/卡利姆多/泽风岛）"
+}

@@ -30,6 +30,8 @@ node_modules/
 # tools/ 的运行前提：npm install 需要它（@napi-rs/canvas / wow-blp-web）
 !package.json
 !package-lock.json
+# 色源补区取点清单（MCP trip 产出，等渲染能力到位后接着提色；不是运行时数据）
+!tools/trip-pending.json
 .opencode/
 
 # ---- 开发记录与过程文档 ----
