@@ -1,0 +1,31 @@
+# BigWigsMods/packager metadata -- CurseForge project 1791156 (MonetUI).
+# Shipping set = MonetUI.toc + Core.lua + Assets + Libs + Utils + Config
+#              + Modules + README.md + LICENSE + THIRD-PARTY-NOTICES.txt.
+# Everything below is development-only and must never reach a release zip.
+package-as: MonetUI
+
+ignore:
+  - .github
+  - .gitattributes
+  - .gitignore
+  - .opencode
+  - .pkgmeta
+  - .qoder
+  - .workbuddy
+  - AGENTS.md
+  - Assets-src
+  - MonetUI.md
+  - TODO.md
+  - docs
+  - framexml-source
+  - node_modules
+  - opencode.json
+  - package-lock.json
+  - package.json
+  - tools
+  - "*.zip"
+  - "NVIDIA Corporation"
+
+# Curated changelog instead of an auto-generated dump of every commit.
+# Update CHANGELOG.md before tagging a release.
+manual-changelog: CHANGELOG.md

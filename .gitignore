@@ -38,6 +38,7 @@ node_modules/
 # Markdown 默认不进库；例外：项目介绍、第三方库许可、字体许可、docs/ 下的四份交接文档（见下方）。
 *.md
 !README.md
+!CHANGELOG.md
 !Libs/NOTICE.md
 !Assets/Fonts/NOTICE.md
 # tools 下的说明文档属于验证链（harness 用法 + "如何新增断言"六步），随脚本一起入库。

@@ -4770,6 +4770,160 @@ zone=贫瘠之地、envSource=override、**4/4 对比度过线**（1.702 / 1.552
 阈值 1.4）。reload 后 `wuxian logs --kinds ERR,BLOCKED` 为空。⇒ 本轮色值改动已实机生效，
 不需再做验收。
 
+## 8.69 2026-11-08 CurseForge 发布流程（首版已上传 / 自动化发布已配置）
+
+**本节是发版操作手册**：项目事实 → 打包与闸门 → 手动上传 → 自动化发布 → 踩过的坑 → 每次发版清单。
+`docs/HANDOFF.md` 在 `.gitignore` 白名单里**会入库推送**，所以这里只写流程与 Secret 名，
+**任何 API Token 明文都不许写进本节**；明文只留本机被 `*.md` 忽略的记录。
+
+### 8.69.1 项目事实（一次性登记）
+
+| 项 | 值 |
+|---|---|
+| 作者中心 | `authors.curseforge.com`（账号 easthillgu） |
+| Project ID | **1791156**（数字 ID，不是 slug） |
+| slug / 项目页 | `monetui` / `www.curseforge.com/wow/addons/monetui` |
+| Game / Class / Category | World of Warcraft / Addons / Miscellaneous |
+| License / 分发 | MIT License / Allow distribution to 3rd party |
+| flavor / 版本 | **Forever · 1.60.1 · Interface 16001**（下拉里确实有 `1.60.1`；TOC 的 `Interface` 保持 16001 不变） |
+| 首版 | Display name `0.12.0` · Release · Game Version `1.60.1` · 英文 Changelog |
+| 首版状态 | Files → `0.12.0` / Type R / **Under Review**（新项目需版主审核，几分钟~3 工作日） |
+| 可见性 | General → **Unlisted project 已取消并保存**，刷新后「不可搜索」提示消失；审核通过后可被搜到。审核前他人不可见、文件不同步 CF 生态属正常 |
+| 邮件 | `legends@curseforge.com` 的 "Congratulations…" = **审核中**通知，不是拒绝；`notifications@github.com` 的 "Run failed: tests" 是 monetcolors 的 CI（见 8.69.6） |
+
+### 8.69.2 发布包怎么来
+
+1. 部署：`tools/deploy-retail.ps1` → `.../_forever_/Interface/AddOns/MonetUI`；`tools/sync-check.js` 必须 in sync。
+2. 打包：从**部署目录**打 zip，**顶层必须是 `MonetUI/` 这一层目录**，不是散文件。本次成品
+   `C:\Users\EastHillGu\AppData\Local\Temp\MonetUI-release\MonetUI-0.12.0-forever.zip`（30.6MB / 126 文件）。
+3. 发行集口径见 `.gitignore` 头部：TOC + Core/Config/Modules/Utils + Assets + Libs + README/LICENSE/NOTICE；
+   **tools/、tests/、docs/、.github/、.workbuddy/、Assets-src/ 一律不进包**。
+   `tools/api-audit-selftest/Broken.lua` 是故意的语法错误测试夹具，打进包会被审核扫成 Lua 错误。
+4. 本次发布包自查：`luac -p` 68 个 `.lua` 全过；TOC/XML 共 126 个引用缺失 0；TOC `Interface: 16001`、`Version: 0.12.0`。
+   > 2026-11-08 起 TOC **保持静态 `## Version`**（当前 `0.12.0`），没采用 `@project-version@`：
+   > `Modules/Tools/WhatsNew.lua` 会读它做「新版本一次性提示」，占位符会让本地实机打印字面量
+   > `@project-version@` 并污染 `MonetUIDB.whatsNewSeen`。改由 workflow 的
+   > 「TOC 版本必须等于 tag」护栏防漏改（见 8.69.4）。手工打包时把 TOC 版本号改成当次版本即可。
+
+**发版前闸门（全过才打包）**：`tools/api-audit.js`、`audit-locals.js`、`audit-taint.js`、
+`env-source-check.js --json`（33/33）、`map-env-coverage.js`、`sync-check.js`、`luac -p` 全仓；
+改过色源底账还要在 monetcolors 跑 `lua tests/test_*.lua` 7 组。
+
+### 8.69.3 手动上传（首版走的是这条）
+
+Files → **Add File**：
+
+1. `Choose File` 选 zip —— Windows 文件选择框浏览器自动化操作不了，**必须人工选**（logo 同理）。
+2. Display name = TOC 里的 `Version`（本次 `0.12.0`）。
+3. **Game Version 必须在下拉里把 `1.60.1` 勾上**：只输入搜索文本不算选中，Add File 会一直 disabled
+   （disabled 按钮被 DOM 快照过滤掉，表现成「点了没反应」）。勾选后按钮亮橙。
+4. Release Type `Release`；Release Options 用默认「审核通过后自动发布」；Changelog 写英文。
+5. Add File → 按钮变 `Uploading...` → 回 Files 列表，Status 依次 Uploading / Processing → **Under Review**。
+6. 审核通过即发布；新项目首次还要版主批准项目本身。
+
+### 8.69.4 自动化发布（2026-11-08 配置已落地，待首次 tag 实跑）
+
+- **Token 在哪**：作者中心 → 右上头像 / Settings → **API Tokens** tab，直达
+  `https://authors.curseforge.com/#/settings/api-tokens`（官方 Upload API 文档 2026-09-27 版给的链接）。
+  填 Token Name → `Generate Token`，**明文只显示一次**，之后 `My API Tokens` 只列名字。
+- **别拿错**：`console.curseforge.com` 的 Core API key 是查询/下载 mod 元数据用的；上传要的是
+  Author Portal 的 Upload API Token，认证头 `X-Api-Token`，端点
+  `POST https://wow.curseforge.com/api/projects/1791156/upload-file`。
+- **凭据放哪**：GitHub 仓库 `easthillgu/MonetUI` → Settings → Secrets and variables → Actions →
+  New repository secret。workflow 读 `${{ secrets.CF_API_TOKEN || secrets.CF_API_KEY }}`，
+  **两个 Secret 名都兼容**（早先按 `CF_API_KEY` 建的不用改名）。
+  明文只留本机被 `.gitignore`（`*.md`）忽略的记录，绝不写进本节 / 代码 / 提交信息。
+  token 曾在对话里出现过，若不放心就在 API Tokens 页删旧建新并同步更新 Secret。
+- **环境变量名以 packager 源码为准**：`CF_API_TOKEN`（`CF_API_KEY` 是仍兼容的 deprecated 名）、
+  `GH_API_TOKEN`（`GITHUB_OAUTH` 已 deprecated）。workflow 把 Secret 映射到前者，
+  把 `${{ secrets.GITHUB_TOKEN }}` 映射到后者。
+
+**已落地的四件**（2026-11-08）：
+
+| 文件 | 内容 |
+|---|---|
+| `.pkgmeta` | `package-as: MonetUI`；`ignore:` 20 项（docs / tools / .github / Assets-src / node_modules / package*.json / 过程 md / 打包产物）；`manual-changelog: CHANGELOG.md` |
+| `.github/workflows/release.yml` | `BigWigsMods/packager@v2`；tag 触发 `v*` / `[0-9]*`；`permissions: contents: write`；checkout `fetch-depth: 0`；`args: -p 1791156 -g 1.60.1 -n "{package-name}-{project-version}-forever:{project-version}"` |
+| `MonetUI.toc` | 加 `## X-Curse-Project-ID: 1791156`；`## Version` 保持静态数字（当前 `0.12.0`） |
+| `CHANGELOG.md` | 手写英文 changelog，直接作为 CF 文件页的 Changelog；`.gitignore` 加了 `!CHANGELOG.md` 白名单 |
+
+**为什么不用 `@project-version@`**：`Modules/Tools/WhatsNew.lua` 用 `C_AddOns.GetAddOnMetadata(..., "Version")`
+比对 `MonetUIDB.whatsNewSeen` 决定是否弹「本版要点」。占位符会让**本地部署目录**（由仓库直拷，
+不经 packager）在下次登录打印字面量版本并写脏存档。所以 TOC 留静态值，改由 workflow 第一步护栏：
+
+```yaml
+- name: Guard - TOC version must match the tag
+  # ${GITHUB_REF_NAME#v} 去 v 前缀；与 TOC 的 ## Version 不等就 fail
+```
+
+⇒ 发版时 **TOC `## Version` / `CHANGELOG.md` 顶部 / tag 三处写同一个数字**，忘了改会在 Actions 第一步红，
+不会发出「CF 显示 0.12.1、游戏里还是 0.12.0」的错包。
+
+另需在仓库 Settings → Actions → General → **Workflow permissions 设 Read and write**（建 GitHub Release 用）；
+workflow 里已声明 `permissions: contents: write`，若组织策略覆盖再检查这里。
+
+**Forever flavor 已核实**（`BigWigsMods/packager` master `release.sh`，2026-11-08 拉取源码逐行确认）：
+
+- `toc_to_type()` 把 `16???` 判为 `game_type=forever`；`set_build_version()` 把 Interface `16001`
+  拆成 `path_version=1.60.1`；上传时 `forever) game_id=88568`，从 `GET /api/game/wow/versions`
+  找出 `gameVersionTypeID=88568 && name=1.60.1` 的 ID 写进 metadata 的 `gameVersions` 数组。
+  ⇒ **自动识别就够**，`-g 1.60.1` 只是显式锁死，防 packager 改版。
+- `releaseType` 由 tag 名判定：含 alpha → alpha、含 beta → beta，其余 **release**；无 tag 一律 alpha。
+- `project_version` = tag 名**原样**（不会去掉 `v`）。所以推荐 tag 用纯数字 `0.12.1`，
+  与首版手工上传的 `0.12.0` 对齐；用 `v0.12.1` 则 TOC 版本与 CF 显示名都带 `v`。
+- metadata 由 packager 生成：`displayName` / `gameVersions` / `releaseType` / `changelog` /
+  `changelogType=markdown`，不需要自己写 `gameVersionNames`。
+
+**触发与验收**：
+
+先把 `MonetUI.toc` 的 `## Version` 与 `CHANGELOG.md` 顶部改成 `0.12.1` 并提交，否则护栏第一步就 fail：
+
+```
+git tag 0.12.1 && git push origin 0.12.1
+```
+
+→ Actions `Release to CurseForge` → 先过 Guard，日志应出现 `Packaging MonetUI`、`Current version: 0.12.1`、
+`Game version: 1.60.1`、`CurseForge ID: 1791156 [token set]`、`Uploading ...`；
+→ GitHub Releases 多一条，CF Files 多一条 `0.12.1` / R / `1.60.1`。
+
+**未验证 / 风险**：
+
+- 本机 `curl` 直连 `authors` / `wow` / `www.curseforge.com` 的 `/api/game/versions` 全被 Cloudflare
+  **403 "Just a moment..."**。packager 实际请求的是 `/api/game/wow/versions`（带 token 头），
+  在 Actions 出口 IP 上一般能过；**首次 tag 实跑才算最终验证**，403 不代表 token 无效。
+  若 Actions 里也 403，回退 8.69.3 手动上传（`.pkgmeta` 仍可本地 `release.sh -d` 只打包）。
+- `.pkgmeta` 清单已本地模拟核对：126 个首版文件 + `CHANGELOG.md` = 127 个装进 `MonetUI/`，
+  **多一个 CHANGELOG.md、夹带 dev 文件 0 个**。
+- 新项目审核期（8.69.1）内自动上传的文件同样要排队审核。
+
+### 8.69.5 浏览器 / 表单踩过的坑（下次别再踩）
+
+- 内置浏览器新开标签会重触发 Cloudflare 验证，等约 6 秒能自动过；过不了要人工勾选。
+- 便携版 Chrome 没装 WorkBuddy 扩展时接管不到用户已登录会话；用内置浏览器 + 人工登录最省事。
+- 富文本（TinyMCE）会吞 `<module>` 这类尖括号文本，命令写 `/mui module on / off`；改完要 blur（Tab）才同步字数。
+- 多选 / 复选框型下拉只输入不勾选 = 表单未满足（见 8.69.3 第 3 条）；坐标点击遇页面滚动漂移会点到别处，
+  提交一律用 DOM 节点点击最稳；General 页改复选框用 `Shift+Tab` + `Space` 比坐标点击可靠。
+- Windows 文件选择框（logo / zip）只能人工选；剪贴板塞文件路径 / 图片都无效。
+
+### 8.69.6 与发布无关、但别再混淆的一封邮件
+
+QQ 邮箱 13:40 的 `[easthillgu/monetcolors] Run failed: tests - main (a6a94a9)` 是 **GitHub Actions 的
+Lua 5.4 单测失败**（7 个 annotations），不是 CurseForge 审核拒绝。根因是 7 区 trip 提色后
+`tests/test_map_sampler.lua` 仍硬编码旧 h/s/l 与 `count >= 14`；已由 `8acd408` 改成 `dataEnv()`
+动态读数据模块 + `>= 25`，本机 7 组全 PASS、已推送。发布包本身与它无关。
+
+### 8.69.7 每次发版的固定动作
+
+1. 把 `MonetUI.toc` 的 `## Version`、`CHANGELOG.md` 顶部（英文）、待打 tag 三者对齐成同一数字 → 提交；
+2. 跑 8.69.2 全部闸门（动过色源则含 monetcolors 的 7 组测试）；
+3. `deploy-retail.ps1` + `sync-check.js`；
+4. 自动路线：`git tag 0.12.1 && git push origin 0.12.1`（纯数字 tag，见 8.69.4）；
+   手工路线：从部署目录打 zip，顶层 `MonetUI/`、排除 dev 目录（TOC 版本号在第 1 步已改好）；
+5. 手工路线才需要 Files → Add File（务必在下拉里勾中 `1.60.1`）+ 填英文 Changelog；
+   自动路线的 Changelog 由 `CHANGELOG.md` 带出；
+6. 盯 Actions 日志 / Files：Under Review → Approved；
+7. 游戏内 `/reload` 抽验 `/mui colors` 与 `MonetUIDB.colorReport`。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 
