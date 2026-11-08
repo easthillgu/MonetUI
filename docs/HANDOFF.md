@@ -4832,6 +4832,9 @@ Files → **Add File**：
 - **凭据放哪**：GitHub 仓库 `easthillgu/MonetUI` → Settings → Secrets and variables → Actions →
   New repository secret。workflow 读 `${{ secrets.CF_API_TOKEN || secrets.CF_API_KEY }}`，
   **两个 Secret 名都兼容**（早先按 `CF_API_KEY` 建的不用改名）。
+  现状：`CF_API_KEY` **已建**（2026-11-08 17:33 在 `settings/secrets/actions` 页面确认存在）。
+  注意 Secret 名是**任意命名**、内容为 token 值，不是另有一种 GitHub 令牌——
+  GitHub 侧的写权限用 Actions 自动注入的 `GITHUB_TOKEN`，零配置。
   明文只留本机被 `.gitignore`（`*.md`）忽略的记录，绝不写进本节 / 代码 / 提交信息。
   token 曾在对话里出现过，若不放心就在 API Tokens 页删旧建新并同步更新 Secret。
 - **环境变量名以 packager 源码为准**：`CF_API_TOKEN`（`CF_API_KEY` 是仍兼容的 deprecated 名）、
@@ -4888,15 +4891,39 @@ git tag 0.12.1 && git push origin 0.12.1
 `Game version: 1.60.1`、`CurseForge ID: 1791156 [token set]`、`Uploading ...`；
 → GitHub Releases 多一条，CF Files 多一条 `0.12.1` / R / `1.60.1`。
 
-**未验证 / 风险**：
+**已验证**（2026-11-08 17:35，本机直连成功）：
 
-- 本机 `curl` 直连 `authors` / `wow` / `www.curseforge.com` 的 `/api/game/versions` 全被 Cloudflare
-  **403 "Just a moment..."**。packager 实际请求的是 `/api/game/wow/versions`（带 token 头），
-  在 Actions 出口 IP 上一般能过；**首次 tag 实跑才算最终验证**，403 不代表 token 无效。
-  若 Actions 里也 403，回退 8.69.3 手动上传（`.pkgmeta` 仍可本地 `release.sh -d` 只打包）。
+- **Token 有效**。判据是三步对照，`GET https://wow.curseforge.com/api/game/versions`：
+  不带 token → **403** + 5.6KB Cloudflare 挑战页；带假 token → **403** +
+  `{"errorCode":403,"errorMessage":"Invalid API token provided."}`；
+  带本 token + `X-Api-Token` → **200** + 14KB JSON（163 条版本）。⇒ 该端点确实鉴权，token 通过。
+- **本机 403 的真因不是 token，是 curl 指纹**。之前失败是因为没带 UA / 用了默认 HTTP2：
+  加上 `--http1.1` + 浏览器 UA + `Accept: application/json` 即可 200。复验命令：
+  ```bash
+  curl -sS --http1.1 \
+    -H "X-Api-Token: $CF_TOKEN" -H "Accept: application/json" \
+    -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+  (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" \
+    https://wow.curseforge.com/api/game/versions -o versions.json -w "%{http_code}\n"
+  ```
+  `authors.curseforge.com/api/...` 一律 404（那是 SPA，没有 API），别在那儿试。
+- **Forever 版本号实测**：`1.60.1` = `id 17053` / `gameVersionTypeID 88568` / `apiVersion 16001`
+  （另有一个 `1.6.0`=id 9 属 typeID 517 的零售旧版，**别混淆**）。
+- **`-g 1.60.1` 命中 forever 分支**：源码 `case` 里 `1.6x` → `game_type="forever"`、
+  `game_type_interface=16001`；`-g forever` / `-g camelot` 是等价别名。
+- **`-n` 语法为 `{文件模板}:{标签模板}`**，可用 token 有 `{package-name}{project-version}
+  {release-type}{classic}{nolib}` 等；模板里写死 `-forever` 是合法字面量，
+  故产物为 `MonetUI-<ver>-forever.zip`、CF 显示名 `<ver>`，与首版手工包一致。
+
+**仍未验证 / 风险**：
+
+- **首次 tag 实跑**才算端到端验证（Actions 出口 IP 能否过 Cloudflare、packager 是否真的
+  把 `1.60.1` 填进 `gameVersions`）。若 Actions 里报 403，回退 8.69.3 手动上传
+  （`.pkgmeta` 仍可本地 `release.sh -d` 只打包不发）。
 - `.pkgmeta` 清单已本地模拟核对：126 个首版文件 + `CHANGELOG.md` = 127 个装进 `MonetUI/`，
   **多一个 CHANGELOG.md、夹带 dev 文件 0 个**。
-- 新项目审核期（8.69.1）内自动上传的文件同样要排队审核。
+- 新项目审核期（8.69.1）内自动上传的文件同样要排队审核；首版 `0.12.0` 目前仍是 Under Review
+  （2026-11-08 17:36 复查）。
 
 ### 8.69.5 浏览器 / 表单踩过的坑（下次别再踩）
 
