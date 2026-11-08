@@ -5,10 +5,13 @@
            引擎按 LibMonetColor:539-552 惰性查它，本身不挑顺序；排在这儿只是读起来顺）；
          MonetColorMapEnvOverride 往同一引擎的 override 通道补"大陆层/世界层"三行（必须在数据包之后：
            它只当别人的祖先，不顶掉任何一条实测区域色，数值口径见该文件头部）；
-         LibMonetColor-Anim-1.0 最后接动画层。五个都在 Core.lua 之前完成注册。 -->
+         MonetColorMapEnvAtlas 补 17 条官方地图贴图区域色（RegisterMapEnv 最高优先级覆盖层，
+           会顶掉数据包里同名区域的实测值；必须排在 Override 之后，色源口径见该文件头部）；
+         LibMonetColor-Anim-1.0 最后接动画层。六个都在 Core.lua 之前完成注册。 -->
     <Script file="LibStub\LibStub.lua"/>
     <Script file="LibMonetColor-1.0\LibMonetColor-1.0.lua"/>
     <Script file="MonetColorMapData-1.0\MonetColorMapData-1.0.lua"/>
     <Script file="MonetColorMapData-1.0\MonetColorMapEnvOverride.lua"/>
+    <Script file="MonetColorMapData-1.0\MonetColorMapEnvAtlas.lua"/>
     <Script file="LibMonetColor-Anim-1.0\LibMonetColor-Anim-1.0.lua"/>
 </Ui>
