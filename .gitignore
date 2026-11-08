@@ -91,5 +91,6 @@ luacheckrc
 *.tar.gz
 _build/
 release/
+.release/
 # Added by code-review-graph
 .code-review-graph/

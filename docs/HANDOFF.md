@@ -4917,6 +4917,12 @@ git tag 0.12.1 && git push origin 0.12.1
 
 **仍未验证 / 风险**：
 
+- **打包环节已干跑验证**（2026-11-08 17:40，本机 `release.sh -d -z -g 1.60.1 -p 1791156 -n ...`）：
+  输出 `Packaging complete.`，`.release/MonetUI/` 共 **127 个文件**
+  （= 首版 126 + `CHANGELOG.md`），`tools / docs / .github / tests / node_modules / Assets-src`
+  **全部未夹带**，打包后 TOC 保留 `X-Curse-Project-ID: 1791156` 与静态 `Version: 0.12.0`。
+  ⇒ 只剩「上传」这一段没在真实环境跑过（本机 `zip` 缺失，用 `-z` 跳过 zip；CI 里 `zip` 自带）。
+  `.release/` 已加入 `.gitignore`（packager 的工作目录，别误提交）。
 - **首次 tag 实跑**才算端到端验证（Actions 出口 IP 能否过 Cloudflare、packager 是否真的
   把 `1.60.1` 填进 `gameVersions`）。若 Actions 里报 403，回退 8.69.3 手动上传
   （`.pkgmeta` 仍可本地 `release.sh -d` 只打包不发）。
