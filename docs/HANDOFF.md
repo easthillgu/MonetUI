@@ -4669,6 +4669,36 @@ wuxianwow atlas 核过，不再只是"经典大陆划分"推定），重生成 `
 **验收**：monetcolors 7 套测试 155 项全绿（`test_map_sampler` 含"每个区都能解析"的遍历断言）；
 MonetUI `tools.wuxian.check` 0 错 8 警（既有项，Libs 无新增）、已 `deploy` + `in sync`。
 
+## 8.67 2026-11-08 色源优先级收口：贴图 > trip > 游戏截图
+
+**拍板口径**（用户）：优先用官方地图美术贴图，缺的走 wuxianwow/trip，还缺的走自己的游戏截图。
+父层三行是派生色，只当父链祖先，不参与精确区竞争。
+
+**核查结论**：数值**本来就已符合**这条优先级 —— Atlas 17 区走 `override`（引擎最高优先级），
+MapData 剩余 16 区恰好 8 trip + 8 game 且不重号。问题是口径隐式、无人守：换一次生成、
+调一次 `Libs.xml` 顺序、给某 game 区补一条 trip，都可能静默打回混合。另外旧
+`tools/map-env-coverage.js` 把「override 顶掉实测行」一律判缺陷，会把贴图层误报 9 条缺陷，
+且覆盖率账漏算贴图层新增的 8 区。
+
+**落地**（`4d197f5` 之后）：
+
+| 改动 | 作用 |
+|---|---|
+| `Libs/MonetColorMapEnvAtlas.lua` + `Libs/Libs.xml` | 17 区贴图色走 override，排在派生父层之后、Anim 之前；`Libs.xml` 注释写死优先级 |
+| `tools/env-source-check.js`（新增） | 按优先级算期望色 → 模拟 `GetMapEnv` 解析序拿实际色 → 逐区对账；校验加载序、`source` 标签、MapData 与底账一致性。违规退出码 1；`--json` 出 33 区账本。自检：篡改底账 1417 的 h 即被抓 |
+| `tools/map-env-coverage.js` | 读入 Atlas 并入 override、KNOWN 补 8 区、`shadow` 体检只针对派生父层；贴图顶掉 9 区改列「预期」 |
+
+底账唯一来源 = monetcolors 仓 `data/game_palette_v1.json` 的 `source` 字段（game 14 / trip 11，只读）。
+生成的 Lua 不带 source 标签、引擎返回的 source 只有 `override/data/parent/fallback` —— 色源审计
+因此放在离线闸门，不进运行期，也不改引擎。
+
+**账本**：精确区 33 = 贴图 17 + trip 8 + game 8（+3 派生父层）；贴图按优先级顶掉 9 个 data 实测行
+（1411/1412/1413/1438/1440/1441/1444/1446/2521）。覆盖率 36/37 有色，唯一缺口仍是 2393 银月城（既有）。
+
+**硬约束**：官方 atlas 贴图只有 17 个区域，其余 16 区无同色源可取，所以这是「按优先级择优」
+而非「全部换成贴图」。要让 16 区也升到 trip，需要另跑一趟 trip 取点 + 提色（当前环境 3D trip 站点
+不可达，见 Atlas 文件头）；此事不在本轮范围。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 
