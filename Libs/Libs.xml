@@ -7,6 +7,9 @@
            它只当别人的祖先，不顶掉任何一条实测区域色，数值口径见该文件头部）；
          MonetColorMapEnvAtlas 补 17 条官方地图贴图区域色（RegisterMapEnv 最高优先级覆盖层，
            会顶掉数据包里同名区域的实测值；必须排在 Override 之后，色源口径见该文件头部）；
+         色源优先级（2026-11-08 拍板）：官方地图贴图 > wuxianwow/trip > 自己的游戏截图。
+           数据包里 trip / game 由 monetcolors 底账的 source 字段区分，父层三行只作祖先；
+           逐区对账与防漂移闸门 = node tools/env-source-check.js（不进发行包）；
          LibMonetColor-Anim-1.0 最后接动画层。六个都在 Core.lua 之前完成注册。 -->
     <Script file="LibStub\LibStub.lua"/>
     <Script file="LibMonetColor-1.0\LibMonetColor-1.0.lua"/>

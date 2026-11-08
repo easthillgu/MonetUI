@@ -6,7 +6,10 @@
 // 这个脚本把三档数出来：**有色 / 走父链 / 落兜底**。
 //
 // 解析序与引擎逐条对齐（LibMonetColor:580-611，不要在这里改口径）：
-//   1. overrideEnv（运行时补充行 = Libs/MonetColorMapData-1.0/MonetColorMapEnvOverride.lua）
+//   1. overrideEnv（运行时补充行，两层：派生父层 MonetColorMapEnvOverride.lua
+//      + 官方地图贴图色 MonetColorMapEnvAtlas.lua）。2026-11-08 色源优先级 = 贴图 > trip > 游戏截图，
+//      所以贴图行顶掉同名实测行是**预期**（优先级闸门见 tools/env-source-check.js），不是缺陷；
+//      只有派生父层行顶掉实测区域行才算缺陷。
 //   2. MapEnv（生成文件 MonetColorMapData-1.0.lua，AUTO-GENERATED）
 //   3. C_Map.GetMapInfo(mapID).parentMapID 往上走，**深度上限 5**，命中 override/data 即 parent:*
 //   4. fallback（无彩灰）
@@ -46,6 +49,7 @@ const val = (f, d) => {
 
 const DATA_FILE = path.join(ROOT, "Libs", "MonetColorMapData-1.0", "MonetColorMapData-1.0.lua");
 const OVERRIDE_FILE = path.join(ROOT, "Libs", "MonetColorMapData-1.0", "MonetColorMapEnvOverride.lua");
+const ATLAS_FILE = path.join(ROOT, "Libs", "MonetColorMapData-1.0", "MonetColorMapEnvAtlas.lua");
 
 /** 从 Lua 源里抠 `MDM.MapEnv` / `OVERRIDE` 那一段表。
  *  这两个文件都是"一行一条"的扁平表，用文本抠比引一个 Lua 解析器实在；
@@ -97,6 +101,12 @@ const KNOWN = [
   [1457, "达纳苏斯", "首都", 1414], [1456, "雷霆崖", "首都", 1414],
   [2482, "海加尔山", "新内容", 1414], [2652, "辛德拉", "新内容", null],
   [2548, "河林", "新内容", null],
+  // 2026-11-08 官方地图贴图色层新增的 8 区（只有这 17 区有贴图可取）。
+  // 父层按经典大陆划分填 1414，ASSUMED；它们都有 override 直接命中，父层不参与判定。
+  [1439, "黑海岸", "区域", 1414], [1442, "石爪山脉", "区域", 1414],
+  [1443, "凄凉之地", "区域", 1414], [1445, "尘泥沼泽", "区域", 1414],
+  [1447, "艾萨拉", "区域", 1414], [1448, "费伍德森林", "区域", 1414],
+  [1449, "安戈洛环形山", "区域", 1414], [1450, "月光林地", "区域", 1414],
   // 实机已知的兜底受害者（HANDOFF:2092）；父层不在 1414/1415 里，属"还有别的父层没补"那一类
   [2393, "银月城(实机)", "首都", null],
   // 父层三行（override 派生）
@@ -144,11 +154,16 @@ function resolve(id, parentOf, override, data) {
   return { tier: "落兜底", via: "fallback", entry: null };
 }
 
-const override = parseRows(OVERRIDE_FILE, "local OVERRIDE = {");
+const parentOverride = parseRows(OVERRIDE_FILE, "local OVERRIDE = {");
+const atlas = parseRows(ATLAS_FILE, "local ATLAS_ENV = {");
 const data = parseRows(DATA_FILE, "MDM.MapEnv = {");
+// 引擎 overrideEnv 后写者赢：Libs.xml 里贴图层排在派生父层之后。
+const override = new Map([...parentOverride, ...atlas]);
 
-// 体检：override 只该当祖先，顶掉实测区域行就等于把提取值换成派生值
-const shadow = [...override.keys()].filter((id) => data.has(id));
+// 体检：派生父层 override 只该当祖先，抢占精确区 = 把提取值换成派生值（缺陷）。
+// 贴图 override 顶掉同名实测行是 2026-11-08 色源优先级的**预期**结果，单列不算缺陷。
+const shadow = [...parentOverride.keys()].filter((id) => data.has(id) || atlas.has(id));
+const priorityOverride = [...atlas.keys()].filter((id) => data.has(id));
 const badRange = [...override.entries(), ...data.entries()].filter(
   ([, e]) => !(e.h >= 0 && e.h <= 360 && e.s >= 0 && e.s <= 1 && e.l >= 0 && e.l <= 1)
 );
@@ -170,7 +185,9 @@ const out = [];
 out.push("MonetColorMapData 覆盖率账（解析序同 LibMonetColor:580-611）");
 out.push("");
 out.push(`数据行  MapEnv(提取)      ${String(data.size).padStart(3)} 条   ${path.relative(ROOT, DATA_FILE)}`);
-out.push(`数据行  override(派生父层) ${String(override.size).padStart(2)} 条   ${path.relative(ROOT, OVERRIDE_FILE)}`);
+out.push(`数据行  override(派生父层) ${String(parentOverride.size).padStart(2)} 条   ${path.relative(ROOT, OVERRIDE_FILE)}`);
+out.push(`数据行  override(贴图优先) ${String(atlas.size).padStart(2)} 条   ${path.relative(ROOT, ATLAS_FILE)}`);
+out.push("色源优先级 官方地图贴图 > wuxianwow/trip > 游戏截图（守门：node tools/env-source-check.js）");
 out.push(`统计口径 ${universe.source}${universe.partial ? "  [清单不完整，父层 ASSUMED]" : ""}`);
 out.push("");
 out.push("三档计数");
@@ -198,7 +215,8 @@ for (const r of tiers["落兜底"]) {
 }
 out.push("");
 out.push("体检");
-out.push(`  override 顶掉实测区域行：${shadow.length ? shadow.join(",") + "  <-- 缺陷" : "0 条"}`);
+out.push(`  派生父层 override 抢占精确区：${shadow.length ? shadow.join(",") + "  <-- 缺陷" : "0 条"}`);
+out.push(`  贴图 override 按优先级顶掉实测行：${priorityOverride.length} 条（预期，不算缺陷）`);
 out.push(`  h/s/l 越界：${badRange.length ? badRange.map(([i]) => i).join(",") + "  <-- 缺陷" : "0 条"}`);
 if (universe.partial) {
   out.push("");
@@ -211,8 +229,8 @@ if (universe.partial) {
 const text = out.join("\r\n");
 if (has("--json")) {
   console.log(JSON.stringify({
-    counts: { data: data.size, override: override.size, 有色: tiers["有色"].length, 走父链: tiers["走父链"].length, 落兜底: tiers["落兜底"].length, 合计: total },
-    shadow, badRange: badRange.map(([i]) => i),
+    counts: { data: data.size, parentOverride: parentOverride.size, atlas: atlas.size, override: override.size, 有色: tiers["有色"].length, 走父链: tiers["走父链"].length, 落兜底: tiers["落兜底"].length, 合计: total },
+    shadow, priorityOverride, badRange: badRange.map(([i]) => i),
     rows: universe.rows.map((r) => ({ ...r, ...resolve(r.id, parentOf, override, data) })),
   }, null, 2));
 } else {
