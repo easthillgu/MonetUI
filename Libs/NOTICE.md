@@ -19,8 +19,12 @@ MonetUI本身完全自写，只有下面这些文件来自他人，按各自许�
 ## MonetColorMapData-1.0 (`Libs/MonetColorMapData-1.0/`)
 
 - 同为自家仓库 `monetcolors` 的产物，非第三方。
-- 区域环境取色数据（mapID -> HSL），由 `gen_map_env.ps1` 从游戏截图取色管线
-  自动生成，勿手改；供 LibMonetColor 的默认环境采样器惰性查找。
+- 区域环境取色数据（mapID -> HSL），链条为 monetcolors 仓的
+  `extract_game_palette_v1.ps1`（游戏截图 + wuxianwow/trip 照片）→ `data/game_palette_v1.json`
+  → `gen_map_env.ps1`，自动生成，勿手改；供 LibMonetColor 的默认环境采样器惰性查找。
+- 同目录另有两层运行时覆盖层，同为自家产物、非第三方：`MonetColorMapEnvOverride.lua`
+  （3 条大陆 / 世界层父链派生色）与 `MonetColorMapEnvAtlas.lua`（17 区官方地图美术贴图环境色），
+  都通过引擎的 `RegisterMapEnv` 注册，优先级高于数据模块；加载顺序见 `Libs.xml`。
 
 ## 为什么把它放进包里
 

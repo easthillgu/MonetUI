@@ -10,13 +10,15 @@
 ![Lua](https://img.shields.io/badge/Lua-5.1-2C2D72.svg)
 ![Status](https://img.shields.io/badge/status-1.60_实机已验-brightgreen.svg)
 
-配色的两半各管一段：**环境色离线采样**（游戏截图按区域提取，存成一张 `mapID → 环境 HSL` 的表），**主题色运行期实时派生**（拿你所在的地图 ID 查表 → 莫奈规则算出边缘 / 环境 / 高亮 / 中性四档 → 亮度阶梯定位 → 广播重涂）。运行期**不读任何贴图像素**（这个客户端也没有可用的像素读取 API），所以换区域时既不用等截图分析、也不会卡一下。查不到的区域沿 `C_Map` 的父链继承上一层（大陆 / 世界）的派生色，父链也断时退回中性灰兜底 —— 配置面板的「区域配色」一行会写明当前用的是哪一档。
+配色的两半各管一段：**环境色离线采样**（按区域从官方地图美术贴图 / wuxianwow 旅拍 / 游戏截图提取，存成一张 `mapID → 环境 HSL` 的表），**主题色运行期实时派生**（拿你所在的地图 ID 查表 → 莫奈规则算出边缘 / 环境 / 高亮 / 中性四档 → 亮度阶梯定位 → 广播重涂）。运行期**不读任何贴图像素**（这个客户端也没有可用的像素读取 API），所以换区域时既不用等截图分析、也不会卡一下。查不到的区域沿 `C_Map` 的父链继承上一层（大陆 / 世界）的派生色，父链也断时退回中性灰兜底 —— 配置面板的「区域配色」一行会写明当前用的是哪一档。
+
+**色源优先级**：官方地图美术贴图 > wuxianwow/trip 旅拍 > 自己的游戏截图，前一级有数据就用前一级。当前共 **33 个精确区域**（贴图 17 / trip 15 / game 1）+ 3 条父链派生兜底，唯一缺口是银月城 2393（旅拍站点不覆盖）。
 
 ---
 
 ## ✨ 特性
 
-- **区域驱动配色** —— 接入 [`LibMonetColor-1.0`](#-依赖) 后，颜色 = 当前地图 ID 查**离线采样的区域环境色** → 莫奈规则**运行期实时派生**四档 → 亮度阶梯定位。未覆盖的区域沿 `C_Map` 父链继承大陆 / 世界层的派生色，父链也断时退回中性灰兜底（面板「区域配色」一行会写明是哪一档）；库缺失时优雅降级为内置默认配色。
+- **区域驱动配色** —— 接入 [`LibMonetColor-1.0`](#-依赖) 后，颜色 = 当前地图 ID 查**按色源优先级离线采样的区域环境色** → 莫奈规则**运行期实时派生**四档 → 亮度阶梯定位。未覆盖的区域沿 `C_Map` 父链继承大陆 / 世界层的派生色，父链也断时退回中性灰兜底（面板「区域配色」一行会写明是哪一档）；库缺失时优雅降级为内置默认配色。
 - **模块松耦合** —— 模块之间只通过 `Utils/EventBus.lua` 通信，互不直接依赖；每个模块都能单独开关，关掉即**完整回退**到暴雪原样。
 - **自绘材质** —— 31 张自绘 UI 贴图（关闭钮三态 / 勾选框 / 状态条 / 图标 / 角饰 / 织纹 / 三角火花），结构性的走脚本（`tools/regen-textures.js`）、可改的走 SVG（`tools/svg/*.svg`）、笔触走 GIMP，不引外部贴图。
 - **无限客户端优先** —— 单位数值一律过保密值查询（`Utils/Secrets.lua`）；`Interface 16001`，Lua 5.1，不使用 5.2+ 特性。
@@ -57,8 +59,9 @@
 ## 🔗 依赖
 
 - **硬依赖：无** —— `LibStub` 已内嵌在 `Libs/` 下，不需要额外安装任何库。
-- **随包**：`LibMonetColor-1.0`（配色引擎）、`LibMonetColor-Anim-1.0`（状态染色层）、`MonetColorMapData-1.0`（25 个区域的实测环境色，自家仓库 [monetcolors](https://github.com/easthillgu/monetcolors) 的生成产物，**不要手改**）。
+- **随包**：`LibMonetColor-1.0`（配色引擎）、`LibMonetColor-Anim-1.0`（状态染色层）、`MonetColorMapData-1.0`（25 个区域的实测环境色：trip 18 / game 7，自家仓库 [monetcolors](https://github.com/easthillgu/monetcolors) 的生成产物，**不要手改**）。
 - **随包的派生数据**：`MonetColorMapEnvOverride.lua`（本仓算出的 3 条大陆 / 世界层父链色，运行时走引擎的 `RegisterMapEnv` override 通道注册）—— 数值由该层成员区的实测色取**圆均值**派生，不是新采的样，所以**不写回生成文件**；`RegisterMapEnv` 自带 `ClearCache + Refresh`，而本文件在 `Libs` 组、`Core.lua` 之前加载 —— 那一刻还没有人订阅引擎回调，所以这几次刷新只重算缓存，不会播一次多余的重涂。
+- **随包的贴图覆盖层**：`MonetColorMapEnvAtlas.lua`（17 区官方地图美术贴图环境色，同样走 `RegisterMapEnv`；加载序排在父层 override 之后，故优先级最高，会顶掉数据包里 9 个同名区域，并补上数据模块没有的 8 个区域）。加上 25 区数据包即现行 33 个精确区域。口径由 `tools/env-source-check.js` 守门（逐区对账 + 加载序 + 底账 `source` 标签），`tools/map-env-coverage.js` 出覆盖率账。
 - **动作条不依赖任何动作条库**：按钮用客户端自己的 `SecureActionButtonTemplate` + `actionpage` 属性自绘，施法、翻页、载具 / 变形 / 覆盖条全部由客户端判定。
 
 > ⚠️ **不要**同时启用独立的 `LibMonetColor-1.0` 插件。同 `MAJOR` 由 `LibStub` 按 `MINOR` 仲裁（`Libs/LibStub/LibStub.lua:15-18`：先注册且 `MINOR` 不低于对方的一份拿到库表），落选的那份在 `LibMonetColor-1.0.lua:29-33` 的 `if not LMC then return end` 处**静默退出** —— 不报错、不崩，但两份的区域色数据不同步时，真正生效的是哪一份取决于加载顺序。本体已内嵌该引擎，重复启用只会让其中一份白加载。
@@ -98,7 +101,7 @@ MonetUI/
 ├── Modules/             各功能模块（见上表），每个模块一份同名 xml 清单
 ├── Assets/              字体 / 自绘材质 / 图标
 ├── docs/                开发记录、布局与材质预览页（gitignore，README 头图例外）
-└── tools/               闸门脚本（api-audit / audit-taint / audit-locals / sync-check）+ 材质生成器
+└── tools/               闸门脚本（api-audit / audit-taint / audit-locals / sync-check / env-source-check / map-env-coverage）+ 材质生成器
 ```
 
 **一个子模块 = 一份 xml 清单**：`MonetUI.toc` 不逐个列 `.lua`，而是列
@@ -113,6 +116,8 @@ MonetUI/
 
 **2026-11-05（《无限》1.60 开服日）已在交付客户端上实机复验：`1.60.1 · build 70790 · Interface 16001 · zhCN`。**
 更早的 12.1.5 验收记录现在只是历史证据；下面写的都是 1.60 实测。
+
+**2026-11-08 追加**：`1.60.1 · build 70862` 上，`/reload` 后全 33 区实机逐区对账 **33/33 完全一致**（17 贴图 override + 15 trip + 1 game）；`/mui colors` 四级亮度阶梯 **4/4 对比度过线**（阈值 1.4）；`ERR / BLOCKED` 零条，加载 21/21 模块。细节见本地开发文档 `docs/HANDOFF.md` §8.68。
 
 - 登录：`已加载 20/20 个模块`、`界面美化已启用（46 个窗口）`、`/mui report` 四段（环境 / 角色 / 位置 / 受限）都对。
 - 只读诊断全跑过：`/mui compat`（58 项，与假设不符 6 项已逐条处置）、`/mui skins diagnose`

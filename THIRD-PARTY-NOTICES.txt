@@ -16,7 +16,9 @@ Libraries (Libs/)
 - LibMonetColor-1.0, LibMonetColor-Anim-1.0, MonetColorMapData-1.0 - built from
   the author's own "monetcolors" project (github.com/easthillgu/monetcolors),
   not third-party code. They are bundled only so the add-on needs no separate
-  download. See Libs/NOTICE.md.
+  download. The two in-house RegisterMapEnv override layers in the same folder
+  (MonetColorMapEnvOverride.lua, MonetColorMapEnvAtlas.lua) are also our own
+  data, not third-party code. See Libs/NOTICE.md.
 - No action-bar library, no Ace3 and no LibSharedMedia are used: action buttons
   are drawn directly on the client's SecureActionButtonTemplate, and fonts /
   textures are shipped with the add-on.
