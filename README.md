@@ -9,6 +9,7 @@
 ![Version](https://img.shields.io/badge/version-0.12.0-informational.svg)
 ![Lua](https://img.shields.io/badge/Lua-5.1-2C2D72.svg)
 ![Status](https://img.shields.io/badge/status-1.60_实机已验-brightgreen.svg)
+[![CurseForge](https://img.shields.io/badge/CurseForge-MonetUI-F16436.svg)](https://www.curseforge.com/wow/addons/monetui)
 
 配色的两半各管一段：**环境色离线采样**（按区域从官方地图美术贴图 / wuxianwow 旅拍 / 游戏截图提取，存成一张 `mapID → 环境 HSL` 的表），**主题色运行期实时派生**（拿你所在的地图 ID 查表 → 莫奈规则算出边缘 / 环境 / 高亮 / 中性四档 → 亮度阶梯定位 → 广播重涂）。运行期**不读任何贴图像素**（这个客户端也没有可用的像素读取 API），所以换区域时既不用等截图分析、也不会卡一下。查不到的区域沿 `C_Map` 的父链继承上一层（大陆 / 世界）的派生色，父链也断时退回中性灰兜底 —— 配置面板的「区域配色」一行会写明当前用的是哪一档。
 
@@ -50,7 +51,12 @@
 
 ## 📦 安装
 
-1. 把整个 `MonetUI` 文件夹放进客户端的 `Interface/AddOns/` 下。
+**CurseForge（推荐）**：<https://www.curseforge.com/wow/addons/monetui> —— 首版 `0.12.0`，
+Forever `1.60.1` / Release，文件 ID `9506208`。用 CurseForge 客户端可直接订阅更新。
+
+手动安装：
+
+1. 把整个 `MonetUI` 文件夹放进客户端的 `Interface/AddOns/` 下（或从 Release 下载 zip 解压）。
 2. **完整重启客户端** —— 新增文件不会被热加载。
 3. 游戏内输入 `/mui` 看用法，`/mui status` 看模块与主题状态。
 

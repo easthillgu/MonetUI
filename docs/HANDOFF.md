@@ -4770,7 +4770,7 @@ zone=贫瘠之地、envSource=override、**4/4 对比度过线**（1.702 / 1.552
 阈值 1.4）。reload 后 `wuxian logs --kinds ERR,BLOCKED` 为空。⇒ 本轮色值改动已实机生效，
 不需再做验收。
 
-## 8.69 2026-11-08 CurseForge 发布流程（首版已上传 / 自动化发布已配置）
+## 8.69 CurseForge 发布流程（2026-11-08 建立；11-09 首版已公开发布 / 自动化已配置）
 
 **本节是发版操作手册**：项目事实 → 打包与闸门 → 手动上传 → 自动化发布 → 踩过的坑 → 每次发版清单。
 `docs/HANDOFF.md` 在 `.gitignore` 白名单里**会入库推送**，所以这里只写流程与 Secret 名，
@@ -4787,9 +4787,11 @@ zone=贫瘠之地、envSource=override、**4/4 对比度过线**（1.702 / 1.552
 | License / 分发 | MIT License / Allow distribution to 3rd party |
 | flavor / 版本 | **Forever · 1.60.1 · Interface 16001**（下拉里确实有 `1.60.1`；TOC 的 `Interface` 保持 16001 不变） |
 | 首版 | Display name `0.12.0` · Release · Game Version `1.60.1` · 英文 Changelog |
-| 首版状态 | Files → `0.12.0` / Type R / **Under Review**（新项目需版主审核，几分钟~3 工作日） |
-| 可见性 | General → **Unlisted project 已取消并保存**，刷新后「不可搜索」提示消失；审核通过后可被搜到。审核前他人不可见、文件不同步 CF 生态属正常 |
+| 首版状态 | **已审核通过并公开发布**（2026-11-09 08:40 复核）。File ID `9506208` · 文件名 `MonetUI-0.12.0-forever.zip` · 30.6 MB · Type R · Forever / `1.60.1` · 上传 11-08 · 当时下载数 2 |
+| 公开链接 | 项目页 `https://www.curseforge.com/wow/addons/monetui`；文件页 `.../files/9506208`；搜索 `wow/search?class=addons&search=MonetUI` **能搜到**（证明 unlisted 已解除） |
+| 可见性 | General → **Unlisted project 已取消并保存**，刷新后「不可搜索」提示消失；项目主页 Description、Files、License 页均公开可读，首页有一张截图 `WoWScrnShot_110826_143340.jpg`。审核前他人不可见、文件不同步 CF 生态属正常 |
 | 邮件 | `legends@curseforge.com` 的 "Congratulations…" = **审核中**通知，不是拒绝；`notifications@github.com` 的 "Run failed: tests" 是 monetcolors 的 CI（见 8.69.6） |
+| 小坑 | 用抓取工具请求项目主页首次可能拿到缓存的 404；加 `?任意参数` 破缓存即正常。`/files` 与搜索页始终正常，别据此误判项目未上线 |
 
 ### 8.69.2 发布包怎么来
 
@@ -4928,8 +4930,10 @@ git tag 0.12.1 && git push origin 0.12.1
   （`.pkgmeta` 仍可本地 `release.sh -d` 只打包不发）。
 - `.pkgmeta` 清单已本地模拟核对：126 个首版文件 + `CHANGELOG.md` = 127 个装进 `MonetUI/`，
   **多一个 CHANGELOG.md、夹带 dev 文件 0 个**。
-- 新项目审核期（8.69.1）内自动上传的文件同样要排队审核；首版 `0.12.0` 目前仍是 Under Review
-  （2026-11-08 17:36 复查）。
+- 首版 `0.12.0` **已于 11-09 审核通过并公开**（见 8.69.1），项目已脱离新项目审核期；
+  后续更新的文件是否还要单独排队，以 Files 列表状态为准。
+- 截至 11-09 08:40，**GitHub Actions 运行数 = 0**（用 git 凭据查 API 确认），
+  即自动发布链路已就绪但**尚未实跑过**；首个 tag 会同时验证 token、上传与 Release 三段。
 
 ### 8.69.5 浏览器 / 表单踩过的坑（下次别再踩）
 
@@ -4956,7 +4960,7 @@ Lua 5.4 单测失败**（7 个 annotations），不是 CurseForge 审核拒绝�
    手工路线：从部署目录打 zip，顶层 `MonetUI/`、排除 dev 目录（TOC 版本号在第 1 步已改好）；
 5. 手工路线才需要 Files → Add File（务必在下拉里勾中 `1.60.1`）+ 填英文 Changelog；
    自动路线的 Changelog 由 `CHANGELOG.md` 带出；
-6. 盯 Actions 日志 / Files：Under Review → Approved；
+6. 盯 Actions 日志 / Files 状态（首版已 Approved，后续版本看新条目）；
 7. 游戏内 `/reload` 抽验 `/mui colors` 与 `MonetUIDB.colorReport`。
 
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
