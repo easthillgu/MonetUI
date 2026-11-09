@@ -5026,15 +5026,17 @@ Lua 5.4 单测失败**（7 个 annotations），不是 CurseForge 审核拒绝�
 
 - `EnsureWindow` 给 free 窗（`BaseKey(key) == FREE_CAT.key`）建一枚 `win.currencyText`
   （`Widget:Font(..., 12, "pixel", "bright", "RIGHT")`，`SetWordWrap(false)`），
-  锚 `TOPRIGHT` 偏移 `isBank and -132 or -8`。**132 = 银行那扇标题行右端两颗钮**
-  （一键存入 / 栏位管理，`EnsureBankTitleTools` 在 Rebuild 末尾才懒建），
-  所以按模式留白，不依赖按钮是否已存在。
+  锚 `TOPRIGHT` 偏移 `isBank and -132 or -SORT_RESERVE(54)`。**132 = 银行那扇右端两颗
+  工具钮**（一键存入 / 栏位管理），**54 = 背包那扇右端一颗「整理」钮**（40 宽 + 8 内边距
+  + 6 间隔，2026-11-09 18:18 加，见 8.76）；这些工具件都在 Rebuild 里懒建，所以按模式
+  **先**留白，不依赖按钮是否已存在。`UpdateCurrencyTitle` 的 `reserve` 用同一个常量。
 - 可用宽度 = 窗宽 − 右端保留 − 18(标题左内边距) − 标题实测宽 − 12(间隔)。
   `GetStringWidth` 在受限窗口可能返回机密值 ⇒ `pcall` + `Secrets.Number`
   （`UnitFrames/Auras.lua:434` 同款），量不到就当"放得下"，宁可显示全也不清空。
   `FittedCurrencyText` 从最多 8 项往下减，多出的折 `+N`；连 1 项都放不下才整段隐藏。
-- 默认 `columns=10 / iconSize=34 / gap=4` ⇒ 窗宽约 386px，背包档可用约 300px，
-  实机两项 `荣誉点数 1792 · 商人青睐 3402` 完整放得下；银行档可用约 128px ⇒ 自动收成
+- 默认 `columns=10 / iconSize=34 / gap=4` ⇒ 窗宽约 386px，背包档可用约 250px
+  （8.76 加整理钮后由 300 缩到 250），实机两项 `荣誉点数 1792 · 商人青睐 3402`
+  仍完整放得下；银行档可用约 128px ⇒ 自动收成
   `荣誉点数 1792 · +1`，不会压到工具钮上。
 - 刷新三路：`FillFreeWindow` 在 `SetSize` 之后调（尺寸定了宽度才对）、
   `CURRENCY_DISPLAY_UPDATE` / `CHAT_MSG_CURRENCY` 只重画这一行字（**不**为几个数字全量 Rebuild）、
@@ -5043,21 +5045,25 @@ Lua 5.4 单测失败**（7 个 annotations），不是 CurseForge 审核拒绝�
 - 开关 `/mui bags currency on|off`（不带参数查状态），默认 `DEFAULTS.bags.currencyTitle = true`；
   关掉只收文字、不动布局。配置面板只有模块总开关，背包细项历来走 `/mui bags`，沿用惯例。
 
-**已知边界**：背包模式一格空位都没有时 `FillFreeWindow` 会 `SetShown(false)` 收掉整扇
-（银行模式有 `keepTitle` 常显标题行）⇒ 背包全满时这行货币也跟着看不到。这是既有布局行为，
-没为货币改它；真要常显得给背包档也加 `keepTitle`，会多留一扇空窗，等玩家定。
+**满包时的边界（8.76 已改）**：本节最初背包档没有 `keepTitle`，一格空位都没有时
+`FillFreeWindow` 会 `SetShown(false)` 收掉整扇，这行货币跟着看不到。2026-11-09 18:18
+加「整理」钮后，两种模式都传 `keepTitle=true` ⇒ 背包全满也保留标题行（多一扇只有
+标题的窄窗），按钮和货币都在。这是为按钮可用性做的布局变更，不是货币功能本身的要求。
 
 **验证（2026-11-09）**：`luac -p`、`api-audit`(0 HARD / 0 unknown event)、`audit-locals`(63 文件)、
 `audit-taint`(0)、`scheduler-callback-probe` 全过；另从 `Bags.lua` **抽取新增段落原文**跑无头桩，
 覆盖 386px 双项完整显示、重复刷新零重排、120px 窄窗隐藏、银行档避让并折 `+1`、开关 off、
 数据层缺失六个路径，全部通过。实机仍需按 B 打开分类背包目测（`wuxian` link 仍 offline）。
 
-## 8.72 2026-11-09 小队 / 团队框默认贴小地图左侧
+## 8.72 2026-11-09 团队框默认贴小地图左侧（小队保持原位）
+
+> **2026-11-09 16:33 作者修订（详见 8.75）**：本节最初把**小队和团队**都锚到小地图，
+> 现改为**只有团队框**贴小地图，小队框恢复原来的屏幕位置 `CENTER/UIParent/CENTER, -330, 40`。
+> 下面保留的锚点/时序/尺寸分析仍然有效，但凡写「两个框 / 小队也贴」的句子以 8.75 为准。
 
 **需求/判据**：团队框架放在小地图左侧、同一高度、间隔 14。落地口径 =
 `point="RIGHT" / relativeTo="MonetUIMinimapPanel" / relativePoint="LEFT" / x=-14 / y=0`
 —— 框的**右边缘**距小地图面板**左边缘** 14 个 UI 单位，垂直中心对齐（同一水平高度）。
-小队与团队共用同一组锚，切小队/团队时位置不跳。
 
 **为什么锚面板而不是 `Minimap`**：小地图画布是 256×256，可见带只有中间 190 高
 （上下各裁 `MASK_CROP=33`），`Minimap` 的 TOP 比人眼看到的边框高 35。
@@ -5073,15 +5079,17 @@ Lua 5.4 单测失败**（7 个 annotations），不是 CurseForge 审核拒绝�
   按一组绝对坐标落位（沿用旧默认的 CENTER ±x），不再把框甩到屏幕边外
   （旧逻辑只把 `relativePoint` 改成 `point`，配合 x=-14 会跑到屏幕右侧外）。
 
-**时序**：Minimap 面板可能比 GroupFrames 晚建。`EnsurePanel` 在**首次**创建并摆好面板后
-补一次 `Mover:ApplyGroup("groups")`，两个方向都覆盖：Groups 先注册 → 面板建好补重贴；
-Minimap 先建 → Groups 注册时 `Mover:Register` 自带 `Apply(key)` 直接命中。重贴读 `store()`，
+**时序**：Minimap 面板可能比 GroupFrames 晚建。`EnsurePanel` 摆好面板后补一次重贴
+（8.74 起是**每次**布局；8.75 起只重贴 `Mover:Apply("groupRaid")`，不再动小队），
+两个方向都覆盖：Groups 先注册 → 面板建好补重贴；Minimap 先建 → Groups 注册时
+`Mover:Register` 自带 `Apply(key)` 直接命中。重贴读 `store()`，
 **不会抹掉玩家自己拖过的位置**。
 
-**默认值与命令**：`Core.lua` 的 `DEFAULTS.groupFrames.party/raid` 换成上面的锚，各带一份
-`fallback`。本机存档里没有 `groupFrames` 段（稀疏落盘把等于默认值的键删了），所以改默认值
-直接生效、无需迁移。别的用户若拖过，存档里的位置优先（项目惯例：不静默改写玩家存过的位置），
-跑 `/mui groupframes minimap` 显式贴回；帮助行也加了这条。
+**默认值与命令（8.75 已修订）**：只有 `DEFAULTS.groupFrames.raid` 带上面的锚与一份
+`fallback`（沿用团队旧位置 `CENTER 300,0`）；`party` 是 `CENTER/UIParent/CENTER, -330, 40`，
+不带 fallback。玩家拖过的位置优先于默认值（项目惯例：不静默改写），
+跑 `/mui groupframes minimap` **只**把团队贴回小地图，`/mui groupframes defaults`
+把两者都恢复默认。
 
 **边界（等作者定）**：这轮只改**位置**，没改框架尺寸 ⇒ 当前团队框高
 `RaidHeight = 5×(2+24+4)+4×2 = 158`、小队框高 133，而小地图面板高 194。
@@ -5135,6 +5143,123 @@ Guard（`tag 0.13.0` == `TOC 0.13.0`）→ packager →
 
 **下次发版**：照 8.69.7 走，只有三处数字要对齐；本项目已验证「纯数字 tag → Actions → GH Release + CF 上传」
 整条链路，不必再手工打包 / Add File。
+
+## 8.74 2026-11-09 队伍框架「改完位置就看不见」判例：fallback 漏换 parent
+
+**现象**：按 8.72 把小队 / 团队框默认锚改成 `MonetUIMinimapPanel` 后，玩家报
+「队伍框架看不到了」。截图（wuxian snap）确认小地图在右下角、其左侧本该出现框架的区域为空。
+探针 `link offline`（该角色 `!WuxianWorkshop` / `WoWBridge` 仍 disabled），拿不到游戏内真值。
+
+**根因（`Utils/Mover.lua` 的 `ApplyOne`）**：8.72 加的 fallback 分支只改了
+`point / relativePoint / x / y`，**没把 `parent` 一起换回 `UIParent`**。
+具名锚框解析成功但**被隐藏 / 还没布局**（典型：小地图模块被关、或 `EnsurePanel`
+先 `SetShown(active)` 再重贴）时，「绝对坐标」被算到那个隐藏面板的 `CENTER` 上 ——
+`SetPoint` 不报错，框却落到屏幕外，表现就是静默消失。
+8.72 的无头桩只覆盖了「面板不存在 / 面板存在且可用」，漏了「面板存在但不可用」这一格，
+所以当时没测出来。**教训：新增 fallback 必须连 parent 一起断言，不能只验 point/x/y。**
+
+**修复**：
+- 新增 `AnchorUsable(frame)`：`IsShown()` 且 `GetRect()` 给出有效矩形（宽高 > 0）才算可用锚。
+- `needFallback` = 名字没解析出来 **或** 解析到的框不可用；触发时
+  `parent, parentKey = UIParent, "UIParent"` 与坐标一起换。
+- 二次自愈：锚定后 `frame:GetRect()` 整个落在屏幕外且有 fallback → 落回绝对坐标。
+- `Minimap.EnsurePanel` 从「仅首次创建重贴」改成**每次布局都重贴** `groups`
+  （面板关掉再打开也能贴回；`ApplyGroup` 读 store()，不抹玩家拖过的位置）。
+
+**离线诊断**：`Modules/UnitFrames/Groups.lua` 新增 `Report()`；`M:Apply()` 末尾与
+`/mui groupframes status` 都会把 `MonetUIDB.groupReport` 落进存档 ——
+panel 的 rect/shown、party/raid anchor 的 rect/shown/GetPoint、headerShown、inGroup/inRaid。
+探针离线时也能从 WTF 的 `SavedVariables/MonetUI.lua` 读回真值。
+整段用 `pcall(Report)` 包住，`rectOf` 对 `GetRect` 少返回值 / 抛错都做了类型校验，
+诊断绝不能反过来打断 `M:Apply()`。
+
+**验证**：闸门全过；两组无头桩 —— Mover 整体加载 7 路径（面板显示 / 隐藏 / 无布局 /
+不存在 / 锚定后屏幕外 / 恢复显示 / 玩家位置优先）、`Report()` 原文抽取 5 路径
+（正常 / GetRect 抛错 / 只回 2 值 / GetPoint 抛错 / 全空）全过。
+`deploy-retail.ps1` 126 文件 + `sync-check` in sync；`wuxian check --no-live`
+3 条 error 仍是既有 `Scheduler.lua` debug 守卫。
+
+**待办**：需玩家 `/reload` 后组队目测；若仍看不到，跑 `/mui groupframes status`，
+把存档里的 `groupReport` 贴回来即可精确定位（不依赖探针）。
+本次修复**已随 2026-11-09 的 `main` 提交入库，但未打 tag、未发版** —— 0.13.0
+已带此 bug 上传 CF，实机确认后再决定发 `0.13.1`。
+
+## 8.75 2026-11-09 16:33 位置口径修订：小队回原位，只有团队贴小地图
+
+**作者指令**：「队伍还放在原来的位置，团队才放到小地图那边」。8.72 把两者都锚到
+`MonetUIMinimapPanel` 是理解偏了 —— 需求里的「团队框架」只指 raid；小队（party）
+不该跟着小地图跑。8.74 修掉的是「框静默消失」的 Mover bug，与这里的**口径**是两件事，
+两套修复都保留。
+
+**落地**（`Core.lua` / `Modules/UnitFrames/Groups.lua` / `Modules/Minimap/Minimap.lua`）：
+
+| 对象 | 位置 |
+| --- | --- |
+| 小队 `groupParty` | `CENTER / UIParent / CENTER, x=-330, y=40`（原来的屏幕位置），**不带 fallback** |
+| 团队 `groupRaid` | `RIGHT / MonetUIMinimapPanel / LEFT, x=-14, y=0`，`fallback = CENTER 300,0`（团队旧位置） |
+
+- `MigratePartyAnchor(cfg)`：存档里若烘着 8.72 那组精确值
+  （`RIGHT / MonetUIMinimapPanel / LEFT / -14 / 0`），在 `M:Apply()` 里改回小队默认。
+  **只在精确匹配时动手**，玩家自己拖出来的任何坐标都不碰。为什么需要：`Mover` 的
+  `stored` 优先于 `default`，而 `store()` 与 `default` 指向**同一张** `cfg.party` 表，
+  光改 `DEFAULTS` 救不回已经落盘的值；跑过 `/mui groupframes minimap` 的号就会中招。
+- `/mui groupframes minimap` 现在**只**改团队，小队一律不动；新增
+  `/mui groupframes defaults`（别名 `reset`）把两者都恢复默认。命令里给团队**补写
+  `fallback` 子表** —— `default == cfg.raid`，缺了它面板不可用时团队会带着 `x=-14`
+  落到 `UIParent` 右侧外（8.74 那个坑的另一种触发方式）。
+- `Minimap.EnsurePanel` 的重贴从 `Mover:ApplyGroup("groups")` 收窄成
+  `Mover:Apply("groupRaid")`：小地图开关不再触碰小队框。
+
+**验证**：全闸门通过（`luac -p` 改动 4 文件、api-audit 0 HARD、locals 63、taint 0、
+scheduler / external-ledger / check-frame-list）；两组无头桩 —— 真实 `Utils/Mover.lua`
+加载后 5 路径（面板可用 / 隐藏 / 无布局 / 不存在 / 仅重贴团队）断言小队恒在
+`CENTER -330,40`、团队在面板可用时 `-14`、不可用时 `CENTER 300,0`；
+`Groups.lua` 原文抽取 `MigratePartyAnchor` + `HandleCommand` 覆盖迁移命中 / 玩家位置不动 /
+`minimap` 只改团队 / `defaults` 改两个 / `status` / 未知子命令，全过。
+
+**状态**：已提交到 `main`（2026-11-09），**未打 tag、未发版**。`0.13.0` 已上传 CF
+（含 8.72 口径 + 8.74 bug），8.74 的修复与本节修订只在源码 / 部署目录生效，
+需实机确认后另发 `0.13.1`。
+
+## 8.76 2026-11-09 18:18 背包「整理」按钮
+
+**需求**：「背包增加一个按钮，整理」。落在**背包档**「剩余空间」窗的标题行最右端
+（和 8.71 的货币同一行），不新增窗口、不新增行，样式直接复用银行工具钮的
+`BankHeadButton`（`Widget:Theme` + `ButtonMaterial` + 10px `bright` 字 + `AnyUp`）。
+`SORT_BTN_W=40`，锚 `TOPRIGHT -8,-6`。
+
+**API 依据**：`C_Container.SortBags()` —— 本机快照 `docs/api/FUNCTIONS.md:1336` 有它、
+`wuxian-api.json` 里 `fl:{}` 无受限标记；暴雪自己
+`Blizzard_UIPanels_Game/Mainline/ContainerFrame.lua:740` 的清理按钮也是直调它。
+`api-audit` 跑完 0 HARD / 0 SecureOnly（4 条 CHECK 全是既有 ActionBars 的 `PlaceAction`）。
+即便如此仍加了守卫：整理会搬动物品，六类受限窗口（`ns:IsRestricted()`，退回 `InCombat()`）
+里**不调用**、给一句回执，避免 `ADDON_ACTION_BLOCKED`。调用后 `M:Refresh()` 立即重扫，
+后续 `BAG_UPDATE` 再兜一次；成功/失败/API 缺失都有聊天框回执，分得清「没接上鼠标」和「被拦」。
+
+**布局联动**（`Modules/Bags/Bags.lua`）：
+
+- 新常量 `SORT_BTN_W=40` / `SORT_RESERVE=8+40+6=54`，两处共用：`EnsureWindow` 里
+  货币文字的右端锚、`UpdateCurrencyTitle` 的 `reserve`。背包档可用宽度从约 300 降到 250，
+  实机两项仍完整放得下；银行档 `132` 不变（两颗工具钮）。
+- `DesignateMaster` 明确排除 `FREE_CAT.key`，所以「剩余空间」窗的 ✕ 永远隐藏，
+  不会压到右上角的整理钮/银行工具钮。
+- **`FillFreeWindow(..., keepTitle)` 从「只有银行」扩成「两套都传 true」**：背包全满时
+  原本整扇窗 `SetShown(false)`，恰恰是最想点整理的时候按钮却消失。代价是满包时多一扇
+  只有标题行的窄窗（窗宽按满行算，空/不空之间不跳宽度）——这是为按钮可用性做的取舍。
+- 键盘入口 `/mui bags sort`（与按钮同一条 `SortBagsNow`），帮助行已补。
+- **银行档不建这颗钮**：那边整理要用 `C_Container.SortBank(bankType)`
+  （`BankFrameTemplates.lua:1817/1872`），语义不同且本客户端未实机验过；作者要的是「背包」，
+  不把两套行为绑在一起。
+
+**验证**：`luac -p`、`api-audit`(0 HARD)、`audit-locals`(63)、`audit-taint`(0)、
+`scheduler-callback-probe`、`external-ledger-probe`、`check-frame-list` 全过；
+从 `Bags.lua` 抽取新增段落原文跑无头桩，覆盖正常调用（1 次 API + 1 次 Refresh）、
+受限拦截（不调用）、API 缺失、API 抛错（失败回执 + 仍刷新）、按钮懒建/幂等/文案/锚点/
+点击回调、标题行让位（背包 250 / 银行 128 且 reserve 未误改）共 7 组路径，全部通过。
+
+**状态**：已提交到 `main`（2026-11-09），**未打 tag、未发版**。连同 8.74（Mover parent
+判例）、8.75（团队/小队位置口径）一起只在源码 / 部署目录生效，等实机确认后合并考虑
+`0.13.1`。实机需 `/reload` 后按 B 目测，探针链路仍 offline。
 
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 

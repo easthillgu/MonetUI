@@ -884,9 +884,7 @@ end
 --- 边框的粗细由 Widget:Theme 的 thickness 决定（物理像素 → UI 单位由 Media:Mult 换算），
 --- 底色只露在地图与边框之间那一圈缝里。
 local function EnsurePanel(minimap)
-    local created = false
     if not panel then
-        created = true
         panel = Widget:CreateFrame("MonetUIMinimapPanel", UIParent,
             MAP_WIDTH + PANEL_PAD * 2, MAP_HEIGHT + PANEL_PAD * 2)
         panel:SetFrameStrata("BACKGROUND")
@@ -906,15 +904,14 @@ local function EnsurePanel(minimap)
     -- 画布每边比面板窄 4，人才看得见的那圈边框才是面板。
     M.panel = panel
 
-    -- 小队 / 团队框的默认锚就是这个面板（Mover 的 `relativeTo`）。它可能比 Minimap
-    -- 模块先注册：那时 `ParentOf` 解析不到全局框、按 fallback 落了位。面板**首次**建好且
-    -- 摆好之后补一次重贴，让它们真正挂到面板上；玩家自己拖过的位置由 store() 保留，
-    -- 重贴不会抹掉。
-    if created then
-        local mover = ns.Mover
-        if mover and type(mover.ApplyGroup) == "function" then
-            pcall(mover.ApplyGroup, mover, "groups")
-        end
+    -- 只有**团队框**的默认锚是这个面板（Mover 的 `relativeTo`；小队框按 2026-11-09
+    -- 16:33 的口径保持屏幕原位，不随小地图动）。它可能比 Minimap 模块先注册；也可能
+    -- 小地图被关掉再打开（那时面板曾 SetShown(false)，Mover 的锚点自检会把框落到
+    -- fallback）。所以每次重新布局都补一次重贴，让团队真正挂回可用面板；
+    -- Apply 读 store()，玩家自己拖过的位置不会被抹掉。框还没注册时 Apply 空转，无副作用。
+    local mover = ns.Mover
+    if mover and type(mover.Apply) == "function" then
+        pcall(mover.Apply, mover, "groupRaid")
     end
 end
 

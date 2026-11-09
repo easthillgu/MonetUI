@@ -1283,6 +1283,74 @@ local function DesiredState()
     end
 end
 
+--- 把锚框的真实状态落进 SavedVariables：探针链路离线时也能从存档读回，
+--- 不用玩家口述「框在哪」。只读 Frame 几何与显隐，不改任何框。
+local function Report()
+    local db = ns:DB()
+    if not db then return nil end
+
+    local function rectOf(frame)
+        if not frame then return "missing" end
+        local ok, left, bottom, width, height = pcall(frame.GetRect, frame)
+        if not ok or type(left) ~= "number" or type(bottom) ~= "number"
+            or type(width) ~= "number" or type(height) ~= "number" then return "ERR" end
+        return string.format("%d,%d %dx%d", left, bottom, width, height)
+    end
+    local function shownOf(frame)
+        if not frame then return false end
+        local ok, shown = pcall(frame.IsShown, frame)
+        return ok and shown and true or false
+    end
+    local function pointOf(frame)
+        if not frame then return "-" end
+        local ok, point, rel, rp, x, y = pcall(frame.GetPoint, frame, 1)
+        if not ok then return "ERR" end
+        local name = "-"
+        if rel then
+            local okName, got = pcall(rel.GetName, rel)
+            name = (okName and got) or tostring(rel)
+        end
+        return string.format("%s -> %s:%s (%s,%s)", tostring(point), tostring(name),
+            tostring(rp), tostring(x), tostring(y))
+    end
+
+    local panel = _G.MonetUIMinimapPanel
+    local out = {
+        when    = date("%Y-%m-%d %H:%M:%S"),
+        inGroup = IsInGroup() and true or false,
+        inRaid  = IsInRaid() and true or false,
+        panel   = { rect = rectOf(panel), shown = shownOf(panel) },
+        rows    = {
+            { key = "party", rect = rectOf(party and party.anchor),
+              shown = shownOf(party and party.anchor),
+              point = pointOf(party and party.anchor),
+              headerShown = shownOf(party and party.header) },
+            { key = "raid", rect = rectOf(raid and raid.anchor),
+              shown = shownOf(raid and raid.anchor),
+              point = pointOf(raid and raid.anchor),
+              headerShown = shownOf(raid and raid.headers and raid.headers[1]) },
+        },
+    }
+    db.groupReport = out
+    return out
+end
+
+--- 2026-11-09 16:33 口径修正：只有团队框贴小地图，小队框回屏幕原位。
+--- 8.72 曾把两者都锚到面板；若玩家跑过 `/mui groupframes minimap`，或旧默认值被落过盘，
+--- 存档里会留着那组精确坐标（stored 优先于 DEFAULTS，光改默认值救不回来）。
+--- 只在"位置精确等于旧默认"时改回，玩家自己拖出来的任何位置都不碰。
+local function MigratePartyAnchor(cfg)
+    local p = cfg and cfg.party
+    local def = ns.DEFAULTS and ns.DEFAULTS.groupFrames and ns.DEFAULTS.groupFrames.party
+    if not p or not def then return false end
+    if p.point ~= "RIGHT" or p.relativeTo ~= "MonetUIMinimapPanel"
+        or p.relativePoint ~= "LEFT" or p.x ~= -14 or p.y ~= 0 then return false end
+    p.point, p.relativeTo, p.relativePoint = def.point, def.relativeTo, def.relativePoint
+    p.x, p.y = def.x, def.y
+    p.fallback = nil
+    return true
+end
+
 function M:Apply()
     local cfg = Config()
     if not cfg then return end
@@ -1295,6 +1363,7 @@ function M:Apply()
         return
     end
 
+    MigratePartyAnchor(cfg)   -- 旧存档里若烘着"小队也贴小地图"，先纠正回原位置
     local partyCfg, raidCfg = cfg.party, cfg.raid
     if not partyCfg or not raidCfg then return end
 
@@ -1355,6 +1424,7 @@ function M:Apply()
     self:RefreshAll()
     StartTicker()
     StartMuteTicker()   -- 循环静音暴雪子框鼠标（LoD 补网）
+    pcall(Report)       -- 落一份锚点账本到 MonetUIDB.groupReport，离线可查；诊断绝不能打断主流程
 end
 
 function M:RegisterEvents()
@@ -1459,23 +1529,52 @@ M.NameCap = NameCap
 M.UpdateHealthText = UpdateHealthText
 M.FrameHeight = FrameHeight
 
---- 把小队 / 团队框贴回小地图左侧的默认位置。玩家拖过的位置存在存档里、优先于默认值
---- （项目惯例：不静默改写玩家存过的位置），所以要显式跑一次这条命令才覆盖。
+--- 位置命令（2026-11-09 16:33 口径）：`minimap` **只**把团队框贴回小地图左侧，
+--- 小队框一律不动；`defaults` 把两者都恢复默认（小队回屏幕原位、团队贴小地图）。
+--- 玩家拖过的位置存在存档里、优先于默认值（项目惯例：不静默改写），所以要显式跑命令才覆盖。
 function M:HandleCommand(rest)
-    if string.lower(rest or "") ~= "minimap" then return false end
+    local sub = string.lower(rest or "")
+    if sub == "status" or sub == "diag" then
+        local okReport, r = pcall(Report)
+        if not okReport then r = nil end
+        local panel = r and r.panel
+        ns:Print(string.format("[mui groupframes] 组队=%s 团队=%s 小地图面板=%s(%s)",
+            tostring(r and r.inGroup), tostring(r and r.inRaid),
+            tostring(panel and panel.rect), tostring(panel and panel.shown)))
+        if r then
+            for i = 1, #r.rows do
+                local row = r.rows[i]
+                ns:Print(string.format("  %s: %s shown=%s header=%s | %s", row.key,
+                    row.rect, tostring(row.shown), tostring(row.headerShown), row.point))
+            end
+        end
+        ns:Print("  账本已写入 MonetUIDB.groupReport")
+        return true
+    end
+    if sub ~= "minimap" and sub ~= "defaults" and sub ~= "reset" then return false end
 
     local cfg = Config()
     local defaults = ns.DEFAULTS and ns.DEFAULTS.groupFrames
     if not cfg or not defaults then return false end
 
+    -- `minimap` 只动团队；`defaults` 两个都回默认。Mover 的 default 与 store 是同一张表，
+    -- 所以 fallback 也必须一起补齐，否则面板不可用时团队会带着 x=-14 落到 UIParent 右侧外。
+    local keys = (sub == "minimap") and { "raid" } or { "party", "raid" }
     local moved = 0
-    for _, key in ipairs({ "party", "raid" }) do
-        local sub, def = cfg[key], defaults[key]
-        if sub and def then
-            sub.point = def.point
-            sub.relativeTo = def.relativeTo
-            sub.relativePoint = def.relativePoint
-            sub.x, sub.y = def.x, def.y
+    for _, key in ipairs(keys) do
+        local target, def = cfg[key], defaults[key]
+        if target and def then
+            target.point = def.point
+            target.relativeTo = def.relativeTo
+            target.relativePoint = def.relativePoint
+            target.x, target.y = def.x, def.y
+            if type(def.fallback) == "table" then
+                local fb = {}
+                for k, v in pairs(def.fallback) do fb[k] = v end
+                target.fallback = fb
+            else
+                target.fallback = nil
+            end
             moved = moved + 1
         end
     end
@@ -1484,8 +1583,11 @@ function M:HandleCommand(rest)
     if Mover and type(Mover.Apply) == "function" then
         pcall(function() Mover:Apply() end)
     end
-    ns:Print(string.format("[mui groupframes] 小队 / 团队框已贴回小地图左侧（间隔 %d，垂直中心对齐）",
-        math.abs((defaults.raid and defaults.raid.x) or 14)))
+    if sub == "minimap" then
+        ns:Print("[mui groupframes] 团队框已贴回小地图左侧（间隔 14、垂直中心对齐）；小队框保持原位")
+    else
+        ns:Print("[mui groupframes] 已恢复默认：小队框回屏幕原位，团队框贴小地图左侧")
+    end
     return true
 end
 

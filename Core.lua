@@ -123,19 +123,19 @@ local DEFAULTS = {
         hideBlizzard = true,
         showIncomingHeals = true,
         showAbsorbs = true,
-        -- 位置口径（2026-11-09 作者定）：小队 / 团队都贴**小地图可见面板左侧**，
-        -- 右边缘距面板左边缘 14，垂直中心对齐（同一高度）。锚的是 `MonetUIMinimapPanel`
-        -- 而不是 `Minimap` 画布 —— 画布 256×256 上下各有 33 的透明带，锚它会高出一截。
-        -- Mover 的 `ParentOf` 支持具名全局框；面板还没建 / 小地图模块关掉时按 fallback 落回屏幕。
+        -- 位置口径（2026-11-09 16:33 作者修订）：**只有团队框**贴小地图可见面板左侧，
+        -- 小队框保持原来的屏幕位置（CENTER / UIParent / -330, 40），不跟着小地图跑。
+        -- 团队锚的是 `MonetUIMinimapPanel` 而不是 `Minimap` 画布 —— 画布 256×256 上下各有
+        -- 33 的透明带，锚它会高出一截。Mover 的 `ParentOf` 支持具名全局框；面板还没建 /
+        -- 小地图模块关掉时按 fallback 落回屏幕（沿用团队原来的 300, 0）。
         -- 拖过的位置存在存档里、优先于这组默认值（项目惯例：不改玩家存过的位置），
-        -- 想贴回去用 `/mui groupframes minimap`。
+        -- 想把团队贴回去用 `/mui groupframes minimap`；两者都回默认用 `defaults`。
         party = {
             enabled = true,
             width = 110, health = 18, power = 4, spacing = 2,
             showPlayer = true,
             healthText = "none",
-            point = "RIGHT", relativeTo = "MonetUIMinimapPanel", relativePoint = "LEFT", x = -14, y = 0,
-            fallback = { point = "CENTER", relativePoint = "CENTER", x = -330, y = 40 },
+            point = "CENTER", relativeTo = "UIParent", relativePoint = "CENTER", x = -330, y = 40,
         },
         raid = {
             enabled = true,
@@ -1184,8 +1184,11 @@ local function PrintHelp()
     ns:Print("  |cffffd100/mui skins diagnose|r 对象名可达性账本（全仓一本账：skins / nameplates / infobar / minimap）")
     ns:Print("  |cffffd100/mui minimap menu|r 微菜单现场判据：行建不建得出 / 面板受不受保护 / 此刻右键落点（开服日「右键没反应」）")
     ns:Print("  |cffffd100/mui infobar currency|r 货币自定义监控：list 看 ID / add|del <ID> / mode / max / zero / panel（右键货币格也能勾）")
+    ns:Print("  |cffffd100/mui bags sort|r 整理背包（与「剩余空间」标题行的「整理」钮同一入口）")
     ns:Print("  |cffffd100/mui bags currency on|off|r 「剩余空间」标题行显示哪些货币（同上清单；默认 on）")
-    ns:Print("  |cffffd100/mui groupframes minimap|r 小队 / 团队框贴回小地图左侧（间隔 14、垂直中心对齐；拖过之后用）")
+    ns:Print("  |cffffd100/mui groupframes minimap|r 只把团队框贴回小地图左侧（间隔 14、垂直居中；小队保持原位）")
+    ns:Print("  |cffffd100/mui groupframes defaults|r 恢复默认位置：小队回屏幕原位，团队贴小地图")
+    ns:Print("  |cffffd100/mui groupframes status|r 打印锚点 / 显隐诊断（同时写入 MonetUIDB.groupReport）")
     ns:Print("  |cffffd100/mui skins diagnose bad|r 只看\"命中但不是框体\"那一类（全量几百行，聊天框装不下）")
     ns:Print("  |cffffd100/mui skins layers <窗口名> [片段]|r 这个窗口的底有几层、每层谁能碰（region / 字段可剥 / 要点名；全量存 MonetUIDB.layerReport）")
     ns:Print("  |cffffd100/mui skins templates [片段]|r 模板库账本：多少个模板 / 映射到 skinAs / Camelot 覆盖；带片段查\"这个控件被认成什么\"")

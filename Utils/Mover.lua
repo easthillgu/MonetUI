@@ -208,6 +208,23 @@ local function ParentOf(key)
     return UIParent, "UIParent"
 end
 
+--- 具名锚框「解析到了」≠「能用」：那个模块可能被关掉（SetShown(false)），
+--- 或者还没布局（GetRect 给不出有效矩形）。锚在隐藏框上 SetPoint 不报错，
+--- 但位置会算到屏幕外，表现成「框架凭空消失」（2026-11-09 队伍框架判例）。
+local function AnchorUsable(frame)
+    if frame == UIParent then return true end
+    if not frame or type(frame.GetRect) ~= "function" or type(frame.IsShown) ~= "function" then
+        return false
+    end
+    local okRect, left, _, width, height = pcall(frame.GetRect, frame)
+    if not okRect or type(left) ~= "number" or type(width) ~= "number"
+        or type(height) ~= "number" or width <= 0 or height <= 0 then
+        return false
+    end
+    local okShown, shown = pcall(frame.IsShown, frame)
+    return okShown and shown and true or false
+end
+
 local function Stored(entry)
     if not entry.store then return nil end
     local ok, value = pcall(entry.store)
@@ -241,15 +258,20 @@ local function ApplyOne(entry)
     local default = entry.default or {}
     local point = stored.point or default.point or "CENTER"
     local relativePoint = stored.relativePoint or default.relativePoint or point
-    local parent, parentKey = ParentOf(stored.relativeTo or default.relativeTo)
+    local relativeTo = stored.relativeTo or default.relativeTo
+    local parent, parentKey = ParentOf(relativeTo)
     local x = stored.x or default.x or 0
     local y = stored.y or default.y or 0
 
-    -- 父框没解析出来时退回屏幕：这时相对点必须跟点一致，否则会差出半个框。
-    -- 例外：default 带了 `fallback`（具名父框还没建出来 / 那个模块被关掉），
-    -- 就按 fallback 给的一组绝对坐标落位，别把框甩到屏幕边外。
-    if parent == UIParent and parentKey ~= (stored.relativeTo or default.relativeTo or "UIParent") then
+    -- fallback 触发有两种：① 名字压根没解析出来；② 解析到了具名框但那个框不可用
+    -- （模块被关 / 还没布局）。**两种都必须把 parent 一起换回 UIParent** ——
+    -- 只改 point/x/y 会把「绝对坐标」算到隐藏/无布局的相对框上，位置反而更离谱。
+    -- 这正是 2026-11-09「改完团队框架位置后框不见了」的根因。
+    local needFallback = (parent == UIParent and parentKey ~= (relativeTo or "UIParent"))
+        or not AnchorUsable(parent)
+    if needFallback then
         local fb = default.fallback
+        parent, parentKey = UIParent, "UIParent"
         if type(fb) == "table" then
             point = fb.point or point
             relativePoint = fb.relativePoint or point
@@ -262,6 +284,22 @@ local function ApplyOne(entry)
 
     frame:ClearAllPoints()
     frame:SetPoint(point, parent, relativePoint, x, y)
+
+    -- 二次自愈：算完发现整个框落在屏幕外（锚点矩形异常 / 旧坐标失效），
+    -- 有 fallback 就落回那组绝对坐标，别让框静默消失。
+    if type(default.fallback) == "table" and parent ~= UIParent then
+        local okRect, left, bottom, width, height = pcall(frame.GetRect, frame)
+        local sw, sh = UIParent:GetWidth() or 0, UIParent:GetHeight() or 0
+        if okRect and type(left) == "number" and type(bottom) == "number"
+            and type(width) == "number" and type(height) == "number"
+            and sw > 0 and sh > 0
+            and (left + width < 0 or left > sw or bottom + height < 0 or bottom > sh) then
+            local fb = default.fallback
+            frame:ClearAllPoints()
+            frame:SetPoint(fb.point or "CENTER", UIParent,
+                fb.relativePoint or "CENTER", fb.x or 0, fb.y or 0)
+        end
+    end
 end
 
 local function ApplyTree(key, seen)

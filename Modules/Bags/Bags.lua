@@ -56,6 +56,12 @@ local BANK_TABS    = { 6, 7, 8, 9, 10, 11, 12, 13, 14 }    -- CharacterBankTab_1
 --   未购买的 7..14 全 0 槽 ⇒ **索引与物理格子 1:1，不存在"同一格出现在多个索引"**（那条旧担忧作废）。
 local BANK_PAGE_CANDIDATES = { -2, -3 }   -- -1 是钥匙扣，见上（保留 -2/-3 只为将来客户端有内容时自动接上）
 
+-- 「整理」按钮（背包档「剩余空间」标题行右端）：宽 40、右内边距 8、与货币文字间隔 6。
+-- 两处必须共用一个数：`EnsureWindow` 里货币文字的右端锚，和 `UpdateCurrencyTitle`
+-- 算可用宽度时的 reserve。银行档不建这颗钮，仍按原来的 132 给两颗工具钮留位。
+local SORT_BTN_W  = 40
+local SORT_RESERVE = 8 + SORT_BTN_W + 6    -- 54
+
 -- ---- 模式（背包 / 银行）：窗口键与存档位置都带模式前缀 --------------------------
 -- 以前银行是**原地替换**背包（同一批 cat.key 的窗），所以"位置不能和背包重叠"这件事
 -- 在结构上做不到。`bank:` 前缀把两套窗、两份位置账、两个总控 ✕ 彻底分开。
@@ -700,12 +706,12 @@ local function EnsureWindow(key)
     Widget:Corners(win)
     Widget:Rule(win, win.title)
 
-    -- 「剩余空间」标题行右端的货币文字。银行那扇的右端挂着"一键存入 / 栏位管理"两颗钮
-    -- （EnsureBankTitleTools 在 Rebuild 末尾才懒建），所以这里先按模式留出 132px，
-    -- 不依赖按钮是否已经存在。背包那扇只留 8px 内边距。
+    -- 「剩余空间」标题行右端的货币文字。银行那扇的右端挂着"一键存入 / 栏位管理"两颗钮，
+    -- 背包那扇挂着「整理」钮（都是 Rebuild 里懒建）—— 所以这里按模式**先**把位置留出来，
+    -- 不依赖按钮是否已经存在：银行 132，背包 SORT_RESERVE（40 宽的钮 + 右侧 8 + 间隔 6）。
     if BaseKey(key) == FREE_CAT.key then
         local currency = Widget:Font(win, 12, "pixel", "bright", "RIGHT")
-        currency:SetPoint("TOPRIGHT", win, "TOPRIGHT", isBank and -132 or -8, -5)
+        currency:SetPoint("TOPRIGHT", win, "TOPRIGHT", isBank and -132 or -SORT_RESERVE, -5)
         currency:SetJustifyH("RIGHT")
         currency:SetWordWrap(false)
         currency:Hide()
@@ -797,7 +803,7 @@ local function UpdateCurrencyTitle(win)
     end
 
     local isBank = ModeOf(win.catKey) == "bank"
-    local reserve = isBank and 132 or 8     -- 银行右端两颗钮
+    local reserve = isBank and 132 or SORT_RESERVE   -- 银行两颗工具钮 / 背包一颗「整理」钮
     local okW, winW = pcall(win.GetWidth, win)
     winW = (okW and Secrets.Number(winW)) or 300
     local titleW = 0
@@ -881,8 +887,9 @@ local FREE_ROWS = 1
 --- `return self.bagID or self:GetParent():GetID()` —— 壳就是父级、`UpdateButton` 里
 --- `shell:SetID(rec.bag)` + `btn:SetID(rec.slot)` 正好喂到它读的那两个口。
 --- 兼容旧调用：传数字（`HideModeWindows` 传 0）= 全清。
---- `keepTitle` = **银行模式**：一个空格都没有时仍留标题行（那行挂着"一键存入 / 栏位管理"，
---- 银行满的时候恰恰是最想点"一键存入"的时候）。此时窗宽按满行算，空/不空之间不跳宽度。
+--- `keepTitle` = 一个空格都没有时仍留标题行（那行挂着动作钮：银行的"一键存入 /
+--- 栏位管理"、背包的"整理"；包满的时候恰恰是最想点它们的时候）。窗宽按满行算，
+--- 空/不空之间不跳宽度。2026-11-09 起两种模式都传 true。
 local function FillFreeWindow(win, empties, keepTitle)
     local size    = Setting("iconSize")
     local gap     = Setting("gap")
@@ -933,7 +940,8 @@ local function FillFreeWindow(win, empties, keepTitle)
     local w = PAD * 2 + perRow * size + math.max(0, perRow - 1) * gap
     local h = TITLE_H + rows * size + math.max(0, rows - 1) * gap + PAD
     if keepTitle then
-        -- 银行模式：宽度按**满一行**算（空/不空之间不跳），没有空格时高度只留标题行。
+        -- 宽度按**满一行**算（空/不空之间不跳），没有空格时高度只留标题行，
+        -- 标题行上的动作钮（整理 / 一键存入 / 栏位管理）因此一直在。
         local fullW = PAD * 2 + columns * size + math.max(0, columns - 1) * gap
         w = math.max(w, fullW)
         if rows == 0 then h = TITLE_H + PAD end
@@ -1105,6 +1113,9 @@ local ParkBlizzardBank   -- 前置声明：函数体排在 CloseAllBags 之后�
 -- 而 Rebuild 要调它 ⇒ 必须先在这儿占位，后面用**赋值**写（写 `local function` 等于另建一个
 -- 同名局部，Rebuild 抓到的仍是全局 nil —— AGENTS 那条判例，2026-11-06 又被探针抓了一次）。
 local EnsureBankTitleTools
+-- 「整理」钮同理：函数体排在银行工具件那一段（要复用 BankHeadButton），
+-- Rebuild 在上面就得调，所以先占位，后面用赋值写。
+local EnsureSortButton
 
 --- 关掉某一模式的全部窗口（银行关闭只收银行那几扇，背包窗一张都不动）。
 local function HideModeWindows(mode)
@@ -1158,11 +1169,13 @@ local function Rebuild(bagType)
     -- 与物理格子 1:1、钥匙扣 `-1` 已从扫描里剔除），原先"银行索引没定性、真槽位可能绑错格"
     -- 这条阻塞消失。显示口径（2026-11-06 作者定）= **只画一行**（`FREE_ROWS = 1` × `columns`），
     -- 其余空位在最后一格写 `+N`（见 FillFreeWindow）。代价：第 N+1 个之后够不到 —— 已接受。
-    -- 银行模式：这扇窗是**银行那一列的第一扇**，标题行右端挂两颗动作钮（一键存入 / 栏位管理）。
-    -- 所以银行开着时即使一个空格都没有，也要把标题行留着（作者 2026-11-06 定）——
-    -- 否则"银行满了想存东西"恰好是按钮消失的时刻。
+    -- 两套模式的「剩余空间」标题行都挂着动作钮：银行两颗（一键存入 / 栏位管理，
+    -- 2026-11-06 作者定），背包一颗（整理，2026-11-09 18:18 作者加）。所以**即使一个
+    -- 空格都没有也要留标题行** —— 否则「包满了想整理」恰好是按钮消失的时刻。
+    -- keepTitle 的语义由「只有银行」扩成「两套都要」。
     local freeWin = EnsureWindow(WinKey(FREE_CAT.key))
-    FillFreeWindow(freeWin, empties, activeMode == "bank")
+    FillFreeWindow(freeWin, empties, true)
+    if activeMode ~= "bank" then EnsureSortButton(freeWin) end
 
     LayoutBothModes()
     RestoreDragged()
@@ -1437,6 +1450,46 @@ local SetBankToolsSetting = function(key, value)
     db.bags[key] = value
 end
 
+-- ---- 背包「整理」钮（2026-11-09 18:18 作者加）--------------------------------
+-- 只用 `C_Container.SortBags()`：本机 API 快照（docs/api/FUNCTIONS.md:1336）里它无
+-- [受限] 标记，暴雪自己 Mainline/ContainerFrame.lua:740 的清理按钮也是直调它。
+-- 银行档**不建**这颗钮：那边整理走 `C_Container.SortBank(bankType)`，语义不同且
+-- 这个客户端未实机验过，别顺手把两套行为绑在一起（作者要的是「背包」）。
+local sortBtn
+
+--- 受限窗口（六类，Core 的 `ns:IsRestricted`）里不整理：整理会搬动物品，硬调可能吃
+--- ADDON_ACTION_BLOCKED。留一句回执，玩家分得清「没接上鼠标」和「被限制拦了」。
+local function RestrictedNow()
+    if type(ns.IsRestricted) == "function" then return ns:IsRestricted() end
+    return InCombat()
+end
+
+local function SortBagsNow()
+    if RestrictedNow() then
+        ns:Print("[mui bags] 整理：当前处于受限窗口（战斗 / 地图 / 聊天锁定等），结束后再点")
+        return false
+    end
+    local api = _G.C_Container
+    if not (api and type(api.SortBags) == "function") then
+        ns:Print("[mui bags] 整理：本客户端没有 C_Container.SortBags —— 这颗钮在此无效")
+        return false
+    end
+    local ok, err = pcall(api.SortBags)
+    M:Refresh()   -- 客户端可能下一帧才发 BAG_UPDATE；先重扫一次，后续事件再兜
+    ns:Print(ok and "[mui bags] 整理：已调用 C_Container.SortBags"
+        or ("[mui bags] 整理：调用失败（" .. tostring(err) .. "）"))
+    return ok and true or false
+end
+
+--- 挂在背包档「剩余空间」标题行最右端，懒建、幂等（窗是复用对象，只建一次）。
+--- 与银行工具钮共用同一个样式工厂；货币文字的右端锚在 EnsureWindow 里已按
+--- SORT_RESERVE 让位，不依赖这颗钮是否建好。
+EnsureSortButton = function(win)
+    if not win or sortBtn then return end
+    sortBtn = BankHeadButton(win, "整理", SORT_BTN_W, SortBagsNow)
+    sortBtn:SetPoint("TOPRIGHT", win, "TOPRIGHT", -8, -6)
+end
+
 
 
 --- 玩家又按了 B（关我们的窗）。一次开背包暴雪会 Show 好几个框，边沿天然合并成一次；
@@ -1674,6 +1727,10 @@ function M:Initialize()
 end
 
 function M:HandleCommand(rest)
+    if rest == "sort" then
+        SortBagsNow()   -- 与标题行「整理」钮同一条路径；键盘/宏也能用
+        return true
+    end
     if rest == "currency on" or rest == "currency off" or rest == "currency" then
         if rest == "currency" then
             ns:Print("[mui bags currency] 标题行货币显示 = "
