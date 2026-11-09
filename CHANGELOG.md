@@ -3,6 +3,26 @@
 This file is used verbatim as the CurseForge release changelog (see `.pkgmeta`).
 Update the top section before tagging a new release.
 
+## 0.13.1 (2026-11-09)
+
+- Group frames: fixed a fallback bug that could make the frames disappear when
+  their anchor panel was hidden or not yet laid out. Anchors now fall back to
+  absolute screen coordinates with the correct parent, and self-heal when the
+  resulting frame would land off-screen.
+- Position correction: only the **raid** frame is anchored to the left of the
+  minimap panel (14-unit gap, vertically centered). The **party** frame keeps
+  its original screen position. `/mui groupframes minimap` now moves the raid
+  frame only; `/mui groupframes defaults|reset` restores both;
+  `/mui groupframes status` writes an anchor / visibility report to
+  `MonetUIDB.groupReport`. Saved positions matching the old 0.13.0 default are
+  migrated once; player-dragged positions are never overwritten.
+- Category bags: added a "Sort" button to the "free space" title row
+  (`C_Container.SortBags`, skipped in restricted windows), also available as
+  `/mui bags sort`. The title row now stays visible even when every slot is full,
+  and the watched currencies give way to the button.
+- Note: the 0.13.0 entry below about *both* party and raid frames sitting left of
+  the minimap is superseded by this release.
+
 ## 0.13.0 (2026-11-09)
 
 - Info bar currency block: a fully customizable watch list. Pick currencies by
@@ -17,6 +37,8 @@ Update the top section before tagging a new release.
 - Party and raid frames now sit to the left of the minimap panel, vertically
   centered with a 14-unit gap; group anchors accept named frames and fall back
   to absolute coordinates. `/mui groupframes minimap` snaps them back.
+  *(Superseded by 0.13.1: only the raid frame is anchored there, and the
+  fallback could make frames disappear.)*
 
 ## 0.12.0 (2026-11-08)
 
