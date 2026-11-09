@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](#-协议)
 ![Interface](https://img.shields.io/badge/Interface-16001-orange.svg)
-![Version](https://img.shields.io/badge/version-0.12.0-informational.svg)
+![Version](https://img.shields.io/badge/version-0.13.0-informational.svg)
 ![Lua](https://img.shields.io/badge/Lua-5.1-2C2D72.svg)
 ![Status](https://img.shields.io/badge/status-1.60_实机已验-brightgreen.svg)
 [![CurseForge](https://img.shields.io/badge/CurseForge-MonetUI-F16436.svg)](https://www.curseforge.com/wow/addons/monetui)
@@ -51,8 +51,11 @@
 
 ## 📦 安装
 
-**CurseForge（推荐）**：<https://www.curseforge.com/wow/addons/monetui> —— 首版 `0.12.0`，
-Forever `1.60.1` / Release，文件 ID `9506208`。用 CurseForge 客户端可直接订阅更新。
+**CurseForge（推荐）**：<https://www.curseforge.com/wow/addons/monetui> —— 当前 `0.13.0`，
+Forever `1.60.1` / Release；首版 `0.12.0` 的文件 ID 是 `9506208`。用 CurseForge 客户端可直接订阅更新。
+自动发版走 GitHub tag：纯数字 tag 触发 Actions 打包上传，见 `docs/HANDOFF.md` §8.69.4；
+新版本上传后通常要过 CF 审核才会在公开文件页出现，期间可从
+[GitHub Releases](https://github.com/easthillgu/MonetUI/releases) 直接下载同名 zip。
 
 手动安装：
 
@@ -133,7 +136,7 @@ MonetUI/
   人物页签 / 好友 / 社交窗 / 任务详情 / 技能书 / 传承三页按 1.60 实名涂到位。
 - 干净基线（关掉同机 QoL 套件 + 重载，且**在战斗中**）：`ERR / BLOCKED` 零条，`/mui blocks` 账本空。
 
-**v0.12.0 已知限制（都是取舍，不是坏掉的功能）**：
+**已知限制（都是取舍，不是坏掉的功能；自 0.12.0 起持续适用）**：
 
 - **暴雪面板没有"一击直开"，最多两击**（2026-11-07 更新）。一击直调暴雪 Lua 全局会把整段面板链记到插件名下
   （11-05 开服 P0 判例：`ToggleCharacter` → `TextStatusBar.lua:110` 机密值比较按 MonetUI 记账），

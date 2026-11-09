@@ -4788,6 +4788,7 @@ zone=贫瘠之地、envSource=override、**4/4 对比度过线**（1.702 / 1.552
 | flavor / 版本 | **Forever · 1.60.1 · Interface 16001**（下拉里确实有 `1.60.1`；TOC 的 `Interface` 保持 16001 不变） |
 | 首版 | Display name `0.12.0` · Release · Game Version `1.60.1` · 英文 Changelog |
 | 首版状态 | **已审核通过并公开发布**（2026-11-09 08:40 复核）。File ID `9506208` · 文件名 `MonetUI-0.12.0-forever.zip` · 30.6 MB · Type R · Forever / `1.60.1` · 上传 11-08 · 当时下载数 2 |
+| 当前版本 | **0.13.0**（2026-11-09 13:08 由 tag 自动上传，zip `MonetUI-0.13.0-forever.zip` / 32.1 MB；GitHub Release `0.13.0`）。CF 公开页当时仍以 `0.12.0` 为 Main File —— 新文件在审核队列，见 8.73 |
 | 公开链接 | 项目页 `https://www.curseforge.com/wow/addons/monetui`；文件页 `.../files/9506208`；搜索 `wow/search?class=addons&search=MonetUI` **能搜到**（证明 unlisted 已解除） |
 | 可见性 | General → **Unlisted project 已取消并保存**，刷新后「不可搜索」提示消失；项目主页 Description、Files、License 页均公开可读，首页有一张截图 `WoWScrnShot_110826_143340.jpg`。审核前他人不可见、文件不同步 CF 生态属正常 |
 | 邮件 | `legends@curseforge.com` 的 "Congratulations…" = **审核中**通知，不是拒绝；`notifications@github.com` 的 "Run failed: tests" 是 monetcolors 的 CI（见 8.69.6） |
@@ -4802,7 +4803,7 @@ zone=贫瘠之地、envSource=override、**4/4 对比度过线**（1.702 / 1.552
    **tools/、tests/、docs/、.github/、.workbuddy/、Assets-src/ 一律不进包**。
    `tools/api-audit-selftest/Broken.lua` 是故意的语法错误测试夹具，打进包会被审核扫成 Lua 错误。
 4. 本次发布包自查：`luac -p` 68 个 `.lua` 全过；TOC/XML 共 126 个引用缺失 0；TOC `Interface: 16001`、`Version: 0.12.0`。
-   > 2026-11-08 起 TOC **保持静态 `## Version`**（当前 `0.12.0`），没采用 `@project-version@`：
+   > 2026-11-08 起 TOC **保持静态 `## Version`**（当前 `0.13.0`），没采用 `@project-version@`：
    > `Modules/Tools/WhatsNew.lua` 会读它做「新版本一次性提示」，占位符会让本地实机打印字面量
    > `@project-version@` 并污染 `MonetUIDB.whatsNewSeen`。改由 workflow 的
    > 「TOC 版本必须等于 tag」护栏防漏改（见 8.69.4）。手工打包时把 TOC 版本号改成当次版本即可。
@@ -4823,7 +4824,7 @@ Files → **Add File**：
 5. Add File → 按钮变 `Uploading...` → 回 Files 列表，Status 依次 Uploading / Processing → **Under Review**。
 6. 审核通过即发布；新项目首次还要版主批准项目本身。
 
-### 8.69.4 自动化发布（2026-11-08 配置已落地，待首次 tag 实跑）
+### 8.69.4 自动化发布（2026-11-08 配置落地；2026-11-09 首次 tag 实跑成功，见 8.73）
 
 - **Token 在哪**：作者中心 → 右上头像 / Settings → **API Tokens** tab，直达
   `https://authors.curseforge.com/#/settings/api-tokens`（官方 Upload API 文档 2026-09-27 版给的链接）。
@@ -4849,7 +4850,7 @@ Files → **Add File**：
 |---|---|
 | `.pkgmeta` | `package-as: MonetUI`；`ignore:` 20 项（docs / tools / .github / Assets-src / node_modules / package*.json / 过程 md / 打包产物）；`manual-changelog: CHANGELOG.md` |
 | `.github/workflows/release.yml` | `BigWigsMods/packager@v2`；tag 触发 `v*` / `[0-9]*`；`permissions: contents: write`；checkout `fetch-depth: 0`；`args: -p 1791156 -g 1.60.1 -n "{package-name}-{project-version}-forever:{project-version}"` |
-| `MonetUI.toc` | 加 `## X-Curse-Project-ID: 1791156`；`## Version` 保持静态数字（当前 `0.12.0`） |
+| `MonetUI.toc` | 加 `## X-Curse-Project-ID: 1791156`；`## Version` 保持静态数字（当前 `0.13.0`） |
 | `CHANGELOG.md` | 手写英文 changelog，直接作为 CF 文件页的 Changelog；`.gitignore` 加了 `!CHANGELOG.md` 白名单 |
 
 **为什么不用 `@project-version@`**：`Modules/Tools/WhatsNew.lua` 用 `C_AddOns.GetAddOnMetadata(..., "Version")`
@@ -5094,6 +5095,46 @@ party `health=31, spacing=1, power=4` ⇒ 同为 194），那会明显改血条�
 `Utils/Mover.lua` 整体无头加载跑桩，覆盖面板存在（RIGHT→面板 LEFT / -14 / 0）、
 面板缺失（fallback CENTER 300/0）、面板建好后补重贴、玩家拖动位置优先四个路径，全部通过。
 实机需 `/reload` 后组队 / 进团目测。
+
+## 8.73 2026-11-09 0.13.0：自动发布链路首次实跑成功
+
+**触发**：用户一句「commit,push, curse发布」即明确授权，一次做完提交 / 推送 / 打 tag。
+随版发出的三块功能见 8.70（信息栏货币自定义监控）/ 8.71（背包标题行货币）/ 8.72（团队框贴小地图）。
+
+**版本三处对齐**：`MonetUI.toc ## Version: 0.13.0`、`CHANGELOG.md` 顶部英文 `0.13.0` 段、
+纯数字 tag `0.13.0`。提交 `3e82f81`（13 文件，+1239 / −69，新增 `Modules/InfoBar/Currency.lua`），
+push `main` 后才 `git tag 0.13.0 && git push origin 0.13.0`（顺序反了会把 tag 打在旧提交上）。
+
+**发版前闸门**：全仓 `luac -p`、`api-audit`（0 HARD）、`audit-locals`（63 文件）、
+`audit-taint`（0 BLOCKER/HIGH/SOFT）、`scheduler-callback-probe`、`external-ledger-probe`、
+`check-frame-list`、`env-source-check --json`（`ok:true`）、`map-env-coverage` 全过；
+`deploy-retail.ps1` 126 文件 + `sync-check` in sync（部署目录 TOC 已是 0.13.0，Currency.lua 在位）。
+
+⚠ **packager 本地 dry-run 必须在 commit 之后跑**：它按 git 归档取文件，`Currency.lua` 还没 `git add`
+时演练产物只有 **127** 文件、缺新模块，看着却同样打印 `Packaging complete.`；提交后重跑才是
+**128** 文件（首版 126 + CHANGELOG + Currency.lua），`find .release -type d -name tools|docs|.github|framexml-source`
+为空，包内 TOC `Interface 16001 / Version 0.13.0 / X-Curse-Project-ID 1791156`。
+以后加新文件发版，务必用「产物文件数 + 新文件路径」验收，别只看脚本退出码。
+
+**Actions 首次实跑**（此前 `total_count = 0`，这是第一条 run）：run `42565511511`，4 步 21 秒全绿 ——
+Guard（`tag 0.13.0` == `TOC 0.13.0`）→ packager →
+`Uploading MonetUI-0.13.0-forever.zip (1.60.1 release) to https://wow.curseforge.com/projects/1791156`
+→ `Success!` → `Packaging complete.`。GitHub Release `0.13.0` 非 draft，2 个 asset
+（zip `32,124,222` B + `release.json`），Release body 就是 `CHANGELOG.md` 全文。
+日志里 `CurseForge ID: 1791156 [token set]` / `CF_API_TOKEN: ***` 证明早先建的 Secret
+`CF_API_KEY` 直接生效，**不用改名、没有第二种 GitHub 令牌**；`-g 1.60.1` 自动解析成 Forever。
+
+**上传后公开状态（要区分「上传成功」与「已公开」）**：13:15 复核 CF `/files` 与 `/files/all`
+（带 query 破缓存），Main File / Recent Files 仍是 `0.12.0` / File ID `9506208` / Last Update Nov 8，
+`0.13.0` 未出现在公开列表 ⇒ 文件在 **CF 审核队列**（首版 11-08 上传、11-09 08:40 才公开，约 18 小时）。
+上传 API 已返回 `Success!`，不是链路失败，别为此重打 tag 或重复上传。
+**Upload API Token 只有上传权限**：`GET /api/projects/1791156/files` 返回
+`403 {"errorCode":5100,"errorMessage":"You do not have permission to access this method."}`，
+别拿它查文件列表；要看状态去作者中心 Files 或等公开页刷新。等待期间立即可用的直链：
+<https://github.com/easthillgu/MonetUI/releases/tag/0.13.0>。
+
+**下次发版**：照 8.69.7 走，只有三处数字要对齐；本项目已验证「纯数字 tag → Actions → GH Release + CF 上传」
+整条链路，不必再手工打包 / Add File。
 
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
