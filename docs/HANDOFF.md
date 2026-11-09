@@ -4963,6 +4963,138 @@ Lua 5.4 单测失败**（7 个 annotations），不是 CurseForge 审核拒绝�
 6. 盯 Actions 日志 / Files 状态（首版已 Approved，后续版本看新条目）；
 7. 游戏内 `/reload` 抽验 `/mui colors` 与 `MonetUIDB.colorReport`。
 
+## 8.70 2026-11-09 信息栏货币块：自定义监控（token 来自角色面板「货币」子标签）
+
+**需求/判据**：玩家要能自己挑监控哪些代币，而不是只看客户端 `isShowInBackpack` 那几项；
+代币名单就在角色面板的货币子标签里。**那份名单不是另造的** ——
+`framexml-source/.../Blizzard_TokenUI/Camelot/Blizzard_TokenUI.lua:382 TokenFrame:Update`
+逐行读的就是 `C_CurrencyInfo.GetCurrencyListSize/GetCurrencyListInfo`，
+所以本模块读的是同一张表（含 `currencyID` / `isHeader` / `isShowInBackpack` / `quantity` / `maxQuantity` / `iconFileID`）。
+
+**落地**：新增 `Modules/InfoBar/Currency.lua`（`InfoBar.xml` 排在 `Blocks.lua` 之后、`XP.lua` 之前），
+`M.Currency` 是唯一数据层；`Blocks.lua` 的货币格只消费 `Snapshot()` / `BarText()` / `FormatQuantity()`。
+
+- 三档来源 `currencyMode`：`backpack`（默认，旧行为）/ `custom`（`currencyWatch` 里的 currencyID 清单）/ `all`（货币页全部已发现项）。
+  `currencyMax`（1–8，默认 3）是条上显示上限，多出的折成 `+N`；`currencyShowZero` 管 0 值；提示框始终列全（最多 30 行）。
+- 按 ID 兜底：折叠分类 / LoD 未加载时货币页那张表会缺项，`GetCurrencyInfo(id)` 单独补问。
+  ⚠ **暴雪自己在 `Blizzard_Professions.lua:1490` 都要回填 `currencyInfo.currencyID = currencyTypesID`**
+  —— 按 ID 查回来的表不保证带这个字段，所以 `EntryFromInfo` 必须收一个带 `id` 的 base。
+  背包档另有 `GetBackpackCurrencyInfo(1..8)` 兜底（对应 `BackpackTokenFrameMixin:Update`）。
+- 机密值口径同 AGENTS：布尔全走 `Secrets.Bool`（`isHeader` 默认 false —— 机密期把整张表当表头会让格子空白），
+  数字走 `Number`，名字 `type()` 之后还要过 `CanRead` 才进 format/concat；`quantity` 读不到时用内存里的 `valueCache` 顶一拍。
+- 配置面板只放三档静态设置（模式 / 上限 / 0 值）+「编辑监控清单」按钮：**清单是动态的，配置面板只在首次打开时构建一次**，
+  逐项勾选放在货币格的**右键面板**（自建 UIParent 子框、DIALOG 档、12 行滚轮翻页，绝不碰暴雪框）。
+- 普通 Button 默认只注册 `LeftButtonUp`（`Bags.lua:457` 同样补过右键）⇒ `RegisterBlock` 新增
+  `rightClick = true` 规格，`BuildBlockFrame` 只对声明的格子 `RegisterForClicks("LeftButtonUp","RightButtonUp")`。
+- 玩家在角色面板改「背包显示」**没有 WoW 事件**（暴雪只发 `EventRegistry` 的
+  `TokenFrame.OnTokenWatchChanged`，按 AGENTS 不挂它的钩子）⇒ 货币格带 2 秒节流的 `onUpdate` 慢刷；
+  `SetText`/`UpdateShown` 都有差异写入，值没变不重排。
+
+**入口**：右键货币格 / 配置面板按钮 / `/mui infobar currency …`
+（`list|status`、`add <ID|名称> ...`、`del <ID|名称> ...`、`clear`、`mode backpack|custom|all`、
+`max <1-8>`、`zero on|off`、`panel`）。`list` 的全量清单落 `MonetUIDB.currencyReport`（聊天框装不下）。
+`add`/`del` 支持一次多个目标（空白或中英文逗号分隔）；整串先试一次，命中就当含空格的英文名，没命中才拆开逐个解析。
+
+**2026-11-09 实机数据回带**：玩家报角色面板货币页两项 `荣誉点数 1792` / `商人青睐 3402`。
+默认 `backpack` 档只会显示 `isShowInBackpack` 标记的那一种 ⇒ 第二项上不了条，这正是"自定义监控"要解决的事。
+所以 `EnsureCustom()` 的种子改成 **当前生效项 ∪ 货币页里此刻有余额的其它项（上限 8）**：
+`mode custom` 一次带齐两项，条上直接 `荣誉点数 1792 · 商人青睐 3402`，不用猜 ID 去 add；
+`mode all` 同样两项俱现。空余额项不进种子（避免正式服几十种货币一进自定义就塞满）。
+切到 `custom` 仍先继承当前显示项，不会一切换就整格空掉。
+
+**验证（2026-11-09）**：`luac -p`、`api-audit`（0 HARD / 0 unknown event）、`audit-locals`（63 文件全过）、
+`audit-taint`（0 BLOCKER/HIGH/SOFT）、`scheduler-callback-probe`、`external-ledger-probe`、
+`check-frame-list`、`wuxian check --no-live`（新文件已被加载，无 not-loaded；3 条 error 是 `Utils/Scheduler.lua` 里
+既有 `debug` 守卫）、两组无头 Lua 桩（数据层命令全路径 + 选择面板建框/勾选/切档）全过。
+**实机未验**：本机当前角色「有梗有特色-打靶」的 `!WuxianWorkshop` / `WoWBridge` 在 `AddOns.txt` 里是
+`disabled`，`wuxian status` 恒 `link offline`、`run` 409 link_down ⇒ 这轮拿不到游戏内真值。
+要实机复核就把这两个插件在该角色的插件列表里启用并 `/reload`，然后
+`/mui infobar currency list`（读账本比读聊天框稳）、右键货币格勾选、看 `logs --kinds ERR,BLOCKED` 是否零新增。
+
+## 8.71 2026-11-09 背包「剩余空间」标题行显示货币
+
+**需求/判据**：把货币显示加到背包，就放在「剩余空间」那一扇的标题行，不另起一行、不加新窗。
+数据源**直接复用 §8.70 的 `M.Currency`**（`Snapshot()` 的模式 / 自定义清单 / 上限 / 0 值开关全部共用）：
+玩家在信息栏勾了什么，背包标题行就显示什么，不造第二份口径，也不需要第二份 currencyID 名单。
+
+**加载顺序坑**：`MonetUI.toc` 里 `Bags.xml`(38) 排在 `InfoBar.xml`(47) **之前** ⇒ `Bags.lua` 顶层
+拿不到 `ns.InfoBar`。所以数据层只能在**运行期**取（`CurrencyData()`），取不到就静默不显示，
+绝不让背包建窗失败。进游戏后所有文件都已加载完，运行期取必然有值。
+
+**落地**（全在 `Modules/Bags/Bags.lua` + `Core.lua` 默认值 / 帮助行）：
+
+- `EnsureWindow` 给 free 窗（`BaseKey(key) == FREE_CAT.key`）建一枚 `win.currencyText`
+  （`Widget:Font(..., 12, "pixel", "bright", "RIGHT")`，`SetWordWrap(false)`），
+  锚 `TOPRIGHT` 偏移 `isBank and -132 or -8`。**132 = 银行那扇标题行右端两颗钮**
+  （一键存入 / 栏位管理，`EnsureBankTitleTools` 在 Rebuild 末尾才懒建），
+  所以按模式留白，不依赖按钮是否已存在。
+- 可用宽度 = 窗宽 − 右端保留 − 18(标题左内边距) − 标题实测宽 − 12(间隔)。
+  `GetStringWidth` 在受限窗口可能返回机密值 ⇒ `pcall` + `Secrets.Number`
+  （`UnitFrames/Auras.lua:434` 同款），量不到就当"放得下"，宁可显示全也不清空。
+  `FittedCurrencyText` 从最多 8 项往下减，多出的折 `+N`；连 1 项都放不下才整段隐藏。
+- 默认 `columns=10 / iconSize=34 / gap=4` ⇒ 窗宽约 386px，背包档可用约 300px，
+  实机两项 `荣誉点数 1792 · 商人青睐 3402` 完整放得下；银行档可用约 128px ⇒ 自动收成
+  `荣誉点数 1792 · +1`，不会压到工具钮上。
+- 刷新三路：`FillFreeWindow` 在 `SetSize` 之后调（尺寸定了宽度才对）、
+  `CURRENCY_DISPLAY_UPDATE` / `CHAT_MSG_CURRENCY` 只重画这一行字（**不**为几个数字全量 Rebuild）、
+  已有 0.5s 轮询顺带刷一次兜住"改背包显示标记没有 WoW 事件"。
+  `win.currencyFull` / `currencyAvail` 做差异写入：文本与宽度没变时零 `SetText`。
+- 开关 `/mui bags currency on|off`（不带参数查状态），默认 `DEFAULTS.bags.currencyTitle = true`；
+  关掉只收文字、不动布局。配置面板只有模块总开关，背包细项历来走 `/mui bags`，沿用惯例。
+
+**已知边界**：背包模式一格空位都没有时 `FillFreeWindow` 会 `SetShown(false)` 收掉整扇
+（银行模式有 `keepTitle` 常显标题行）⇒ 背包全满时这行货币也跟着看不到。这是既有布局行为，
+没为货币改它；真要常显得给背包档也加 `keepTitle`，会多留一扇空窗，等玩家定。
+
+**验证（2026-11-09）**：`luac -p`、`api-audit`(0 HARD / 0 unknown event)、`audit-locals`(63 文件)、
+`audit-taint`(0)、`scheduler-callback-probe` 全过；另从 `Bags.lua` **抽取新增段落原文**跑无头桩，
+覆盖 386px 双项完整显示、重复刷新零重排、120px 窄窗隐藏、银行档避让并折 `+1`、开关 off、
+数据层缺失六个路径，全部通过。实机仍需按 B 打开分类背包目测（`wuxian` link 仍 offline）。
+
+## 8.72 2026-11-09 小队 / 团队框默认贴小地图左侧
+
+**需求/判据**：团队框架放在小地图左侧、同一高度、间隔 14。落地口径 =
+`point="RIGHT" / relativeTo="MonetUIMinimapPanel" / relativePoint="LEFT" / x=-14 / y=0`
+—— 框的**右边缘**距小地图面板**左边缘** 14 个 UI 单位，垂直中心对齐（同一水平高度）。
+小队与团队共用同一组锚，切小队/团队时位置不跳。
+
+**为什么锚面板而不是 `Minimap`**：小地图画布是 256×256，可见带只有中间 190 高
+（上下各裁 `MASK_CROP=33`），`Minimap` 的 TOP 比人眼看到的边框高 35。
+`MonetUIMinimapPanel`（260×194，`Minimap.lua:EnsurePanel`）才是那圈可见边框，
+任务追踪早就按它对齐（`QuestTracker.lua:73`）。
+
+**Mover 的两处通用扩展**（`Utils/Mover.lua`）：
+
+- `ParentOf(key)` 原本只认"已登记的 Mover key / UIParent"。新增第三条：key 指向
+  **具名全局 Frame**（`type(_G[key])=="table" and type(_G[key].SetPoint)=="function"`）就认它作父框。
+  别的模块建出来的框不用先登记进 Mover 也能当锚，拖动后 `Mover:Store` 也会以它为参照存相对位置。
+- `ApplyOne` 的父框解析失败分支新增 `default.fallback`：小地图模块关掉 / 面板还没建时，
+  按一组绝对坐标落位（沿用旧默认的 CENTER ±x），不再把框甩到屏幕边外
+  （旧逻辑只把 `relativePoint` 改成 `point`，配合 x=-14 会跑到屏幕右侧外）。
+
+**时序**：Minimap 面板可能比 GroupFrames 晚建。`EnsurePanel` 在**首次**创建并摆好面板后
+补一次 `Mover:ApplyGroup("groups")`，两个方向都覆盖：Groups 先注册 → 面板建好补重贴；
+Minimap 先建 → Groups 注册时 `Mover:Register` 自带 `Apply(key)` 直接命中。重贴读 `store()`，
+**不会抹掉玩家自己拖过的位置**。
+
+**默认值与命令**：`Core.lua` 的 `DEFAULTS.groupFrames.party/raid` 换成上面的锚，各带一份
+`fallback`。本机存档里没有 `groupFrames` 段（稀疏落盘把等于默认值的键删了），所以改默认值
+直接生效、无需迁移。别的用户若拖过，存档里的位置优先（项目惯例：不静默改写玩家存过的位置），
+跑 `/mui groupframes minimap` 显式贴回；帮助行也加了这条。
+
+**边界（等作者定）**：这轮只改**位置**，没改框架尺寸 ⇒ 当前团队框高
+`RaidHeight = 5×(2+24+4)+4×2 = 158`、小队框高 133，而小地图面板高 194。
+"高度相等"按"同一水平高度（垂直中心对齐）"实现；若作者要的是"两块一样高"，
+得把 5 行重排到 194（例：raid `health=32, spacing=1, power=3` ⇒ 5×38+4=194，
+party `health=31, spacing=1, power=4` ⇒ 同为 194），那会明显改血条厚度，故没擅自做。
+14 按 Mover 的 UI 单位解释（配置里的坐标单位），不是物理像素。
+
+**验证（2026-11-09）**：`luac -p`、`api-audit`(0 HARD)、`audit-locals`(63 文件)、
+`audit-taint`(0)、`scheduler-callback-probe`、`check-frame-list` 全过；
+`Utils/Mover.lua` 整体无头加载跑桩，覆盖面板存在（RIGHT→面板 LEFT / -14 / 0）、
+面板缺失（fallback CENTER 300/0）、面板建好后补重贴、玩家拖动位置优先四个路径，全部通过。
+实机需 `/reload` 后组队 / 进团目测。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 

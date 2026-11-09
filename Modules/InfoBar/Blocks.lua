@@ -180,79 +180,82 @@ M:RegisterBlock({
     onClick  = BlockClick("character"),   -- 贴格小菜单只留「角色」一行，第二击开角色界面（直调 ToggleCharacter 是 P0 判例）
 })
 
--- Retail's "watched" flag has no equivalent here; `isShowInBackpack` (the currency shown beside the gold in the bag bar) is the closest and is used instead.
-local function WatchedCurrencies()
-    local api = _G.C_CurrencyInfo
-    if not api then return nil end
-    if type(api.GetCurrencyListSize) ~= "function" then return nil end
-    if type(api.GetCurrencyListInfo) ~= "function" then return nil end
-
-    local ok, size = pcall(api.GetCurrencyListSize)
-    if not ok then return nil end
-    size = Secrets.Number(size)
-    if not size or size < 1 then return nil end
-
-    local list = {}
-    for i = 1, size do
-        local okInfo, info = pcall(api.GetCurrencyListInfo, i)
-        -- 字段是机密布尔时 `not info.isHeader` / `info.isShowInBackpack` 一次真值测试就被拦
-        -- （ADDON_ACTION_BLOCKED UNKNOWN()）—— 走唯一的漏斗 Secrets.Bool。
-        if okInfo and type(info) == "table"
-            and not Secrets.Bool(info.isHeader, false)
-            and Secrets.Bool(info.isShowInBackpack, false) then
-            local name = info.name
-            local quantity = Secrets.Number(info.quantity)
-            -- name 之后要进 string.format / table.concat：type() 判不出机密串，必须再过 IsSecret。
-            if type(name) == "string" and not Secrets.IsSecret(name) and quantity then
-                list[#list + 1] = {
-                    name     = name,
-                    quantity = quantity,
-                    maximum  = Secrets.Number(info.maxQuantity),
-                }
-            end
-        end
-    end
-    return list
-end
-
+-- 货币块的取值全在 Currency.lua（角色面板「货币」子标签那张表 + 自定义 ID 清单）。
+-- 旧实现只读 isShowInBackpack、条上硬编码最多 2 项，玩家没法自己挑要看哪些代币；
+-- 现在三种来源共用一次 Snapshot()：条身读前 N 项，提示框读全量，右键弹勾选面板。
 local function CurrencyUpdate(block)
-    local list = WatchedCurrencies()
-    if not list or #list == 0 then M:SetText(block, "") return end
-
-    local parts = {}
-    for i = 1, math.min(#list, 2) do
-        parts[#parts + 1] = string.format("%s %d", list[i].name, list[i].quantity)
-    end
-    M:SetText(block, table.concat(parts, " · "))
+    local currency = M.Currency
+    if not currency then M:SetText(block, "") return end
+    local entries = currency:Snapshot()
+    if #entries == 0 then M:SetText(block, "") return end
+    M:SetText(block, currency:BarText(entries))
 end
 
 local function CurrencyTooltip()
     local tip = Tip()
     if not tip then return end
+    local currency = M.Currency
+    if not currency then return end
 
-    local list = WatchedCurrencies()
-    if not list or #list == 0 then
-        pcall(tip.AddLine, tip, "没有标记为背包显示的货币。", 0.8, 0.8, 0.8)
-        return
+    local entries, missing, mode = currency:Snapshot()
+    pcall(tip.AddLine, tip, "货币监控 · " .. currency:ModeLabel(mode), 0.6, 0.8, 1)
+    if #entries == 0 then
+        pcall(tip.AddLine, tip, "当前没有可显示的货币。", 0.8, 0.8, 0.8)
+    else
+        local shown = math.min(#entries, 30)
+        for i = 1, shown do
+            local entry = entries[i]
+            local value = currency:FormatQuantity(entry.quantity)
+            if entry.maxQuantity and entry.maxQuantity > 0 then
+                value = value .. " / " .. currency:FormatQuantity(entry.maxQuantity)
+            end
+            pcall(tip.AddDoubleLine, tip, entry.name, value, 1, 1, 1, 1, 1, 1)
+        end
+        if #entries > shown then
+            pcall(tip.AddLine, tip, string.format("……另有 %d 项", #entries - shown), 0.8, 0.8, 0.8)
+        end
     end
+    if missing > 0 then
+        pcall(tip.AddLine, tip, string.format("%d 项监控 ID 当前读不到", missing), 0.9, 0.6, 0.4)
+    end
+    pcall(tip.AddLine, tip, "右键：勾选要监控的货币", 0.6, 0.8, 1)
+    pcall(tip.AddLine, tip, "/mui infobar currency list 看 ID", 0.6, 0.8, 1)
+end
 
-    pcall(tip.AddLine, tip, "货币", 0.6, 0.8, 1)
-    for i = 1, #list do
-        local entry = list[i]
-        local value = string.format("%d / %s", entry.quantity,
-            entry.maximum and string.format("%d", entry.maximum) or "-")
-        pcall(tip.AddDoubleLine, tip, entry.name, value, 1, 1, 1, 1, 1, 1)
-    end
+-- 玩家在角色面板里改「背包显示」没有对应的 WoW 事件（暴雪只发 EventRegistry 回调，
+-- 不挂它的钩子：AGENTS 污染模型）。2 秒慢刷一次就够 —— 全是轻量 C_* 读取，
+-- SetText / UpdateShown 都自带差异写入，值没变一拍就退回。
+local function CurrencyOnUpdate(block, elapsed)
+    block.tick = (block.tick or 0) + elapsed
+    if block.tick < 2 then return end
+    block.tick = 0
+    M:RefreshBlock("currency")
+end
+
+--- 左键照旧开自己的背包窗，右键归货币选择面板。用可调用表承载 hint：
+--- InfoBar 的 OnEnter 只在 `type(onClick)=="table" and onClick.hint` 时补点击提示行。
+local function CurrencyClick(openBags)
+    return setmetatable({ hint = "左键打开背包 · 右键自定义监控" }, {
+        __call = function(_, block, button)
+            if button == "RightButton" then
+                if M.Currency then pcall(M.Currency.TogglePanel, M.Currency) end
+            elseif button == "LeftButton" then
+                pcall(openBags, block, button)
+            end
+        end,
+    })
 end
 
 M:RegisterBlock({
-    key      = "currency",
-    label    = "货币",
-    position = "LEFT",
-    events   = { "CURRENCY_DISPLAY_UPDATE", "PLAYER_ENTERING_WORLD" },
-    update   = CurrencyUpdate,
-    tooltip  = CurrencyTooltip,
-    onClick  = BlockClick("bags"),   -- 代币/货币的实物就在背包里，钱数也显示在那扇窗底部
+    key        = "currency",
+    label      = "货币",
+    position   = "LEFT",
+    rightClick = true,   -- 右键开货币勾选面板（BuildBlockFrame 会补注册 RightButtonUp）
+    events     = { "CURRENCY_DISPLAY_UPDATE", "CHAT_MSG_CURRENCY", "PLAYER_ENTERING_WORLD" },
+    update     = CurrencyUpdate,
+    tooltip    = CurrencyTooltip,
+    onUpdate   = CurrencyOnUpdate,
+    onClick    = CurrencyClick(BlockClick("bags")),   -- 代币实物在背包里，钱数也在那扇窗底部
 })
 
 local function Latency()

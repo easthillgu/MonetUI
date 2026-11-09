@@ -59,6 +59,9 @@ local DEFAULTS = {
         windowsPerRow  = 1,
         showReagentBag = true,
         showBank       = true,
+        -- 「剩余空间」标题行右侧显示货币（复用 InfoBar 的自定义监控清单）。
+        -- `/mui bags currency on|off` 可关；关掉只收文字，不动布局。
+        currencyTitle  = true,
         -- 银行：**接管暴雪银行框**（alpha 0 + 关鼠标），只留我们的窗。2026-11-06 作者拍板默认 on ——
         -- 依据 HANDOFF §8.57：银行空格已是真 ItemButton（绑 bag/slot），三条拖放（背→银 / 银→背 /
         -- 背→背）逐格实测通过。代价写清：买栏位 / 换银行包要走 `/mui bags bank off`（或面板里的
@@ -120,18 +123,26 @@ local DEFAULTS = {
         hideBlizzard = true,
         showIncomingHeals = true,
         showAbsorbs = true,
+        -- 位置口径（2026-11-09 作者定）：小队 / 团队都贴**小地图可见面板左侧**，
+        -- 右边缘距面板左边缘 14，垂直中心对齐（同一高度）。锚的是 `MonetUIMinimapPanel`
+        -- 而不是 `Minimap` 画布 —— 画布 256×256 上下各有 33 的透明带，锚它会高出一截。
+        -- Mover 的 `ParentOf` 支持具名全局框；面板还没建 / 小地图模块关掉时按 fallback 落回屏幕。
+        -- 拖过的位置存在存档里、优先于这组默认值（项目惯例：不改玩家存过的位置），
+        -- 想贴回去用 `/mui groupframes minimap`。
         party = {
             enabled = true,
             width = 110, health = 18, power = 4, spacing = 2,
             showPlayer = true,
             healthText = "none",
-            point = "CENTER", relativeTo = "UIParent", relativePoint = "CENTER", x = -330, y = 40,
+            point = "RIGHT", relativeTo = "MonetUIMinimapPanel", relativePoint = "LEFT", x = -14, y = 0,
+            fallback = { point = "CENTER", relativePoint = "CENTER", x = -330, y = 40 },
         },
         raid = {
             enabled = true,
             width = 72, health = 24, power = 3, spacing = 2, groupGap = 8,
             healthText = "none",
-            point = "CENTER", relativeTo = "UIParent", relativePoint = "CENTER", x = 300, y = 0,
+            point = "RIGHT", relativeTo = "MonetUIMinimapPanel", relativePoint = "LEFT", x = -14, y = 0,
+            fallback = { point = "CENTER", relativePoint = "CENTER", x = 300, y = 0 },
         },
     },
     -- 首领框架（Modules/UnitFrames/BossFrames.lua）：安全按钮 + visibility 驱动，
@@ -249,6 +260,13 @@ local DEFAULTS = {
         combatPulse = true,
         xp          = true,
         xpFaction   = true,
+        -- 货币块（Modules/InfoBar/Currency.lua）：backpack=沿用背包显示标记 / custom=自己勾的
+        -- currencyID 清单 / all=货币页全部已发现项；currencyMax 是条上最多显示几项，
+        -- 多出来的折成 "+N"，提示框始终列全；currencyShowZero 管 0 值要不要占一格。
+        currencyMode     = "backpack",
+        currencyWatch    = {},
+        currencyMax      = 3,
+        currencyShowZero = true,
         blocks = {
             gold       = true,
             durability = true,
@@ -1165,6 +1183,9 @@ local function PrintHelp()
     ns:Print("  |cffffd100/mui <模块> on|off|r  单独开关模块")
     ns:Print("  |cffffd100/mui skins diagnose|r 对象名可达性账本（全仓一本账：skins / nameplates / infobar / minimap）")
     ns:Print("  |cffffd100/mui minimap menu|r 微菜单现场判据：行建不建得出 / 面板受不受保护 / 此刻右键落点（开服日「右键没反应」）")
+    ns:Print("  |cffffd100/mui infobar currency|r 货币自定义监控：list 看 ID / add|del <ID> / mode / max / zero / panel（右键货币格也能勾）")
+    ns:Print("  |cffffd100/mui bags currency on|off|r 「剩余空间」标题行显示哪些货币（同上清单；默认 on）")
+    ns:Print("  |cffffd100/mui groupframes minimap|r 小队 / 团队框贴回小地图左侧（间隔 14、垂直中心对齐；拖过之后用）")
     ns:Print("  |cffffd100/mui skins diagnose bad|r 只看\"命中但不是框体\"那一类（全量几百行，聊天框装不下）")
     ns:Print("  |cffffd100/mui skins layers <窗口名> [片段]|r 这个窗口的底有几层、每层谁能碰（region / 字段可剥 / 要点名；全量存 MonetUIDB.layerReport）")
     ns:Print("  |cffffd100/mui skins templates [片段]|r 模板库账本：多少个模板 / 映射到 skinAs / Camelot 覆盖；带片段查\"这个控件被认成什么\"")

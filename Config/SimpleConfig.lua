@@ -1601,6 +1601,46 @@ function SimpleConfig:Build()
                 ApplyBar()
             end)
 
+        -- 货币自定义监控（Modules/InfoBar/Currency.lua）：这里只放"模式 / 上限 / 0 值"
+        -- 三档静态设置。逐项勾选的清单会随角色面板「货币」子标签变化，配置面板只在
+        -- 第一次打开时构建一次，不适合放动态列表 —— 那份放在货币格的右键面板里。
+        local currency = infobar.Currency
+        if currency then
+            MakeDropdown(content, row(28), "货币来源", {
+                { value = "backpack", text = "跟随背包显示" },
+                { value = "custom",   text = "自定义监控清单" },
+                { value = "all",      text = "全部已发现货币" },
+            },
+                function() return currency:Mode() end,
+                function(value) currency:SetMode(value) end)
+
+            local maxItems = {}
+            for i = 1, 8 do maxItems[i] = { value = i, text = i .. " 项" } end
+            MakeDropdown(content, row(28), "条上最多", maxItems,
+                function() return currency:MaxOnBar() end,
+                function(value) currency:SetMax(value) end)
+
+            MakeDropdown(content, row(28), "0 值货币", {
+                { value = true,  text = "显示" },
+                { value = false, text = "隐藏" },
+            },
+                function() return currency:ShowZero() end,
+                function(value) currency:SetShowZero(value) end)
+
+            local picker = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+            picker:SetSize(150, 22)
+            picker:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(28) - 2)
+            picker:SetText("编辑监控清单")
+            Widget:ButtonMaterial(picker, { alpha = 0, weaveAlpha = 0.25 })
+            picker:SetScript("OnClick", function() currency:TogglePanel() end)
+
+            local currencyHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
+            currencyHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(48))
+            currencyHint:SetWidth(328)
+            currencyHint:SetJustifyH("LEFT")
+            currencyHint:SetText("清单来自角色面板 → 货币 子标签；折叠的分类请先在面板里展开。右键信息栏的货币格也能打开勾选面板，/mui infobar currency list 查 ID。")
+        end
+
         -- One switch per block, in registration order.
         for _, block in ipairs(infobar.blocks) do
             MakeCheckbox(content, block.label, row(26),

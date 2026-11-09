@@ -373,9 +373,10 @@ local function UpdateShown(block)
 end
 
 --- Record a block's spec; frames are built later in `M:Build` because blocks register at file load while the bar only exists at login.
--- @param spec { key, label, position="LEFT"|"RIGHT"|"CENTER", always?, update, tooltip, onClick, onUpdate }
+-- @param spec { key, label, position="LEFT"|"RIGHT"|"CENTER", always?, rightClick?, update, tooltip, onClick, onUpdate }
 --   `position="CENTER"` = 整组居中（`Relayout` 收集后摆，现役只有系统块）；`always = true` =
---   不吃 mouseover 悬停淡出、**常显**（alpha 判据只在 `ApplyColors` 那一处）。
+--   不吃 mouseover 悬停淡出、**常显**（alpha 判据只在 `ApplyColors` 那一处）；
+--   `rightClick = true` = 这格要收右键（普通 Button 默认只注册 LeftButtonUp，见 BuildBlockFrame）。
 --   `onClick` 只有两条合法路：打开**我们自己的**面板（`Blocks.lua` 的 `ToggleStatsPanel` 那一类），
 --   或走 `BlockClick(动作名)`（单源在 `MicroMenu.lua` 的 `M.actions`；要开暴雪面板的只能两击代点）。
 --   暴雪面板**没有**合法的直开入口，别再往这里加（见 `BuildBlockFrame` 上方的两段判例）。
@@ -512,6 +513,11 @@ local function BuildBlockFrame(block)
     end)
 
     if block.onClick then
+        -- 普通 Button 默认只注册 LeftButtonUp（Bags.lua:457 要右键就得自己补一遍）。
+        -- 只给显式声明的格子开右键，别让其余格子莫名开始吃掉右键点击。
+        if block.rightClick and frame.RegisterForClicks then
+            pcall(frame.RegisterForClicks, frame, "LeftButtonUp", "RightButtonUp")
+        end
         frame:SetScript("OnClick", function(_, mouseButton)
             pcall(block.onClick, block, mouseButton)
         end)
@@ -752,6 +758,7 @@ local PROBED = {
     "C_AddOns.GetNumAddOns", "C_AddOns.GetAddOnName",
     "GetAddOnMemoryUsage", "UpdateAddOnMemoryUsage",
     "C_CurrencyInfo.GetCurrencyListSize", "C_CurrencyInfo.GetCurrencyListInfo",
+    "C_CurrencyInfo.GetCurrencyInfo", "C_CurrencyInfo.GetBackpackCurrencyInfo",
     "C_SpecializationInfo.GetSpecialization", "C_SpecializationInfo.GetSpecializationInfo",
     "GetInventoryItemDurability",
     "C_FriendList.GetNumFriends", "C_FriendList.GetNumOnlineFriends",
@@ -795,11 +802,26 @@ function M:Diagnose()
 end
 
 function M:HandleCommand(rest)
-    local sub = string.lower(rest or "")
+    local line = rest or ""
+    local cmd, tail = line:match("^(%S+)%s*(.-)%s*$")
+    local sub = string.lower(cmd or "")
+
     if sub == "diagnose" or sub == "diag" or sub == "probe" then
         self:Diagnose()
         return true
     end
+
+    -- 货币自定义监控的子命令全部住在 Currency.lua（数据层 + 面板 + 命令一体），
+    -- 这里只做转发，不在核心条里再抄一份参数解析。
+    if sub == "currency" or sub == "curr" then
+        if type(self.Currency) == "table" and type(self.Currency.HandleCommand) == "function" then
+            pcall(self.Currency.HandleCommand, self.Currency, tail or "")
+        else
+            ns:Print("货币监控模块未加载（检查 InfoBar.xml 是否挂了 Currency.lua）。")
+        end
+        return true
+    end
+
     return false
 end
 

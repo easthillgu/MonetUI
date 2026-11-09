@@ -700,6 +700,18 @@ local function EnsureWindow(key)
     Widget:Corners(win)
     Widget:Rule(win, win.title)
 
+    -- 「剩余空间」标题行右端的货币文字。银行那扇的右端挂着"一键存入 / 栏位管理"两颗钮
+    -- （EnsureBankTitleTools 在 Rebuild 末尾才懒建），所以这里先按模式留出 132px，
+    -- 不依赖按钮是否已经存在。背包那扇只留 8px 内边距。
+    if BaseKey(key) == FREE_CAT.key then
+        local currency = Widget:Font(win, 12, "pixel", "bright", "RIGHT")
+        currency:SetPoint("TOPRIGHT", win, "TOPRIGHT", isBank and -132 or -8, -5)
+        currency:SetJustifyH("RIGHT")
+        currency:SetWordWrap(false)
+        currency:Hide()
+        win.currencyText = currency
+    end
+
     -- 总控窗的 ✕：模板自带 UIPanelCloseButton 外观，OnClick 覆盖成"收整套分类背包"
     -- （等同再按一次 B）。默认隐藏 —— DesignateMaster 只让当前总控窗亮它，屏幕上一个 ✕
     -- 都不多，也不会因为某扇窗临时有货就自己冒出来。
@@ -729,6 +741,94 @@ end
 -- TITLE_H covers the label + brush underline; PAD keeps the first item row clear of the stroke.
 local TITLE_H = 30
 local PAD     = 5
+
+-- ---- 「剩余空间」标题行的货币文字 -------------------------------------------
+-- 数据源就是信息栏那套自定义监控（Modules/InfoBar/Currency.lua）：清单、模式、上限、
+-- 0 值开关全部共用，玩家在信息栏勾了什么，背包标题行就显示什么，不另造第二份口径。
+-- Bags.xml 比 InfoBar.xml **先**加载，所以 `ns.InfoBar.Currency` 只能在运行期取（进游戏后
+-- 所有文件都已加载完）。数据层不存在 / 模块被关掉时静默不显示，绝不让背包建窗失败。
+local function CurrencyData()
+    local infoBar = ns.InfoBar
+    return infoBar and infoBar.Currency or nil
+end
+
+--- n 项明细 + 剩余折成 `+N`，和信息栏 `C:BarText` 是同一种写法。
+local function BuildCurrencyText(entries, C, n)
+    local parts = {}
+    for i = 1, n do
+        parts[#parts + 1] = string.format("%s %s",
+            entries[i].name, C:FormatQuantity(entries[i].quantity))
+    end
+    if #entries > n then parts[#parts + 1] = "+" .. (#entries - n) end
+    return table.concat(parts, " · ")
+end
+
+--- 标题行宽度有限：从"全部"往下减项，用 FontString 实测宽度挑第一个放得下的版本。
+--- `GetStringWidth` 在受限窗口可能返回机密值（UnitFrames/Auras.lua:434 同款判例）⇒
+--- pcall + Secrets.Number，量不到就当"放得下"，宁可显示全也别因测量失败清空。
+local function FittedCurrencyText(fs, entries, C, avail)
+    for n = math.min(#entries, 8), 1, -1 do
+        local text = BuildCurrencyText(entries, C, n)
+        fs:SetText(text)
+        local ok, width = pcall(fs.GetStringWidth, fs)
+        width = ok and Secrets.Number(width) or nil
+        if not width or width <= avail then return text end
+    end
+    fs:SetText("")
+    return ""
+end
+
+local function UpdateCurrencyTitle(win)
+    local fs = win and win.currencyText
+    if not fs then return end
+
+    local C = CurrencyData()
+    if not C or Setting("currencyTitle") == false or not win:IsShown() then
+        win.currencyFull, win.currencyAvail = nil, nil
+        fs:Hide()
+        return
+    end
+
+    local ok, entries = pcall(C.Snapshot, C)
+    if not ok or type(entries) ~= "table" or #entries == 0 then
+        win.currencyFull, win.currencyAvail = nil, nil
+        fs:Hide()
+        return
+    end
+
+    local isBank = ModeOf(win.catKey) == "bank"
+    local reserve = isBank and 132 or 8     -- 银行右端两颗钮
+    local okW, winW = pcall(win.GetWidth, win)
+    winW = (okW and Secrets.Number(winW)) or 300
+    local titleW = 0
+    if win.title and win.title.GetStringWidth then
+        local okT, w = pcall(win.title.GetStringWidth, win.title)
+        titleW = (okT and Secrets.Number(w)) or 0
+    end
+    if titleW <= 0 then titleW = isBank and 96 or 52 end
+    local avail = math.max(40, winW - reserve - 18 - titleW - 12)
+
+    -- 轮询每 0.5s 会走到这里：文本与可用宽度都没变就别重排（SetText 会触发布局）。
+    local full = BuildCurrencyText(entries, C, math.min(#entries, 8))
+    if win.currencyFull == full and win.currencyAvail == avail then
+        if not fs:IsShown() then fs:Show() end
+        return
+    end
+    win.currencyFull, win.currencyAvail = full, avail
+
+    fs:SetWidth(avail)
+    if FittedCurrencyText(fs, entries, C, avail) ~= "" then
+        fs:Show()
+    else
+        fs:Hide()
+    end
+end
+
+local function RefreshCurrencyTitles()
+    for _, win in pairs(windows) do
+        if win.currencyText then UpdateCurrencyTitle(win) end
+    end
+end
 
 local function FillWindow(win, items)
     local size     = Setting("iconSize")
@@ -839,10 +939,12 @@ local function FillFreeWindow(win, empties, keepTitle)
         if rows == 0 then h = TITLE_H + PAD end
         win:SetSize(w, h)
         win:SetShown(true)
+        UpdateCurrencyTitle(win)   -- 尺寸定了才有正确的可用宽度
         return
     end
     win:SetSize(w, h)
     win:SetShown(draw > 0)
+    UpdateCurrencyTitle(win)
 end
 
 --- Place windows the user has dragged back where they left them.
@@ -1412,6 +1514,9 @@ local function StartPolling()
     if not pollSubId then
         pollSubId = Scheduler:Every(POLL_INTERVAL * 1000, function()
             if not shown then return end
+            -- 玩家在角色面板改「背包显示」没有 WoW 事件（信息栏同款问题）；
+            -- 顺带刷一次标题行，文字/宽度没变时 UpdateCurrencyTitle 会自己短路。
+            RefreshCurrencyTitles()
             local indexes = Setting("showReagentBag")
                 and { 0, 1, 2, 3, 4, BAG_REAGENT } or BAGS_CARRIED
             local sig = BagSignature(indexes)
@@ -1529,6 +1634,9 @@ function M:Initialize()
     EventBus:Register("LOOT_READY", Mark)           -- 拾取结算（一次拾取发多条，帧级合并吸收）
     EventBus:RegisterUnit("UNIT_INVENTORY_CHANGED", "player", Mark)
     EventBus:Register("PLAYERBANKSLOTS_CHANGED", MarkBank)  -- 银行格子变化（快照有，载荷 slot）
+    -- 货币变化不带 BAG_UPDATE：只重画「剩余空间」标题行那一行字，别为几个数字全量 Rebuild。
+    EventBus:Register("CURRENCY_DISPLAY_UPDATE", RefreshCurrencyTitles)
+    EventBus:Register("CHAT_MSG_CURRENCY", RefreshCurrencyTitles)
     -- 读图回来缓存可能失效：开着窗就强制重扫（事件不补发，InfoBar 同款教训）。
     EventBus:Register("PLAYER_ENTERING_WORLD", function()
         if shown then
@@ -1566,6 +1674,26 @@ function M:Initialize()
 end
 
 function M:HandleCommand(rest)
+    if rest == "currency on" or rest == "currency off" or rest == "currency" then
+        if rest == "currency" then
+            ns:Print("[mui bags currency] 标题行货币显示 = "
+                .. (Setting("currencyTitle") ~= false and "on" or "off") .. "（on|off 可切换）")
+            return true
+        end
+        local on = (rest == "currency on")
+        local db = ns:DB()
+        db.bags = db.bags or {}
+        db.bags.currencyTitle = on
+        for _, win in pairs(windows) do
+            if win.currencyText then
+                win.currencyFull, win.currencyAvail = nil, nil
+                if not on then win.currencyText:Hide() end
+            end
+        end
+        if on then RefreshCurrencyTitles() end
+        ns:Print("[mui bags currency] 标题行货币显示 = " .. (on and "on" or "off"))
+        return true
+    end
     if rest == "hidebliz on" or rest == "hidebliz off" then
         -- 接管暴雪银行框的开关，**默认 on**（2026-11-06 作者拍板；依据 HANDOFF §8.57：空格已是
         -- 真 ItemButton、三向拖放逐格实测通过）。关掉的理由仍然是"要买栏位 / 换银行包"——

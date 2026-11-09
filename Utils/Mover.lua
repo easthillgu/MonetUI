@@ -196,6 +196,15 @@ local function ParentOf(key)
     if not key or key == "UIParent" then return UIParent, "UIParent" end
     local other = entries[key]
     if other and other.frame then return other.frame, key end
+    -- 允许锚到**别的模块建出来的具名全局框**（如 `MonetUIMinimapPanel`）。
+    -- 这些框不在 Mover 的登记表里，但它们是真实存在的 Frame，相对定位照样成立；
+    -- 只在 key 指向真正的 Frame 时才认，避免把随便一个字符串当父框吞掉。
+    if type(key) == "string" then
+        local global = _G[key]
+        if type(global) == "table" and type(global.SetPoint) == "function" then
+            return global, key
+        end
+    end
     return UIParent, "UIParent"
 end
 
@@ -237,8 +246,18 @@ local function ApplyOne(entry)
     local y = stored.y or default.y or 0
 
     -- 父框没解析出来时退回屏幕：这时相对点必须跟点一致，否则会差出半个框。
+    -- 例外：default 带了 `fallback`（具名父框还没建出来 / 那个模块被关掉），
+    -- 就按 fallback 给的一组绝对坐标落位，别把框甩到屏幕边外。
     if parent == UIParent and parentKey ~= (stored.relativeTo or default.relativeTo or "UIParent") then
-        relativePoint = point
+        local fb = default.fallback
+        if type(fb) == "table" then
+            point = fb.point or point
+            relativePoint = fb.relativePoint or point
+            x = fb.x or x
+            y = fb.y or y
+        else
+            relativePoint = point
+        end
     end
 
     frame:ClearAllPoints()

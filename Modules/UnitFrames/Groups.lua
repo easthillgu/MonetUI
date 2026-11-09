@@ -1459,4 +1459,34 @@ M.NameCap = NameCap
 M.UpdateHealthText = UpdateHealthText
 M.FrameHeight = FrameHeight
 
+--- 把小队 / 团队框贴回小地图左侧的默认位置。玩家拖过的位置存在存档里、优先于默认值
+--- （项目惯例：不静默改写玩家存过的位置），所以要显式跑一次这条命令才覆盖。
+function M:HandleCommand(rest)
+    if string.lower(rest or "") ~= "minimap" then return false end
+
+    local cfg = Config()
+    local defaults = ns.DEFAULTS and ns.DEFAULTS.groupFrames
+    if not cfg or not defaults then return false end
+
+    local moved = 0
+    for _, key in ipairs({ "party", "raid" }) do
+        local sub, def = cfg[key], defaults[key]
+        if sub and def then
+            sub.point = def.point
+            sub.relativeTo = def.relativeTo
+            sub.relativePoint = def.relativePoint
+            sub.x, sub.y = def.x, def.y
+            moved = moved + 1
+        end
+    end
+    if moved == 0 then return false end
+
+    if Mover and type(Mover.Apply) == "function" then
+        pcall(function() Mover:Apply() end)
+    end
+    ns:Print(string.format("[mui groupframes] 小队 / 团队框已贴回小地图左侧（间隔 %d，垂直中心对齐）",
+        math.abs((defaults.raid and defaults.raid.x) or 14)))
+    return true
+end
+
 ns:Register("GroupFrames", M)
