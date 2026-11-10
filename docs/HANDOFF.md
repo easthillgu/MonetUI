@@ -5984,7 +5984,42 @@ session → `27870`，诊断立刻多出「锚点：」行，新代码进 VM。
 观感上始终贴小地图面板上沿，不再出现盖到小地图圆面上的情况。§8.86 验收全部收口
 （机制注入验证 + 作者目测双通过）。
 
-**未提交 / 未打 tag / 未发版**；§8.78~8.86 均为 `0.13.2` 候选，发版等作者明确授权。
+> 历史状态行：本节写于发布前。（实际发布见 §8.87，§8.78~8.86 已随 `0.13.2` 上线。）
+
+## 8.87 2026-11-10 19:1x 0.13.2 自动发布实跑（§8.78~8.86 全量上线）
+
+作者 19:04 确认「目测通过」并明确授权「提交并发 0.13.2」后执行，全部为既有链路、无人工上传。
+
+| 项 | 值 |
+|---|---|
+| 版本三处 | `MonetUI.toc ## Version: 0.13.2`、`CHANGELOG.md` 顶部 0.13.2 英文条目、纯数字 tag `0.13.2` |
+| 提交 | `e81c5e2`（36 文件，+3673 / -164），push `8216cc8..e81c5e2` → `main`；tag 指向 `e81c5e2` |
+| Actions | run `42806233979`，30 秒全绿：Guard（`toc=0.13.2` == tag）→ Strip dev → Package/CF/GH Release 三步均 success |
+| GitHub Release | `0.13.2`，`MonetUI-0.13.2-forever.zip` **32,128,449 B** + `release.json`（`flavor=forever / interface=16001`） |
+| CF 状态 | 上传步骤 success；公开 Files 页当时仍显示 `0.13.1` 为 Latest（0.13.2 在审核队列） |
+
+**发布前演练（关键，别省）**：用含 `.git` 的临时副本跑 `node tools/strip-dev.js` +
+`packager-release.sh -d -z -l -e`，产物 127 文件、`## Version: 0.13.2` /
+`## X-Dev-Build: release`、`Init.lua` PRESENT、两份 dev 文件 ABSENT、
+`Tools.xml` 只剩 6 行 Script、tools/docs/.git/.github 全 ABSENT、**84 条 TOC/XML 引用零缺失**。
+`Init.lua` 是本版新增文件 —— 不先 `git add` 就演练会被 `git ls-files` 静默漏掉（§8.85.3 判例），
+本次先 stage 再演练，产物里确认存在。校验 XML 引用时路径要相对**该 XML 所在目录**，
+按包根算会得到 66 条假阳性。
+
+**日志取用判例**：匿名 `GET /actions/runs/<id>/logs` 返回 403 `Must have admin rights to
+Repository.`；看逐行 `Success!` 需仓库 admin（浏览器登录后打开 Actions 页）。
+本轮以「Job/5 个 step 全 success + GH Release 产物齐全」为判据：packager 上传失败会让该 step 失败。
+
+**CF 审核延迟（§8.77 判例再确认）**：0.13.1 上传后约 6 小时才公开为 Latest。0.13.2 上传成功
+后公开页短时间仍是 0.13.1 属正常，**绝不重打 tag / 重复上传**；要复核 Files 页加 `?任意参数`
+破缓存。Upload API Token 只有上传权限，查不了文件状态。
+
+**本地客户端**：发版后重跑 `deploy-retail.ps1`，129 文件，TOC `Version: 0.13.2` /
+`X-Dev-Build: dev`（本地保留 dev 表面，符合 §8.85）。`sync-check` 代码层 0 missing / 0 stale，
+EXIT 1 仍只因两个历史 EXTRA 文档 `CHANGELOG.md` / `README.md`，按规矩没删。
+
+**各节状态行说明**：§8.78~8.86 里的「未提交 / 未打 tag / 未发版」是当时的历史记录，
+现已全部随 `0.13.2` 发布；不再逐条改写，以本节为准。
 
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
