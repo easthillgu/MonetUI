@@ -34,6 +34,14 @@ jobs:
             exit 1
           fi
 
+      # Dev surface stays in the repo and in the local WOWFOREVER install. Before packaging,
+      # flip the TOC dev flag and drop the DEV-ONLY Script lines; .pkgmeta excludes the two
+      # dev files themselves. packager copies from this working tree, so the edits land in the zip.
+      - name: Strip dev-only surface for the release build
+        run: |
+          node tools/strip-dev.js --self-test
+          node tools/strip-dev.js
+
       - name: Package, create GitHub Release, upload to CurseForge
         uses: BigWigsMods/packager@v2
         with:

@@ -144,7 +144,7 @@ local function CVarFlag(cvar, note)
     rec.note = note
     if not cvarWarned[cvar] then
         cvarWarned[cvar] = true
-        ns:Print(("|cffffa940控制台优化空转|r：%s —— %s（期望 %s）")
+        ns:DevPrint(("|cffffa940控制台优化空转|r：%s —— %s（期望 %s）")
             :format(cvar, note, Text(rec.want)))
     end
 end
@@ -320,9 +320,9 @@ function M:Initialize()
         end
     end
     if #stuck > 0 then
-        ns:Print(("|cffffa940控制台优化：%d 条开关是关的，值却还留在打开时的状态|r（%s）")
+        ns:DevPrint(("|cffffa940控制台优化：%d 条开关是关的，值却还留在打开时的状态|r（%s）")
             :format(#stuck, table.concat(stuck, ", ")))
-        ns:Print("  旧版没把原值记下来造成的。一条命令全推回去：/mui tweaks restore")
+        ns:DevPrint("  旧版没把原值记下来造成的。一条命令全推回去：/mui tweaks restore")
     end
 
     -- 默认画面对齐放在最后（2026-11-08）：
@@ -429,9 +429,9 @@ function M:AlignVision(quiet, force)
         end
     end
     if not quiet and wrote > 0 then
-        ns:Print(("|cff00ff00默认画面对齐|r：写入 %d 条（另有 %d 条由开着的开关接管）。")
+        ns:DevPrint(("|cff00ff00默认画面对齐|r：写入 %d 条（另有 %d 条由开着的开关接管）。")
             :format(wrote, skipped))
-        ns:Print("  想把新画面留作默认：/mui tweaks snapshot　｜　不想自动对齐：/mui tweaks defaults off")
+        ns:DevPrint("  想把新画面留作默认：/mui tweaks snapshot　｜　不想自动对齐：/mui tweaks defaults off")
     end
     return wrote, skipped
 end

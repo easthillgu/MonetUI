@@ -128,7 +128,7 @@ M.actions = {
     calendar = OpenCalendar,
     settings = OpenSettings,
     dock     = OpenMicroDock,
-    character = OpenCharacter, -- 信息栏"耐久"格：只留「角色」一行，贴着格子开（两击）
+    character = OpenCharacter, -- 微菜单自用；信息栏「耐久」格 11-10 起只读，不再代点这里
     friends  = OpenFriends,    -- 信息栏"好友"格：直开社交窗（作者批准的例外，见 OpenFriends 头注）
 }
 

@@ -13,6 +13,10 @@
 -- 窗口可能是机密布尔），数字用 Number，名字要进 format / concat 还得再过 CanRead。
 -- `GetCurrencyInfo(id)` 是自定义档的兜底：货币页那张表在折叠分类 / LoD 未加载时会缺项，
 -- 直接按 ID 问客户端就不会让已配置的监控项凭空消失。
+--
+-- 2026-11-10 作者口径（§8.82）：**默认只追踪金币，其它货币做提示让玩家自己添加**。
+-- 金币不是货币页里的 currencyID，用伪 ID 0 作为「基线条目」由 Snapshot() 首位插入，
+-- 三种模式都带它；其余货币不再自动补（旧 EnsureCustom 会顺手带入有余额项，已去掉）。
 
 local ADDON_NAME, ns = ...
 local M = ns.InfoBar
@@ -84,6 +88,38 @@ end
 -- 最近一次成功读到的值。受限窗口里 quantity 变成机密时用它顶一拍，
 -- 免得格子在战斗里忽明忽暗；只在内存里，不落盘。
 local valueCache = {}
+
+-- 金币基线（§8.82）：`GetMoney()` 返回铜数，不是货币页里的 currencyID，
+-- 所以给它一个不与任何真实 ID 冲突的伪 ID 0，并且不进 Available()/选择面板。
+-- 渲染方统一读 entry.display（已经格式化成 g/s/c），不走 FormatQuantity 的万/亿缩写。
+local GOLD_ID = 0
+-- 金币不在货币页里，没有 iconFileID：用暴雪自带的金币图标（INV_Misc_Coin_01）。
+-- 图标 ID 收在数据层，背包标题行等渲染方一律走 C:IconOf()，别各写一份硬编码。
+local GOLD_ICON = 133784
+
+local function FormatMoney(copper)
+    copper = Num(copper)
+    if not copper then return nil end
+    copper = math.floor(copper)
+    local g = math.floor(copper / 10000)
+    local s = math.floor(copper / 100) % 100
+    local c = copper % 100
+    if g > 0 then return string.format("%dg %ds %dc", g, s, c) end
+    if s > 0 then return string.format("%ds %dc", s, c) end
+    return string.format("%dc", c)
+end
+
+--- 读不到（受限窗口里 GetMoney 变机密值）就返回 nil，让消费方静默不显示而不是报错。
+function C:GoldEntry()
+    if type(_G.GetMoney) ~= "function" then return nil end
+    local ok, copper = pcall(_G.GetMoney)
+    copper = ok and Num(copper) or nil
+    if not copper then return nil end
+    local display = FormatMoney(copper)
+    if not display then return nil end
+    return { id = GOLD_ID, name = "金币", quantity = copper,
+             display = display, icon = GOLD_ICON, isGold = true }
+end
 
 --- 把一份 CurrencyInfo（列表行或按 ID 查回来的）翻成我们自己的普通表。
 --- base = 同一 ID 上一轮的读数，用来补这次读不到的字段。
@@ -228,6 +264,12 @@ function C:Snapshot()
     local list, byID = self:Available(backpackIDs)
     local ids, mode = EffectiveIDs(list, backpackIDs)
     local entries, missing = {}, 0
+
+    -- §8.82：金币是唯一默认追踪项，永远排第一；不受 ShowZero / mode 影响。
+    -- 其它货币一条都不自动加，玩家自己勾（提示见 CurrencyTooltip / 选择面板 hint）。
+    local gold = self:GoldEntry()
+    if gold then entries[#entries + 1] = gold end
+
     for i = 1, #ids do
         local entry = byID[ids[i]]
         if not entry then
@@ -239,6 +281,28 @@ function C:Snapshot()
     return entries, missing, mode, list
 end
 
+--- 还没加进监控、但可以添加的货币（给提示框用）。all 模式下没有「可添加」概念，
+--- 由消费方自己判断要不要展示；只返回前 limit 项，别把 tooltip 撑爆。
+function C:Suggestions(limit)
+    limit = limit or 5
+    local list = self:Available()
+    local watch = self:Watch()
+    local watched = {}
+    for i = 1, #watch do
+        local id = Num(watch[i])
+        if id then watched[id] = true end
+    end
+    local out = {}
+    for i = 1, #list do
+        local entry = list[i]
+        if not watched[entry.id] then
+            out[#out + 1] = entry
+            if #out >= limit then break end
+        end
+    end
+    return out
+end
+
 function C:FormatQuantity(value)
     local n = Num(value)
     if not n then return "?" end
@@ -248,13 +312,36 @@ function C:FormatQuantity(value)
     return tostring(n)
 end
 
+--- 图标模式的短数量（§8.84）：名称交给 tooltip，标题行只留「图标 + 数字」。
+--- 金币的 display 是 `35g 59s 51c`，比任何货币名都长；这里按最高非零单位缩成
+--- 一段（`35g` / `59s` / `51c`），完整值在 tooltip 里给，不丢信息。
+function C:ShortQuantity(entry)
+    if type(entry) ~= "table" then return "?" end
+    if not entry.isGold then return self:FormatQuantity(entry.quantity) end
+    local copper = Num(entry.quantity)
+    if not copper then return "?" end
+    if copper >= 10000 then return math.floor(copper / 10000) .. "g" end
+    if copper >= 100 then return math.floor(copper / 100) .. "s" end
+    return (copper % 100) .. "c"
+end
+
+--- 渲染方唯一的图标来源；真实货币读货币页的 iconFileID，金币用内置图标。
+--- 取不到（表头 / LoD 未加载 / 机密值）返回 nil，渲染方退化成文字首字，别画空贴图。
+function C:IconOf(entry)
+    if type(entry) ~= "table" then return nil end
+    if entry.isGold then return GOLD_ICON end
+    local icon = Num(entry.icon)
+    return (icon and icon > 0) and icon or nil
+end
+
 --- 条身只读前 N 项（N = currencyMax），多出来的折成 "+k"，不把整条撑爆。
 function C:BarText(entries)
     local max = self:MaxOnBar()
     local parts = {}
     for i = 1, math.min(#entries, max) do
         local entry = entries[i]
-        parts[#parts + 1] = string.format("%s %s", entry.name, self:FormatQuantity(entry.quantity))
+        parts[#parts + 1] = string.format("%s %s", entry.name,
+            entry.display or self:FormatQuantity(entry.quantity))
     end
     local more = #entries - max
     if more > 0 then parts[#parts + 1] = string.format("+%d", more) end
@@ -267,10 +354,10 @@ local function Changed()
     C:RefreshPanel()
 end
 
---- 从别的档切到自定义时，先把"当前正在显示的那些"变成初始清单，
---- 再补上货币页里此刻**有余额**的其它项（上限 8）：1.60 的货币页往往只有两三种，
---- 客户端的 `isShowInBackpack` 却只标记了一种，光继承显示项会让第二种（如商人青睐）
---- 在自定义档里凭空缺席，玩家还得自己猜 ID 去 add。玩家看到的是接着改，不是从零开始。
+--- 从别的档切到自定义时，只把"当前正在显示的那些货币"变成初始清单。
+--- §8.82 作者口径：其它货币**不自动补**。旧实现会顺手把货币页里所有有余额的项
+--- （荣誉点数、商人青睐…）塞进清单，等于替玩家做了选择，与「默认只追踪金币、
+--- 其它做提示自己添加」冲突。金币是 Snapshot 的基线、不是 currencyID，绝不进 watch。
 function C:EnsureCustom()
     if self:Mode() == "custom" then return end
     local backpackIDs = (self:Mode() == "backpack") and self:BackpackIDs() or nil
@@ -280,14 +367,9 @@ function C:EnsureCustom()
     local watch, seen = self:Watch(), {}
     for i = 1, #ids do
         local id = ids[i]
-        if not seen[id] then seen[id] = true; watch[#watch + 1] = id end
-    end
-    for i = 1, #list do
-        local entry = list[i]
-        if #watch >= 8 then break end
-        if entry.quantity and entry.quantity > 0 and not seen[entry.id] then
-            seen[entry.id] = true
-            watch[#watch + 1] = entry.id
+        if id and id >= 1 and not seen[id] then
+            seen[id] = true
+            watch[#watch + 1] = id
         end
     end
     Settings().currencyMode = "custom"
@@ -515,8 +597,11 @@ function C:RefreshPanel()
 
     if #list == 0 then
         panel.hint:SetText("清单为空：先开一次角色面板 → 货币，或用 /mui infobar currency add <ID>")
+    elseif #self:Watch() == 0 then
+        panel.hint:SetText("默认追踪金币 · 点下面的行添加其它货币（滚轮翻页）")
     else
-        panel.hint:SetText(string.format("共 %d 项 · 滚轮翻页 · 点击行增删监控", #list))
+        panel.hint:SetText(string.format("共 %d 项 · 已监控 %d 项 · 点行增删",
+            #list, #self:Watch()))
     end
 end
 
@@ -540,8 +625,9 @@ local function Usage()
     ns:Print("|cffffd100/mui infobar currency|r <命令>")
     ns:Print("  list / status    列出货币页清单与 ID（完整清单存 MonetUIDB.currencyReport）")
     ns:Print("  add <ID|名称> ...  加入自定义监控（可一次多个）；del <...> 移除；clear 清空")
+    ns:Print("  默认只追踪金币；其它货币用 add 或右键货币格勾选添加，不会自动带入")
     ns:Print("  mode backpack|custom|all   来源切换；panel 打开勾选面板")
-    ns:Print("  切到 custom 会自动带入当前显示项 + 货币页里有余额的其它项（最多 8 项）")
+    ns:Print("  切到 custom 只继承当前正在显示的货币，不再自动补有余额的项")
     ns:Print("  max <1-8>        条上最多显示几项；zero on|off 是否显示 0 值")
 end
 
@@ -591,6 +677,7 @@ function C:List()
 
     ns:Print(string.format("货币清单（角色面板 · 货币）：%d 项 · 当前模式 %s",
         #list, self:ModeLabel()))
+    ns:Print("  * = 已监控；金币默认追踪、不在此清单里。用 add <ID|名称> 或右键货币格添加其它货币")
 
     local report = { mode = self:Mode(), count = #list, entries = {} }
     local shown = math.min(#list, 24)
@@ -627,8 +714,16 @@ function C:Status()
     local watch = self:Watch()
     ns:Print(string.format("货币监控：%s · 条上最多 %d 项 · 0 值%s",
         self:ModeLabel(mode), self:MaxOnBar(), self:ShowZero() and "显示" or "隐藏"))
-    ns:Print(string.format("  自定义清单 %d 项 · 当前生效 %d 项 · 暂不可读 %d 项 · 货币页可见 %d 项",
+    ns:Print(string.format("  自定义清单 %d 项 · 当前生效 %d 项（含金币基线）· 暂不可读 %d 项 · 货币页可见 %d 项",
         #watch, #entries, missing, #list))
+    local suggestions = self:Suggestions(3)
+    if #suggestions > 0 then
+        local names = {}
+        for i = 1, #suggestions do
+            names[i] = string.format("%s (%d)", suggestions[i].name, suggestions[i].id)
+        end
+        ns:Print("  可添加：" .. table.concat(names, "、") .. " —— /mui infobar currency add <ID|名称>")
+    end
 end
 
 function C:AddByText(text)

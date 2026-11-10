@@ -208,10 +208,18 @@ local function ParentOf(key)
     return UIParent, "UIParent"
 end
 
---- 具名锚框「解析到了」≠「能用」：那个模块可能被关掉（SetShown(false)），
+--- 锚框「解析到了」≠「能用」：那个模块可能被关掉（SetShown(false)），
 --- 或者还没布局（GetRect 给不出有效矩形）。锚在隐藏框上 SetPoint 不报错，
 --- 但位置会算到屏幕外，表现成「框架凭空消失」（2026-11-09 队伍框架判例）。
-local function AnchorUsable(frame)
+---
+--- **两类锚框要分开判**（2026-11-10 目标的目标判例）：
+--- - Mover 里登记过的框（单位框等）：显隐由 visibility state driver 控制，**隐藏是常态**
+---   （没目标时 `target` 框就是 hidden），但框布局过、GetRect 仍有效，锚上去位置是对的。
+---   早先一律要求 IsShown() 会把 `targettarget` 误判成「锚不可用」→ 无 fallback →
+---   落点变成 `LEFT/UIParent/LEFT 6,0`（屏幕左边缘）。这类只看矩形。
+--- - 具名全局框（如 `MonetUIMinimapPanel`）：模块关掉时 SetShown(false) 是真不可用，
+---   仍要求 IsShown()，团队框才会按 fallback 落回屏幕。
+local function AnchorUsable(frame, parentKey)
     if frame == UIParent then return true end
     if not frame or type(frame.GetRect) ~= "function" or type(frame.IsShown) ~= "function" then
         return false
@@ -221,8 +229,21 @@ local function AnchorUsable(frame)
         or type(height) ~= "number" or width <= 0 or height <= 0 then
         return false
     end
+    if parentKey and entries[parentKey] then return true end
     local okShown, shown = pcall(frame.IsShown, frame)
     return okShown and shown and true or false
+end
+
+--- 摆完是否整体落在屏幕外。rect 给不出有效值时返回 false（隐藏框别乱挪）。
+local function Offscreen(frame)
+    if not frame or type(frame.GetRect) ~= "function" then return false end
+    local ok, left, bottom, width, height = pcall(frame.GetRect, frame)
+    if not ok or type(left) ~= "number" or type(bottom) ~= "number"
+        or type(width) ~= "number" or type(height) ~= "number" then return false end
+    local sw = (UIParent.GetWidth and UIParent:GetWidth()) or 0
+    local sh = (UIParent.GetHeight and UIParent:GetHeight()) or 0
+    if sw <= 0 or sh <= 0 then return false end
+    return left + width < 0 or left > sw or bottom + height < 0 or bottom > sh
 end
 
 local function Stored(entry)
@@ -268,7 +289,7 @@ local function ApplyOne(entry)
     -- 只改 point/x/y 会把「绝对坐标」算到隐藏/无布局的相对框上，位置反而更离谱。
     -- 这正是 2026-11-09「改完团队框架位置后框不见了」的根因。
     local needFallback = (parent == UIParent and parentKey ~= (relativeTo or "UIParent"))
-        or not AnchorUsable(parent)
+        or not AnchorUsable(parent, parentKey)
     if needFallback then
         local fb = default.fallback
         parent, parentKey = UIParent, "UIParent"
@@ -279,25 +300,42 @@ local function ApplyOne(entry)
             y = fb.y or y
         else
             relativePoint = point
+            -- 没有 fallback 表时，「相对偏移」不能当绝对坐标留在屏幕边缘
+            -- （8.78 的 LEFT 6,0 就那么跑到左边缘的）。按原锚点方向落到
+            -- 一个屏幕内象限：框至少看得见、拖得回来，也不会压在正中间。
+            local sw = (UIParent.GetWidth and UIParent:GetWidth()) or 0
+            local sh = (UIParent.GetHeight and UIParent:GetHeight()) or 0
+            if sw > 0 and sh > 0 then
+                if type(x) ~= "number" then x = 0 end
+                if type(y) ~= "number" then y = 0 end
+                local qx = (string.find(point, "LEFT", 1, true) and -sw * 0.25)
+                    or (string.find(point, "RIGHT", 1, true) and sw * 0.25) or 0
+                local qy = (string.find(point, "TOP", 1, true) and sh * 0.25)
+                    or (string.find(point, "BOTTOM", 1, true) and -sh * 0.25) or 0
+                x = qx + math.max(-sw * 0.15, math.min(sw * 0.15, x))
+                y = qy + math.max(-sh * 0.15, math.min(sh * 0.15, y))
+                point, relativePoint = "CENTER", "CENTER"
+            end
         end
     end
 
     frame:ClearAllPoints()
     frame:SetPoint(point, parent, relativePoint, x, y)
 
-    -- 二次自愈：算完发现整个框落在屏幕外（锚点矩形异常 / 旧坐标失效），
-    -- 有 fallback 就落回那组绝对坐标，别让框静默消失。
-    if type(default.fallback) == "table" and parent ~= UIParent then
-        local okRect, left, bottom, width, height = pcall(frame.GetRect, frame)
-        local sw, sh = UIParent:GetWidth() or 0, UIParent:GetHeight() or 0
-        if okRect and type(left) == "number" and type(bottom) == "number"
-            and type(width) == "number" and type(height) == "number"
-            and sw > 0 and sh > 0
-            and (left + width < 0 or left > sw or bottom + height < 0 or bottom > sh) then
+    -- 二次自愈：算完发现整框落在屏幕外（锚点矩形异常 / 旧坐标失效），有 fallback
+    -- 就落回那组绝对坐标，没有就回屏幕中心 —— 别让框静默消失。旧版条件里的
+    -- `parent ~= UIParent` 会把 needFallback 这条路径整个漏掉（那时 parent 已被
+    -- 换回 UIParent），11-10 模块关闭连锁排查补上。
+    if needFallback or parent ~= UIParent then
+        if Offscreen(frame) then
             local fb = default.fallback
             frame:ClearAllPoints()
-            frame:SetPoint(fb.point or "CENTER", UIParent,
-                fb.relativePoint or "CENTER", fb.x or 0, fb.y or 0)
+            if type(fb) == "table" then
+                frame:SetPoint(fb.point or "CENTER", UIParent,
+                    fb.relativePoint or "CENTER", fb.x or 0, fb.y or 0)
+            else
+                frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+            end
         end
     end
 end

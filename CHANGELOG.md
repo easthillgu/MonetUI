@@ -3,6 +3,32 @@
 This file is used verbatim as the CurseForge release changelog (see `.pkgmeta`).
 Update the top section before tagging a new release.
 
+## 0.13.2 (2026-11-10)
+
+- Tooltips: fixed tooltips occasionally appearing on top of the minimap when
+  "above minimap" anchoring was selected. Blizzard re-anchors GameTooltip on
+  every show, so the anchor is now read back each frame and reclaimed whenever
+  another writer touched it. A temporarily unavailable minimap panel pins the
+  tooltip to absolute screen coordinates instead of following the cursor.
+- Anchors: fixed target-of-target placement, and fixed windows drifting to the
+  screen edge when a module such as the minimap or quest tracker is disabled.
+  Hidden anchor panels now fall back to the correct parent and self-heal.
+- Startup: a new Init layer aligns the default chat frame's bottom edge with
+  the action bar by saving a separate Edit Mode layout named "MonetUI".
+  Blizzard presets and existing custom layouts are never modified; check with
+  `/mui init status|run`.
+- Currency: gold is always tracked by default; other currencies are opt-in via
+  the right-click watch list and its suggestions. The bag title row now draws a
+  compact icon plus a short amount (e.g. `35g`) with full values on hover, so
+  many tracked currencies still fit. Toggle with `/mui bags currency icons on|off`.
+- Category bags: fixed the B key failing to close the bags after enabling
+  "show currencies on backpack" in Blizzard's own options.
+- Info bar: the durability block is now hover-only and shows average durability;
+  clicking it no longer opens the character panel.
+- Release builds no longer ship developer diagnostics or dev-only slash
+  commands. Local and repository builds keep them.
+- Addon version is now read from the TOC instead of being hard-coded.
+
 ## 0.13.1 (2026-11-09)
 
 - Group frames: fixed a fallback bug that could make the frames disappear when

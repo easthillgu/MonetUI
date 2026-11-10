@@ -4,9 +4,17 @@
 -- 位置有三种摆法（设置键 anchor）：
 --   cursor  —— 跟随光标；贴到屏幕右/上边缘时**翻到光标另一侧**，再越界就顶回屏幕内；
 --   minimap —— 提示框的**右下角对齐小地图面板的右上角**（贴在地图上沿、右边缘齐平），
---              长得顶出屏幕顶边就改挂在面板下方；
+--              长得顶出屏幕顶边就改把顶边钉在屏幕顶沿；
 --   off     —— 不动，用暴雪自己的锚点。
 --   偏移按物理像素算（Media:Mult），不随 UI 缩放浮动。
+--
+-- **锚点所有权（2026-11-10 修「偶尔跑到小地图上」）**：暴雪每次 SetOwner / Show 都会给
+-- GameTooltip 重写锚点（小地图图标、动作条按钮的提示尤其频繁）。原来只靠 cursorKey /
+-- mmKey 去重，那两个键记的是"我们上次的输入"，不是"当前锚点还是不是我们写的"：
+-- 输入恰好没变（同样行数的两个提示、光标没动）就跳过写入，提示框留在暴雪刚写的锚点上。
+-- 现在摆位前回读一次 GetPoint，不是我们写的那一份就强制重贴（AnchorIntact / SetAnchor）。
+-- 另外面板**临时隐藏**不再退回跟随光标 —— 光标多半正停在小地图图标上，跟回去就是
+-- "提示框盖在小地图上"；只有小地图模块真的关掉才走跟随。
 --
 -- 内容（三样，其余在 HANDOFF 3.13 里写了为什么砍）：
 --   * 单位：一行「目标: <名字>」—— 这个单位正在打谁（名字用职业色，NPC 用中性色）；
@@ -65,6 +73,12 @@ local CONTENT_INTERVAL_MS = 250
 
 local mode, enrich, idsByAlt, neutralText   -- 设置缓存（每帧要读，别去翻 DB）：mode = cursor / minimap / off
 local cursorKey, mmKey
+--- 我们上一次写给提示框的锚点（point / rel / relPoint / x / y）。去重键记的是"输入"，
+--- 这份记的是"写出去的结果"：别人把锚点改回去时，只有它能发现（见文件头）。
+local lastAnchor
+local lastPanel, lastGood         -- 上次用的面板对象 / 最后一次有效的面板几何（临时读不出时钉住用）
+local anchorReclaims, panelFallbacks = 0, 0   -- 诊断账本：锚点被外部改写次数 / 真退回跟随次数
+local fallbackCounted = false         -- 退回跟随按"次"记，不是按帧记
 local placeJob, contentJob         -- Utils/Scheduler 订阅号（本仓不再自建 OnUpdate 帧）
 local wasShown, modDown            -- 提示框显隐上升沿 / Alt 当前状态
 local modFrame                     -- MODIFIER_STATE_CHANGED 事件帧（按 idsByAlt 按需建/摘）
@@ -118,6 +132,63 @@ M.ResolveMode = ResolveMode
 -- 位置
 -- ============================================================================
 
+--- 摆位统一走这里：写锚点，同时记下"这一份是我们写的"。
+--- 回读校验就靠这份记账判断别人有没有把锚点改回去。
+local function SetAnchor(tip, point, rel, relPoint, x, y)
+    tip:ClearAllPoints()
+    tip:SetPoint(point, rel, relPoint, x, y)
+    lastAnchor = { point = point, rel = rel, relPoint = relPoint, x = x, y = y }
+end
+
+--- 提示框现在挂在哪，还是我们上次写的那一份吗？
+--- 读不出（受限 / 机密 / GetPoint 抛错）一律当"不是"，宁可多写一次布局，也不要把
+--- 别人写的锚点当成自己的留在屏幕上。`GetNumPoints` 也查：追加的第二个锚点会拉伸
+--- 提示框，而我们写入的永远是单点。
+local function AnchorIntact(tip)
+    if not lastAnchor or type(tip.GetPoint) ~= "function" then return false end
+    local ok, p, r, rp, x, y = pcall(tip.GetPoint, tip, 1)
+    if not ok then return false end
+    if Secrets.IsSecret(p) or Secrets.IsSecret(r) or Secrets.IsSecret(rp)
+       or Secrets.IsSecret(x) or Secrets.IsSecret(y) then return false end
+    if p ~= lastAnchor.point or rp ~= lastAnchor.relPoint or r ~= lastAnchor.rel then return false end
+    local nx, ny = Secrets.Number(x), Secrets.Number(y)
+    if not nx or not ny then return false end
+    if math.abs(nx - lastAnchor.x) > 0.01 or math.abs(ny - lastAnchor.y) > 0.01 then return false end
+    if type(tip.GetNumPoints) == "function" then
+        local okN, n = pcall(tip.GetNumPoints, tip)
+        local count = okN and Secrets.Number(n) or nil
+        -- 读不出（受限）就当这一项查不了，别每帧都判失配、反复重贴。
+        if count and count ~= 1 then return false end
+    end
+    return true
+end
+
+--- 小地图面板的几何。**不看 IsShown**：隐藏的框几何照样有效，锚上去位置照算；
+--- 以前拿 `IsShown` 当门槛，面板临时一隐藏就退回跟随光标，光标多半正停在小地图
+--- 图标上 —— 提示框于是"跑到小地图上"（2026-11-10 玩家报的偶发）。
+--- 真正该判的是几何本身：读得出、不是机密、落在屏幕内。
+local function MinimapPanelGeometry(panel)
+    if not panel or type(panel.GetRight) ~= "function" or type(panel.GetTop) ~= "function" then
+        return nil
+    end
+    local okR, right = pcall(panel.GetRight, panel)
+    local okT, top = pcall(panel.GetTop, panel)
+    if not okR or not okT then return nil end
+    local r, t = Secrets.Number(right), Secrets.Number(top)
+    if not r or not t or r <= 0 or t <= 0 then return nil end
+    local ui = _G.UIParent
+    local uiW, uiH
+    if ui then
+        local okW, w = pcall(ui.GetWidth, ui)
+        local okH, h = pcall(ui.GetHeight, ui)
+        uiW = okW and Secrets.Number(w) or nil
+        uiH = okH and Secrets.Number(h) or nil
+    end
+    if uiW and uiW > 0 and r > uiW + 1 then return nil end
+    if uiH and uiH > 0 and t > uiH + 1 then return nil end
+    return r, t, uiH
+end
+
 --- 把提示框摆到光标旁：默认右下；光标进入右侧/下侧边缘带就翻到另一边；最后再夹回屏幕内。
 --- **所有判断只看光标位置**（不看提示框宽高），所以内容变化不会让它在两侧之间横跳。
 local function PlaceCursor(tip)
@@ -155,19 +226,40 @@ local function PlaceCursor(tip)
     if key == cursorKey then return end
     cursorKey = key
 
-    tip:ClearAllPoints()
-    tip:SetPoint("BOTTOMLEFT", ui, "BOTTOMLEFT", x0, y0)
+    SetAnchor(tip, "BOTTOMLEFT", ui, "BOTTOMLEFT", x0, y0)
 end
 
 --- 提示框的**右下角对齐小地图面板的右上角**：贴在地图上沿、右边缘齐平。
---- 长得顶出屏幕顶边就改挂在面板下方（顶边贴面板底边）；小地图模块没开就退回跟随光标。
+--- 小地图模块真的关掉才退回跟随光标；面板只是临时隐藏 / 几何这一拍读不出时，
+--- 把提示框钉在最后一次有效的位置上（UIParent 绝对坐标），**绝不跟回光标**。
 local function PlaceMinimap(tip)
     local minimap = ns:GetModule("Minimap")
     local panel = minimap and minimap.panel
-    -- 面板是我们自己造的框（MonetUIMinimapPanel），但模块关掉时它是隐藏的：
-    -- 隐藏时锚上去等于锚在一个看不见的位置，宁可直接退回光标。
-    if not panel or not Secrets.Bool(panel:IsShown(), false) then
+    local moduleOff = not Secrets.Bool(ns:IsModuleEnabled("Minimap"), true)
+
+    if moduleOff or not panel then
+        if not fallbackCounted then
+            panelFallbacks = panelFallbacks + 1
+            fallbackCounted = true
+        end
+        lastPanel = nil
         PlaceCursor(tip)
+        return
+    end
+
+    local right, top, uiH = MinimapPanelGeometry(panel)
+    if right then fallbackCounted = false end   -- 回到正常摆位：下次再退回算新的一次
+    if not right then
+        -- 几何读不出（换主题 / 编辑模式 / 受限）：钉住，不改写锚点、不跟光标。
+        -- 连缓存都没有就这一拍什么都不做，下一拍几何回来立即重贴。
+        if lastGood and _G.UIParent then
+            local key = ("hold:%.2f:%.2f:%.2f"):format(lastGood.right, lastGood.top, lastGood.gap)
+            if key ~= mmKey then
+                mmKey = key
+                SetAnchor(tip, "BOTTOMRIGHT", _G.UIParent, "BOTTOMLEFT",
+                    lastGood.right, lastGood.top + lastGood.gap)
+            end
+        end
         return
     end
 
@@ -176,20 +268,30 @@ local function PlaceMinimap(tip)
     local w, h = tip:GetWidth() or 0, tip:GetHeight() or 0
     if Secrets.IsSecret(w) then w = 0 end
     if Secrets.IsSecret(h) then h = 0 end
-    local right, top = panel:GetRight() or 0, panel:GetTop() or 0
-    local uiH = ui and ui:GetHeight() or 0
 
-    -- 面板被拖动 / 提示框内容变长都要重摆；两者没变就不写。
-    local key = string.format("%.2f:%.2f:%.2f:%.2f", right, top, w, h)
+    lastGood = { right = right, top = top, gap = gap }
+
+    -- 面板对象换过（皮肤重建 / 模块重开）也要强制重贴：只比 right/top 看不出来，
+    -- 而提示框还锚在旧面板上，位置会整个跑掉。
+    if panel ~= lastPanel then
+        lastPanel = panel
+        mmKey = nil
+    end
+
+    -- 上面放不下的判据也进 key：屏幕高度抖动时不能留着上一次那一支的锚点。
+    local above = not (uiH and uiH > 0 and h > 0 and (top + gap + h > uiH))
+    local key = ("%.2f:%.2f:%.2f:%.2f:%.2f:%s"):format(
+        right, top, w, h, uiH or 0, above and "above" or "top")
     if key == mmKey then return end
     mmKey = key
 
-    tip:ClearAllPoints()
-    if uiH > 0 and h > 0 and top + gap + h > uiH then
-        -- 上面放不下：挂到面板下方，仍然右对齐
-        tip:SetPoint("TOPRIGHT", panel, "BOTTOMRIGHT", 0, -gap)
+    if above or not ui then
+        SetAnchor(tip, "BOTTOMRIGHT", panel, "TOPRIGHT", 0, gap)
     else
-        tip:SetPoint("BOTTOMRIGHT", panel, "TOPRIGHT", 0, gap)
+        -- 长到顶出屏幕顶边：把顶边钉在屏幕顶沿、右边缘仍与面板齐平。
+        -- 旧写法 TOPRIGHT → panel:BOTTOMRIGHT 是让提示框从面板底边往下排，
+        -- 本客户端面板底边距屏幕底只有 31 UI 单位，整块必然跑出屏幕。
+        SetAnchor(tip, "TOPRIGHT", ui, "TOPLEFT", right, (uiH or 0) - gap)
     end
 end
 
@@ -197,11 +299,26 @@ end
 --- **不设 `SetClampedToScreen`**：引擎的夹取会和我们每帧写的锚点是两套写手，
 --- 贴边时位置会互相拉扯（玩家 2026-10-26 报"乱跑"的另一个来源）。夹取在 PlaceCursor 里自己算，结果确定。
 local function ApplyPlacement(tip)
+    if mode == "off" then
+        -- 让暴雪自己摆：记账全清，免得下次切回来时拿旧锚点当"还是我们的"去覆盖它。
+        cursorKey, mmKey, lastAnchor = nil, nil, nil
+        return
+    end
+    -- 别人把锚点改回去了 → 去重键作废，这一拍强制重贴。
+    if not AnchorIntact(tip) then
+        if lastAnchor then anchorReclaims = anchorReclaims + 1 end
+        cursorKey, mmKey = nil, nil
+    end
     if mode == "cursor" then
         PlaceCursor(tip)
     elseif mode == "minimap" then
         PlaceMinimap(tip)
     end
+end
+
+--- 模式 / 设置变化：所有去重账作废，下一拍按新设置重摆。
+local function InvalidatePlacement()
+    cursorKey, mmKey, lastAnchor = nil, nil, nil
 end
 
 -- ============================================================================
@@ -638,7 +755,7 @@ local function Reset(tip)
     Mark(tip, "boxSig", nil)
     Mark(tip, "boxSide", nil)
     if box then box:Hide() end
-    cursorKey, mmKey = nil, nil
+    cursorKey, mmKey, lastAnchor = nil, nil, nil
     lastPayload[tip] = nil
 end
 
@@ -903,6 +1020,28 @@ function M:Diagnose(verbose)
     Say(("订阅：每帧摆位=%s｜兜底扫描=%s（%dms）｜Alt 事件帧=%s"):format(
         placeJob and "在" or "无", contentJob and "在" or "无", CONTENT_INTERVAL_MS,
         modFrame and "在" or "无"))
+    -- 位置账本（2026-11-10）：外部改写次数 > 0 是**正常**的 —— 暴雪每次 SetOwner 都会
+    -- 重贴锚点，我们靠回读把它拉回来；要看的是"当前锚点"是不是我们写的那一份。
+    local curPoint, curRel, curOffset = "读不出", "-", "-"
+    if tip and type(tip.GetPoint) == "function" then
+        local ok, p, r, rp, x, y = pcall(tip.GetPoint, tip, 1)
+        if ok and not Secrets.IsSecret(p) and not Secrets.IsSecret(rp) then
+            curPoint = tostring(p) .. "→" .. tostring(rp)
+            local okN, name = false, nil
+            if r and type(r.GetName) == "function" then
+                okN, name = pcall(r.GetName, r)
+            end
+            curRel = (okN and Plain(name)) or tostring(r)
+            local nx, ny = Secrets.Number(x), Secrets.Number(y)
+            if nx and ny then curOffset = ("%.0f,%.0f"):format(nx, ny) end
+        end
+    end
+    Say(("锚点：外部改写 %d 次｜退回跟随 %d 次｜回读一致=%s｜当前=%s(%s) 偏移=%s｜我们上次写=%s"):format(
+        anchorReclaims, panelFallbacks,
+        tip and (AnchorIntact(tip) and "是" or "否") or "-",
+        curPoint, curRel, curOffset,
+        lastAnchor and (tostring(lastAnchor.point) .. "→" .. tostring(lastAnchor.relPoint)
+            .. (" %.0f,%.0f"):format(lastAnchor.x, lastAnchor.y)) or "无"))
     -- 可见性一律走 `TooltipVisible`（pcall + Secrets.Bool）：GameTooltip 属于可能被引擎
     -- 临时禁读的框，直接 `tip:IsVisible()` 会抛（AGENTS：三个 Watch 驱动都为此设了这道漏斗）。
     local _, tipVisible = TooltipVisible()
@@ -957,6 +1096,7 @@ end
 
 function M:Apply()
     ReadSettings(self)
+    InvalidatePlacement()   -- 模式 / 开关变了：去重账与锚点账一起作废，别留着旧模式的锚点
     -- 开关变了：记账清零，下一拍按新设置重来。
     -- 注意**不 Hide 提示框**（以前的毛病：取消勾选会把正在看的提示框直接收掉）；
     -- SyncJobs 只会收掉**我们自己的**那块小框。

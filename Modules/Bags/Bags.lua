@@ -62,6 +62,15 @@ local BANK_PAGE_CANDIDATES = { -2, -3 }   -- -1 是钥匙扣，见上（保留 -
 local SORT_BTN_W  = 40
 local SORT_RESERVE = 8 + SORT_BTN_W + 6    -- 54
 
+-- ---- 标题行货币的图标模式（§8.84）-------------------------------------------
+-- 每格 = 14px 图标 + 3px 间隔 + 短数量文字，格间 8px；名称与完整数量移到悬停提示。
+-- 追踪项一多，「名称 + 完整数量」会被 FittedCurrencyText 折成 +N 甚至整行隐藏，
+-- 图标模式把每项从 ~100 UI 压到 ~35 UI。`icons off` 仍可切回原来的纯文字排版。
+local CURRENCY_ICON    = 14
+local CURRENCY_IGAP    = 3
+local CURRENCY_CGAP    = 8
+local CURRENCY_MAXCELL = 8
+
 -- ---- 模式（背包 / 银行）：窗口键与存档位置都带模式前缀 --------------------------
 -- 以前银行是**原地替换**背包（同一批 cat.key 的窗），所以"位置不能和背包重叠"这件事
 -- 在结构上做不到。`bank:` 前缀把两套窗、两份位置账、两个总控 ✕ 彻底分开。
@@ -716,6 +725,11 @@ local function EnsureWindow(key)
         currency:SetWordWrap(false)
         currency:Hide()
         win.currencyText = currency
+        -- 图标模式用它实测短数量文字宽度：隐藏、不设锚点、不占布局，只借字体度量。
+        local measure = Widget:Font(win, 11, "pixel", "bright", "LEFT")
+        measure:SetWordWrap(false)
+        measure:Hide()
+        win.currencyMeasure = measure
     end
 
     -- 总控窗的 ✕：模板自带 UIPanelCloseButton 外观，OnClick 覆盖成"收整套分类背包"
@@ -759,14 +773,166 @@ local function CurrencyData()
 end
 
 --- n 项明细 + 剩余折成 `+N`，和信息栏 `C:BarText` 是同一种写法。
+--- §8.82：Snapshot 首位是金币基线，它的 display 已经是 g/s/c，不能走万/亿缩写。
 local function BuildCurrencyText(entries, C, n)
     local parts = {}
     for i = 1, n do
         parts[#parts + 1] = string.format("%s %s",
-            entries[i].name, C:FormatQuantity(entries[i].quantity))
+            entries[i].name, entries[i].display or C:FormatQuantity(entries[i].quantity))
     end
     if #entries > n then parts[#parts + 1] = "+" .. (#entries - n) end
     return table.concat(parts, " · ")
+end
+
+--- 图标模式的缓存签名：短数量 / 图标 / 名称任一变化都要重排（轮询每 0.5s 走到）。
+local function CurrencyIconSignature(entries, C)
+    local parts = { "n=" .. #entries }
+    for i = 1, math.min(#entries, CURRENCY_MAXCELL) do
+        local e = entries[i]
+        parts[#parts + 1] = string.format("%s|%s|%s",
+            tostring(C:IconOf(e)), C:ShortQuantity(e), tostring(e.name))
+    end
+    return table.concat(parts, ";")
+end
+
+local function CurrencyCell(entry, C)
+    return {
+        icon        = C:IconOf(entry),
+        text        = C:ShortQuantity(entry),
+        label       = tostring(entry.name or "?"),
+        full        = entry.display or C:FormatQuantity(entry.quantity),
+        maxQuantity = entry.maxQuantity,
+    }
+end
+
+--- 按可用宽度挑能放下的格数。measure(text) 由渲染方用 FontString 实测；
+--- 量不到（受限窗口返回机密值）当 0 ⇒ 当作放得下，宁可显示全也别因测量失败清空。
+--- 返回 n, cells, widths, tail（tail = 折成 "+N" 的项数）。
+local function FitCurrencyIcons(entries, C, avail, measure)
+    local cells = {}
+    for i = 1, math.min(#entries, CURRENCY_MAXCELL) do
+        cells[i] = CurrencyCell(entries[i], C)
+    end
+    local more = #entries - #cells
+    for n = #cells, 1, -1 do
+        local widths, total = {}, 0
+        for i = 1, n do
+            local w = CURRENCY_ICON + CURRENCY_IGAP + (measure(cells[i].text) or 0)
+            widths[i] = w
+            total = total + w + (i > 1 and CURRENCY_CGAP or 0)
+        end
+        local tail = more + (#cells - n)
+        if tail > 0 then
+            local w = measure("+" .. tail) or 0
+            widths[n + 1] = w
+            total = total + CURRENCY_CGAP + w
+        end
+        if total <= avail then return n, cells, widths, tail end
+    end
+    return 0, cells, {}, more + #cells
+end
+
+--- 懒建一格。Button 才收得到 OnEnter；拖动转发给窗口，标题行仍整条可拖。
+local function EnsureCurrencyCell(win, index)
+    win.currencyCells = win.currencyCells or {}
+    local cell = win.currencyCells[index]
+    if cell then return cell end
+
+    cell = Widget:CreateFrame(nil, win, 1, CURRENCY_ICON, nil, "Button")
+    cell:EnableMouse(true)
+    cell:RegisterForDrag("LeftButton")
+    cell:SetScript("OnDragStart", function() win:StartMoving() end)
+    cell:SetScript("OnDragStop", function()
+        win:StopMovingOrSizing()
+        SaveWindowPosition(win)
+    end)
+
+    cell.icon = Widget:Icon(cell, CURRENCY_ICON)
+    cell.icon:SetPoint("LEFT", cell, "LEFT", 0, 0)
+    cell.text = Widget:Font(cell, 11, "pixel", "bright", "LEFT")
+    cell.text:SetPoint("LEFT", cell.icon, "RIGHT", CURRENCY_IGAP, 0)
+    cell.text:SetWordWrap(false)
+
+    cell:SetScript("OnEnter", function(self)
+        local tip, data = _G.GameTooltip, self.currencyData
+        if not tip or not data then return end
+        pcall(tip.SetOwner, tip, self, "ANCHOR_TOP")
+        pcall(tip.ClearLines, tip)
+        pcall(tip.AddLine, tip, data.label, 1, 1, 1)
+        local value = data.full
+        if type(data.maxQuantity) == "number" and data.maxQuantity > 0 then
+            value = value .. " / " .. tostring(data.maxQuantity)
+        end
+        pcall(tip.AddLine, tip, value, 0.7, 0.9, 1)
+        pcall(tip.Show, tip)
+    end)
+    cell:SetScript("OnLeave", function()
+        local tip = _G.GameTooltip
+        if tip then pcall(tip.Hide, tip) end
+    end)
+
+    win.currencyCells[index] = cell
+    return cell
+end
+
+local function HideCurrencyCells(win)
+    if not win.currencyCells then return end
+    for _, cell in ipairs(win.currencyCells) do cell:Hide() end
+end
+
+local function RenderCurrencyIcons(win, entries, C, avail, rightX)
+    local measureFS = win.currencyMeasure
+    local function measure(text)
+        if not measureFS then return #tostring(text) * 7 end
+        pcall(measureFS.SetText, measureFS, text)
+        local ok, w = pcall(measureFS.GetStringWidth, measureFS)
+        w = ok and Secrets.Number(w) or nil
+        -- 隐藏的 FontString 在个别客户端可能量不出宽度；按 11px 点阵字保守估算，
+        -- 宁可少放一格，也不能让数字画出格外跟下一格叠在一起。
+        if not w or w <= 0 then return #tostring(text) * 7 end
+        return w
+    end
+
+    local n, cells, widths, tail = FitCurrencyIcons(entries, C, avail, measure)
+    local total = n + (tail > 0 and 1 or 0)
+    for i = 1, total do EnsureCurrencyCell(win, i) end
+    HideCurrencyCells(win)                 -- 下面按本次算出的格数逐个扶正
+    win.currencyRendered = total
+
+    local cursor = rightX
+    for i = 1, n do
+        local cell, data = win.currencyCells[i], cells[i]
+        local w = widths[i] or (CURRENCY_ICON + CURRENCY_IGAP)
+        cell:SetSize(w, CURRENCY_ICON)
+        cell:SetPoint("TOPRIGHT", win, "TOPRIGHT", cursor, -5)
+        if data.icon then
+            pcall(cell.icon.SetTexture, cell.icon, data.icon)
+            cell.icon:Show()
+            cell.text:SetPoint("LEFT", cell.icon, "RIGHT", CURRENCY_IGAP, 0)
+        else
+            -- 货币页还没给出 iconFileID：隐藏图标只留数字，名称仍在 tooltip 里。
+            cell.icon:Hide()
+            cell.text:SetPoint("LEFT", cell, "LEFT", 0, 0)
+        end
+        cell.text:SetText(data.text)
+        cell.currencyData = data
+        cell:Show()
+        cursor = cursor - w - CURRENCY_CGAP
+    end
+    if tail > 0 then
+        local cell = win.currencyCells[n + 1]
+        local w = widths[n + 1] or 20
+        cell:SetSize(w, CURRENCY_ICON)
+        cell:SetPoint("TOPRIGHT", win, "TOPRIGHT", cursor, -5)
+        cell.icon:Hide()
+        cell.text:SetPoint("LEFT", cell, "LEFT", 0, 0)
+        cell.text:SetText("+" .. tail)
+        cell.currencyData = {
+            label = "还有 " .. tail .. " 项",
+            full  = "完整清单：悬停信息栏货币格",
+        }
+        cell:Show()
+    end
 end
 
 --- 标题行宽度有限：从"全部"往下减项，用 FontString 实测宽度挑第一个放得下的版本。
@@ -784,21 +950,26 @@ local function FittedCurrencyText(fs, entries, C, avail)
     return ""
 end
 
+--- 两套排版共用一次「清空」：窗口隐藏 / 配置关掉 / 清单为空时都收干净并作废缓存。
+local function ClearCurrencyTitle(win)
+    win.currencyKey = nil
+    if win.currencyText then win.currencyText:Hide() end
+    HideCurrencyCells(win)
+end
+
 local function UpdateCurrencyTitle(win)
     local fs = win and win.currencyText
     if not fs then return end
 
     local C = CurrencyData()
     if not C or Setting("currencyTitle") == false or not win:IsShown() then
-        win.currencyFull, win.currencyAvail = nil, nil
-        fs:Hide()
+        ClearCurrencyTitle(win)
         return
     end
 
     local ok, entries = pcall(C.Snapshot, C)
     if not ok or type(entries) ~= "table" or #entries == 0 then
-        win.currencyFull, win.currencyAvail = nil, nil
-        fs:Hide()
+        ClearCurrencyTitle(win)
         return
     end
 
@@ -814,19 +985,38 @@ local function UpdateCurrencyTitle(win)
     if titleW <= 0 then titleW = isBank and 96 or 52 end
     local avail = math.max(40, winW - reserve - 18 - titleW - 12)
 
-    -- 轮询每 0.5s 会走到这里：文本与可用宽度都没变就别重排（SetText 会触发布局）。
-    local full = BuildCurrencyText(entries, C, math.min(#entries, 8))
-    if win.currencyFull == full and win.currencyAvail == avail then
-        if not fs:IsShown() then fs:Show() end
+    -- 轮询每 0.5s 会走到这里：内容 / 模式 / 可用宽度都没变就别重排（SetText 触发布局）。
+    -- key 里带模式前缀，`icons on|off` 切换后即使内容相同也会重画。
+    local useIcons = Setting("currencyIcons") ~= false
+    local signature = useIcons and CurrencyIconSignature(entries, C)
+        or BuildCurrencyText(entries, C, math.min(#entries, 8))
+    local key = (useIcons and "i|" or "t|") .. signature .. "|" .. avail
+    if win.currencyKey == key then
+        if useIcons then
+            for i = 1, win.currencyRendered or 0 do
+                if win.currencyCells and win.currencyCells[i] then
+                    win.currencyCells[i]:Show()
+                end
+            end
+        elseif not fs:IsShown() then
+            fs:Show()
+        end
         return
     end
-    win.currencyFull, win.currencyAvail = full, avail
+    win.currencyKey = key
 
-    fs:SetWidth(avail)
-    if FittedCurrencyText(fs, entries, C, avail) ~= "" then
-        fs:Show()
-    else
+    if useIcons then
         fs:Hide()
+        RenderCurrencyIcons(win, entries, C, avail, -reserve)
+    else
+        HideCurrencyCells(win)
+        win.currencyRendered = 0
+        fs:SetWidth(avail)
+        if FittedCurrencyText(fs, entries, C, avail) ~= "" then
+            fs:Show()
+        else
+            fs:Hide()
+        end
     end
 end
 
@@ -1005,11 +1195,43 @@ local function DesignateMaster()
     end
 end
 
+--- 锚框「在」≠「能用」（2026-11-10 作者判例）：QuestTracker 关掉时只是
+--- `tracker:Hide()`，全局框 `MonetUIQuestTracker` 依然在 `_G` 里；模块还没建框时
+--- 则压根没有这个全局名，或者框建了但还没布局。这两种都不能往上锚 ——
+--- 隐藏/无矩形的框会把整列背包算到屏幕边缘。与 Utils/Mover.lua 的 AnchorUsable
+--- 同口径：IsShown + 有效矩形 + 矩形落在屏幕内。
+local function TrackerUsable(frame)
+    if not frame or type(frame.GetRect) ~= "function"
+        or type(frame.IsShown) ~= "function" then return false end
+    local okShown, shownNow = pcall(frame.IsShown, frame)
+    if not okShown or not shownNow then return false end
+    local ok, left, bottom, width, height = pcall(frame.GetRect, frame)
+    if not ok or type(left) ~= "number" or type(bottom) ~= "number"
+        or type(width) ~= "number" or type(height) ~= "number"
+        or width <= 0 or height <= 0 then return false end
+    local ui = _G.UIParent
+    local sw = (ui and ui.GetWidth and ui:GetWidth()) or 0
+    local sh = (ui and ui.GetHeight and ui:GetHeight()) or 0
+    if sw > 0 and sh > 0
+        and (left + width < 0 or left > sw or bottom + height < 0 or bottom > sh) then
+        return false
+    end
+    return true
+end
+
+--- 锚框可用时返回它的屏幕左边缘，用于把「相对偏移」钳到屏幕内。
+local function TrackerLeft(frame)
+    if not frame or type(frame.GetLeft) ~= "function" then return nil end
+    local ok, left = pcall(frame.GetLeft, frame)
+    if ok and type(left) == "number" then return left end
+    return nil
+end
+
 --- Tile the visible, not-yet-dragged windows in category order from the anchor.
 --- 首选布局：side="right" —— 分类背包的 RIGHT 对齐 QuestTracker 的 LEFT，
 --- 间隔 anchor.x（负数 = QuestTracker 左边），垂直从 anchor.y 起一列堆下来。
---- 如果 anchor.frame 不存在（QuestTracker 模块关了 / 还没初始化），降级到
---- "屏幕中间 x=屏幕宽度-280，顶部 y=-28 往下堆" —— 保证无论如何都不会跑出屏幕。
+--- 锚框不存在 / 被隐藏 / 未布局时降级到屏幕右侧一列，并把 x/y 钳在屏幕内 ——
+--- 保证关掉任务追踪、小地图，或读图后锚框还没出生，背包都不会跑到边缘外。
 local function LayoutWindows(mode)
     local anchor = Setting("anchor") or {}
     local spacing = 14
@@ -1030,13 +1252,18 @@ local function LayoutWindows(mode)
     end
 
     local base = _G[anchor.frame]
-    local sideRight = (anchor.side == "right" and base)
+    local sideRight = (anchor.side == "right" and TrackerUsable(base))
 
     if sideRight then
-        -- 贴 base 左边，垂直一列。
+        -- 贴 base 左边，垂直一列。锚框可用时也要防「列往左顶出屏幕」：
+        -- 窗口是 TOPRIGHT 锚 base 的 TOPLEFT，最宽那扇的左边缘须留 16px。
         local x = anchor.x or -18
         if mode == "bank" then
             x = x - bagsColumnWidth() - spacing
+        end
+        local baseLeft = TrackerLeft(base)
+        if baseLeft then
+            x = math.max(x, 16 + bagsColumnWidth() - baseLeft)
         end
         local y = anchor.y or -28
         local rowH = 0
@@ -1053,14 +1280,19 @@ local function LayoutWindows(mode)
         return
     end
 
-    -- 降级：QuestTracker 帧不在，屏幕中间一列。
+    -- 降级：锚框不可用（模块关掉 / 还没出生 / 没布局），屏幕右侧一列。
     local UIParent = _G.UIParent
-    local screenW = UIParent and UIParent.GetWidth and UIParent:GetWidth() or 1920
+    local screenW = (UIParent and UIParent.GetWidth and UIParent:GetWidth()) or 1920
+    local columnW = bagsColumnWidth()
+    local margin = 16
     local originX = screenW - 300   -- 屏幕右边往里 300px（约 Minimap 列 + 一点）
     if mode == "bank" then
-        originX = originX - bagsColumnWidth() - spacing
+        originX = originX - columnW - spacing
     end
-    local originY  = anchor.y or -28
+    -- 整列右边界 = originX + columnW：钳到屏幕内，左边界至少留 margin。
+    local maxX = math.max(margin, screenW - columnW - margin)
+    originX = math.max(margin, math.min(originX, maxX))
+    local originY = math.min(anchor.y or -28, -margin)
     local rowH = 0
     for _, cat in ipairs(ORDERED) do
         local key = (mode == "bank") and ("bank:" .. cat.key) or cat.key
@@ -1073,22 +1305,29 @@ local function LayoutWindows(mode)
         end
     end
 
-    -- 降级布局：说明 QuestTracker 帧还没出生。PollWatch 低频轮询，帧一出来
-    -- 就把窗口贴回正确位置，然后**自我注销** —— 一次性补扫，不该永久空转。
-    if not _G.MonetUIQuestTracker then
-        if not Marked(_G.UIParent, "bagsRetry") then
-            Mark(_G.UIParent, "bagsRetry", true)
-            local retry
-            retry = function()
-                if _G.MonetUIQuestTracker and shown then
-                    Widget:Unwatch(_G.UIParent, retry)
-                    Mark(_G.UIParent, "bagsRetry", nil)
-                    LayoutWindows()
+    -- 补扫：只要这次是降级落点，就等锚框「重新可用」（模块重开 / 面板重建 /
+    -- 首帧布局完成）再贴回首选布局并自我注销。旧版只在 `_G` 里没这个框时挂，
+    -- 模块关掉时框还在但 hidden ⇒ 永远等不到，背包就一直留在屏幕边缘。
+    -- 最多等 30 次（低频 2s = 1 分钟），模块一直关着就不空转；开关本身走
+    -- MONETUI_MODULE_STATE_CHANGED 即时重排。
+    if not Marked(_G.UIParent, "bagsRetry") then
+        Mark(_G.UIParent, "bagsRetry", true)
+        local retry, tries = nil, 0
+        retry = function()
+            if not shown then return end
+            tries = tries + 1
+            local ready = TrackerUsable(_G[anchor.frame])
+            if ready or tries >= 30 then
+                Widget:Unwatch(_G.UIParent, retry)
+                Mark(_G.UIParent, "bagsRetry", nil)
+                if ready then
+                    LayoutWindows("bags")
+                    LayoutWindows("bank")
                     RestoreDragged()
                 end
             end
-            Widget:PollWatch(_G.UIParent, retry, 2)
         end
+        Widget:PollWatch(_G.UIParent, retry, 2)
     end
 end
 
@@ -1222,6 +1461,16 @@ local function BlizzardBagFrames()
     return frames
 end
 
+--- 开关边沿的**信号源**：只认真容器框，不认货币条。
+--- BackpackTokenFrame 是 ContainerFrameCombinedBags 的子框。玩家在暴雪「货币 → 在背包显示」
+--- 勾过任意货币后它常驻 IsShown=true；父框 Hide 不改变子框自身的 IsShown
+--- （2026-11-10 实机：容器框全 Hide 后它仍 true）。把它算进 anyShown 会让下降沿永远不来，
+--- 症状就是「勾了货币显示之后按 B 关不掉背包」。它仍留在 BlizzardBagFrames() 里参与
+--- 停车（alpha 0 + 整树禁鼠标），否则一排代币按钮会浮在看不见的背包上收鼠标 / 弹 tooltip。
+local function IsBagSignalFrame(frame)
+    return frame ~= nil and frame ~= _G.BackpackTokenFrame
+end
+
 --- ✕ 的实际动作：收整套。先把还显示着的暴雪框 Hide 一次 —— 停车只压 alpha、从不 Hide，
 --- 此刻暴雪框仍 IsShown；不先收它，守卫的边沿会停在"开"，玩家要按两下 B 才能重新打开。
 --- 战斗中不能 Hide 暴雪框（里面有受保护子按钮，会被拦），那就只收我们的窗，
@@ -1236,8 +1485,12 @@ CloseAllBags = function(mode)
         return
     end
     if not InCombat() then
+        -- 只收真容器框：BackpackTokenFrame 的显隐归暴雪（玩家勾的「在背包显示」），
+        -- 我们替它 Hide 既没必要，还会被暴雪自己 Show 回来制造额外抖动。
         for _, frame in ipairs(BlizzardBagFrames()) do
-            if frame and frame.IsShown and frame:IsShown() then pcall(frame.Hide, frame) end
+            if IsBagSignalFrame(frame) and frame.IsShown and frame:IsShown() then
+                pcall(frame.Hide, frame)
+            end
         end
     end
     M:Toggle(false)
@@ -1308,7 +1561,8 @@ local function SweepBlizzardBags(allowMouse)
     for _, frame in ipairs(BlizzardBagFrames()) do
         if frame and frame.IsShown then
             local isShown = frame:IsShown()
-            if isShown then anyShown = true end
+            -- 边沿只认真容器框：货币条常驻 IsShown 时不能顶住下降沿（见 IsBagSignalFrame）。
+            if isShown and IsBagSignalFrame(frame) then anyShown = true end
             local rec = parked[frame]
             if rec then
                 if frame.GetAlpha and frame:GetAlpha() ~= 0 then
@@ -1633,7 +1887,9 @@ function M:Initialize()
     -- 战斗中不动暴雪背包（父框里是受保护子按钮）：robust 见 bagsVisualOpen 那行。
     local restoredOpen = false
     for _, frame in ipairs(BlizzardBagFrames()) do
-        if frame and frame.IsShown and frame:IsShown() then
+        -- 登录复位同样只认真容器框：勾了货币显示后 BackpackTokenFrame 会常驻 shown，
+        -- 若算进来会被误判成「上次开着背包退出」，还会白 Hide 一次玩家勾的显示。
+        if IsBagSignalFrame(frame) and frame.IsShown and frame:IsShown() then
             restoredOpen = true
             if not InCombat() then pcall(frame.Hide, frame) end
         end
@@ -1690,6 +1946,19 @@ function M:Initialize()
     -- 货币变化不带 BAG_UPDATE：只重画「剩余空间」标题行那一行字，别为几个数字全量 Rebuild。
     EventBus:Register("CURRENCY_DISPLAY_UPDATE", RefreshCurrencyTitles)
     EventBus:Register("CHAT_MSG_CURRENCY", RefreshCurrencyTitles)
+    -- 金币是标题行首项，但它走 GetMoney() 不走货币页事件：捡钱 / 花 money 要立刻更新，
+    -- 不能等 0.5s 轮询（信息栏的「金钱」块同款口径）。
+    EventBus:Register("PLAYER_MONEY", RefreshCurrencyTitles)
+    -- 模块开关会隐藏/重建具名锚框：关掉任务追踪时分类背包必须**立刻**改用
+    -- 屏幕内降级落点，重开时贴回追踪框左边（2026-11-10 判例）。只重排，
+    -- RestoreDragged 会在之后把玩家拖过的窗口放回原处。
+    EventBus:Register("MONETUI_MODULE_STATE_CHANGED", function(_, name)
+        if name ~= "QuestTracker" and name ~= "Minimap" then return end
+        if not shown then return end
+        LayoutWindows("bags")
+        LayoutWindows("bank")
+        RestoreDragged()
+    end)
     -- 读图回来缓存可能失效：开着窗就强制重扫（事件不补发，InfoBar 同款教训）。
     EventBus:Register("PLAYER_ENTERING_WORLD", function()
         if shown then
@@ -1731,20 +2000,36 @@ function M:HandleCommand(rest)
         SortBagsNow()   -- 与标题行「整理」钮同一条路径；键盘/宏也能用
         return true
     end
-    if rest == "currency on" or rest == "currency off" or rest == "currency" then
-        if rest == "currency" then
-            ns:Print("[mui bags currency] 标题行货币显示 = "
-                .. (Setting("currencyTitle") ~= false and "on" or "off") .. "（on|off 可切换）")
-            return true
-        end
+    if rest == "currency" then
+        ns:Print("[mui bags currency] 标题行货币显示 = "
+            .. (Setting("currencyTitle") ~= false and "on" or "off") .. "（on|off 可切换）")
+        ns:Print("[mui bags currency] 标题行图标模式 = "
+            .. (Setting("currencyIcons") ~= false and "on" or "off")
+            .. "（icons on|off 可切换；on = 图标 + 短数量，名称悬停可见）")
+        return true
+    end
+    -- 两套排版各自一个开关，都写作废 key 后强制重画（key 带模式前缀，切换必生效）。
+    if rest == "currency icons on" or rest == "currency icons off" then
+        local on = (rest == "currency icons on")
+        local db = ns:DB()
+        db.bags = db.bags or {}
+        db.bags.currencyIcons = on
+        for _, win in pairs(windows) do win.currencyKey = nil end
+        RefreshCurrencyTitles()
+        ns:Print("[mui bags currency] 标题行图标模式 = " .. (on and "on" or "off")
+            .. "（" .. (on and "图标 + 短数量，名称悬停可见" or "名称 + 完整数量") .. "）")
+        return true
+    end
+    if rest == "currency on" or rest == "currency off" then
         local on = (rest == "currency on")
         local db = ns:DB()
         db.bags = db.bags or {}
         db.bags.currencyTitle = on
         for _, win in pairs(windows) do
-            if win.currencyText then
-                win.currencyFull, win.currencyAvail = nil, nil
-                if not on then win.currencyText:Hide() end
+            win.currencyKey = nil
+            if not on then
+                if win.currencyText then win.currencyText:Hide() end
+                HideCurrencyCells(win)
             end
         end
         if on then RefreshCurrencyTitles() end
@@ -1998,6 +2283,12 @@ function M:Refresh()
     bagSig, bankSig = nil, nil
     Rebuild("bags")
     if bankOpen then Rebuild("bank") end
+end
+
+--- 只重画标题行（配置面板 / 命令切图标模式时用），不碰格子布局。
+function M:RefreshCurrencyTitles()
+    for _, win in pairs(windows) do win.currencyKey = nil end
+    RefreshCurrencyTitles()
 end
 
 function M:SetEnabled(enabled)

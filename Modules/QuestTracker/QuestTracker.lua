@@ -71,7 +71,14 @@ local function ApplyDefaultPosition()
     tracker:ClearAllPoints()
     local minimap = ns:GetModule("Minimap")
     local panel = minimap and minimap.panel
-    if panel then
+    -- 面板存在 ≠ 能用：小地图模块关掉时它只是 SetShown(false)，锚上去等于
+    -- 锚到一个看不见的位置（Tooltip.PlaceMinimap 早有同款判例）。11-10 修。
+    local usable = false
+    if panel and type(panel.IsShown) == "function" then
+        local ok, shownPanel = pcall(panel.IsShown, panel)
+        usable = ok and shownPanel and true or false
+    end
+    if usable then
         tracker:SetPoint("RIGHT", panel, "RIGHT", 0, 0)
     else
         -- Minimap module off: the cluster keeps its parked inset, so this lands on the same edge.
@@ -525,6 +532,14 @@ function M:Initialize()
         QueueRender()
     end)
     EventBus:Register("ZONE_CHANGED_NEW_AREA", function() SuppressBlizzard() end)
+    -- 小地图开关会改变默认锚（panel）的可用性：没被玩家拖过就重贴一次，
+    -- 别停在隐藏面板的位置；存档里有拖拽位置则一律不碰。
+    EventBus:Register("MONETUI_MODULE_STATE_CHANGED", function(_, name)
+        if name ~= "Minimap" or not tracker or not enabled then return end
+        local stored = ns:DB().questTracker
+        if stored and stored.point then return end
+        ApplyDefaultPosition()
+    end)
     EventBus:Register("ADDON_LOADED", function(_, name)
         if name == "Blizzard_ObjectiveTracker" then SuppressBlizzard() end
     end)

@@ -1146,6 +1146,21 @@ function M:Initialize()
 
     self:RegisterEvents()
     self:UpdateAll()
+
+    -- 位置兜底：Initialize 里每个框都是「先摆位、再注册 visibility 驱动」，轮到
+    -- `targettarget` 时 `target` 框可能还没被驱动显示 / 还没布局（GetRect 无效），
+    -- 那一拍会落到 fallback。所有驱动都注册完之后的下一帧再重贴一次整组，
+    -- 两种登录时序都能收敛到 `LEFT / target / RIGHT, 6, 0`。
+    -- Mover.ApplyOne 自带战斗守卫（战斗中排到 ns:AfterCombat），不会吃 ADDON_ACTION_BLOCKED；
+    -- 重贴读 store()，玩家拖过的位置不会被抹掉。整段 pcall，诊断/补偿绝不打断登录。
+    local function ReapplyPositions()
+        pcall(function() ns.Mover:ApplyGroup("unitframes") end)
+    end
+    if type(_G.C_Timer) == "table" and type(_G.C_Timer.After) == "function" then
+        pcall(_G.C_Timer.After, 0, ReapplyPositions)
+    else
+        ReapplyPositions()
+    end
 end
 
 --- 安全单位按钮的显隐：走 visibility 驱动（战斗中不能由我们 SetShown ——

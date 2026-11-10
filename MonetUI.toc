@@ -2,11 +2,12 @@
 ## Title: MonetUI
 ## Notes: Monet-style UI addon - adaptive Impressionist color engine integration
 ## Author: EastHillGu
-## Version: 0.13.1
+## Version: 0.13.2
 ## Category: Interface
 ## IconTexture: Interface\AddOns\MonetUI\Assets\Textures\monet_addon_icon.blp
 ## X-Website: https://github.com/EastHillGu/MonetUI
 ## X-Curse-Project-ID: 1791156
+## X-Dev-Build: dev
 ## SavedVariables: MonetUIDB
 
 # ============================================================
@@ -21,6 +22,10 @@ Libs\Libs.xml
 
 # Utilities (Math Secrets Media EventBus Color Widget Layout Mover Skin)
 Utils\Utils.xml
+
+# 启动前置配置：静态基线在加载期固定，编辑模式布局在模块 Initialize 之前一次性对齐。
+# 必须在 Core.lua 之前 —— 它要在 PLAYER_LOGIN 的 StartModules 门闸上挂回调。
+Init.lua
 
 # Core (SavedVariables / 模块注册与生命周期 / 主题管线 / 斜杠命令)
 Core.lua

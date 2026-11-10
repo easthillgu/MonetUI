@@ -32,7 +32,9 @@ const dest = destAt >= 0
     : 'C:\\Users\\EastHillGu\\Documents\\Blizzards\\WOWFOREVER\\World of Warcraft\\_forever_';
 
 const DIRS = ['Assets', 'Libs', 'Utils', 'Config', 'Modules'];
-const FILES = ['MonetUI.toc', 'Core.lua', 'LICENSE', 'THIRD-PARTY-NOTICES.txt'];
+// Init.lua is loaded from the repo root by the TOC (before Core.lua); keep it in
+// the deploy/sync manifest or the installed copy silently misses the bootstrap.
+const FILES = ['MonetUI.toc', 'Init.lua', 'Core.lua', 'LICENSE', 'THIRD-PARTY-NOTICES.txt'];
 const installed = path.join(dest, 'Interface', 'AddOns', 'MonetUI');
 
 const hash = (file) => crypto.createHash('md5').update(fs.readFileSync(file)).digest('hex');

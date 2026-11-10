@@ -19,9 +19,9 @@ end
 ---
 --- 映射按"数据住在哪 / 面板有没有合法开口"来定，不是随手分配（11-07 晚间按作者指示定稿）：
 ---   金钱 / 货币 → **我们自己的背包窗**（钱数就显示在背包窗底部，代币的实物也在背包里）；
----   耐久 → **角色界面**（定向代点小菜单 `OpenTargeted`：贴着被点那格、只留「角色」一行，
----     第二击到面板 —— 数据本身仍只能从背包物品读，见 `DurabilityUpdate` 上方的 1.60 API 注释）。
----     不许直调 `_G.ToggleCharacter`：那是 11-05 开服 P0 的原路（`InfoBar.lua` 头注有判例）；
+---   耐久 → **只读**（11-10 作者指示）：取消点击，不弹小菜单、不开角色界面。
+---     这格只用来悬停看平均耐久；数据本身仍只能从背包物品读（见下方 1.60 API 注释）。
+---     `MicroMenu.lua` 的 `character` 动作留给微菜单自己用，不再由信息栏格子触发。
 ---   延迟/帧率/内存 → **设置**（`Settings.OpenToCategory`，纯 C_*，无暴雪 Lua 链）；
 ---   好友 → **直开社交窗**（`friends` → `_G.ToggleFriendsFrame()`）：本客户端没有好友/社交的
 ---     原生微按钮（实机探针 12 颗里没有），也没有纯 C_* 开口（`C_FriendList.ShowFriends()` 实测
@@ -36,7 +36,6 @@ end
 local CLICK_HINT = {
     bags      = "打开背包",
     settings  = "打开设置",
-    character = "打开角色界面",
     friends   = "打开好友列表",
     dock      = "打开快捷入口（角色 / 任务 / 天赋 …）",
 }
@@ -123,11 +122,12 @@ M:RegisterBlock({
 -- containerIndex: 0-4（角色背包 + 4 个背包）
 -- slotIndex: 背包内的槽位
 -- 已装备物品的耐久无法直接查询，需要实机验证是否有其他 API。
-local function DurabilityUpdate(block)
+--- 平均耐久（取件平均）：update 与 tooltip 共用一次计算，悬停不必再扫一遍背包。
+--- 返回 (百分比, 件数)；API 不可用或一件都读不出时两个值都是 nil。
+local function AverageDurability()
     local api = _G.C_Container
     if not api or type(api.GetContainerItemDurability) ~= "function" then
-        M:SetText(block, "")
-        return
+        return nil
     end
     
     local sum, count = 0, 0
@@ -155,19 +155,30 @@ local function DurabilityUpdate(block)
         end
     end
     
-    if count == 0 then
-        M:SetText(block, "")
-        return
-    end
-    
-    M:SetText(block, string.format("%.0f%%", sum / count * 100))
+    if count == 0 then return nil end
+    return sum / count * 100, count
 end
 
-local function DurabilityTooltip()
+local function DurabilityUpdate(block)
+    local avg, count = AverageDurability()
+    -- 缓存在注册表上：tooltip 挂在 OnEnter，早于下一次 update 也要能读到当前值。
+    block.avgPercent, block.avgCount = avg, count
+    M:SetText(block, avg and string.format("%.0f%%", avg) or "")
+end
+
+--- 只读格：悬停给出平均耐久与取件数；不注册 onClick ⇒ 信息栏也不再补「点击：」提示行。
+local function DurabilityTooltip(block)
     local tip = Tip()
     if not tip then return end
     pcall(tip.AddLine, tip, "装备耐久", 0.6, 0.8, 1)
-    pcall(tip.AddLine, tip, "取件平均值；数值越低修理越贵。", 0.8, 0.8, 0.8)
+    local avg = block and block.avgPercent
+    if avg then
+        pcall(tip.AddLine, tip, string.format("平均耐久 %.0f%%（%d 件取件平均）",
+            avg, block.avgCount or 0), 1, 1, 1)
+    else
+        pcall(tip.AddLine, tip, "平均耐久：读不出", 0.8, 0.8, 0.8)
+    end
+    pcall(tip.AddLine, tip, "数值越低修理越贵。", 0.8, 0.8, 0.8)
 end
 
 M:RegisterBlock({
@@ -177,16 +188,25 @@ M:RegisterBlock({
     events   = { "UPDATE_INVENTORY_DURABILITY", "PLAYER_ENTERING_WORLD" },
     update   = DurabilityUpdate,
     tooltip  = DurabilityTooltip,
-    onClick  = BlockClick("character"),   -- 贴格小菜单只留「角色」一行，第二击开角色界面（直调 ToggleCharacter 是 P0 判例）
+    -- 11-10 作者指示：只读格，取消点击（不注册 onClick、不弹角色小菜单）。
 })
 
 -- 货币块的取值全在 Currency.lua（角色面板「货币」子标签那张表 + 自定义 ID 清单）。
 -- 旧实现只读 isShowInBackpack、条上硬编码最多 2 项，玩家没法自己挑要看哪些代币；
 -- 现在三种来源共用一次 Snapshot()：条身读前 N 项，提示框读全量，右键弹勾选面板。
+-- §8.82：Snapshot 首位是金币基线；信息栏另有独立「金钱」块，条身不重复显示它，
+-- 玩家把金钱块关掉后这里自动补上。没有其它货币时该格照旧隐藏（SetText ""）。
 local function CurrencyUpdate(block)
     local currency = M.Currency
     if not currency then M:SetText(block, "") return end
     local entries = currency:Snapshot()
+    if M:BlockEnabled("gold") then
+        local rest = {}
+        for i = 1, #entries do
+            if not entries[i].isGold then rest[#rest + 1] = entries[i] end
+        end
+        entries = rest
+    end
     if #entries == 0 then M:SetText(block, "") return end
     M:SetText(block, currency:BarText(entries))
 end
@@ -199,20 +219,35 @@ local function CurrencyTooltip()
 
     local entries, missing, mode = currency:Snapshot()
     pcall(tip.AddLine, tip, "货币监控 · " .. currency:ModeLabel(mode), 0.6, 0.8, 1)
+    pcall(tip.AddLine, tip, "默认只追踪金币；其它货币自己添加", 0.8, 0.8, 0.8)
     if #entries == 0 then
-        pcall(tip.AddLine, tip, "当前没有可显示的货币。", 0.8, 0.8, 0.8)
+        pcall(tip.AddLine, tip, "金币当前读不到。", 0.8, 0.8, 0.8)
     else
         local shown = math.min(#entries, 30)
         for i = 1, shown do
             local entry = entries[i]
-            local value = currency:FormatQuantity(entry.quantity)
-            if entry.maxQuantity and entry.maxQuantity > 0 then
+            -- 金币的 display 已是 g/s/c，别走 FormatQuantity 的万/亿缩写。
+            local value = entry.display or currency:FormatQuantity(entry.quantity)
+            if not entry.isGold and entry.maxQuantity and entry.maxQuantity > 0 then
                 value = value .. " / " .. currency:FormatQuantity(entry.maxQuantity)
             end
             pcall(tip.AddDoubleLine, tip, entry.name, value, 1, 1, 1, 1, 1, 1)
         end
         if #entries > shown then
             pcall(tip.AddLine, tip, string.format("……另有 %d 项", #entries - shown), 0.8, 0.8, 0.8)
+        end
+    end
+    -- §8.82「其它的做提示可以自己添加」：把没监控的货币连同 ID 列出来，
+    -- 玩家不用先去猜 ID，右键勾选或用 add 命令都行。all 模式本来就全显示，不列。
+    if mode ~= "all" then
+        local suggestions = currency:Suggestions(5)
+        if #suggestions > 0 then
+            pcall(tip.AddLine, tip, "可添加（右键勾选 / add 命令）：", 0.6, 0.8, 1)
+            for i = 1, #suggestions do
+                local entry = suggestions[i]
+                pcall(tip.AddDoubleLine, tip, entry.name, "ID " .. tostring(entry.id),
+                    0.9, 0.9, 0.9, 0.6, 0.8, 1)
+            end
         end
     end
     if missing > 0 then
@@ -251,7 +286,7 @@ M:RegisterBlock({
     label      = "货币",
     position   = "LEFT",
     rightClick = true,   -- 右键开货币勾选面板（BuildBlockFrame 会补注册 RightButtonUp）
-    events     = { "CURRENCY_DISPLAY_UPDATE", "CHAT_MSG_CURRENCY", "PLAYER_ENTERING_WORLD" },
+    events     = { "CURRENCY_DISPLAY_UPDATE", "CHAT_MSG_CURRENCY", "PLAYER_MONEY", "PLAYER_ENTERING_WORLD" },
     update     = CurrencyUpdate,
     tooltip    = CurrencyTooltip,
     onUpdate   = CurrencyOnUpdate,

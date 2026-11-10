@@ -56,7 +56,8 @@ function M:Show(version)
     end
     ns:Print(("|cffffd100MonetUI 已更新到 %s|r —— 本版要点："):format(version))
     for _, line in ipairs(notes) do ns:Print("  · " .. line) end
-    ns:Print("  输入 |cffffd100/mui|r 打开配置；出问题先跑 |cffffd100/mui report|r。")
+    ns:Print("  输入 |cffffd100/mui|r 打开配置"
+        .. (ns.dev and "；出问题先跑 |cffffd100/mui report|r。" or "。"))
     return true
 end
 

@@ -5296,6 +5296,696 @@ CF 上传（`-p 1791156 -g 1.60.1 -n "{package-name}-{project-version}-forever:{
 上传，所以顺手给 0.13.0 那条「小队和团队都贴小地图」加 superseded 注，避免自相矛盾。
 Secret `CF_API_KEY` 沿用（8.73 实跑已验证），不需要第二种令牌。
 
+## 8.78 2026-11-10 目标的目标定位：AnchorUsable 把 visibility 框误判成不可用锚
+
+**问题**：作者问「目标的目标定位是否准确」。静态核查结论：**单位识别准、位置不准**。
+单位层 = `unit="targettarget"`（UnitFrames.lua:918）+ visibility
+`[@targettarget,exists] show; hide`（:44）+ `PLAYER_TARGET_CHANGED` / `UNIT_TARGET("target")`
+两条刷新（:1098-1105）；EventBus 回调首参是事件名（Utils/EventBus.lua:4），参数对得上。
+
+**根因（0.13.1 里 8.74 的回归）**：8.74 新增的 `AnchorUsable(frame)` 硬要求 `IsShown()`，
+但单位框显隐由 visibility state driver 控制，**隐藏是常态**：
+
+- `CreateUnitFrame` 末尾 `frame:Hide()`（:890），`Initialize` 顺序是
+  `Create → PositionFrame → ApplyVisibility`（:1127-1132）。
+- 无目标登录时 `target` 框 hidden；轮到 `targettarget` 定位时 `AnchorUsable=false`
+  → `needFallback=true`（Mover.lua:270-283）。
+- `targettarget` 的 default **没有 fallback** → else 分支把 parent 换成 `UIParent`、
+  `relativePoint=point` ⇒ 实际落点 `LEFT/UIParent/LEFT 6,0`（屏幕左边缘），
+  而不是 Core.lua:113 要的 `LEFT/target/RIGHT 6,0`。
+- `M:UpdateAll()` 只刷内容不重贴（:1009）；全仓只有 `/mui groupframes` 会调全局
+  `Mover:Apply()`（Groups.lua:1584）⇒ 跑过那条命令才「突然正常」。
+- 0.13.0 之前没有 `IsShown` 这层检查，所以是新回归，不是老问题。
+
+**修复**（`Utils/Mover.lua` / `Modules/UnitFrames/UnitFrames.lua`）：
+
+- `AnchorUsable(frame, parentKey)` 分两类：**Mover 登记过的框**只看 `GetRect` 有效
+  （隐藏框布局仍在、锚上去位置是对的）；**具名全局框**（`MonetUIMinimapPanel` 等）
+  仍要求 `IsShown()`，8.74 的团队 fallback 口径不变。用 `entries[parentKey]` 区分。
+- `Initialize` 末尾、所有 `ApplyVisibility` 之后 `C_Timer.After(0, ...)` 重贴一次
+  `Mover:ApplyGroup("unitframes")`：兜住「锚框还没布局 / GetRect 无效」那一格。
+  `ApplyOne` 自带战斗守卫（战斗中排到 `ns:AfterCombat`），重贴读 `store()` 不抹玩家位置；
+  整段 `pcall`，补偿绝不打断登录。
+- 保留 8.74 的「fallback 连 parent 一起换」+ 屏幕外自愈，不动 8.75 的小队/团队口径。
+
+**验证**：全闸门（`luac -p` / api-audit 0 HARD / locals 63 / taint 0 / scheduler-callback-probe /
+check-frame-list / diff --check）全过。从 `Mover.lua` 抽取
+`ParentOf + AnchorUsable + ApplyOne` 原文跑无头桩 7 路径全过：登记框隐藏但 rect 有效 → 仍锚该框；
+具名面板隐藏 → fallback 且 parent=UIParent；具名面板显示 → 锚面板；名字解析不到 / 登记框无 rect
+→ fallback；玩家存档优先；小队默认屏位不变。deploy 128 文件。
+
+**状态**：**修复已过作者实机确认**（2026-11-10 14:22 反馈「现在对了」，`/reload` 后 ToT
+贴在目标框右侧），但仍**未提交、未打 tag、未发版**，TOC / HEAD 仍停在 `0.13.1`。
+同一时点复核 CF：`0.13.1` 已审核通过并成为 **Latest release**（File ID `9525231`，
+Type R / Forever / 1.60.1，5 次下载；0.13.0 6 次、0.12.0 3 次，项目合计 14）⇒ 带 ToT
+位置 bug 的版本已对外且 zip 不能替换，修复要触达用户必须另发 `0.13.2`
+（照 8.69.7 / 8.77 流程，不撤旧版）。
+
+**部署目录旁注**：`sync-check` 报 2 个 EXTRA（`CHANGELOG.md` / `README.md`），是 11-10 08:35
+从 CurseForge 发布包解压留在 AddOn 根目录的文档；deploy 清单（5 目录 + 4 根文件）不含也不删它们。
+代码层 0 missing / 0 stale，实质 in sync。清掉这两个文件即可让退出码回 0 —— 按个人文件安全规矩
+**未擅自删除**。
+
+## 8.79 2026-11-10 模块关闭连锁：具名锚框「在但不可用」把窗口算到屏幕边缘
+
+**问题**：作者要求排查「关掉某个模块（小地图 / 任务追踪）引发的连锁」，实报案例是
+**关掉任务追踪后背包跑到屏幕最边缘**，要求「把落点做好回归」。
+
+**静态排查（5 条链）**：
+
+| # | 链路 | 症状 |
+| --- | --- | --- |
+| ① | `QuestTracker:SetEnabled(false)` 只 `tracker:Hide()`（QuestTracker.lua:542），全局框 `MonetUIQuestTracker` **仍在 `_G`** | 判「框在不在」永远为真 |
+| ② | `Bags.lua:LayoutWindows` 只 `local base = _G[anchor.frame]`，`sideRight` 不判显隐/布局，照旧 `TOPRIGHT → base.TOPLEFT, -18,-28` | 隐藏/未布局框的 rect 把整列窗口算到边缘（作者实报） |
+| ③ | 补扫 `PollWatch` 只在 `not _G.MonetUIQuestTracker`（帧不存在）时挂，且条件含 `and shown` | 模块关掉方向永远等不到「帧出生」，不会贴回 |
+| ④ | `QuestTracker.ApplyDefaultPosition` 用 `if panel then`（小地图关闭时 panel 存在但 hidden）；`Minimap:SetEnabled(false)` 只 `SetShown(false)`，不走 `EnsurePanel` | 任务追踪锚隐藏面板；团队框不重贴（Tooltip.PlaceMinimap 早有 `IsShown` 判例，另两处没跟上） |
+| ⑤ | `Mover.ApplyOne` 无 `fallback` 表时 `relativePoint = point` 后**沿用相对偏移**；二次自愈条件含 `parent ~= UIParent`，而 `needFallback` 时 parent 已被换回 UIParent | 8.78 的 `LEFT 6,0` 那类边缘落点；fallback 后落屏外没人救 |
+
+**修复（四层，6 个文件）**：
+
+1. `Core.lua:SetModuleEnabled` 末尾广播 `MONETUI_MODULE_STATE_CHANGED(name, value)`。
+   以前没有模块开关事件，各模块只能靠轮询补扫，关掉方向天然等不到；`EventBus:Fire` 的
+   回调首参是事件名（Utils/EventBus.lua:231），订阅一律 `function(_, name, ...)`。
+2. `Modules/Bags/Bags.lua`：新增 `TrackerUsable(frame)`（`IsShown` + `GetRect` 有效 +
+   矩形在屏幕内）与 `TrackerLeft(frame)`；`sideRight` 改走可用性判定。降级落点把
+   `originX` 钳进 `[16, screenW-columnW-16]`、`originY ≤ -16`；首选分支也按
+   `baseLeft` 保证最宽那扇窗左边缘留 16px。补扫 watcher 改成「等锚框重新可用」，
+   30 次（2s × 30）后自我注销，模块一直关着不空转；新增模块事件订阅，开关**当场**
+   重排两列 + `RestoreDragged()`（不抹玩家拖过的窗口）。
+3. `Modules/QuestTracker/QuestTracker.lua`：`ApplyDefaultPosition` 加
+   `pcall(panel.IsShown, panel)`，不可用时退回 `RIGHT/UIParent/RIGHT, -PANEL_EDGE`；
+   订阅模块事件，小地图开关后重贴默认位置（存档里有拖拽位置则不动）。
+   `Modules/Minimap/Minimap.lua:SetEnabled` 末尾 `pcall(mover.Apply, mover, "groupRaid")`，
+   关掉即触发 §8.74 的 fallback，开启挂回面板。
+4. `Utils/Mover.lua`：新增 `Offscreen(frame)`；无 `fallback` 时按原点方向落**屏幕内象限**
+   （`CENTER` + 象限偏移，原 x/y 钳进 ±15% 屏宽/高），不再把相对偏移当绝对坐标；
+   二次自愈条件改成 `needFallback or parent ~= UIParent`，有 fb 落 fb、没有回屏幕中心。
+   8.78 的「登记框隐藏但 rect 有效 → 仍锚该框」与 8.74/8.75 的口径全部保留。
+
+**回归桩**：`tools/harness/module-anchor-probe.lua`（`lua tools/harness/module-anchor-probe.lua`），
+**抽取线上源码原文**执行，不是抄一份逻辑自验 —— Mover 取 `ParentOf..Stored` +
+`ApplyOne..ApplyTree`，Bags 取 `TrackerUsable..最近一次银行重绘`。15 路径全 PASS：
+Mover 9 条（含 8.78 的 7 条原样回归、无 fb 落象限 `x=-474` 而非 `LEFT 6,0`、屏外二次自愈），
+Bags 6 条（关任务追踪→降级 UIParent `x=1604`、`x+300≤1920`、`y=-28`、银行列 `x=1306`、
+重开→`TOPRIGHT/tracker -18`、框在但无 rect→降级）。
+
+**验证与状态**：全闸门（luac / api-audit 0 HARD / locals 63 / taint 0 / scheduler /
+frame-list / env-source PASS / diff --check）全过；deploy 128 文件、代码层 0 missing / 0 stale
+（`sync-check` 退出 1 只因 8.78 记过的 2 个 EXTRA 文档）。**未提交、未打 tag、未发版**，
+TOC / HEAD 仍 `0.13.1`。游戏进程在但 wuxian `link offline`（`run` 返回 409 `link_down`），
+本轮**没有实机真值**。作者选「先全量验收再决定」，本修复连同 8.78 一起等确认后发 `0.13.2`。
+
+**实机验收清单**：`/reload` 后 ① 开着背包，配置面板关掉任务追踪 → 背包应落在屏幕右侧
+一列、不贴边不越界；重开任务追踪 → 贴回追踪框左边；② 关小地图 → 团队框按 fallback 回
+屏幕内、任务追踪停在右上、提示框退回跟随光标；③ ToT 贴目标框右侧 6px（8.78）；
+④ 按 B 看「整理」钮与满包标题行；⑤ 组队看小队原位、进团看团队贴小地图左侧 14px；
+⑥ 战斗/读图各来回一次，确认没有窗口飘走。有问题用 `/mui groupframes status` 读
+`MonetUIDB.groupReport`。
+
+## 8.80 2026-11-10 默认聊天框底边没和动作条对齐 → 启动前置层 Init.lua
+
+**现象**：作者报「默认的聊天框底部没有和动作条底部对齐」。
+
+**实机真值**（`wuxian run` 游戏内读数，屏幕 2133×1200 UI / 缩放 0.64）：
+
+| 对象 | 底边 | 顶边 | 锚点 |
+|---|---|---|---|
+| `MonetUIBar1` | **31** | 59 | `BOTTOM/UIParent/BOTTOM 0/31` |
+| `MonetUIMinimapPanel` | **31** | 225 | `BOTTOM/Minimap/BOTTOM 0/31` |
+| `ChatFrame1` | **145** | 401 | `BOTTOMLEFT/UIParent/BOTTOMLEFT 35/145` |
+
+差 **114 UI 单位**（≈73 物理像素）。动作条与小地图本来就齐，聊天框是唯一 outlier。
+145 来自暴雪预设：`framexml-source/Interface/AddOns/Blizzard_EditMode/Camelot/EditModePresetLayoutConstants.lua:66`
+`CHAT_FRAME_ANCHOR_OFFSET_Y = 145`，当前激活的是预设布局「现代」（Preset, index 0）；
+`C_EditMode.GetLayouts()` 里作者自建布局「11」的 ChatFrame 锚点 y=34（≈31），但没激活 ——
+所以「默认」会回到 145。
+
+**根因是注释与实现脱节**：`Utils/Layout.lua` 旧注释写「聊天框（Modules/Skins/Social，对齐
+ChatFrame1 的底边）」，但 `Social.lua` 2026-10-29 已把聊天框贴底整个移除（ChatFrame1 是
+EditMode 系统帧 system=8，`ClearAllPoints/SetPoint/SetClampRectInsets` 会永久标脏，见 §3.1），
+只保留 `MatchChatHeight()` 对齐高度（实机 h=256 与 Minimap 一致）。高度齐了、底边没齐。
+
+**作者拍板**（11-10 15:00）：「写一个 init，把这些需要的设置统一调整好，然后再加载插件，
+这样就不会冲突或者错位；动态 mover 以后再做」。因此本次**不新增任何运行期动态重贴**，
+保留 8.78 / 8.79 的既有修复，改为一次性启动前置层。
+
+### 8.80.1 约束（§3.1 / AGENTS，踩过一次）
+
+- 不能对 `ChatFrame1` 做 `SetPoint` / `ClearAllPoints` / `SetClampRectInsets`。
+- **不能写 `systemInfo.isInDefaultPosition`**：AGENTS 点名它是编辑模式会读的脏值。
+  第一版 init 写过 `false`，随后 `CompactUnitFrame oldR / outOfRange … tainted by 'MonetUI'`
+  持续报错；已删除该赋值，改用 `anchorInfo.offsetY` 单字段（§3.1 的方法槽污染与这里不同，
+  但判例一并禁止）。
+- 不能覆写暴雪方法、不能改 `EditModePresetLayoutManager` 的内置预设表。
+- 可用路径只有 `C_EditMode` 官方 API：`GetLayouts / SaveLayouts / OnLayoutAdded /
+  SetActiveLayout / IsValidLayoutName`，以及暴雪自己的 `EditModeManagerFrame:MakeNewLayout`。
+
+### 8.80.2 实现
+
+- 新增根文件 **`Init.lua`**，TOC 里放在 `Utils.xml` 之后、`Core.lua` 之前；`ns.Init.SETUP`
+  是启动期设置的单一声明处（当前 `bottom = 31`、`chatLayoutName = "MonetUI"`）。
+- **① 静态阶段**：文件加载期 `Init:ApplyStatic()` 把 `ns.Layout.bottom` 写成 `SETUP.bottom`。
+  ActionBars / Minimap / Skins 读到的第一份几何就是最终值。
+- **② 暴雪侧一次性设置**：`AlignChatBottom()` 深拷贝当前**预设**布局 → 只把 ChatFrame 的
+  `anchorInfo.offsetY` 写成 31（水平位置与其余 58 个系统原样）→ `MakeNewLayout` 另存为
+  Account 布局「MonetUI」并激活。**以 `C_EditMode.GetLayouts()` 读回结果判定成功**：
+  PLAYER_LOGIN 阶段布局系统未就绪时 `MakeNewLayout` 不报错但保存会被丢弃；保存成功后再
+  显式 `C_EditMode.SetActiveLayout(index)`（`MakeNewLayout` 内部的 activate 依赖
+  `EditModeUnsavedChangesDialog` 状态，早期可能不激活）。只有读回成功才写
+  `MonetUIDB.init.chatAligned = true`。
+- **③ 门闸**：`Core.lua` 的 `PLAYER_LOGIN` 把 `StartModules` 包成 `Boot()` 交给
+  `ns.Init:Run(Boot)`。静态基线已固定 ⇒ 立即放行模块（模块不依赖聊天框位置）；
+  聊天框对齐排在 `PLAYER_ENTERING_WORLD` 后 0.2s 一次性执行，带 3s 兜底、
+  最多 2 次重试（失败保留标记 false，可用 `/mui init run` 手动重跑）。
+  `PLAYER_LOGIN` 阶段直接调官方 API 会静默丢保存，这是必须放到进世界后的原因。
+- `Core.lua`：`DEFAULTS.init.chatAligned`、帮助行与 `/mui init status|run`。
+- `Utils/Layout.lua`：修掉失效注释，说明真实对齐由 Init.lua 完成、改基线请改 `SETUP.bottom`。
+- `tools/deploy-retail.ps1` / `tools/sync-check.js`：根目录文件清单补 `Init.lua`
+  （**漏了会导致 TOC 指向的文件不在客户端、整个插件加载失败**，本次实测踩到）。
+- 回归桩 `tools/harness/init-probe.lua`：13 项静态一致性（加载顺序 / 两份部署清单 /
+  单一基线 / 不写脏值 / 不对系统帧设位置 / 保存校验 / 幂等门闸 / 命令），`lua tools/harness/init-probe.lua` 全 PASS。
+
+### 8.80.3 验收与陷阱
+
+- **手动路径实机已验证成功**：`MonetUI.Init:AlignChatBottom(true)` 后
+  `ChatFrame1` 底边 **32**、`Bar1` **31**、小地图面板 **31**（差 1 UI 单位，亚像素），
+  `ChatFrame1` 锚 `BOTTOMLEFT/UIParent/BOTTOMLEFT 35/31`，高 256 不变，
+  激活布局 `MonetUI/1`，其余系统（Bar2 / Minimap / InfoBar / QuestTracker / 页签条）几何无错位。
+- **wuxian 的 `ReloadUI()` 与 `ConsoleExec("reloadui")` 都不重启 Lua VM**：设
+  `_G.MUIPROBE` 后「重载」，值仍在、`MonetUI.Init.reason` 仍是旧文案、`attempts` 仍 nil；
+  日志同时出现 `ADDON_ACTION_BLOCKED *** ForceTaint_Strong *** Reload()` 与
+  `CompactUnitFrame oldR / outOfRange … tainted by 'MonetUI'`。这两类报错在**没有成功另存
+  布局**的那次 /reload 里同样出现，判为验收工具注入的 taint，不是 init 引入；
+  但以后验收污染链**必须让玩家在游戏里手动输入 `/reload`**（或点 wuxian reload 按钮），
+  不能用 `wuxian run 'ReloadUI()'`。`session` 号变化不代表 VM 重启。
+- **待作者操作**：手动 `/reload` 一次，让最终版 init 走完整自动路径；然后
+  `/mui init status` 看基线 / 底边 / 布局，或直接按 B 目测聊天框下沿与动作条下沿齐。
+  若自动路径仍失败，用 `/mui init run` 强制重跑（会另存布局）。
+- **链路诊断（11-10 15:32 复核）**：`wuxian doctor` 显示 `!WuxianWorkshop` / `WoWBridge`
+  在 3 个角色的 `AddOns.txt` 里被禁用 ⇒ `link offline`、`last frame` 停更；
+  `wuxian app --background` + `companion --duration 0 --rate 0.08 --capture wgc` 能起
+  WGC 采集但**不会**让 link 变 online，必须在游戏插件列表里启用这两个插件并 `/reload`。
+  做干净污染验收时禁用探针是合理的，此时用游戏内目视 + `/mui init status` 即可，别硬拉链路。
+- **RUN 日志时间线（防误判）**：`15:14:43` 手动一次性脚本成功
+  （`layouts=1:现代,2:经典,3:游戏手柄,4:MonetUI,5:11 active=4`）→
+  `15:17:39` 为复现问题**主动删掉** idx=4 的 `MonetUI` 布局（`layouts=1:11`）→
+  `15:20:32` 最后一条有效读数 `chat.bottom=145 / bar.bottom=31 / activeLayout=现代/0 /
+  offsetY=145 / userLayouts=1:11 / db.chatAligned=false / reason=编辑模式布局已就绪 /
+  attempts=nil`。`reason` 仍是旧文案、`attempts=nil` ⇒ **当前 Lua VM 跑的还是旧版
+  Init.lua**；145 是删掉布局后的预期回退，**不是 init 失效**。此后无任何 RUN 结果记录
+  ⇒ 上一条 `504 timeout` 的一次性对齐命令**没有落地**，不得计入验收结论。
+- 退出编辑模式 / 切布局后可能被暴雪自己重排；玩家若手动改过布局，init 的幂等标记
+  不会覆盖他。`chatAligned` 只表示「已经另存并激活过一次」。
+
+**状态**：**未提交、未打 tag、未发版**，TOC / HEAD 仍 `0.13.1`。连同 8.78 / 8.79
+一起等 0.13.2。全闸门通过（luac / api-audit 0 HARD / locals 64 / taint 0 BLOCKER /
+scheduler / frame-list / env-source / diff clean），部署 129 文件、代码层 0 missing / 0 stale。
+
+## 8.81 2026-11-10 15:3x 首次干净 /reload 全量验收（实机真值）
+
+**链路**：作者启用 `!WuxianWorkshop` + `WoWBridge` 并手动 `/reload` 后
+`wuxian status` → `link online / session 51054`（session 变化 = VM 真重启）。
+8.80 离线的根因由 `wuxian doctor` 确认：这两个探针插件在 3 个角色的 `AddOns.txt`
+里被禁用，`app --background` + companion WGC 只能起采集、救不回 link。
+
+**init 真值（修复前）**：`Init.loaded=true`、`reason=静态基线已就位，模块已放行`、
+`attempts=0`、`bottom=31` ⇒ 最终版 `Init.lua` 已加载；但 `lastAlign=未运行`、
+`db.chatAligned=true`、`layouts=1:现代,2:经典,3:游戏手柄,4:11` 里没有 `MonetUI`，
+`activeLayout=11/1`、`chat.bottom=34 / bar.bottom=31`。⇒ **自动对齐根本没跑**：
+存档的 `chatAligned=true` 是 15:14 手动成功时写的，对应布局 15:17 为复现被删，
+`Run()` 只看标记就 return。34 vs 31 来自玩家自建布局「11」的 chat y=34，
+不是 init 成果（差 3 UI ≈ 2 物理像素，视觉已齐）。
+
+**修复 ①（Init.lua）**：幂等改成「标记 + `HasAlignedLayout()`」双条件；标记 true
+但布局不在时清标记重建；`Run()` 的跳过条件同步；`/mui init status` 增加
+「对齐布局 MonetUI 存在=是/否」。回归桩加两条断言（16 项全 PASS）。
+注意当前激活布局「11」是**自定义而非预设**，重建会走既有「不覆盖玩家自定义」
+分支并如实报告；只有玩家切回预设布局时，下次启动才会另存 `MonetUI`。这是口径，不是失败。
+
+**修复 ②（Core.lua:11）**：`ns.version` 硬编码 `"0.12.0"`，启动横幅与 `/mui status`
+一直报旧版（TOC / tag 已 0.13.1）。改为加载期从
+`C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version")` 读、回退 `"?"`；与 WhatsNew
+同一数据源，发版不再需要第四处手工对齐。桩加静态断言禁止硬编码回归。
+
+**全量验收其余项（实机通过）**：
+- 小队 `MonetPartyAnchor CENTER→UIParent (-330,40)`、团队
+  `MonetRaidAnchor RIGHT→MonetUIMinimapPanel:LEFT (-14,0)`（框右 1826 / 面板左 1840）。
+  `MonetUIDB.groupReport` 记的 raid fallback `(300,0)` 只是登录早期面板未布局时的快照，
+  之后 `EnsurePanel` 重贴已修正 ⇒ 8.79 有效，**别拿账本当现状**。
+- 背包：`M:Toggle(true)` 后标题行 `剩余空间`、整理按钮 `整理 / shown=true`；
+  13 项模块开关（Atmosphere 关、其余开）无异常。
+- 主窗几何：Bar1 底 31 / MinimapPanel 底 31 / InfoBar 顶栏 1186，均正常。
+- 探针技巧：`GetChildren()/GetRegions()` 返回变参，必须 `{frame:GetChildren()}`
+  打包；`BankHeadButton` 的文字在按钮子 FontString 上，不是 `button:GetText()`。
+  全枚举时某些 rect 是 secret，`table.concat` 会抛 `invalid value (secret)`，需数值漏斗。
+
+**待作者拍板：背包标题行货币没显示**（不是崩溃）。真值链：
+`bags.currencyTitle=true`、`Currency.exists=true`、`Snapshot.ok=true` 但 `entries=0`、
+`mode=backpack`；货币页 `listSize=4` 且 `isShowInBackpack` 全 false，存档
+`currencyMode="backpack"` + `currencyWatch={}` ⇒ `UpdateCurrencyTitle` 在
+`#entries==0` 时按设计 Hide。**1792 / 3402 是 currencyID，不是数量**
+（荣誉点数 id=1792 余额 16、商人青睐 id=3402 余额 80）。作者早先要求的「纳入默认
+custom 清单」没有落进 `DEFAULTS`，`EnsureCustom()` 从未触发。涉及默认配置语义，
+本轮未擅自改，等作者选方案。
+
+**状态**：两处修复已部署（129 文件）、闸门全过（luac / init-probe 16 /
+module-anchor-probe 15 / api-audit 0 HARD / taint 0 / diff clean / 代码层 0 missing
+0 stale，仅 2 个 EXTRA 文档）。**仍未提交 / 未打 tag / 未发版**，TOC / HEAD 仍
+`0.13.1`。
+
+### 8.81.1 15:51 干净 /reload 复验（修复闭环）
+
+作者手动 `/reload` 后的日志 + `wuxian run` 真值：
+
+- `v0.13.1 已加载`；`ns.version=0.13.1` == `toc.version=0.13.1` ⇒ **修复 ② 通过**。
+- `attempts=1`、`lastAlign=跳过：当前不是预设布局（不覆盖玩家自定义）` ⇒ **修复 ①
+  通过**：自动路径真的执行了（不再是 `0` / `未运行`），并按设计拒绝覆盖自定义布局；
+  `/mui init status` 也如实报出 `对齐布局 MonetUI 存在=false`。
+- `chat.bottom=34 / bar=31`（差 3 UI）、`activeLayout=11/1`、布局列表仍无 `MonetUI`。
+  34 是玩家自建布局「11」自己的 chat y=34，与 init 无关；「默认」场景（预设布局）
+  才会另存并激活 `MonetUI`，当前不是那个场景。
+- **ERR / BLOCKED 日志停在 15:25:19，15:51:50 之后零新增** ⇒ 8.80.3 判例闭环：
+  那批 `CompactUnitFrame oldR / outOfRange … tainted by 'MonetUI'` 只在工具侧
+  `ReloadUI()` 注入时出现，干净手动重载下不出现，**不是 init 或 MonetUI 引入的污染**。
+- 日志里「档 xxx 此刻跳过 N 个非框体条目」是 skins 诊断的常规时序提示（窗还没出生），
+  「控制台优化 … /mui tweaks restore」是既有自检，均非本轮改动引入，也不是报错。
+
+**默认场景未直接验**：当前角色激活自定义布局「11」，另存分支要切回暴雪预设才走。
+15:14 的手动脚本已验证过同一套 `MakeNewLayout` + 读回 + `SetActiveLayout` 链路，
+最终版只多一层读回校验，风险低；若要彻底闭环，临时切回「现代」再 `/reload` 一次。
+→ **已于 15:59 补验通过，见 §8.81.2。**
+
+### 8.81.2 15:59 默认（预设布局）场景补验 —— 启动前置层完整闭环
+
+作者把编辑模式切回暴雪预设后再次手动 `/reload`（`wuxian status` session 46680，
+链路 online）。启动日志出现**此前从未出现过的成功分支**：
+
+```text
+15:59:24  输出  [MonetUI] 启动设置：聊天框底边已与动作条对齐（32 / 31）。
+```
+
+该文案只由 `Init:AlignChatBottom()` 在「`MakeNewLayout` 成功 + `C_EditMode.GetLayouts()`
+读回确认布局已保存 + 显式 `SetActiveLayout`」之后，下一帧 `Geometry()` 判定
+`|chatBottom - barBottom| <= 2` 时打印（`Init.lua:215-227`）。
+
+**`wuxian run` 读回的完整真值**：
+
+| 判据 | 真值 |
+|---|---|
+| `lastAlign` / `attempts` | `已另存并激活布局 MonetUI` / `1` |
+| `activeLayout` | `MonetUI/1`（type=1 = Account） |
+| 布局表（EditModeManagerFrame） | `1:现代/0, 2:经典/0, 3:游戏手柄/0, 4:MonetUI/1, 5:11/1` |
+| `C_EditMode.GetLayouts()` | `1:MonetUI/1, 2:11/1` —— 官方 API 确认已持久化 |
+| 聊天框 / 动作条 / 小地图面板底边 | `32` / `31` / `31` |
+| `ChatFrame1:GetPoint(1)` | `BOTTOMLEFT → UIParent:BOTTOMLEFT (35, 31)` |
+| 激活布局的 ChatFrame system | `offsetY=31`、`offsetX=35`、`isInDefaultPosition=true` |
+| `db.chatAligned` | `true` |
+
+三点关键结论：
+
+1. **只改了预期的一条**：`offsetY` 145 → 31；水平 `offsetX=35` 原样继承预设，
+   `isInDefaultPosition` 保留预设原值 `true`（没有写 §3.1 点名的脏值），其余系统全量深拷贝。
+2. **玩家自定义布局「11」完整保留**（仍在 idx=5 / C API idx=2），init 是「另存 + 激活」，
+   没有覆盖或删除任何既有布局；预设「现代」也仍在。这解释了为何 15:51 那次
+   `activeLayout=11/1` 时会跳过 —— 口径是「不覆盖玩家自定义」，不是缺陷。
+3. **ERR / BLOCKED 日志仍停在 15:25:19**，15:51 与 15:59 两次干净手动重载后
+   均零新增 ⇒ §8.80.3 的 taint 归因再次确认：那批 `CompactUnitFrame oldR /
+   outOfRange … tainted by 'MonetUI'` 是工具侧 `ReloadUI()` 注入的，与 Init 无关。
+
+至此 §8.80 启动前置层的**静态基线、默认场景自动对齐、自定义布局保护、幂等/重建、
+污染规避、干净重载**六条全部实机闭环；§8.78 / §8.79 / §8.80 / §8.81 具备合并发版条件。
+
+**仍未提交 / 未打 tag / 未发版**（HEAD `8216cc8`、tag / TOC `0.13.1`）。
+发版前剩余待定：货币默认清单方案（A/B/C，见 §8.81 第 4 条）与是否合并发 `0.13.2`。
+→ 货币方案作者已于 16:14 拍板，见 §8.82。
+
+## 8.82 2026-11-10 16:1x 货币默认追踪口径：「默认追踪金币，其他的做提示可以自己添加」
+
+作者否决了把 `1792 / 3402` 写进默认 custom 清单的方案（§8.81 的 A），给出新口径原话：
+**「默认追踪金币，其他的做提示可以自己添加」**。本节按此落地。
+
+### 现场真值（16:14 `wuxian run` 读回）
+
+- `GetMoney = 355951` 铜 ⇒ 期望显示 `35g 59s 51c`。
+- 存档 `currencyMode="backpack"` / `currencyWatch` 空 ⇒ **不需要迁移**，改数据层即可对现有角色立即生效。
+- `C_CurrencyInfo.GetCurrencyListSize() = 4`，但是 `0:专业与商业技能`（表头）、
+  `3402:商人青睐`、`0:Unused`（表头）、`1792:荣誉点数` —— **只有 2 项真实货币**，
+  另 2 行是无 `currencyID` 的分类表头，`Available()` 会自然过滤。
+- 澄清：`1792 / 3402` 是 currencyID，不是数量（余额 16 / 80）。
+
+### 设计：金币是「基线条目」，不是 currencyID
+
+金币来自 `GetMoney()`，不在货币页里，所以给它伪 ID `0`，由 `C:Snapshot()` **首位插入**，
+三种模式（`backpack / custom / all`）都带、不受 `ShowZero` 影响、不进 `currencyWatch`、
+不进选择面板。条目带 `display`（已格式化 g/s/c）与 `isGold`，渲染方统一读
+`entry.display or FormatQuantity()`，避免金币被「万/亿」缩写。
+
+- `Core.lua` 的 `DEFAULTS.currencyMode` / `currencyWatch` **一个值都没改**，不写死任何 ID，
+  不替玩家选货币；因此无迁移、无存档污染。
+- `C:EnsureCustom()` **去掉「自动补货币页里有余额的其它项（最多 8 项）」**——那等于替玩家
+  把荣誉点数、商人青睐都勾上了，与新口径冲突。现在切 custom 只继承当前真正显示的货币 ID，
+  并用 `id >= 1` 兜住伪 ID 0 不落盘。
+- 读不到 `GetMoney`（受限窗口机密值）时 `GoldEntry()` 返回 nil，静默不显示、不报错。
+
+### 「其他的做提示」四处落点
+
+1. 货币格 tooltip：`默认只追踪金币；其它货币自己添加` + `C:Suggestions(5)` 列出未监控
+   货币的名字与 ID（all 模式不列，本来全显示）。
+2. 右键勾选面板 hint：清单空时 `默认追踪金币 · 点下面的行添加其它货币（滚轮翻页）`。
+3. `/mui infobar currency status` 追加「可添加：…（ID）」，`list` / `Usage()` 也补口径。
+4. 配置面板 hint 说明其它货币要右键勾选或 `add <ID|名称>` 添加。
+
+消费方：`Modules/Bags/Bags.lua` 的「剩余空间」标题行现在默认显示金币（原本空白）；
+`Modules/InfoBar/Blocks.lua` 条身**过滤金币**（信息栏已有独立「金钱」块，避免重复刷两遍，
+玩家关掉金钱块会自动补上），tooltip 仍列全；`PLAYER_MONEY` 加进事件表保证金币变化即时刷。
+
+### 回归桩与闸门
+
+新增 `tools/harness/currency-gold-probe.lua`：**整份加载线上 `Currency.lua` 原文** + 最小
+WoW 桩（按实机形态造 2 表头 + 2 货币），39 项 ALL PASS，覆盖 Snapshot 首位金币 /
+g/s/c 格式化 / 默认零其它货币 / 表头过滤 / Suggestions / 切 custom 不自动补 /
+add·ToggleWatch·del 后金币仍在 / 伪 ID 不落盘 / 机密值降级 / 四个消费方静态断言。
+其余闸门：`luac -p` 全量、`api-audit` no hard finding、`audit-locals` 64 文件、
+`audit-taint` 0/0/0、`scheduler-callback-probe`、`check-frame-list`、`env-source-check`、
+`init-probe` 16、`module-anchor-probe` 15、`git diff --check` 全部通过；部署 129 文件，
+代码层 0 missing / 0 stale（`sync-check` 退出 1 仍只因 2 个历史 EXTRA 文档）。
+
+### 待作者实机验收
+
+VM 里仍是旧代码，需**手动 `/reload`**：按 B 看标题行应出现 `金币 35g 59s 51c`；
+鼠标悬停信息栏货币格看「可添加」清单；`/mui infobar currency status` 看口径；
+`/mui infobar currency add 1792` 后标题行应变 `金币 … · 荣誉点数 16`。
+
+**仍未提交 / 未打 tag / 未发版**，TOC / HEAD 仍 `0.13.1`。§8.78 / 8.79 / 8.80 /
+8.81 / 8.82 / 8.83 / 8.84 一并列为 `0.13.2` 候选，等验收通过再决定发布。
+
+## 8.83 2026-11-10 16:3x 勾了「货币在背包显示」后按 B 关不掉背包
+
+**作者实报**：「在暴雪设置里把货币添加到背包后，能追踪，但是无法用快捷键关闭背包了」。
+`link online / session 8262`，本地 `HEAD 8216cc8`、TOC `0.13.1`。
+
+### 现象与隔离实验（`wuxian run` 读真值，非截图推断）
+
+| 步骤 | `ContainerFrame1` | `ContainerFrameCombinedBags` | `BackpackTokenFrame` | 分类窗 `free/use` |
+|---|---|---|---|---|
+| 起始（全关） | false | false | false | false / false |
+| 按 B 开 | false | false | **true** | **true / true** |
+| 按 B 关 | false | **true** | **true** | **true / true**（关不掉） |
+| 只 Hide 容器框 | false | false | **true** | true / true（仍关不掉） |
+| 再 Hide 货币条 | false | false | false | **false / false**（立刻关掉） |
+
+关键结构：`BackpackTokenFrame` 的 **parent 是 `ContainerFrameCombinedBags`**，而
+`IsShown()` 只看自身标志、**不看父框是否可见**。玩家在暴雪「货币 → 在背包显示」勾过任意
+货币后它会常驻 `IsShown=true`；关背包时暴雪只 Hide 父框，它不受影响。
+
+### 根因
+
+`BlizzardBagFrames()` 把 `BackpackTokenFrame` 一并列入，而 `SweepBlizzardBags()` 返回的
+`anyShown` 被 `StartBlizzardGuard()` 当作「玩家按了 B」的**唯一边沿信号**（§8.56：本客户端
+按 B 不发 `BAG_OPEN / BAG_CLOSED`，连 `BAG_UPDATE` 都不发）。货币条常驻 shown ⇒
+`anyShown` 恒真 ⇒ 下降沿永远不来 ⇒ `M:Toggle(false)` 永不触发。勾货币之前它跟着父框
+一起不显示，所以一直没暴露。
+
+### 修复（只摘信号，不摘停车）
+
+新增 `IsBagSignalFrame(frame)`（`Bags.lua`）显式排除 `_G.BackpackTokenFrame`，四处接入：
+
+1. `SweepBlizzardBags()`：`anyShown` 只在 `isShown and IsBagSignalFrame(frame)` 时置真；
+   **停车扫查仍遍历全部框**（`CollectTree` 补禁鼠标、`SetAlpha(0)`），否则勾了货币显示后
+   那排代币按钮会浮在看不见的背包上收鼠标 / 弹 tooltip。
+2. `CloseAllBags()`（点 ✕）：只 Hide 真容器框，不再替暴雪关玩家勾的货币显示，也少一次
+   「暴雪立刻 Show 回来」的抖动。
+3. `M:Initialize()` 的 `restoredOpen` 复位：只认真容器框，避免登录时被误判成
+   「上次开着背包退出」并白 Hide 一次货币条。
+4. `BlizzardBagFrames()` 本身**不改**，保持停车 / Hide 的集合完整。
+
+守卫仍是显式开/关（`M:Toggle(true|false)`），没退化成 toggle；`TOGGLE_DEBOUNCE` 不动。
+
+### 回归桩
+
+`tools/harness/bags-token-guard-probe.lua`：**抽取线上 `Bags.lua` 的
+`BlizzardBagFrames / IsBagSignalFrame / CollectTree / SweepBlizzardBags /
+StartBlizzardGuard` 原文执行**，25 项 ALL PASS。含静态边界断言（停车仍覆盖货币条、
+守卫仍是边沿、四处门控）+ 实机形态帧状态驱动：
+
+- 「容器关 + 货币条常驻 → `anyShown=false`」（修复前为 true）
+- 「按 B 开 → 按 B 关」完整状态机，关拍断言 `shown=false / M:Toggle(false)`
+- 老场景（没勾货币）仍能开能关、停车把货币条 alpha 按回 0、debounce 仍生效
+- **桩的 `GetTime()` 基线必须取 100 而非 0**：实机是几百秒，从 0 起第一拍会被
+  0.12s debounce 误吃，是桩自身的问题不是代码问题。
+
+### 状态
+
+全闸门通过（全量 `luac -p`、4 个回归桩 ALL PASS、`api-audit` no hard finding、
+`audit-locals` 64、`audit-taint` 0/0/0、scheduler、frame-list、env-source、
+`git diff --check` clean），部署 129 文件、代码层 0 missing / 0 stale。
+**未提交 / 未打 tag / 未发版**。VM 里仍是旧代码，需手动 `/reload` 后按 B 两次复验：
+开得开、关得掉，且货币标题行仍显示。
+
+> 诊断时在游戏里做过 `ToggleAllBags()` 与逐框 Hide，收尾已把容器框、货币条与分类窗
+> 全部复位成关闭状态；玩家 `/reload` 后 `Initialize` 会再复位一次暴雪背包状态机。
+
+## 8.84 2026-11-10 16:4x 标题行货币改「图标 + 短数量」（追踪项多了放不下）
+
+**作者实报**：「货币的问题 title 能用图标代替吗，这样可以节省位置，不然追踪多了就放不下了」
+（接着 8.83 的话题；玩家刚在暴雪设置里勾了 `3402 商人青睐` 到背包）。
+
+### 现场数据
+
+| 项 | 实机读数 |
+|---|---|
+| 金币 | `GetMoney=355951` → `35g 59s 51c`（**最长的一串**，比任何货币名都占宽） |
+| 货币页图标 | `3402 商人青睐 iconFileID=135725`、`1792 荣誉点数 iconFileID=2173920` |
+| 金币图标 | 金币不在货币页、没有 iconFileID；`SetTexture(133784)` 成功、`GetTexture()=133784`（`INV_Misc_Coin_01`） |
+| 勾选状态 | `showInBackpack=3402:商人青睐` |
+
+原排版 `BuildCurrencyText` 是「名称 + 完整数量」，`FittedCurrencyText` 从 8 项往下减、
+放不下就折 `+N` 甚至整行隐藏 —— 追踪项一多必然丢信息。
+
+### 设计（默认开，可一键切回）
+
+- **图标 + 短数量，名称与完整值移到悬停提示**。金币按最高非零单位缩成 `35g` / `59s` / `51c`
+  （完整 `35g 59s 51c` 在 tooltip）；其它货币仍走 `FormatQuantity` 的万/亿缩写。
+- **图标 ID 由数据层统一给**：`C:IconOf(entry)` 读货币页 `entry.icon`，金币用 `GOLD_ICON=133784`；
+  `C:ShortQuantity(entry)` 是短数量唯一口径。渲染方不硬编码图标、不自己截 g/s/c。
+  `iconFileID` 缺失（表头 / LoD 未加载）时隐藏图标只留数字，名称仍在 tooltip。
+- **布局**：每格 `14 图标 + 3 间隔 + 文字实测宽`，格间 8，最多 8 格，余量折成 `+N`。
+  `FitCurrencyIcons(entries, C, avail, measure)` 是纯函数，按可用宽度从全量往下减。
+  量宽用窗口上一枚隐藏的 `currencyMeasure` FontString；`GetStringWidth` 返回机密值 /
+  隐藏 FontString 量不出时按 `#text * 7` 保守估算，**宁可少放一格也不叠字**。
+- **交互**：每格是 Button（才收得到 `OnEnter`），悬停显示名称 / 完整数量 / 上限；
+  `OnDragStart/OnDragStop` 转发给窗口，标题行仍整条可拖。`+N` 格给「还有 N 项」提示。
+- **开关**：`DEFAULTS.bags.currencyIcons = true`；`/mui bags currency icons on|off`、
+  `/mui bags currency` 看状态、配置面板「信息栏」货币区加勾选并立即重画。
+  缓存 key 带 `i|` / `t|` 模式前缀，切换后即使内容不变也重排。
+- **文字模式完整保留**（`FittedCurrencyText` 一行没删），`icons off` 可切回。
+- 新增 `PLAYER_MONEY` 订阅：金币走 `GetMoney()` 不发货币事件，捡钱 / 花钱要立刻更新，
+  不能等 0.5s 轮询。
+- 标题行共用原来的 `avail` 与 `reserve`（银行 132 / 背包 `SORT_RESERVE=54`），
+  图标格从 `-reserve` 往左排，「整理」钮与银行两颗工具钮位置不变。
+
+### 量化与回归桩
+
+`tools/harness/bags-currency-icon-probe.lua`：**整份加载线上 `Currency.lua` 原文**
+（金币条目 / `ShortQuantity` / `IconOf` 都是真实现）+ 抽取线上 `Bags.lua` 的
+`BuildCurrencyText / CurrencyIconSignature / CurrencyCell / FitCurrencyIcons` 原文执行，
+38 项 ALL PASS。核心两条：
+
+- 同样 4 项，图标模式 `148 UI` vs 文字模式 `539 UI` —— **约省 3.6 倍**；
+- 窄标题行逐项减并折 `+N`、超过 8 项只画 8 格、机密值量不到仍显示全部、
+  数量 / 图标变化都能让缓存签名失效（轮询会刷新）。
+
+其余静态断言钉住：默认开启、两套分流、缓存 key 前缀、`PLAYER_MONEY`、量宽兜底、
+tooltip 与拖动转发、命令与配置联动、文字模式仍在。
+
+### 状态
+
+全闸门通过（全量 `luac -p`、5 个回归桩 ALL PASS、`api-audit` no hard finding、
+`audit-locals` 64、`audit-taint` 0/0/0、scheduler、frame-list、env-source、
+`git diff --check` clean），部署 129 文件、代码层 0 missing / 0 stale
+（`sync-check` 退出 1 仍只因 2 个历史 EXTRA 文档）。
+改动：`Modules/InfoBar/Currency.lua`、`Modules/Bags/Bags.lua`、`Core.lua`、
+`Config/SimpleConfig.lua`、新增回归桩。
+
+**未提交 / 未打 tag / 未发版**，TOC / HEAD 仍 `0.13.1`。VM 里仍是旧代码，
+需手动 `/reload` 后按 B 复验：标题行应是金币图标 + `35g`、勾了的货币各一枚图标，
+悬停显示全名与完整数值；`/mui bags currency icons off` 能切回文字排版。
+一次 `/reload` 可同时收口 8.82（金币基线）/ 8.83（按 B 关得掉）/ 8.84（图标）。
+
+## 8.85 2026-11-10 17:xx 耐久格只读 + 发布版剥离 dev 功能与提示
+
+**作者指示**：① infobar 的耐久度 block 取消点击功能，只保留悬停显示平均耐久；
+② 清理发布版 mui 的 dev 功能和提示，这些只在本地和仓库保留。
+
+### 8.85.1 耐久度格改成只读
+
+`Modules/InfoBar/Blocks.lua`：抽出 `AverageDurability()`（返回平均百分比 + 取件数），
+`DurabilityUpdate` 与 `DurabilityTooltip` 共用一次扫描，结果缓存在 `block.avgPercent` /
+`block.avgCount` 上（tooltip 挂在 OnEnter，可能早于下一次 update）。条身仍是 `75%`，
+悬停补「平均耐久 75%（2 件取件平均）」；读不出时给「平均耐久：读不出」。
+**删掉 `onClick = BlockClick("character")`** ⇒ 不弹角色小菜单、不开角色界面，`InfoBar.lua`
+的 OnEnter 也不再补「点击：」提示行。`MicroMenu.lua` 的 `character` 动作保留给微菜单自用，
+`CLICK_HINT.character` 删除。空背包 / API 缺失 / 机密值三条降级路径照旧。
+
+### 8.85.2 dev 门闸（本地与仓库 = dev，发布包 = release）
+
+`MonetUI.toc` 加 `## X-Dev-Build: dev`；`Core.lua` 用
+`C_AddOns.GetAddOnMetadata(ADDON_NAME, "X-Dev-Build")` 读它，**只有恰好 `dev` 才开**
+`ns.dev`（取不到 / 字段被改坏一律按发布版处理，fail-closed）。新增 `ns:DevPrint()`：
+发布版静默，账本与返回值不变。
+
+- **诊断命令**：`DEV_COMMANDS`（scale / blocks / restrict / colors / lost / compat / perf /
+  report / devtools）+ `DEV_SUBCOMMANDS`（按模块名 + 首词精确匹配：skins 的 diagnose|diag|
+  probe|layers|templates|closes|inset|arrows，infobar/minimap/nameplates/tooltip/buffframe 的
+  诊断词，groupframes status）在 `HandleSlash` 开头拦截。玩家向命令全部保留：配置、status、
+  theme、init、模块开关、bags sort / currency、infobar currency、groupframes minimap|defaults、
+  tweaks、whatsnew、reset。**按模块精确匹配是为了不误伤 `/mui tweaks status`。**
+- **帮助文本**：`PrintHelp()` 打完玩家向行后 `if not ns.dev then return end`，后面整段诊断清单
+  与「用法：/mui <模块> diagnose」提示在发布版都不出现。
+- **启动自检提示改 `DevPrint`**：Core 的模块加载统计 / UI 缩放固定 / 客户端身份、ActionBars
+  就绪、Skins 美化窗口数、Nameplates isSecure、Tweaks stuck 与 CVar 空转、`Skin:WarnOnce`
+  （那批「档 xxx 跳过 N 个非框体条目」）、Init 自动对齐提示、两处「DevTools 没加载」兜底。
+  `WhatsNew` 的「出问题先跑 /mui report」按 `ns.dev` 条件拼接。玩家主动敲命令的输出和
+  `vX 已加载` 横幅仍走 `ns:Print`。
+
+### 8.85.3 发布链路物理剥离（已用真实 packager 演练验证）
+
+打包机制查过本地 `packager-release.sh`：`#@debug@` / `lua_filter debug` 默认 release 构建的
+行为不够直观，改用**显式、可本地复现**的三件套：
+
+1. `tools/strip-dev.js`（`tools/` 本就在 `.pkgmeta ignore` 里，不进发布包）在 Guard 之后、
+   packager 之前跑 `--self-test` + 原地剥离：TOC 标记 `dev → release`，从
+   `Modules/Tools/Tools.xml` 摘掉带 `<!-- DEV-ONLY -->` 行尾标记的两行 Script。幂等防呆：
+   只允许从 dev 状态剥离，重复执行报错。`--check` 校验本地/仓库仍是 dev。
+2. `.pkgmeta ignore` 加 `Modules/Tools/DevTools.lua`、`Modules/Tools/Report.lua`。
+3. `.github/workflows/release.yml` 加 `Strip dev-only surface for the release build` 步骤。
+
+**关键验证**：packager 读的是**工作区文件内容**，不是 `git archive HEAD` 的内容 —— 用临时
+副本（复制含 `.git` 的仓库 → 跑 strip → `packager-release.sh -d -z -l -e -t <tmp> -r <tmp>/.release`）
+实跑，发布目录 `MonetUI/` 里：
+`## X-Dev-Build: release` ✓、`Core.lua` 是修改后的版本 ✓、Tools.xml 只剩
+Cursor/Durability/Toast/Atmosphere/WhatsNew/Tweaks 六行 ✓、两个 dev 文件 `ABSENT` ✓、
+tools / docs / .git / .github 全 `ABSENT` ✓、共 126 文件。
+同一次部署的**本地客户端**仍是 dev：TOC `dev`、两份 dev 文件在、Tools.xml 两行标记在。
+
+**折中说清**：诊断分支散落在 Core / Skins / 各模块主文件里，无法整文件排除；发布包里这些
+代码仍是死代码（门闸不可达、帮助不列），但两个独立的 dev 文件与所有 dev 启动提示确实
+不在发布版。若以后要连代码字节都剥掉，再按 `--@do-not-package@` 块改 packager 调用参数。
+
+### 8.85.4 验证与状态
+
+新增两桩：`tools/harness/infobar-durability-probe.lua`（22 项，抽取三个耐久函数**线上原文**
+执行，覆盖平均 75% / 空背包 / API 缺失 / 机密值 / tooltip 无点击行）、
+`tools/harness/release-dev-gate-probe.lua`（44 项，门闸、帮助分叉、11 处 DevPrint、
+XML 标记、.pkgmeta、workflow 顺序、实跑 `--check` / `--self-test` 且不改写仓库）。
+全闸门通过：全量 `luac -p`、七个桩 ALL PASS、`api-audit` no hard finding、
+`audit-locals` 64、`audit-taint` 0/0/0、scheduler / frame-list / env-source、`diff --check` clean。
+部署 129 文件，代码层 0 missing / 0 stale（`sync-check` 退出 1 仍只因两个历史 EXTRA 文档
+`CHANGELOG.md` / `README.md`，按规矩没删）。
+
+**未提交 / 未打 tag / 未发版**，TOC / HEAD 仍 `0.13.1`。§8.78~8.85 一并列为 `0.13.2` 候选；
+发版动作仍等作者明确授权。
+
+**17:xx 实机复核（session 56043，VM 已是新代码）**：`MonetUI.dev=true`；耐久块
+`onClick=nil`、`frame:GetScript("OnClick")=nil`、`avgPercent=100` / `avgCount=1`、条身 `100%`；
+触发 OnEnter 读回 tooltip 三行「装备耐久 / 平均耐久 100%（1 件取件平均）/ 数值越低修理越贵」，
+**无「点击：」行**。再临时把 `MonetUI.dev` 置 false 模拟发布态（hook `print` 捕获输出，用完即恢复）：
+`/mui help` 只 16 行玩家向命令且不含 diagnose（dev 态含）、`/mui skins diagnose` 被拦并提示
+「发布版不提供」、`/mui tweaks zzz` 未被误伤且 usage 不带 diagnose。8.82/8.83/8.84 的
+手动 `/reload` 目测项仍按各自章节验收。
+
+### 8.86 2026-11-10：鼠标提示「偶尔跑到小地图上」—— 锚点所有权 + 面板临时隐藏（0.13.2 候选）
+
+#### 8.86.1 现象与实机真值
+
+作者报：提示框位置选「小地图右上角」时，偶尔会乱跑到小地图上。
+session 56043 实机读值：
+
+- `MonetUIDB.tooltip.anchor = minimap`、`ResolveMode = minimap`；
+- 正常态 `GameTooltip:GetPoint(1) = BOTTOMRIGHT → MonetUIMinimapPanel:TOPRIGHT (0, 8)`；
+- `UIParent 2133.33×1200 @0.64`；`MonetUIMinimapPanel L/R/T/B = 1840.33/2100.33/225/31`、
+  `Minimap T=256 B≈0` → 小地图在**右下**，提示框平时在它正上方（底 233 / 顶 422）；
+- 把锚点人为改成 `TOPLEFT → Minimap:BOTTOMLEFT` 后 0.6s 再读，已变成
+  `BOTTOMLEFT → MonetUIBar2Button6:TOPRIGHT` —— **存在第二个写手**：暴雪（或按钮 hover 层）
+  每次 `SetOwner / Show` 都会重贴锚点。
+
+#### 8.86.2 根因（两条，各自都能复现症状）
+
+1. **去重键记的是「输入」，不是「锚点所有权」**：`PlaceMinimap` 的 `mmKey = right:top:w:h`、
+   `PlaceCursor` 的 `cursorKey = x:y:w:h:scale`。暴雪重贴之后只要输入没变（同行数内容、
+   光标没动、面板没动），`ApplyPlacement` 就跳过写入 → 提示框留在别人写的锚点上
+   （小地图图标 / 动作条按钮旁）。这就是「偶尔」：只在输入恰好不变的那一次出现。
+   与 §3.18 的 `SetClampedToScreen` 两套写手同类，但那次修的是引擎夹取，这次是暴雪的 `SetPoint`。
+2. **面板临时隐藏就退回跟随光标**：`PlaceMinimap` 拿 `panel:IsShown()` 当可用性门槛，
+   一假就 `PlaceCursor(tip)`。换主题 / 编辑模式 / Mover 自愈期间面板短暂隐藏，
+   而光标正停在小地图图标上 → 提示框直接盖到小地图上。隐藏框的几何其实依然有效，
+   `IsShown` 是错的判据（与 §8.74 的 `AnchorUsable` 同一条：判几何，不判 shown）。
+
+#### 8.86.3 修法（`Modules/Tooltip/Tooltip.lua`）
+
+| 改动 | 内容 |
+|---|---|
+| `SetAnchor` | 所有摆位统一经它 `ClearAllPoints + SetPoint`，记 `lastAnchor = {point, rel, relPoint, x, y}` |
+| `AnchorIntact` | 每帧摆位前 `pcall(GetPoint, 1)` 回读，逐项比 point/rel/relPoint/x/y；机密、抛错、追加第二个锚点（`GetNumPoints ~= 1`）一律判失配 → 清 `cursorKey/mmKey` 强制重贴，并记 `anchorReclaims` |
+| `MinimapPanelGeometry` | 只判 `GetRight/GetTop` 是不是明文数字且落在 `UIParent` 内；**不再看 IsShown** |
+| 面板临时不可用 | 用 `lastGood`（最后一次有效 right/top/gap）把提示框**钉在 UIParent 绝对坐标**，绝不跟回光标；只有 `ns:IsModuleEnabled("Minimap") == false` 才按原设计退回 `PlaceCursor`（记 `panelFallbacks`） |
+| 面板重建 | `panel ~= lastPanel` 强制重贴（只比 right/top 看不出对象换了，提示框会留在旧面板上） |
+| 长提示框 | `top+gap+h > uiH` 时由 `TOPRIGHT → panel:BOTTOMRIGHT`（顶边贴面板底；本客户端面板底只离屏幕底 31，整块必溢出）改成 `TOPRIGHT → UIParent:TOPLEFT (right, uiH-gap)`；分支标记与 `uiH` 一并进 `mmKey` |
+| 账本失效 | `Reset`（隐藏沿）、`M:Apply`（设置/模式变化）清 `lastAnchor`；`mode == "off"` 清账且不碰暴雪锚点 |
+| 诊断 | `/mui tooltip diagnose` 增一行「锚点：外部改写 N 次｜退回跟随 N 次｜回读一致=…｜当前=…｜我们上次写=…」，`MonetUIDB.tooltipDiag` 同步落盘 |
+
+`Config/SimpleConfig.lua` 的提示文案同步改成「面板临时隐藏时保持原位，只有小地图模块关掉才退回跟随」。
+
+#### 8.86.4 验证
+
+- 新桩 `tools/harness/tooltip-anchor-probe.lua` **35 项 ALL PASS**：抽取线上摆位段原文执行，
+  覆盖 ★ 外部改锚点而输入不变必自愈、追加第二锚点、`GetPoint` 被拦、`IsShown=false` 但几何有效、
+  几何读不出钉住、几何恢复、面板换对象、模块真关掉、off、长提示框、cursor 模式自愈；
+  另 16 条静态断言守住修复边界。
+- 全闸门：全量 `luac -p`（排除 `api-audit-selftest` 的故意坏样例）、8 个桩 ALL PASS、
+  `api-audit` no hard finding、`audit-locals` 64 文件、`audit-taint` 0/0/0、scheduler /
+  frame-list / env-source、`strip-dev --check`、`diff --check` 全过。
+- 部署 129 文件到 `_forever_`，`sync-check` 代码层 0 missing / 0 stale（EXIT 1 仍只因历史
+  EXTRA `CHANGELOG.md` / `README.md`，按规矩没删）。
+- **新逻辑依赖的 API 已在同机实机确认可用**（旧 VM 里直接问）：
+  `pcall(GameTooltip:GetPoint,1)` 返回 `BOTTOMRIGHT / MonetUIMinimapPanel / TOPRIGHT / 0(false) / 8(false)`
+  （括号是 `issecretvalue`）、`GetNumPoints=1`、`UIParent 2133.33×1200` 明文、
+  `panel:GetRight/GetTop = 2100.33/225` 明文、`IsModuleEnabled("Minimap")=true`。
+  ⇒ 回读校验不会因机密值退化成"每帧都判失配、反复重贴"。
+
+#### 8.86.5 实机验收（18:49 完成，session 27870）
+
+**重载判例再确认**：点 wuxian 的重载按钮只换会话号（`56043 → 9472`），`reload none pending`，
+但 `MonetUIDB.tooltipDiag.rows` 仍是 16 行旧输出（没有「锚点：」行）—— 注入通道的
+`ReloadUI()` 不重启 Lua VM（§8.80）。作者在游戏聊天框**手动敲 `/reload`** 后
+session → `27870`，诊断立刻多出「锚点：」行，新代码进 VM。
+
+真值（`/mui tooltip diagnose` 与实机 `run` 读回）：
+
+| 项 | 值 |
+|---|---|
+| 设置 / 订阅 | `位置=minimap`、每帧摆位在、兜底 250ms 在、Alt 事件帧在 |
+| 平时锚点 | `BOTTOMRIGHT → MonetUIMinimapPanel:TOPRIGHT (0,8)`，`GetNumPoints=1` |
+| 账本 | 外部改写持续增长（82 → 115 次），**退回跟随 0 次** |
+| 完整诊断 | 15 行全部正常，第 8 行锚点账、第 9 行驱动提示框可见性 |
+
+**★ 注入验证（等价复现用户症状）**：提示框可见（`vis1=vis2=true`）时人为
+`ClearAllPoints + SetPoint("TOPLEFT", Minimap, "BOTTOMLEFT")`，0.3s 后读回
+`BOTTOMRIGHT → MonetUIMinimapPanel:TOPRIGHT`；`anchorReclaims` 恰好 `82 → 83`
+（**+1，不是每帧乱刷**），`回读一致=是`、`我们上次写=BOTTOMRIGHT→TOPRIGHT 0,8`。
+修前这一步会因为 `mmKey` 没变而把提示框留在小地图锚点上。
+诊断在提示框**隐藏**时显示「回读一致=否 / 我们上次写=无」是正常态（隐藏沿 `Reset` 清账），
+可对照第 9 行「可见性=不可见/读不出」，别据此误判故障。
+
+**日志**：手动 `/reload` 之后 `ERR,BLOCKED` 零新增（最后一条仍是 18:11:59 的旧 VM 记录）；
+验证时注入的 `SetOwner/Show/ClearAllPoints/SetPoint` 也没产生新的 BLOCKED。
+
+**目测（19:04 作者确认「目测通过」）**：反复悬停小地图图标 / 动作条按钮 / 背包物品，
+观感上始终贴小地图面板上沿，不再出现盖到小地图圆面上的情况。§8.86 验收全部收口
+（机制注入验证 + 作者目测双通过）。
+
+**未提交 / 未打 tag / 未发版**；§8.78~8.86 均为 `0.13.2` 候选，发版等作者明确授权。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 

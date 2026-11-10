@@ -131,7 +131,7 @@ local function FlushCVarNotes()
     if n > 3 then
         names = table.concat(cvarNotes, "、", 1, 3) .. (" 等 %d 项"):format(n)
     end
-    ns:Print(("|cffffa940姓名板有 %d 项设置客户端不让插件改（isSecure）：%s|r —— "
+    ns:DevPrint(("|cffffa940姓名板有 %d 项设置客户端不让插件改（isSecure）：%s|r —— "
         .. "需要生效请在暴雪自己的设置里调；细账 /mui nameplates cvars"):format(n, names))
     cvarNotes = {}
 end

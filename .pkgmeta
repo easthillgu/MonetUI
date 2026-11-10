@@ -23,6 +23,10 @@ ignore:
   - package-lock.json
   - package.json
   - tools
+  # 开发版专属探针 / 诊断包：只在本地与仓库保留。
+  # Tools.xml 的对应 Script 行由 tools/strip-dev.js 在发版前摘掉，避免 TOC/XML 引用缺失文件。
+  - Modules/Tools/DevTools.lua
+  - Modules/Tools/Report.lua
   - "*.zip"
   - "NVIDIA Corporation"
 

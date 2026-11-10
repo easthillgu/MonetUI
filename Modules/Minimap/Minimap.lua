@@ -1134,6 +1134,14 @@ function M:SetEnabled(enabled)
     end
     if panel then panel:SetShown(active) end
     if blocker then blocker:SetShown(active) end
+
+    -- 面板显隐一变，锚它的团队框要**当场**重贴：开着挂回面板，关掉则让 Mover
+    -- 的 AnchorUsable 判成不可用、按 fallback 落回屏幕内。EnsurePanel 只在皮肤
+    -- 重建时跑，SetEnabled(false) 不走那条路（11-10 模块关闭连锁排查）。
+    local mover = ns.Mover
+    if mover and type(mover.Apply) == "function" then
+        pcall(mover.Apply, mover, "groupRaid")
+    end
 end
 
 --- 别的模块在战斗里被拒了，排队等脱战补做（战斗队列只有一个出口，交给它统一排）。

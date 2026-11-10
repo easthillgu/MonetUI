@@ -1940,12 +1940,12 @@ function M:Apply()
 
     if own and not announced then
         announced = true
-        ns:Print(("自绘动作条已就绪：%d 组 × %d 个，按钮 %dpx。"):format(
+        ns:DevPrint(("自绘动作条已就绪：%d 组 × %d 个，按钮 %dpx。"):format(
             count, BUTTONS_PER_BAR, ButtonSize()))
     elseif not own and buildFailure == nil and db.ownBars ~= false then
         if not announced then
             announced = true
-            ns:Print("自绘动作条未启用，保留暴雪默认动作条。")
+            ns:DevPrint("自绘动作条未启用，保留暴雪默认动作条。")
         end
     end
 

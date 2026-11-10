@@ -8,10 +8,39 @@ local LibStub = _G.LibStub
 local LMC = LibStub and LibStub("LibMonetColor-1.0", true)
 
 ns.name = ADDON_NAME
-ns.version = "0.12.0"
+-- 版本一律从 TOC 读，别再硬编码：0.13.0 / 0.13.1 发版时只改了 TOC / CHANGELOG / tag，
+-- 这里却留在 0.12.0，启动横幅和 /mui status 都在报旧版本（11-10 实机读数发现）。
+-- 与 WhatsNew 同一个来源，发版时不再需要第四处手工对齐。
+do
+    local CAddOns = _G.C_AddOns
+    local ok, tocVersion = false, nil
+    if type(CAddOns) == "table" and type(CAddOns.GetAddOnMetadata) == "function" then
+        ok, tocVersion = pcall(CAddOns.GetAddOnMetadata, ADDON_NAME, "Version")
+    end
+    ns.version = (ok and type(tocVersion) == "string" and tocVersion ~= "") and tocVersion or "?"
+end
+
+-- 开发版门闸：TOC 的 `## X-Dev-Build: dev` 只在仓库与本地部署里是这个值。
+-- release.yml 在 packager 之前跑 tools/strip-dev.js，把标记改成 release 并从加载清单里
+-- 摘掉 DevTools.lua / Report.lua；两份文件也列在 .pkgmeta 的 ignore 里，不进 zip。
+-- 于是发布版不注册诊断命令、不打印开发期自检提示，dev 代码仍完整留在本地/仓库。
+-- 默认关闭（取不到元数据或字段被改坏都按发布版处理），别让漏改的打包变成刷屏。
+do
+    local CAddOns = _G.C_AddOns
+    local ok, flag = false, nil
+    if type(CAddOns) == "table" and type(CAddOns.GetAddOnMetadata) == "function" then
+        ok, flag = pcall(CAddOns.GetAddOnMetadata, ADDON_NAME, "X-Dev-Build")
+    end
+    ns.dev = (ok and flag == "dev") and true or false
+end
 
 local DEFAULTS = {
     enabled = true,
+    -- 启动前置设置（Init.lua）：一次性把暴雪编辑模式布局另存并激活，让聊天框底边
+    -- 与动作条共用 ns.Layout.bottom。true = 已处理过，不再重复新建布局。
+    init = {
+        chatAligned = false,
+    },
     modules = {
         UnitFrames   = true,
         GroupFrames  = true,
@@ -62,6 +91,9 @@ local DEFAULTS = {
         -- 「剩余空间」标题行右侧显示货币（复用 InfoBar 的自定义监控清单）。
         -- `/mui bags currency on|off` 可关；关掉只收文字，不动布局。
         currencyTitle  = true,
+        -- §8.84：标题行用「图标 + 短数量」代替「名称 + 完整数量」，追踪项多时才放得下；
+        -- 名称与完整数量移到悬停提示。icons off 可切回原来的纯文字排版。
+        currencyIcons  = true,
         -- 银行：**接管暴雪银行框**（alpha 0 + 关鼠标），只留我们的窗。2026-11-06 作者拍板默认 on ——
         -- 依据 HANDOFF §8.57：银行空格已是真 ItemButton（绑 bag/slot），三条拖放（背→银 / 银→背 /
         -- 背→背）逐格实测通过。代价写清：买栏位 / 换银行包要走 `/mui bags bank off`（或面板里的
@@ -263,6 +295,8 @@ local DEFAULTS = {
         -- 货币块（Modules/InfoBar/Currency.lua）：backpack=沿用背包显示标记 / custom=自己勾的
         -- currencyID 清单 / all=货币页全部已发现项；currencyMax 是条上最多显示几项，
         -- 多出来的折成 "+N"，提示框始终列全；currencyShowZero 管 0 值要不要占一格。
+        -- §8.82：金币是 Snapshot 的基线条目（GetMoney，伪 ID 0），不属于 currencyWatch；
+        -- 三种模式都带它。其它货币默认一条都不追踪，由玩家自己 add / 右键勾选。
         currencyMode     = "backpack",
         currencyWatch    = {},
         currencyMax      = 3,
@@ -457,6 +491,12 @@ end
 
 function ns:Print(message)
     print("|cff88aaff[MonetUI]|r " .. tostring(message))
+end
+
+--- 开发期自检提示：发布版静默（账本 / 返回值照旧，只是不往聊天框刷）。
+--- 只给"启动时自动打出来的诊断信息"用；玩家主动敲命令的输出仍走 ns:Print。
+function ns:DevPrint(message)
+    if self.dev then self:Print(message) end
 end
 
 --- The saved variable table, always a table.
@@ -822,6 +862,12 @@ function ns:SetModuleEnabled(name, value)
             self:Print("模块 " .. name .. " 切换失败: " .. tostring(err))
         end
     end
+
+    -- 模块开关会把别处依赖的**具名锚框**藏起来（QuestTracker 关掉只是 Hide，
+    -- 全局框还在；Minimap 关掉把 panel SetShown(false)）。只靠各模块自己轮询
+    -- 补扫，关掉方向永远等不到「帧出生」那一刻 —— 2026-11-10「关任务追踪后
+    -- 背包跑到屏幕边缘」判例。给依赖方一个统一重排时机（回调首参是事件名）。
+    ns.EventBus:Fire("MONETUI_MODULE_STATE_CHANGED", name, value)
 end
 
 function ns:StartModules()
@@ -851,7 +897,7 @@ function ns:StartModules()
     -- 看着就像有模块坏了（11-05 开服实测：Atmosphere 被关 → 接手的人第一反应是找故障）。
     -- 真没初始化起来的模块仍然会让两个数不等，那种才是故障。
     local tail = off > 0 and string.format("（另 %d 个已在设置中关闭）", off) or ""
-    self:Print(string.format("已加载 %d/%d 个模块%s。", count, #moduleOrder - off, tail))
+    self:DevPrint(string.format("已加载 %d/%d 个模块%s。", count, #moduleOrder - off, tail))
 end
 
 local function RefreshTheme(reason)
@@ -1168,30 +1214,39 @@ local function PrintColorLadder()
 end
 
 local function PrintHelp()
+    -- 发布版只列玩家向命令；下面 `if not ns.dev then return end` 之后的整段诊断清单，
+    -- 连同这些文案本身，都只在仓库 / 本地开发版里出现。
     ns:Print("命令：")
     ns:Print("  |cffffd100/mui|r            打开配置面板")
     ns:Print("  |cffffd100/mui status|r     显示模块与主题状态")
+    ns:Print("  |cffffd100/mui init status|r  启动前置设置：基线 / 聊天框与动作条底边 / 布局状态")
+    ns:Print("  |cffffd100/mui init run|r     强制重跑一次聊天框对齐（会另存编辑模式布局）")
     ns:Print("  |cffffd100/mui theme|r      重算当前区域配色并重涂（mapID 查表，不采像素）")
+    ns:Print("  |cffffd100/mui enable|r     启用本体")
+    ns:Print("  |cffffd100/mui disable|r    禁用本体（需 /reload）")
+    ns:Print("  |cffffd100/mui <模块> on|off|r  单独开关模块")
+    ns:Print("  |cffffd100/mui infobar currency|r 货币自定义监控：list 看 ID / add|del <ID> / mode / max / zero / panel（右键货币格也能勾）")
+    ns:Print("  |cffffd100/mui bags sort|r 整理背包（与「剩余空间」标题行的「整理」钮同一入口）")
+    ns:Print("  |cffffd100/mui bags currency on|off|icons on|off|r 「剩余空间」标题行货币显示")
+    ns:Print("  |cffffd100/mui groupframes minimap|r 只把团队框贴回小地图左侧（间隔 14、垂直居中；小队保持原位）")
+    ns:Print("  |cffffd100/mui groupframes defaults|r 恢复默认位置：小队回屏幕原位，团队贴小地图")
+    ns:Print("  |cffffd100/mui whatsnew|r  重看本版要点；/mui tweaks 看控制台优化")
+    ns:Print("  |cffffd100/mui reset|r      恢复默认设置（需 /reload）")
+    if not ns.dev then return end
+
+    ns:Print("  —— 开发版诊断（发布版不提供）——")
     ns:Print("  |cffffd100/mui scale|r      像素网格 / 缩放自检（改完 UI 缩放后再跑一次对比）")
     ns:Print("  |cffffd100/mui blocks|r     机密布尔被拦的调用栈账本（`UNKNOWN()` 归因，加 full 看完整栈）")
     ns:Print("  |cffffd100/mui restrict|r   六类受限窗口自查（战斗只是其中一类）+ 可读性前置是否可用")
     ns:Print("  |cffffd100/mui colors|r     配色四级亮度阶梯（面板/空槽/织纹/填充）+ 逐组对比度，账本 MonetUIDB.colorReport")
     ns:Print("  |cffffd100/mui lost|r       血条「损失部分」配色自查：样式有没有落地、织纹有没有把颜色盖住")
     ns:Print("  |cffffd100/mui compat|r     客户端能力自查：换客户端第一趟跑它（bad 只看与假设不符的，tmpl 连模板一起探，find <片段> 扫暴雪帧真名）")
-    ns:Print("  |cffffd100/mui enable|r     启用本体")
-    ns:Print("  |cffffd100/mui disable|r    禁用本体（需 /reload）")
-    ns:Print("  |cffffd100/mui <模块> on|off|r  单独开关模块")
     ns:Print("  |cffffd100/mui skins diagnose|r 对象名可达性账本（全仓一本账：skins / nameplates / infobar / minimap）")
     ns:Print("  |cffffd100/mui minimap menu|r 微菜单现场判据：行建不建得出 / 面板受不受保护 / 此刻右键落点（开服日「右键没反应」）")
-    ns:Print("  |cffffd100/mui infobar currency|r 货币自定义监控：list 看 ID / add|del <ID> / mode / max / zero / panel（右键货币格也能勾）")
-    ns:Print("  |cffffd100/mui bags sort|r 整理背包（与「剩余空间」标题行的「整理」钮同一入口）")
-    ns:Print("  |cffffd100/mui bags currency on|off|r 「剩余空间」标题行显示哪些货币（同上清单；默认 on）")
-    ns:Print("  |cffffd100/mui groupframes minimap|r 只把团队框贴回小地图左侧（间隔 14、垂直居中；小队保持原位）")
-    ns:Print("  |cffffd100/mui groupframes defaults|r 恢复默认位置：小队回屏幕原位，团队贴小地图")
     ns:Print("  |cffffd100/mui groupframes status|r 打印锚点 / 显隐诊断（同时写入 MonetUIDB.groupReport）")
-    ns:Print("  |cffffd100/mui skins diagnose bad|r 只看\"命中但不是框体\"那一类（全量几百行，聊天框装不下）")
+    ns:Print("  |cffffd100/mui skins diagnose bad|r 只看「命中但不是框体」那一类（全量几百行，聊天框装不下）")
     ns:Print("  |cffffd100/mui skins layers <窗口名> [片段]|r 这个窗口的底有几层、每层谁能碰（region / 字段可剥 / 要点名；全量存 MonetUIDB.layerReport）")
-    ns:Print("  |cffffd100/mui skins templates [片段]|r 模板库账本：多少个模板 / 映射到 skinAs / Camelot 覆盖；带片段查\"这个控件被认成什么\"")
+    ns:Print("  |cffffd100/mui skins templates [片段]|r 模板库账本：多少个模板 / 映射到 skinAs / Camelot 覆盖；带片段查「这个控件被认成什么」")
     -- 上线日验收用的只读探针（一个字节都不写，全量都落 SavedVariables）：
     ns:Print("  |cffffd100/mui perf [reset|diag]|r 调度器总账：订阅数 / 逐路耗时排序 / 失败计数 + 外部驱动账 + Lua 内存 + 当前被暂停的轮询框；带 reset 先清零再计时，带 diag 打调试能力自检（账本 MonetUIDB.perfReport）")
     ns:Print("  |cffffd100/mui skins closes|r 关闭按钮换皮覆盖面：按图集全量扫，已换皮/仍是暴雪原样/读不出三档（closeReport）")
@@ -1200,7 +1255,6 @@ local function PrintHelp()
     ns:Print("  |cffffd100/mui buffframe probe|r 只数战斗光环容器的子框个数，不读任何 aura 字段（buffProbe）")
     ns:Print("  |cffffd100/mui nameplates siblings|r 每块牌 base:GetChildren() 的真名 + alpha，判据是名单里有没有 BuffListFrame（nameplateSiblings）")
     ns:Print("  |cffffd100/mui …|r          以上探针全量只进账本：落盘比 /reload 晚 1–2 分钟，登出后读最稳，聊天框只有前几行")
-    ns:Print("  |cffffd100/mui reset|r      恢复默认设置（需 /reload）")
 end
 
 -- The UI scale.  Every size in this addon is authored in UI units, so the scale decides
@@ -1241,7 +1295,7 @@ local function ApplyAutoScale()
     local height = ns.Media:ScreenHeight()
     local presets = height and ns.Media.scalePresets[height]
     if not presets then
-        ns:Print(string.format("UI 缩放：%s 高度不在固定表里，保持游戏自己的设置。", tostring(height)))
+        ns:DevPrint(string.format("UI 缩放：%s 高度不在固定表里，保持游戏自己的设置。", tostring(height)))
         return false
     end
 
@@ -1250,7 +1304,7 @@ local function ApplyAutoScale()
     if applied and current and math.abs(current - applied) > 0.0001 then
         -- The player moved the game's own slider: hands off from now on.
         theme.uiScaleMode = "game"
-        ns:Print("UI 缩放：检测到你自己改过缩放，MonetUI 交还控制权（/mui scale 看当前值）。")
+        ns:DevPrint("UI 缩放：检测到你自己改过缩放，MonetUI 交还控制权（/mui scale 看当前值）。")
         return false
     end
 
@@ -1267,7 +1321,7 @@ local function ApplyAutoScale()
         if after and math.abs(after - candidate.scale) < 0.0001 then
             theme.uiScaleApplied = candidate.scale
             applyingScale = false
-            ns:Print(string.format("UI 缩放：按 %d 高度固定为 %.4f（1 UI 单位 = %d 物理像素）。",
+            ns:DevPrint(string.format("UI 缩放：按 %d 高度固定为 %.4f（1 UI 单位 = %d 物理像素）。",
                 height, candidate.scale, candidate.pixels))
             return true
         end
@@ -1275,7 +1329,7 @@ local function ApplyAutoScale()
     end
     applyingScale = false
 
-    ns:Print("UI 缩放：这个客户端不接受固定值（/mui scale 看当前值）。")
+    ns:DevPrint("UI 缩放：这个客户端不接受固定值（/mui scale 看当前值）。")
     return false
 end
 
@@ -1343,9 +1397,37 @@ local function PrintScale()
     ns:Print("改动游戏里的 UI 缩放后再跑一次，Mult() 应随之变化。")
 end
 
+--- 发布版不提供的诊断命令。玩家向命令（配置 / 模块开关 / 状态 / 主题 / 背包 / 货币 /
+--- 团队框 / tweaks / whatsnew / init / reset）一律保留。模块子命令按「模块名 + 首词」
+--- 精确匹配，别误伤 `/mui tweaks status` 这类玩家命令。
+local DEV_COMMANDS = {
+    scale = true, blocks = true, restrict = true, colors = true, lost = true,
+    compat = true, perf = true, report = true, devtools = true,
+}
+local DEV_SUBCOMMANDS = {
+    skins       = { diagnose=true, diag=true, probe=true, layers=true, templates=true,
+                    closes=true, inset=true, arrows=true },
+    infobar     = { diagnose=true, diag=true, probe=true },
+    minimap     = { diagnose=true, diag=true, probe=true, menu=true },
+    nameplates  = { diagnose=true, diag=true, probe=true, siblings=true, cvars=true },
+    tooltip     = { diagnose=true, diag=true, probe=true },
+    buffframe   = { probe=true, diag=true, diagnose=true },
+    groupframes = { status=true },
+}
+
 local function HandleSlash(message)
     local command, rest = string.match(message or "", "^(%S*)%s*(.-)$")
     command = string.lower(command or "")
+
+    -- 发布版：诊断命令整体不可达（帮助里也不列），给一句人话别让输入像被吞掉。
+    if not ns.dev then
+        local first = string.lower(string.match(rest or "", "^(%S*)") or "")
+        local subs = DEV_SUBCOMMANDS[command]
+        if DEV_COMMANDS[command] or (subs and subs[first]) then
+            ns:Print("这是开发版诊断命令，发布版不提供。输入 |cffffd100/mui|r 查看可用命令。")
+            return
+        end
+    end
 
     if command == "" or command == "config" or command == "options" then
         if ns.Config and ns.Config.Toggle then
@@ -1356,6 +1438,17 @@ local function HandleSlash(message)
 
     elseif command == "status" then
         PrintStatus()
+
+    elseif command == "init" then
+        if not (ns.Init and ns.Init.Status) then
+            ns:Print("启动前置层没加载：检查 MonetUI.toc 里 Init.lua 是否在 Core.lua 之前。")
+        elseif string.lower(rest or "") == "run" then
+            ns:DB().init.chatAligned = false
+            local _, why = ns.Init:AlignChatBottom(true)
+            ns:Print("启动设置：" .. tostring(why))
+        else
+            ns.Init:Status()
+        end
 
     elseif command == "theme" then
         RefreshTheme("manual")
@@ -1412,7 +1505,7 @@ local function HandleSlash(message)
         if devTools and type(devTools.Perf) == "function" then
             devTools:Perf(rest)   -- `/mui perf reset` 靠这个参数
         else
-            ns:Print("DevTools 探针模块没加载：检查 Modules/Tools/Tools.xml 里有没有 DevTools.lua。")
+            ns:DevPrint("DevTools 探针模块没加载：检查 Modules/Tools/Tools.xml 里有没有 DevTools.lua。")
         end
 
     elseif command == "compat" then
@@ -1466,7 +1559,8 @@ local function HandleSlash(message)
 
                 if not handled then
                     local usage = "用法：/mui " .. moduleName .. " on|off"
-                    if type(module.HandleCommand) == "function" then
+                    -- 发布版不要把诊断子命令写进提示里（帮助文本同理，见 PrintHelp）。
+                    if ns.dev and type(module.HandleCommand) == "function" then
                         usage = usage .. "  或  /mui " .. moduleName .. " diagnose"
                     end
                     ns:Print(usage)
@@ -1539,14 +1633,25 @@ ns.EventBus:Register("PLAYER_LOGIN", function()
         loginThemeReported = true
         ns:Print("主题刷新失败（已继续启动模块）：" .. tostring(themeErr))
     end
-    -- Before the modules: every size they build is computed from the scale.
-    ApplyAutoScale()
-    ns:StartModules()
+    -- 启动前置层（Init.lua）在放行模块之前把需要的设置统一调整好：静态基线已在
+    -- 文件加载期固定，这里等编辑模式布局数据就绪、一次性对齐聊天框，然后才
+    -- StartModules —— 各模块拿到的第一份几何就是最终值，不需要运行期反复重贴。
+    local function Boot()
+        -- Before the modules: every size they build is computed from the scale.
+        ApplyAutoScale()
+        ns:StartModules()
 
-    ns:Print(string.format("v%s 已加载。MonetColor: %s。输入 |cffffd100/mui|r 打开配置。",
-        ns.version,
-        ns:HasMonetColor() and "|cff00ff00已接入|r" or "|cffff6b6b未找到（使用内置调色板）|r"))
-    ns:Print("客户端：" .. ns:ClientIdentity())
+        ns:Print(string.format("v%s 已加载。MonetColor: %s。输入 |cffffd100/mui|r 打开配置。",
+            ns.version,
+            ns:HasMonetColor() and "|cff00ff00已接入|r" or "|cffff6b6b未找到（使用内置调色板）|r"))
+        ns:DevPrint("客户端：" .. ns:ClientIdentity())
+    end
+
+    if ns.Init and type(ns.Init.Run) == "function" then
+        ns.Init:Run(Boot)
+    else
+        Boot()
+    end
 end)
 
 -- The player moved the game's own UI-scale slider: hand the scale back instead of fighting

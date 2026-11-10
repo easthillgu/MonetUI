@@ -1395,7 +1395,7 @@ function SimpleConfig:Build()
         tipHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(44))
         tipHint:SetWidth(328)
         tipHint:SetJustifyH("LEFT")
-        tipHint:SetText("用鼠标＝跟手（贴屏幕右/上边缘自动翻边）；用小地图＝提示框右下角对齐小地图面板右上角（小地图模块关掉时自动退回跟随）。边框与底色在上方「界面美化 → 系统 → 鼠标提示边框」。")
+        tipHint:SetText("用鼠标＝跟手（贴屏幕右/上边缘自动翻边）；用小地图＝提示框右下角对齐小地图面板右上角（面板临时隐藏时保持原位，只有小地图模块关掉才退回跟随）。边框与底色在上方「界面美化 → 系统 → 鼠标提示边框」。")
 
         -- 光标装饰（Modules/Cursor）：纯视觉，跟着主题色走；用模块开关整体关掉。
         local cursor = ns:GetModule("Cursor")
@@ -1627,6 +1627,16 @@ function SimpleConfig:Build()
                 function() return currency:ShowZero() end,
                 function(value) currency:SetShowZero(value) end)
 
+            -- §8.84：追踪项一多，「名称 + 完整数量」会被标题行折成 +N。
+            -- 图标模式改画「图标 + 短数量」，名称与完整值移到悬停提示。
+            MakeCheckbox(content, "背包标题行：货币用图标（省位置，名称悬停可见）", row(26),
+                function() return ns:DB().bags.currencyIcons ~= false end,
+                function(value)
+                    ns:DB().bags.currencyIcons = value and true or false
+                    local bags = ns:GetModule("Bags")
+                    if bags and bags.RefreshCurrencyTitles then bags:RefreshCurrencyTitles() end
+                end)
+
             local picker = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
             picker:SetSize(150, 22)
             picker:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(28) - 2)
@@ -1638,7 +1648,7 @@ function SimpleConfig:Build()
             currencyHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(48))
             currencyHint:SetWidth(328)
             currencyHint:SetJustifyH("LEFT")
-            currencyHint:SetText("清单来自角色面板 → 货币 子标签；折叠的分类请先在面板里展开。右键信息栏的货币格也能打开勾选面板，/mui infobar currency list 查 ID。")
+            currencyHint:SetText("默认只追踪金币（背包标题行与提示框都会显示）。背包标题行默认用图标 + 短数量，悬停看名称与完整数值；关掉上面的勾选可换回纯文字。其它货币不自动带入：右键信息栏的货币格勾选，或 /mui infobar currency add <ID|名称> 添加；list 查 ID。清单来自角色面板 → 货币 子标签，折叠的分类请先在面板里展开。")
         end
 
         -- One switch per block, in registration order.

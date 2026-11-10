@@ -168,7 +168,8 @@ function Skin:WarnOnce(topic, message)
     if warned[topic] then return end
     warned[topic] = true
     rememberWarn(topic, message)
-    ns:Print(message)
+    -- 发布版静默：这些是开发期的名单/换皮自检提示，账本照样记、/mui report 在本地仍能读。
+    ns:DevPrint(message)
 end
 
 --- 确认并取回一个美化对象：`"CharacterFrame"`，或 `"Minimap.Buttons.DragonkinComp"` 这样的点路径。

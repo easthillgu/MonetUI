@@ -67,7 +67,9 @@ foreach ($dir in 'Assets', 'Libs', 'Utils', 'Config', 'Modules') {
     if ($LASTEXITCODE -ge 8) { throw "robocopy failed for $dir (exit $LASTEXITCODE)" }
 }
 
-foreach ($file in 'MonetUI.toc', 'Core.lua', 'LICENSE', 'THIRD-PARTY-NOTICES.txt') {
+# Init.lua is a root-level runtime file loaded by the TOC before Core.lua; it must
+# be shipped or the addon fails to load (TOC points at a file that is not there).
+foreach ($file in 'MonetUI.toc', 'Init.lua', 'Core.lua', 'LICENSE', 'THIRD-PARTY-NOTICES.txt') {
     Copy-Item (Join-Path $root $file) (Join-Path $target $file) -Force
 }
 

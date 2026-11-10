@@ -918,7 +918,7 @@ function M:Initialize()
     self:ApplyFont()
     self:ApplyAll()
 
-    ns:Print("界面美化已启用（" .. tostring(#self.registry) .. " 个窗口）。")
+    ns:DevPrint("界面美化已启用（" .. tostring(#self.registry) .. " 个窗口）。")
 end
 
 function M:SetEnabled(enabled)
@@ -1132,7 +1132,7 @@ function M:HandleCommand(rest)
             DevTools:SkinsProbe(sub)
             return true
         end
-        ns:Print("DevTools 探针模块没加载（检查 Modules/Tools/Tools.xml）。")
+        ns:DevPrint("DevTools 探针模块没加载（检查 Modules/Tools/Tools.xml）。")
         return true
     end
     return false
