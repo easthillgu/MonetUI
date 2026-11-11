@@ -8,8 +8,8 @@
  * ⇒ 本工具的"声明层查不到"只是**待实机确认**的候选清单，不是缺陷计数，更不是改名清单。
  *   真名一律以实机为准（`/mui compat find <片段>` 扫 `EnumerateFrames`）。
  * 判据来源 = `tools/harness/world-data.lua`（1.60 = Camelot 分支优先的 FrameXML 声明式快照）。
- *
- * 用法：
+ * ⚠ 该表**不入库**（公开面不承载从暴雪 FrameXML 编译出的派生表）：缺表或比生成器旧 ⇒ 现场重生
+ *   （`node tools/harness/build-world.js`，源在 framexml-source/，那个也不入库 ⇒ 换机要整目录拷贝）。
  *   node tools/frame-name-existence.js            # 三档分布 + 待实机确认清单
  *   node tools/frame-name-existence.js --scope bank
  *   LUA_BIN=/path/to/lua.exe node tools/frame-name-existence.js
@@ -45,6 +45,28 @@ if (!lua) {
   console.error('找不到 Lua 解释器（设 LUA_BIN 指定）。这条闸门判不了存在性，明确失败退出 1，绝不静默跳过。');
   process.exit(1);
 }
+
+// ---- 派生表缺失/过期 ⇒ 现场重生（与 tools/harness/run.js 同一套判据）--------------
+// 不这么做的话，缺表会让下面的 dofile 直接崩，而报错只说"文件不存在"，
+// 看不出"这是生成物，重新生成就行"——新克隆仓库时必踩。
+const REGEN = ['world-data.lua', path.join(__dirname, 'harness', 'build-world.js')];
+const regenTable = () => {
+  const [name, genScript] = REGEN;
+  const outPath = path.join(__dirname, 'harness', name);
+  let need = false;
+  try {
+    need = fs.statSync(outPath).mtimeMs < fs.statSync(genScript).mtimeMs;
+  } catch (e) { need = true; }
+  if (!need) return;
+  console.log(`# 派生表 ${name} 缺失或过期，正在重生…`);
+  const r = spawnSync(process.execPath, [genScript], { encoding: 'utf8', cwd: ROOT, maxBuffer: 16 * 1024 * 1024 });
+  process.stdout.write((r.stdout || '').replace(/^/gm, '# '));
+  if (r.status !== 0) {
+    console.error(`生成 ${name} 失败（源在 framexml-source/，那个也不入库 —— 换机要整目录拷贝）：\n${r.stderr || ''}`);
+    process.exit(1);
+  }
+};
+regenTable();
 
 // ---- 把 1.60 的名字宇宙导出来（临时文件，不入库）--------------------------------
 const DUMP = path.join(os.tmpdir(), 'mui-160-names.txt');

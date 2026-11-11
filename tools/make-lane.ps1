@@ -7,7 +7,7 @@ make-lane.ps1 —— 多 harness 车道创建器（工作流详见 docs/MULTI-HA
 
 做什么：
   1. git worktree add ..\MonetUI-lane-<Name>（分支 lane/<Name>-<Task>）
-  2. 拷贝未跟踪的记忆文件：AGENTS.md / TODO.md / MonetUI.md（.gitignore 把它们排除，
+  2. 拷贝未跟踪的记忆文件：AGENTS.md / TODO.md / MonetUI.md + docs\ 交接包（.gitignore 把它们排除，
      worktree 里天然没有，不补 = harness 失忆）
   3. junction 只读共享件：docs\api、tools\node_modules、Assets\Textures.bak
   4. 打印该车道的人工配置提醒
@@ -32,11 +32,19 @@ git -C $root worktree add $lane -b $branch
 if ($LASTEXITCODE -ne 0) { throw "git worktree add 失败（分支 $branch 是否已存在？）" }
 
 # ---- 拷贝未跟踪的记忆文件：各车道各自演进，合并时由集成道带回 ----
-foreach ($f in 'AGENTS.md', 'TODO.md', 'MonetUI.md') {
+foreach ($f in 'AGENTS.md', 'TODO.md', 'MonetUI.md',
+           'docs\HANDOFF.md', 'docs\CHECKS.md', 'docs\CODEX-SETUP.md',
+           'docs\MULTI-HARNESS.md', 'docs\PLAN-refactor.md',
+           'docs\PLAN-refactor-2026-10-29.md', 'docs\REVIEW-2026-10-29.md',
+           'docs\POSTLAUNCH-WEEK1.md') {
   $src = Join-Path $root $f
-  if (Test-Path $src) { Copy-Item $src (Join-Path $lane $f) }
+  if (Test-Path $src) {
+    $dst = Join-Path $lane $f
+    $dir = Split-Path -Parent $dst
+    if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    Copy-Item $src $dst
+  }
 }
-
 # ---- junction：只读共享件，不复制、三家车道事实一致 ----
 $junctions = @(
   'docs\api',            # API 快照（api-lookup/api-audit 的数据源，事实必须一致）

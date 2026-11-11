@@ -4,7 +4,12 @@
 # （文件仍在本地磁盘，只是不进版本库）。
 #
 # 发行集 = MonetUI.toc + Core/Config/Modules/Utils + Assets（材质与字体）
-#        + Libs（第三方代码与许可声明）+ README.md + LICENSE + .gitignore
+#        + Libs（第三方代码与许可声明）+ README.md / CHANGELOG.md / LICENSE
+#        + tools/ 的闸门脚本（验证链的一部分，CI 也要用）+ .github/
+#
+# 2026-11-11 起远端是**公开**仓库（不再是"私有备份"）。公开面 =
+# 发行集 + 验证链脚本 + 许可声明；开发记忆（docs/ 交接包、AGENTS.md、
+# MonetUI.md、TODO.md）与未授权字体一律只留本地。
 #
 # 材质分两处（2026-10-28 起）：
 #   Assets-src/Textures/*.tga  —— TGA **源**：进 git（可复现 + 可审计），**不发行**。
@@ -25,6 +30,10 @@ tools/*
 !tools/**/*.svg
 !tools/**/*.html
 !tools/**/*.lua
+# harness 派生产物：源在 framexml-source/ 与 docs/api/（两者都不入库），
+# run.js 跑之前会按 mtime 自动重生 —— 公开面不放派生表
+tools/harness/world-data.lua
+tools/harness/engine-api.lua
 node_modules/
 *.json
 # tools/ 的运行前提：npm install 需要它（@napi-rs/canvas / wow-blp-web）
@@ -35,7 +44,7 @@ node_modules/
 .opencode/
 
 # ---- 开发记录与过程文档 ----
-# Markdown 默认不进库；例外：项目介绍、第三方库许可、字体许可、docs/ 下的四份交接文档（见下方）。
+# Markdown 默认不进库；例外：项目介绍、第三方库许可、字体许可、tools 下的说明文档。
 *.md
 !README.md
 !CHANGELOG.md
@@ -46,17 +55,11 @@ node_modules/
 !tools/**/*.md
 # Qoder CN 的项目规则（多车道约束，随 worktree 走，必须入库）
 !.qoder/rules/*.md
-# 例外：交接/流程类文档进库（其余 docs/ 内容——api 快照、texture-preview 产物、评审表——只留本地）。
-# 注意：不能写成整目录 `docs/`——那会让下面的 ! 全部失效（git 不会进入被排除的目录）。
+# docs/ 整目录排除 + 逐文件 `!` 白名单（不能写成整目录 `docs/`——那会让下面的 ! 全部失效）。
+# docs/ 交接包（CHECKS / CODEX-SETUP / HANDOFF / MULTI-HARNESS / PLAN-refactor×2 /
+# REVIEW-2026-10-29）只留本地：公开仓库不承载内部交接记忆。
 docs/*
-!docs/CHECKS.md
-!docs/CODEX-SETUP.md
-!docs/HANDOFF.md
-!docs/PLAN-refactor.md
-!docs/REVIEW-2026-10-29.md
-!docs/PLAN-refactor-2026-10-29.md
-!docs/MULTI-HARNESS.md
-# README 头图（tools/make-banner.ps1 由 Assets-src 的 TGA 合成，克隆者可复现）
+# 例外：README 头图（tools/make-banner.ps1 由 Assets-src 的 TGA 合成，克隆者可复现）
 !docs/monet_logo_240x40.png
 
 # ---- 过程产物 / 中间文件 ----
@@ -68,6 +71,11 @@ Assets/Textures.bak/
 # 参考仓库：Gethe/wow-ui-source forever 分支只读克隆（4500+ 文件，供
 # tools/extract-templates.js 抓模板）。永远不进库，也不进包。
 framexml-source/
+
+# ---- 未授权字体：只留本地，不进版本库 ----
+# roadway.ttf 文件内无 license 字段（见 Assets/Fonts/NOTICE.md），
+# 公开仓库 = 对外可下载 = 分发，所以它不能待在版本库里。
+Assets-src/Fonts/roadway.ttf
 
 # ---- 编辑器 / 系统 ----
 .codegraph/

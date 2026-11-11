@@ -71,13 +71,13 @@ node tools/harness/run.js --max=30     # 每类多列几条明细
 
 ## 派生表：重生与入库
 
-| 产物 | 生成器 | 入库现状 |
+| 产物 | 生成器 | 版本库现状 |
 |---|---|---|
-| `world-data.lua`（1.5 MB） | `node tools/harness/build-world.js` | 已被 `b9c3fc2` 入库（派生表，本可不必） |
+| `world-data.lua`（1.5 MB） | `node tools/harness/build-world.js` | **不入库**（2026-11-11 起；`.gitignore` 已排除） |
 | `engine-api.lua`（1.3 MB） | `node tools/harness/build-engine.js` | 同上 |
 
-两张都是**派生表**：源在 `framexml-source/` 与 `docs/api/`，所以入不入库不影响正确性。
-现状是都已入库；要收掉的话见文末的 `.gitignore` 行，**别半路撤**（别人的基线会对不上）。
+两张都是**派生表**：源在 `framexml-source/` 与 `docs/api/`（两者都不入库），所以入不入库不影响正确性。
+现状是**都不入库**（远端 2026-11-11 转公开后收缩：公开面不承载这两张从暴雪 FrameXML / 客户端 API 快照编译出的派生表）。
 
 `run.js` 每次启动会核 mtime：**产物缺失、或比生成器旧 ⇒ 现场重生**，所以日常只记一条命令。
 换客户端分支、重新抓了 `docs/api` 快照这类"源变了但生成器没变"的场合手工加 `--regen`（别指望
@@ -173,9 +173,9 @@ true）。`samples/bad-aftercombat-write.lua` 现在就是按这个形状写的�
 6. **断言不可迁就代码**：红了先定性 —— 真缺陷（留红）/ 判据缺离线证据（降 `warn` 并在
    `why` 里写清缺什么）/ 桩错（修桩，不要改产品）。不许为了让 harness 变绿放宽断言。
 
-## 入库建议（`.gitignore` 由集成道维护，这里只给行）
+## 版本库口径（`.gitignore` 由集成道维护，这里只记录状态）
 
-两张派生表已经入库（`b9c3fc2`）。若决定改为"只本地生成"，加：
+两张派生表**已按下面的行排除**（远端转公开后收缩公开面）：
 
 ```
 # harness 派生产物：源在 framexml-source/ 与 docs/api/，run.js 缺/过期自动重生
@@ -185,3 +185,6 @@ tools/harness/engine-api.lua
 
 其余（`run.js` / `run.lua` / `api_stub.lua` / `frames.lua` / `report.lua` /
 `build-world.js` / `build-engine.js` / `samples/*.lua` / 本文件）都应入库。
+
+**换机/换车道时**：这两张表由 `run.js` 按 mtime 自动重生（源缺失时要先补
+`framexml-source/` 与 `docs/api/`，两者都是本机资源，不入库）。

@@ -109,7 +109,7 @@ MonetUI/
 ├── Config/              设置面板（SimpleConfig）+ Config.xml
 ├── Modules/             各功能模块（见上表），每个模块一份同名 xml 清单
 ├── Assets/              字体 / 自绘材质 / 图标
-├── docs/                开发记录、布局与材质预览页（gitignore，README 头图例外）
+├── docs/                开发记录、布局与材质预览页（不入库；README 头图例外）
 └── tools/               闸门脚本（api-audit / audit-taint / audit-locals / sync-check / env-source-check / map-env-coverage）+ 材质生成器
 ```
 
@@ -119,7 +119,7 @@ MonetUI/
 `.lua` 只有 `Core.lua`。要加减文件就改对应 xml ——
 顺序和"这一组是干什么的、为什么是这个先后"都写在各 xml 头部的注释里。
 
-> 仓库只跟踪**发行集**（`.toc` / 各 xml 列出的文件 + `Assets/` + `Libs/` + `README.md` / `LICENSE`）。`tools/` 的闸门与材质生成脚本入库（验证链的一部分），其余开发资料（`docs/` 大部分、`AGENTS.md`、`MonetUI.md`）按 `.gitignore` 不入库 —— 克隆下来是可直接用的插件，不是完整开发环境。脚本用法写在各脚本头部注释里。
+> 仓库只跟踪**发行集**（`.toc` / 各 xml 列出的文件 + `Assets/` + `Libs/` + `README.md` / `LICENSE`）与 `tools/` 的闸门与材质生成脚本（验证链的一部分）。其余开发资料（`docs/` 交接包、`AGENTS.md`、`MonetUI.md`、`TODO.md`）按 `.gitignore` 不入库 —— 克隆下来是可直接用的插件，不是完整开发环境。脚本用法写在各脚本头部注释里。
 
 ## ⚠️ 状态
 
