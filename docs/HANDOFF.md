@@ -6511,7 +6511,7 @@ EnsureChannelHeaderHook / EnsureTempWindowHook / FadeTime）、`Config/SimpleCon
 - **改动文件**：`Modules/Skins/Social.lua`、`tools/harness/chat-band-probe.lua`、`docs/HANDOFF.md`。
 - **验收**：游戏内 `/reload` 通过；已随 **0.13.4** 发布（commit `2f19b5b`，Actions run `42975049396` success）。
 
-### §8.96 输入框空闲渐隐 + 三档平时状态（2026-11-11，待 0.13.5）
+### §8.96 输入框空闲渐隐 + 三档平时状态（2026-11-11，已随 0.13.5 发布）
 
 **来源**：作者贴来一份千问给的参考实现 `ChatEditFade.lua`（输入框空闲渐隐 0.25 + 聚焦 1.0 + 与 tab 互斥），
 问"我们能做吗"。评估结论：**能力可做，但实现不能照抄** —— 该文件在实测环境里有 4 处硬伤。
