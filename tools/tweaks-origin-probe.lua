@@ -13,7 +13,7 @@
 --   3) 关掉开关：真的还原成玩家原值，账清空
 --   4) 玩家中途自己改过：关掉时不抢他的值，只清账
 --   5) /mui tweaks restore：没记账的用客户端默认值兜底
---   6) /mui tweaks all 0：九条全关并还原
+--   6) /mui tweaks all 0：八条全关并还原（lootRange 已移除）
 --
 -- 跑法：lua tools/tweaks-origin-probe.lua    退出码 0 = 全绿
 -- 依赖：lua 5.4（loadfile 三参 env）；无第三方库。
@@ -31,7 +31,6 @@ local CVARS = {
     cameraDistanceMaxZoomFactor = { value = "1", default = "1" },
     WorldTextScale_v2     = { value = "1", default = "1" },
     outlineModeShowLootEffectWhenDisabled = { value = "0", default = "0" },
-    autoLootRange         = { value = "0", default = "0" },
 }
 
 local function Reset()
@@ -63,6 +62,7 @@ local function MakeNS()
     local ns = {}
     ns.Secrets = { IsSecret = function() return false end }
     ns.Print = function(_, msg) out[#out + 1] = tostring(msg) end
+    ns.DevPrint = function(_, msg) out[#out + 1] = tostring(msg) end   -- 同 Print，诊断文本也要被 Text() 捕获
     ns.DB = function() return DB end
     ns.Register = function() end
     ns.GetModule = function() return nil end
@@ -158,7 +158,7 @@ local M6c = Load()
 M6c:RestoreAll()
 check("玩家的 55 原封不动", CVARS.particleDensity.value == "55", CVARS.particleDensity.value)
 
-print("== 6) all 0：九条全关并还原 ==")
+print("== 6) all 0：八条全关并还原 ==")
 Reset()
 DB.tweaks = { sharpen = true, noFog = true }
 DB.tweakOrigin = nil

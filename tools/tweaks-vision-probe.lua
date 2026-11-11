@@ -58,10 +58,10 @@ local printed = {}
 local ns = {}
 ns.Secrets = { IsSecret = function() return false end }
 ns.Print = function(_, msg) printed[#printed + 1] = tostring(msg) end
--- 与用户存档一致：九条全开（2026-11-07 实机 MonetUI.lua 的 db.tweaks）
+-- 与用户存档一致：八条全开（2026-11-07 实机 MonetUI.lua 的 db.tweaks；lootRange 已移除）
 local DB = {
     tweaks = {
-        cameraZoom = true, lootRange = true, combatText = true, questGlow = true,
+        cameraZoom = true, combatText = true, questGlow = true,
         noDeathGray = true, sharpen = true, noWeather = true, fewParticles = true,
         noFog = true,
     },

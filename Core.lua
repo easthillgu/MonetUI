@@ -245,6 +245,21 @@ local DEFAULTS = {
     skins = {
         font   = "pixel",
         panels = {},
+        -- 聊天页签悬停才显示（§8.89）：关掉就回到始终显示。输入框嵌入框内顶部不受此开关影响。
+        hoverChatTabs = true,
+        -- 聊天输入框位置（§8.89.4 / C）：`top` 嵌框内顶部，`bottom` 回到原生框底；
+        -- 仅当 `chatEditBoxAutoHide` 关闭时才按此位置常显。切换后需 /reload 生效。
+        chatEditBoxPos = "top",
+        -- 输入框自动隐藏（§8.91）：默认开启——输入框带折叠、平时隐藏，仅聚焦（Enter/点击）才显示，
+        -- 失焦后自动藏回；关闭则按 `chatEditBoxPos` 常显。切换需 /reload 生效。
+        chatEditBoxAutoHide = true,
+        -- §8.90 聊天页签三态色 + 独立淡入时长（hex，不含 #）：未选中 / 选中 / 未读闪烁。
+        -- 默认取中性灰 / 白 / 警示红，足以区分三态；玩家可在 SimpleConfig 改。
+        tabColorNormal   = "9a9a9a",
+        tabColorSelected = "ffffff",
+        tabColorFlash    = "ff6b6b",
+        -- 页签悬停淡入淡出时长（秒）；0.18 贴近 Chattynator，支持 0.1/0.3/0.5。
+        tabFade         = 0.18,
     },
     -- 小地图 (Modules/Minimap)：方形地图 + 主题面板 + 顶部区域名条；暴雪的集群按钮逐项接管。
     -- hide* 是「把暴雪那个按钮藏起来」，默认全藏（方形面板和暴雪原样按钮混在一起最难看）；

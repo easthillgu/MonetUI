@@ -43,7 +43,6 @@ C("weatherDensity",                    "2", "3")
 C("ResampleQuality",                   "1", "1")
 C("RenderScale",                       "1", "1")
 C("cameraDistanceMaxZoomFactor",       "1", "1")
-C("autoLootRange",                     "0", "0")
 C("WorldTextScale_v2",                 "1", "1")
 C("outlineModeShowLootEffectWhenDisabled", "0", "0")
 
@@ -77,6 +76,7 @@ local function MakeNS()
     local ns = {}
     ns.Secrets = { IsSecret = function() return false end }
     ns.Print = function(_, msg) out[#out + 1] = tostring(msg) end
+    ns.DevPrint = function(_, msg) out[#out + 1] = tostring(msg) end   -- 同 Print，诊断文本也要被 Text() 捕获
     ns.DB = function() return DB end
     ns.Register = function() end
     ns.GetModule = function() return nil end
@@ -102,10 +102,10 @@ local function check(name, cond, extra)
 end
 local function Text() return table.concat(out, "\n") end
 
--- 实盘里的开关组合：5 开 4 关
+-- 实盘里的开关组合：5 开 3 关（lootRange 已移除：autoLootRange 在 Forever 1.60 不存在）
 local function LiveSwitches()
     return {
-        cameraZoom = true, lootRange = false, combatText = true, questGlow = true,
+        cameraZoom = true, combatText = true, questGlow = true,
         noDeathGray = true, sharpen = false, noWeather = true,
         fewParticles = false, noFog = false,
     }
@@ -118,8 +118,8 @@ local M1 = Load()
 local s1 = M1:Settings()
 check("新存档铺了 5 条默认开关",
     s1.cameraZoom and s1.combatText and s1.questGlow and s1.noDeathGray and s1.noWeather)
-check("默认关的 4 条没写进存档",
-    not s1.lootRange and not s1.sharpen and not s1.fewParticles and not s1.noFog)
+check("默认关的 3 条没写进存档",
+    not s1.sharpen and not s1.fewParticles and not s1.noFog)
 
 DB = { tweaks = { sharpen = true } }
 local M2 = Load()

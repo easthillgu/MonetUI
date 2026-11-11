@@ -894,13 +894,20 @@ function Skin:Panel(frame, opts)
     if not frame or not self:IsScriptObject(frame) then return nil end
     opts = opts or {}
 
+    local inset = opts.inset or 0
+    -- §8.89 `topExtend`：把背板上沿向外多撑一段（聊天框用它扩出 32 的输入区）。
+    -- 只在这条链上生效，**不能改默认 inset**，否则所有皮肤窗口一起上移。
+    local topExtend = opts.topExtend or 0
     local bg = Marked(frame, "skinBg")
+    local function AnchorPanel()
+        pcall(bg.SetPoint, bg, "TOPLEFT", frame, "TOPLEFT", inset, -inset + topExtend)
+        pcall(bg.SetPoint, bg, "BOTTOMRIGHT", frame, "BOTTOMRIGHT", -inset, inset)
+    end
+
     if not bg then
         bg = NewBackdropFrame(opts.host or frame, opts.levelOffset or -1)
         if not bg then return nil end
-        local inset = opts.inset or 0
-        pcall(bg.SetPoint, bg, "TOPLEFT", frame, "TOPLEFT", inset, -inset)
-        pcall(bg.SetPoint, bg, "BOTTOMRIGHT", frame, "BOTTOMRIGHT", -inset, inset)
+        AnchorPanel()
         Widget:Theme(bg, {
             thickness   = opts.thickness or 1,
             bgAlpha     = opts.bgAlpha or 0.85,
@@ -909,8 +916,15 @@ function Skin:Panel(frame, opts)
             bgSurface   = opts.bgSurface,
         })
         Mark(bg, "skinPlate", true)
+        Mark(bg, "panelTopExtend", topExtend)
         Mark(frame, "skinBg", bg)
         self:Track(bg)
+    elseif (Marked(bg, "panelTopExtend") or 0) ~= topExtend then
+        -- 背板是缓存的：opts 变了不能只靠 /reload。这两个点都写在**我们自己的**背板上，
+        -- ClearAllPoints 不涉及任何暴雪框，不产生 taint（§8.62 的判例只禁 cf 本体）。
+        pcall(bg.ClearAllPoints, bg)
+        AnchorPanel()
+        Mark(bg, "panelTopExtend", topExtend)
     end
 
     pcall(bg.Show, bg)
@@ -1250,6 +1264,44 @@ function Skin:Button(button, opts)
     return button
 end
 
+--- §8.90 把 "#rrggbb" 解成 0..1 的 r,g,b；非法返回 nil（调用点走兜底）。
+local function HexToRGB(hex)
+    if type(hex) ~= "string" then return nil end
+    local h = hex:gsub("#", "")
+    if #h ~= 6 then return nil end
+    local r, g, b = h:match("(..)(..)(..)")
+    if not r then return nil end
+    return tonumber(r, 16) / 255, tonumber(g, 16) / 255, tonumber(b, 16) / 255
+end
+
+--- §8.90 读聊天页签三态配置色（Normal / Selected / Flash）。DB 没配或非法时走兜底：
+--- 普通→主题边色（贴近旧观感），选中→白，未读→警示红。
+local function TabColor(state)
+    local db = (type(ns.DB) == "function") and ns:DB() or nil
+    local cfg = db and db.skins
+    local hex = cfg and cfg["tabColor" .. state]
+    local r, g, b = HexToRGB(hex)
+    if r then return r, g, b end
+    if state == "Selected" then return 1, 1, 1 end
+    if state == "Flash" then return 1, 0.42, 0.42 end
+    local er, eg, eb = Color:GetBorder(); return er, eg, eb
+end
+
+--- §8.90 页签是否处于「未读闪烁」：暴雪把未读指示画在 `ChatFrameNTabFlash` 上，
+--- 其 FlashAnim 在播放即代表未读。读不到 / 异常一律按「非闪烁」处理（保守，不误染）。
+local function TabIsFlashing(tab)
+    if type(tab.GetName) ~= "function" then return false end
+    local ok, nm = pcall(tab.GetName, tab)
+    if not ok or type(nm) ~= "string" or nm == "" then return false end
+    local flash = _G[nm .. "TabFlash"]
+    if not flash then return false end
+    local okP, playing = pcall(function()
+        return flash.FlashAnim and type(flash.FlashAnim.IsPlaying) == "function"
+            and flash.FlashAnim:IsPlaying()
+    end)
+    return okP and playing or false
+end
+
 --- Reflect the selection state on a tab's Monet underline.
 -- Skin:Button -> Strip fades every texture region of the tab, SelectedTexture included, so the stock
 -- "this tab is active" art is gone and the underline has to carry the state instead.  A panel swaps
@@ -1271,7 +1323,12 @@ function Skin:UpdateTabState(tab)
         if ok then selected = (alpha or 0) > 0 end
     end
 
-    underline:SetAlpha(selected and 1 or 0.25)
+    -- §8.90 三态色：未读闪烁 > 选中 > 普通。普通保持 0.25 弱显（旧观感），选中 / 未读抬满。
+    local flashing = TabIsFlashing(tab)
+    local state = flashing and "Flash" or (selected and "Selected" or "Normal")
+    local r, g, b = TabColor(state)
+    local a = (selected or flashing) and 1 or 0.25
+    underline:SetVertexColor(r, g, b, a)
     underline:Show()
 
     -- **整框 alpha 的鬼影**（2026-11-06 实机）：暴雪按"未读 / 非活动"把整个页签框淡到
@@ -1338,8 +1395,7 @@ function Skin:Tab(tab, opts)
         self:Track(underline)
         WatchTab(self, tab)
         self:OnTheme(function()
-            local r, g, b = Color:GetBorder()
-            underline:SetVertexColor(r, g, b, 1)
+            -- §8.90 下划线颜色由 UpdateTabState 按三态统一上色（不再硬编码主题边色）。
             Skin:UpdateTabState(tab)
         end)
     end

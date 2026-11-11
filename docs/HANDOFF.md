@@ -6021,6 +6021,418 @@ EXIT 1 仍只因两个历史 EXTRA 文档 `CHANGELOG.md` / `README.md`，按规�
 **各节状态行说明**：§8.78~8.86 里的「未提交 / 未打 tag / 未发版」是当时的历史记录，
 现已全部随 `0.13.2` 发布；不再逐条改写，以本节为准。
 
+## 8.88 2026-11-10 22:1x 调研：把聊天输入框放到「框体内部顶端」（作者拍板**先不改，只记录**）
+
+**需求辨析**：§8.62（11-06）做过的「输入框置顶」是把输入框摆到**框体外面**、
+页签行**之上**（当年玩家口径「摆在窗口上方、不遮文字」）。本次作者要的是
+**聊天框矩形内部的顶端**（页签行下方、半透板内），是第三个位置，不是同一件事。
+
+### 8.88.1 三种位置与现有落点
+
+| 位置 | 锚点 | 出处 |
+|---|---|---|
+| 暴雪默认（框**下沿外**） | `TOPLEFT → $parent:BOTTOMLEFT (-5,-2)` + `RIGHT → ScrollBar:RIGHT (8,0)` | `framexml-source/…/Blizzard_ChatFrameBase/Mainline/FloatingChatFrame.xml:555-561` |
+| 当前 0.13.2（框**上沿外**、页签之上） | `BOTTOMLEFT → cf:TOPLEFT (-5, dy≈69)` + `BOTTOMRIGHT → cf:TOPRIGHT (8, dy)` | `Modules/Skins/Social.lua:205-258`（`PinChatEditBox`）、`:293-305`（`Widget:PollWatch` 每秒校）、§8.62 |
+| 本次目标（框**内**顶端） | `TOPLEFT → cf:TOPLEFT (0,-2)` + `TOPRIGHT → cf:TOPRIGHT (0,-2)` | 未实现 |
+
+`dy = (页签顶 − 框顶) + 页签高 + 2 ≈ 36 + 32 + 2 = 70`（§8.62 拖窗复验实测 69/70）。
+即从上到下现在是「输入框 / 空隙 / 页签行 / 半透板」，输入框并不属于框体。
+
+**官方没有这个开关**：Edit Mode 的聊天框设置只有宽/高
+（`tools/harness/engine-api.lua:718` 的 `EditModeChatFrameSetting` 枚举 =
+WidthHundreds / WidthTensAndOnes / HeightHundreds / HeightTensAndOnes）；
+CVar `chatStyle` 只切 `classic` / `im`（`FloatingChatFrame.lua:1781`），不管位置。
+⇒ 只能由插件改锚点，落点集中在 `Social.lua` 一处。
+
+### 8.88.2 可行性与四条硬约束（源码 + §8.62 已验真值）
+
+1. §8.62 实测 `ChatFrame1..10EditBox:IsProtected()=false` ⇒ **写它自己的锚点安全**。
+   但「模板 `frameStrata="DIALOG"` / 是 cf 子框」只是 XML 静态值，**实机不是这样**
+   （22:55 复核见 §8.88.6）：`eb:GetParent()=UIParent`、`strata=LOW`、`level=1`，
+   而 `ChatFrame1` 同为 UIParent 子框、`strata=LOW`、`level=5`。
+   原因是 `ChatFrameEditBox.lua:326` 的 `OnLoad` 只在创建时设一次
+   `level = 当时 cf 的 level + 1`（之后 cf 被 EditMode 抬到 5 并不同步），
+   `:565` 的 `Deactivate()` 又把 strata 打回 `LOW`；焦点一来
+   `ChatFrameUtil.lua:534` 的 `ActivateChat()` 才 `SetFrameStrata("DIALOG") + Raise()`。
+   ⇒ **把 eb 直接挪进 cf 矩形内会被 cf 的消息文字盖住**，一按 Enter 又冒出来。
+   方案 A 若要做，必须额外钉住层级（`SetFrameStrata("DIALOG")` 或 `cf level + 1`），
+   而那会与暴雪 Activate / Deactivate 反复拉扯。
+2. **绝不能碰 `ChatFrameN` 本体**的 `SetPoint / ClearAllPoints / SetClampRectInsets`
+   （`Social.lua:170-183` 的 taint 判例：EditMode 系统帧 system=8 被标脏 →
+   `secureexecuterange` 整链污染、`Auras cannot be accessed while tainted`）。
+   对 cf 只做过 `SetHeight`（`MatchChatHeight`，实测安全）。
+3. `FCF_DockUpdate`（`FloatingChatFrame.lua:1616`，拖窗 / 改大小 / 改停靠触发）会把锚点
+   重钉回底部 ⇒ 沿用 `Widget:PollWatch(fn, 1)` 每秒纠回，只把 `already` 的几何判定换掉；
+   想消除「输入框刚显示那一拍还在底部」的闪烁，可给 eb 的 `OnShow` 挂一次即时重钉
+   （eb 非保护框，风险低；不要 hook 全局 `ChatEdit_*`）。
+4. **消息文字无法自动让开**：`SimpleMessageFrameAPIDocumentation.lua` 的
+   `SimpleMessageFrameAPI` 只有 `SetFading / SetFont / SetFontObject / SetIndentedWordWrap /
+   SetInsertMode / SetJustifyH / SetJustifyV / SetShadow* / SetSpacing / SetTextColor /
+   SetTimeVisible` —— **没有 `SetTextInsets`**；`SetMaxLines` 虽没进这份 API 文档，
+   但 **实机 `cf.SetMaxLines` 确实存在**（22:55 读到 `GetMaxLines=128`），它只是滚动缓冲
+   上限、不是给顶部留白，帮不上忙。源码里唯一那处 `SetTextInsets`
+   （`Shared/ChatFrameEditBox.lua:714`）是 EditBox 给自己 header 留的，与消息区无关。
+   ⇒ 输入框高 32，消息堆到顶时必然盖住最上面 1~2 行。
+   **「只在输入时才显示」这个缓解理由也不成立**：实机 `chatStyle=im`、
+   `ChatFrame1EditBox shown=true / IsVisible=true / alpha=1`（我们的 `PinChatEditBox`
+   把暴雪 0.35 抬回 1），且 `GetNumMessages()=128` 已满 ⇒ 遮挡是**长期**的。
+
+### 8.88.3 方案 A（最小改动，作者未采纳但记录备用）
+
+只改 `PinChatEditBox`：
+
+```lua
+eb:ClearAllPoints()
+eb:SetPoint("TOPLEFT",  cf, "TOPLEFT",  0, -2)
+eb:SetPoint("TOPRIGHT", cf, "TOPRIGHT", 0, -2)
+```
+
+**高度来源已核实**：`FloatingChatFrame.xml:554-561` 的 `<EditBox name="$parentEditBox">`
+自带 `<Size x="5" y="32"/>`，两个 TOP 点只负责撑宽、`y=32` 由 Size 提供并向下延伸
+⇒ 不必 `SetHeight`，也不必担心 `ClearAllPoints` 后塌成 0 高。
+宽度会从原来的「cf 宽 +13」（`BOTTOMRIGHT → cf:TOPRIGHT (8, dy)` 的 +8 与 -5 出血）
+收成正好等于 cf 宽，输入框与消息区左右齐平。
+
+配套五处：① 删掉按页签算 `dy` 的整段（框内顶端天然不盖页签，页签在框外上方）；
+② `already` **必须同时校验两个锚点**（暴雪 `FCF_DockUpdate` 可能只改第二个点）：
+   `p1=="TOPLEFT" and a1==cf and rp1=="TOPLEFT" and x1≈0 and y1≈-2`
+   `and p2=="TOPRIGHT" and a2==cf and rp2=="TOPRIGHT" and y2≈-2`，否则漏判会留半个错位框；
+③ `CHAT_EDITS` 从 1..4 补到 1..10（`CHAT_TABS` 早已是十个，备用窗口第 5+ 的输入框
+   目前没人钉）；④ `Skin:EditBox` 的 0.9 底衬会叠在 0.35 的 `panel` 上，观感要实机看，
+   必要时把输入框底衬调成不透明；⑤ 想消除「刚显示那一拍还在底部」的闪烁，给 eb 挂
+   `OnShow` 即时重钉（不要 hook 全局 `ChatEdit_*`，见约束 3）。
+外加回归桩：抽 `PinChatEditBox` 线上原文，覆盖框内锚点 / 拖窗后被 FCF 重钉 /
+只改第二锚点 / 页签隐藏 / 机密值 / 1..10 名单 / alpha 抬回。
+**代价**：消息满时顶部 1~2 行被盖（见约束 4）。
+
+### 8.88.4 方案 B（完全不遮字，改动更大）
+
+`Utils/Skin.lua:892-918` 的 `Skin:Panel` 用两个点画底板：
+`TOPLEFT → frame:TOPLEFT (inset,-inset)` + `BOTTOMRIGHT → frame:BOTTOMRIGHT (-inset,inset)`。
+把聊天框那块 `skinBg` 的 **TOPLEFT 单独上移约 32**（y 从 `-inset` 改 `+32`），
+底板就向上多出一条输入区，输入框落在这段里 ⇒ 视觉上仍在「框体内顶部」，
+**实现口径**：绝不能改 `Skin:Panel` 的默认 `inset`（`Social.lua:263` 之外所有皮肤窗口都会
+跟着上移 32）。要给 `Skin:Panel` 加一个只在这条链上生效的新 opts 字段（例如
+`topExtend = 32`），在 `:902` 写成
+`pcall(bg.SetPoint, bg, "TOPLEFT", frame, "TOPLEFT", inset, -inset + (opts.topExtend or 0))`，
+再由 `SkinChat` 的 `M:Dress(CHAT_FRAMES, { panel = { ..., topExtend = 32 } })` 传入；
+`Marked(frame, "skinBg")` 有缓存，已建过的背板不会因 opts 变化重画，
+必须 `/reload` 才能看到（或给 `Skin:Panel` 加一次「字段变了就重设 TOPLEFT」的幂等分支）。
+而 `ChatFrameN` 的消息区一点没动、文字零遮挡。
+**风险**：页签行正好在框顶上方 4~36（`§8.62`），扩展段会与页签背景重叠，
+且 `skinBg` 是 `levelOffset=-1` 的背板，与 `GeneralDockManager` / 页签的层级关系必须实机调；
+也比方案 A 多碰一处公共皮肤原语，回归面更大。
+
+### 8.88.5 状态与待办
+
+- 作者 22:1x 明确选「**先不改，只记录**」：本节为纯调研，**没有改任何代码、没部署、
+  没提交、没发版**；0.13.2 及客户端保持原样。
+- **实机链路当时是断的**：`wuxian status` → `link offline`、最后一帧 20:51:16；
+  后台拉起 `wuxian companion --duration 0 --rate 0.08 --capture wgc` 后 WGC 捕获已启动
+  （22:14:13 started），但 daemon 仍 offline，`wuxian run` 返回
+  `409 link_down: no frames come from the game`。需作者把游戏窗口切回前台 / 让它出帧，
+  再读 `ChatFrame1/4`、`…EditBox`、`…Tab` 的 `GetRect` / `GetPoint` 真值，
+  尤其确认 `chatStyle`、输入框是否常驻显示、页签与扩展底板的层次。
+- 恢复后按 §8.88.3 / 8.88.4 二选一，再决定要不要进 `0.13.3`。
+- **22:55 已恢复**，真因与恢复手法见 §8.88.6 末段；真值读完后 A / B 都要重新裁决，
+  并新增方案 C（§8.88.6）。
+
+### 8.88.6 实机真值复核（2026-11-10 22:55，session 49191，0.13.2 / dev）
+
+`wuxian run` 明文读数（坐标是 UIParent 物理像素）：
+
+| 对象 | 真值 |
+|---|---|
+| `ChatFrame1` | `L35 B32 W430 H256 T288 R465`；parent `UIParent`，`LOW` / **lvl 5**；`BOTTOMLEFT→UIParent(35,31)`，npts=1 |
+| `ChatFrame1EditBox` | `L30 B357 W443 H32 T389 R473`；parent **UIParent**，`LOW` / **lvl 1**，`IsProtected=false`，`shown/visible=true`，`alpha=1`；`BOTTOMLEFT→cf:TOPLEFT(-5,69)` + `BOTTOMRIGHT→cf:TOPRIGHT(8,69)` |
+| `ChatFrame1Tab` | `L33 B291 W47.5 H32 T323`；parent `GeneralDockManager`，`LOW` / lvl 2 |
+| `GeneralDockManager` | `L33 B291 W447 H26 T317`，`LOW` / lvl 1 |
+| `skinBg`（`skinPlate` #9） | rect **与 cf 完全一致**；parent **ChatFrame1**，`LOW` / **lvl 4**；`cf.skinBg` 字段为 nil（走 `ns:Marked` 旁表，探针要遍历 children） |
+| 状态 | `chatStyle=im`、`insertMode=2`、`GetMaxLines=128`、**`GetNumMessages=128`（已满）**、`eb:GetTextInsets()=52.5,13,0,0` |
+| API | `cf.SetTextInsets=nil`、`cf.SetMaxLines=function`、`eb.SetTextInsets=function`、`eb.HookScript=function`、`cf:GetFrameStrata()=LOW` |
+
+未激活的 `ChatFrame2/4EditBox` 仍是暴雪默认底部锚点
+（`TOPLEFT→cf:BOTTOMLEFT(-5,-2)` + `RIGHT→anon:RIGHT(8,0)`）、`alpha=0.3`、`shown=false`：
+`Widget:PollWatch` 有可见性门槛（`Utils/Widget.lua:441-458`，不可见就 0.3 秒重试且不执行回调），
+所以隐藏窗口的输入框不会被钉；切到该窗口后下一拍才纠正，**最多 1 秒闪烁**。
+另 `CHAT_FRAMES`/`CHAT_EDITS` 仍只列 1..4（`Social.lua:133/156`），`CHAT_TABS` 已是 1..10。
+
+**对两方案的裁决**：
+
+- **方案 A 基本否决**。① `eb lvl 1 < cf lvl 5` 且同为 UIParent 子框 ⇒ 挪进 cf 矩形会被
+  消息文字盖住；要补钉 `SetFrameStrata("DIALOG")` / `level = cf+1`，而暴雪
+  `ChatFrameUtil.lua:534` 的 `ActivateChat()` 与 `ChatFrameEditBox.lua:565` 的
+  `Deactivate()` 会来回改 strata，PollWatch 会与玩家操作拉扯。② `chatStyle=im`
+  + 输入框常驻 + 消息已 128 行满 ⇒ 顶部 1~2 行**长期**被盖，不是「输入时才」。
+  ③ 隐藏窗口的可见性门槛带来切窗闪烁。
+- **方案 B 有数值级障碍但未判死**：plate lvl 4 > `GeneralDockManager` lvl 1 / Tab lvl 2，
+  直接把 plate 上扩 32（顶到 T320）会**盖住页签条**（B291..T317）。修法：把 plate
+  降到 lvl 0，或把扩展段做成独立 lvl-0 背板；同时 eb 仍需钉 DIALOG 才压得过页签。
+- **方案 C（本轮新提出，零遮挡且不动页签，推荐评估）**：把 `cf:SetHeight(base-32)`
+  （`SetHeight` 已由 `MatchChatHeight` 实测安全，见 `Social.lua:180-198`）→ 消息区顶边
+  T288 降到 T256；`skinBg` 的 TOPLEFT 上扩 32 让**外框轮廓仍是 B32..T288**；
+  输入框落在这条 `T256..T288` 空带里（`BOTTOMLEFT → cf:TOPLEFT (0,2)` 之类）。
+  于是：文字完全不进输入区、输入框在「框体内顶部」、plate 顶仍是 T288 与
+  `GeneralDockManager` 底 B291 **不重叠**（层次关系保持现状）、eb 在 cf 矩形之外
+  不受 lvl 1<5 影响。唯一代价是可见消息少约 2 行。
+  **三个待解细节**：`MatchChatHeight` 目前无条件把高度写成 Minimap 高（256），
+  必须一起改成 `h-32` 否则每次 PEW 把布局改回去；高度基准要用「与上次写入值比较」
+  的幂等账本（外部改过就重取 base），不能每拍减 32 越减越矮；
+  `Skin:Panel` 的 `Marked(frame,"skinBg")` 有缓存，`topExtend` 变更需 `/reload` 或加
+  幂等重设分支。本轮**未实现、未验证**。
+
+**链路恢复判例（重要）**：`wuxian app --background` 把 daemon 从 pid 9252 / :59700
+重启成 pid 19580 / :57240，但 22:14 启动的 `companion` 仍连旧 daemon ⇒
+`link offline` + `run: 409 link_down` 持续 40 分钟，**与游戏窗口是否在前台无关**。
+停掉旧 companion 再重挂，7 秒内 `frame found / link up / session 49191 online`
+（`ping 0.43s`）。⇒ 以后凡是 daemon 重启 / 端口变化，**必须同时重挂 companion**；
+先 `status` 看 `link` 与 daemon pid，别急着让玩家切窗口。
+
+### 8.89 方案 C 落地：输入框嵌框内顶部 + 页签悬停显示
+
+作者 23:07 拍板「C，页签设置为悬停显示」。本节为**实现记录**，未提交 / 未发版。
+
+#### 8.89.1 三处几何改动（依据 §8.88.6 实机真值）
+
+| 改动 | 落点 |
+|---|---|
+| `ChatFrameN:SetHeight(minimapH - 32)` | `Modules/Skins/Social.lua` `ChatBand:TargetHeight/PinHeight`；消息区顶 T288→T256 |
+| `skinBg` 的 TOPLEFT 上扩 32 | `Utils/Skin.lua:893+` 的 `Skin:Panel` 新增 `opts.topExtend`，外框轮廓仍 B32..T288 |
+| `eb` 底边贴 cf 顶 | `ChatBand:PinEditBox`：`BOTTOMLEFT/BOTTOMRIGHT → cf:TOPLEFT/TOPRIGHT (0,0)`，落在 T256..T288 空带 |
+
+- **高度账本不需要「记住 base」**：目标值每拍从小地图现算，天然幂等；EditMode / `FCF_DockUpdate`
+  改回去由 `Widget:PollWatch(fn, 1)` 下一拍纠回。`MatchChatHeight` 仍注册 PEW 再校一次。
+- `Skin:Panel` 的背板有 `Marked(frame,"skinBg")` 缓存，所以加了 `panelTopExtend` 幂等重设分支：
+  opts 变了就在**我们自己的**背板上 `ClearAllPoints` + 重设两点，不用 `/reload`；
+  `ClearAllPoints` 不涉及任何暴雪框，**不违反 §8.62 的 taint 判例**（那条只禁 cf 本体）。
+- 输入框两个锚点都参与 `already` 判定（暴雪可能只改第二点）、机密值读数不误判、
+  显示中的输入框 alpha 抬回 1。`CHAT_FRAMES` / `CHAT_EDITS` 由 1..4 补到 **1..10**
+  （22:55 实机逐个点名，十个 cf / eb 全在，只是 5..10 `IsShown()=false`；
+  PollWatch / HoverWatch 自带可见性门槛，隐藏窗不跑回调）。
+
+#### 8.89.2 页签悬停显示：为什么用 GDM 的整框 alpha
+
+- **不能写 `ChatFrameNTab:SetAlpha(0)`**：`Skin:UpdateTabState` 的 `fullAlpha` 有 0.5 秒轮询，
+  会把任何 `<0.99` 的 tab alpha 抬回 1（这条本来是为修「未读页签整框鬼影」加的）。
+- **不复用暴雪 `ChatFrameUtil.SetTabAlphas`**：它的 `CHAT_FRAME_TAB_*_NOMOUSE_ALPHA`
+  是 0.2 / 0.4（选中页签 0.4、普通 0.2、提示中 1.0），只是**淡化**不是隐藏。
+- 改为控制父容器 `GeneralDockManager`：实机所有 tab 的 parent 都在 GDM 树下
+  （Tab1=GDM，Tab4=GDMScrollFrameChild），`GetAlpha()` 是相对父级的有效值 ⇒
+  `GDM:SetAlpha(0/1)` 让整条页签行一起隐现。暴雪源码 grep 无 `GDM:SetAlpha`，
+  皮肤轮询也不碰它 ⇒ **没有第二个写手**。alpha=0 的框仍参与 `IsMouseOver` 命中，页签可点。
+- 触发区 = 10 个 cf + 10 个 eb + GDM 共 21 个 `Widget:HoverWatch`，共用一对模块级
+  `ChatHoverEnter/Leave`（按引用去重，Apply 重跑不重复登记），任一 hover 即显示。
+- 离开时**延迟 0.2 秒**才隐藏：输入框带顶 T288 到页签条底 B291 有 3px 缝，
+  直接 hide 会闪；用 `chatHideToken` 作废过期的隐藏请求（跨缝进页签不误隐藏）。
+- 配置：`Core.lua` `DEFAULTS.skins.hoverChatTabs = true`（默认开），
+  `Config/SimpleConfig.lua` 界面美化页加「聊天页签悬停才显示」复选框，
+  setter 调 `ns.Skins:RefreshChatTabHover()` **即时生效不用 /reload**；
+  `chat` 皮肤面板关掉时也自动恢复常显。
+
+#### 8.89.3 闸门与回归桩
+
+- 新桩 `tools/harness/chat-band-probe.lua` **53 项 ALL PASS**：抽取线上 `CHAT BAND` 段原文
+  在 stub 环境执行，覆盖高度幂等 / 外部改回高度自愈 / 只改第二锚点自愈 / 机密值 /
+  alpha 抬回 / 几何重放（外框 32 空带、输入框上沿齐平、不侵入页签）/ 悬停时序
+  （延迟、token 跨缝、配置关、面板关、21 个观察不重复登记）/ Apply 链（topExtend 透传）。
+  静态边界另守住「不写 cf 锚点、不写 tab alpha、隐藏走 GDM、旧 -5,dy 已删」。
+- 全量：全文件 `luac -p`、9 个回归桩 ALL PASS、api-audit / audit-locals / audit-taint /
+  scheduler / check-frame-list / env-source-check / `strip-dev --check` / `diff --check` 全绿。
+  部署 129 文件到 `_forever_`，代码层 0 missing / 0 stale（`sync-check` EXIT 1 仍只因
+  历史 EXTRA `CHANGELOG.md` / `README.md`，按规矩没删）。
+
+#### 8.89.4 判例：`wuxian load MonetUI` 不能用来验收
+
+23:24 试过整包热加载想省一次 `/reload`，结果它是**逐文件重放 129 个 Lua**
+（`logs` 里每个文件一条 RUN ok，从 23:24:02 排到 23:24:10 才走到 `Social.lua`），
+`ping 70: 43.69 s round trip`、`run` 全部 `504 timeout`；更要命的是它会在旧 VM 上
+**重复注册** Panel / Watch / 事件，实机状态不再干净，读数不可信。
+⇒ 与 §8.80 的「`ReloadUI()` 不重启 Lua VM」并列：**新代码验收只能在游戏聊天框
+手动敲 `/reload`**，点 wuxian 的重载按钮或 `wuxian load` 都不算。
+
+**脏 VM 的实机证据（23:26）**：热加载后 `MonetUI.Skins.RefreshChatTabHover` 已是
+`function`、`registry=39 / chatPanels=1`（没有重复注册），主动调
+`M:RefreshChatTabHover()` 也确实把 `GeneralDockManager:GetAlpha()` 打到 **0**
+（页签行整条消失，截图确认无残留、无溢出按钮）；但 `ChatFrame1:GetHeight()` 仍 **256**、
+`ChatFrame1EditBox` 仍 `BOTTOMLEFT → cf:TOPLEFT (-5,69)`、`GDM alpha` 之外
+`skinPlate` 标记也读不到了 —— 旧的 PollWatch 订阅仍指向旧闭包，新 `ChatBand:PinLayout`
+没有接管。截图上表现为「页签没了、但旧的空输入框还悬在框外上方」。
+这正好说明几何与订阅必须在**干净 VM**里由 Apply 重建，热加载读数一律不作数。
+
+#### 8.89.5 待作者实机验收（手动 `/reload` 后）
+
+1. 按 B 之外随便看一眼：聊天框底边仍 32、外框顶仍在原 T288，输入框嵌在外框顶端、
+   与消息区左右齐平；消息文字不再被输入框盖住（顶部不再有重叠）。
+2. 鼠标移开聊天区域 → 页签行整条消失；移到聊天框 / 输入框 / 页签条 → 立刻出现，
+   从输入框跨到页签不闪；**页签必须能点**（切窗 / 右击菜单）。
+3. 配置面板「界面美化 → 聊天页签悬停才显示」关掉 → 页签立刻常显，打开 → 恢复悬停，
+   全程不用 `/reload`。
+4. `/mui skins diagnose` 无新增 ✗；`logs --kinds ERR,BLOCKED` 手动 `/reload` 后零新增。
+   实机读真值可查：`ChatFrame1:GetHeight()≈224`、`ChatFrame1EditBox:GetPoint(1/2)`
+   应为 `BOTTOMLEFT/BOTTOMRIGHT → ChatFrame1:TOPLEFT/TOPRIGHT (0,0)`、
+   `GeneralDockManager:GetAlpha()` 随悬停 0/1、且 `GeneralDockManager` 的锚点偏移应是
+   `CHAT_INPUT_BAND`（32，而非暴雪默认的 0）⇒ 页签回到 `B291..T317` 原始位。
+
+#### 8.89.6 修复：页签点不到（2026-11-11）
+
+首版方案 C 落地后作者实机报「位置下来了，但页签点不到了」。根因不在悬停逻辑，
+而在**缩高把页签容器一起拽了下来**：
+
+- `GeneralDockManager`（GDM，所有聊天页签的父容器）在暴雪源码里锚在 `ChatFrameNBackground:TOPLEFT`
+  （`FloatingChatFrame.lua:2172-2173`，偏移 0），并由 `FCFDock_SetPrimary` 设好；`OnSizeChanged`
+  回调只置 `isDirty` 并重排 tab、**不重设 GDM 锚点**（`FloatingChatFrame.lua:2184`）。
+- `PinHeight` 把 cf 缩高 32 ⇒ background 顶随之下移 32 ⇒ 锚在它身上的 GDM 整条跟着掉进
+  输入框带（实机测得 GDM `B259..T285`、Tab `B259..T291`，与输入框 `B256..T288` 几乎全重叠）。
+- 鼠标落在页签位时命中帧是 `ChatFrame1EditBox`（输入框带盖在上面）⇒ 页签点不到。
+
+修复：新增 `ChatBand:PinDock`，把 GDM 相对它的原宿主框（`ChatFrameNBackground`）抬 `CHAT_INPUT_BAND`
+（= 框缩掉的高度），页签回到缩高前的原屏幕位置（运行期代偿实验证实：抬 32 ⇒ GDM `B291..T317`
+= 原始位，命中帧变回 `ChatFrame1Tab`）。要点：
+- 只针对 `ChatFrame1`：`PinLayout` 里 `if name == "ChatFrame1" then self:PinDock() end`，
+  因为 GDM 是全局 dock、锚在 dock primary（ChatFrame1）的 background 上；其他窗闭包不碰它。
+- 读取 GDM 当前第一锚点的相对框作 `SetPoint` 宿主，**不动相对框本身**，第二锚点一并抬，防
+  暴雪只重设其一；几何去重（偏移已为 32 则不写），由 `Widget:PollWatch` 每拍纠回
+  （Blizzard 重设 dock primary 时抹掉的偏移会被下一拍拉回）。
+- `target` 为 nil（minimap 太矮、band 未激活）时不抬，避免把页签推离原位置。
+- **不碰 GDM 的 `SetAlpha`**（悬停显隐仍由 `SetTabsVisible` 管），也不碰 `cf` 本体任何锚点，
+  不引入 taint；GDM 非保护帧，改它自己的锚点安全。
+
+回归桩 `chat-band-probe.lua` 由 53 项扩到 **62 项**：覆盖 PinDock 抬升量 / 双点抬升 /
+已对齐不重复写 / Blizzard 抹回偏移自愈 / 非 primary 不抬 / minimap 过矮守卫。
+全量 `luac -p`、9 桩、api-audit / locals / taint / scheduler / frame-list / env-source、
+`strip-dev --check`、`diff --check` 全绿；部署 129 文件，代码层 0 missing / 0 stale
+（仅 2 个历史 EXTRA 文档 `CHANGELOG.md`/`README.md`，按规矩没删）。实机组需作者手动 `/reload` 验收。
+
+**未提交 / 未打 tag / 未发版**；本节与 §8.88 的调研一起作为 `0.13.3` 候选。
+
+### §8.89.7 借鉴 Chattynator 收口 A/B/C/D（2026-11-11）
+
+**来源**：作者在 `_forever_` 装了 Chattynator 做友商分析。它是「完全替代」路线（卸载原生框、
+接管 `FloatingChatFrameManager`、hook GDM `SetScript`），taint 与兼容孤立风险高，MonetUI 作为
+皮肤层**不照搬其替代手段**；但抽了四点轻量、零 taint 的做法落地（§8.89 现有实现已验证可用）。
+
+**A —— 声明式区域分发（轻量改造）**
+- 新增 `ChatBand.skinners` 表（`frame` 一项）按区域类型收口「钉合」逻辑，`PinLayout` 只做
+  `Dispatch("frame", name, cf)` 分发。以后新增聊天子件（如缩放把手 `ResizeWidget`）只往表里加一项，
+  主干不用再改。注意表里仍保留 `if name == "ChatFrame1" then self:PinDock() end` 等字面结构——
+  回归桩按串校验，移走会红（见下）。
+- 配套 `ChatBand:Opt(key)` 集中读 `db.skins.*`，SimpleConfig 只写配置、不碰 ChatBand 内部。
+
+**B —— 页签悬停平滑化（§8.89 悬停显示升级）**
+- 隐藏延迟 `0.2s → 2s`（贴近 Chattynator 的 `2s`），并用跨缝 token 防闪。
+- 新增 `ChatBand:FadeTo(show)` 做 0.18s 线性淡入淡出（真客户端挂私有帧 `OnUpdate` 插值）；
+  桩环境 / 无 `SetScript` 的真帧时**直接落离散目标**，行为不变。
+- `ChatHoverLeave` 增加 `IsMouseOver` 二次校验（子/父边界抖动导致「还在框上」被误判离开时不清账）。
+- 调用方一律传**布尔** `true/false`（见下方环境坑），不再传 0/1。
+
+**C —— 输入框位置多档配置**
+- `DEFAULTS.skins.chatEditBoxPos = "top"`（默认，受 `CHAT_INPUT_BAND` 约束，嵌框内顶部）；
+  可选 `"bottom"` 回到暴雪原生框底（不钉）。
+- `ChatBand:EditBoxPos()` 读配置，`skinner.frame` 仅在 `top` 时 `PinEditBox`；`bottom` 由 PollWatch 下一拍
+  自动不钉（从 top→bottom 切换需重载界面释放钉合，配置提示已写明）。
+- `SimpleConfig` 界面美化页新增「聊天输入框位置」下拉（top / bottom）。
+
+**D —— 事件总线解耦**
+- 配置 setter `M:RefreshChatTabHover()` 改为只 `ns.EventBus:Fire("CHAT_SKIN_SETTING_CHANGED")`，
+  不再直接调 `ChatBand` 内部；ChatBand 订阅该事件做页签刷新。SimpleConfig 仅依赖稳定入口
+  `RefreshChatTabHover`，不与任何 ChatBand 方法名耦合。
+
+**回归与坑**
+- `tools/harness/chat-band-probe.lua` 仍 **62 项 ALL PASS**（A 没破坏任何桩校验的字面串；B/C/D 行为
+  在布尔语义下等价）。
+- **测试环境坑（重要）**：本机 `lua` 二进制把 `0` 当作**真值**（`0 and 1 or 0` 得 `1`，而 `false/nil` 仍假），
+  与 WoW 真客户端**一致**（都是标准 Lua 5.1，`0` 为真值、只有 `nil`/`false` 为假）。真正的坑是
+  **我们的代码把 `0/1` 当布尔并假设 `0` 为假**（如 `FadeTo(0)` → `0 and 1 or 0` 在两种环境都算成 `1`）。
+  本次已把 `FadeTo`/`SetTabsVisible` 全程改为布尔语义规避；今后聊天相关代码**禁止用数字 0/1 当布尔**，
+  开/关判定一律用 `true`/`false`，`and 1 or 0` 只许出现在「布尔拼 alpha 数值」这种明确要数字的场合。
+- 改动文件：`Modules/Skins/Social.lua`（CHAT BAND 段）、`Core.lua`（DEFAULTS）、
+  `Config/SimpleConfig.lua`（下拉）、`docs/HANDOFF.md`。
+
+**未提交 / 未打 tag / 未发版**；本节作为 `0.13.3` 候选，发布须作者明确授权。实机验收需 `/reload`。
+
+### §8.90 聊天美化三项优化（2026-11-11）
+
+**来源**：作者带来一份「纯外观聊天美化」独立插件规格（目标 WoW 12.0，硬约束**不注册 `CHAT_MSG_*`、
+不解析消息文本、只操作框架对象避免 taint**）。该规格有 5 处事实性错误/缺口（`MouseWheelEnabled(true)`
+不存在、`SetBackdrop` 需 `BackdropTemplate`、漏临时窗动态创建、目标客户端与 MonetUI 实际适配的
+Forever 1.60 矛盾、经典样式 UX 陷阱）。决定**不另起独立插件**，而是以规格为镜，把其中真正零 taint、
+可落地的三件优化并入 MonetUI 现有 ChatBand 皮肤层，全程遵守硬约束。
+
+**A —— 输入框边框跟频道色（§8.90.1）**
+- 新增 `ChatBand:ChannelColor(eb)`：读 `eb:GetAttribute("chatType")`，若为 `"CHANNEL"` 再读
+  `eb:GetAttribute("channelTarget")` 拼 `"CHANNEL"..localID`，落到 `ChatTypeInfo[type]` 取 `.r/.g/.b`；
+  整个取值链 `pcall` 包住，任意一步缺值即回退 `Color:GetBorder()`（环境主题边色）。
+- `ChatBand:ApplyChannelColor(eb)`：把频道色经 `Widget:SetBorderState(frame, r, g, b, a)`
+  持久化到 `Marked(eb, "controlBg")` 那块主题化背板（悬停/主题刷新都不会覆盖它，只认领当前边框色）。
+- 即时重染：`hooksecurefunc("ChatEdit_UpdateHeader", function(eb) ... end)`（即
+  `ChatFrameEditBoxMixin.UpdateHeader`，Deprecated_ChatInfo 里）；改频道时暴雪会调它，按 `KNOWN_EB`
+  认领的输入框即时重染，无需轮询、无 taint。
+- 周期兜底：`skinner.frame` 每拍（PollWatch）调 `self:ApplyChannelColorByName(name)`，`name.."EditBox"`
+  经 `Skin:Need` 取控件，保证首次创建/频道色延迟到位也能覆盖。
+
+**B —— 临时窗 >10 动态覆盖（§8.90.2）**
+- `ChatBand.dynamic = {}`：运行期新建的临时聊天窗名（`FCF_OpenTemporaryWindow` 动态创建，编号可 >10）。
+- `hooksecurefunc("FCF_OpenTemporaryWindow", function(chatFrame) ... end)`：认领 `^ChatFrame%d+$` 形态的新窗，
+  去重（`ChatBand.dynamic[nm] and return`）后入表并调 `ChatBand:RegisterRuntimeChatFrame(nm)`。
+- `RegisterRuntimeChatFrame(name)`：补齐 panel / tab / editbox / scroll / poll / hover / 频道色跟踪，
+  与 `CHAT_FRAMES` 原生窗走同一条皮肤管线路径。
+- 遍历统一收敛到 `ChatBand:IterateFrames(fn)`：`CHAT_FRAMES` ∪ `ChatBand.dynamic` 一并扫，
+  `MatchChatHeight` / `SetupChatTabHover` / PollWatch 注册循环全部改用它，原生窗与临时窗不再分两套。
+
+**C —— 页签三态色 + 独立淡入时长（§8.90.3）**
+- `DEFAULTS.skins` 新增（§8.90）：`tabColorNormal = "9a9a9a"` / `tabColorSelected = "ffffff"` /
+  `tabColorFlash = "ff6b6b"` / `tabFade = 0.18`（hex 不含 #；淡入时长单位秒，与原 0.18s 淡入对齐）。
+- `UpdateTabState` 改写为三态：`TabIsFlashing(tab)` 读 `_G[nm.."TabFlash"].FlashAnim:IsPlaying()`
+  判未读闪烁 → 取 `Flash`；`tab:IsSelected()` → 取 `Selected`；否则 `Normal`。
+  `TabColor(state)` 读 `ns:DB().skins["tabColor"..state]`，非法兜底：Selected→白、Flash→(1,0.42,0.42)、
+  其余 `Color:GetBorder()`。下划线 `underline:SetVertexColor(r,g,b,a)`：选中/未读 `a=1`，普通 `a=0.25`。
+- `Skin:Tab` 的 `OnTheme` 去掉硬编码 `Color:GetBorder()`，只调 `Skin:UpdateTabState(tab)`，主题刷新即按三态重上色。
+- `ChatBand:FadeTime()` 读 `self:Opt("tabFade")`，非法回退 `0.18`；`FadeTo` 步长改用 `FadeTime()`，
+  页签悬停淡入淡出时长与三态色解耦、可独立配置。
+- `SimpleConfig` 界面美化页新增：
+  - 「页签淡入时长」下拉（0.1 / 0.18 / 0.3 / 0.5，getter 直读 `ns:DB().skins.tabFade`）；
+  - 三个带 `swatch` 的颜色下拉（「页签色·未选中 / 选中 / 未读」），写 `ns:DB().skins.tabColor*`，
+    改即触发 `ns.Skins:RefreshChatTabHover()`（经事件总线 `CHAT_SKIN_SETTING_CHANGED`，零内部耦合）。
+  - 本地 `HexToRGB` / `TabColorSwatch` / `TAB_COLOR_ITEMS`（7 个预设命名色）支撑 swatch 渲染。
+
+**硬约束遵守**
+- 全程**未注册任何 `CHAT_MSG_*` 事件**、**未解析任何消息文本**、未做任何频道过滤；所有上色只操作
+  输入框/页签/下划线等框架对象与 `ChatTypeInfo` 颜色表，零 taint。
+- 频道色取自暴雪已有的 `ChatTypeInfo`（玩家切频道时由系统维护），不自行缓存/推断文字。
+
+**回归与闸门**
+- `tools/harness/chat-band-probe.lua` 由 62 项扩到 **71 项 ALL PASS**（新增 §8.90 静态断言：
+  `ChannelColor`/`GetAttribute`/`ChatTypeInfo`、`hooksecurefunc("ChatEdit_UpdateHeader"`、
+  `Widget:SetBorderState`、`hooksecurefunc("FCF_OpenTemporaryWindow"`、`for name in pairs(self.dynamic)`、
+  `self:Opt("tabFade")`、`DEFAULTS` 三色、`页签色·*`/`页签淡入时长`、`UpdateTabState` 的
+  `TabColor`/`TabIsFlashing`）。
+- `luac -p` 四文件（Core / Skin / Social / SimpleConfig）全 OK；`wuxian check` 无新增 error；
+  另 3 个读 Core/Config 的探针（bags-currency-icon / tooltip-anchor / currency-gold）亦 ALL PASS。
+- 行为语义沿用 §8.89.7 的**布尔**约定（`FadeTo`/`SetTabsVisible` 全程布尔，禁止数字 0/1 当布尔）。
+
+**改动文件**：`Core.lua`（DEFAULTS §8.90）、`Utils/Skin.lua`（HexToRGB / TabColor / TabIsFlashing /
+`UpdateTabState` 三态 / `Skin:Tab` OnTheme）、`Modules/Skins/Social.lua`（CHAT BAND 段：
+ChannelColor / ApplyChannelColor / dynamic / IterateFrames / RegisterRuntimeChatFrame /
+EnsureChannelHeaderHook / EnsureTempWindowHook / FadeTime）、`Config/SimpleConfig.lua`（三态色 + 淡入时长下拉）、
+`tools/harness/chat-band-probe.lua`（+9 断言）、`docs/HANDOFF.md`。
+
+**未提交 / 未打 tag / 未发版**；本节与 §8.89 系列一起作为 `0.13.3` 候选，发布须作者明确授权。实机验收需 `/reload`。
+
+### §8.91 输入框自动隐藏（默认开启 + 关闭开关，2026-11-11）
+- **需求**：作者 reload 后指出输入框无"自动隐藏"能力（§8.89 悬停显隐只作用于页签 GDM，输入框带常驻）。最终落地为**默认开启**的自动隐藏：平时折叠输入框带、仅聚焦（Enter/点击）才显示；控制台提供明确"关闭"开关，关掉则按位置常显。
+- **配置模型（两字段）**：`chatEditBoxAutoHide`（bool，默认 `true` = 默认开启隐藏）+ `chatEditBoxPos`（`top`/`bottom`，仅当关闭隐藏时作为常显位置，默认 `top`）。`ChatBand:EditBoxPos()` 优先看 `chatEditBoxAutoHide`：开 → `"hidden"`；关 → 读 `chatEditBoxPos`。
+- **三处联动**（关键）：`topExtend`、页签抬升量、cf 目标高度都来自 `ChatBand:InputBand()`——**仅 `bottom` 返回 `0`**，`top`/`hidden` 都返回 `CHAT_INPUT_BAND`(32)。具体：① `Dress.topExtend`（SkinChat + RegisterRuntimeChatFrame 两处）改读 `InputBand()`；② `TargetHeight()` 改 `h - self:InputBand()`；③ `PinDock` 的 `want` 改读 `InputBand()`（bottom→0 页签容器不抬，top/hidden→32 与原始位一致）。
+  - 早期设计 hidden→0（回收带、cf 高度恢复）已**废弃**：那样聚焦弹出时输入框在 cf 顶部无带可落，会被暴雪原生钉到底部（作者反馈"输入框跑到下面了"）。现改为 hidden 保留顶部带、仅折叠 EditBox。
+- **EditBox 隐藏（修复背景色残留 + 落底）**：`skinner.frame` 在 `pos == "top" or pos == "hidden"` 时先调 `PinEditBox(name)` 把输入框钉到**顶部带**，`pos == "hidden"` 再调 `ChatBand:HideEditBox(name)` 折叠——早期 hidden 不钉只折叠，输入框保持暴雪原生底部，聚焦就从底部冒出。折叠时 `SetShown(false)` 隐藏 EditBox，**同时同步隐藏它的 `controlBg` 背板**（输入框背景色/频道色，由 §8.90 的 `Widget:SetBorderState` 写到 `ns.Marked(eb,"controlBg")`），否则 EditBox 藏了背景色还挂在那（作者反馈"输入框背景色一直在"）。聚焦时（`HasFocus` 为真）PollWatch 下一拍保持显示，失焦后重新隐藏。EditBox 是非保护框、`HasFocus` 是标准方法、全程 pcall，无 taint。
+- **切换约定**：与 top↔bottom 一致，`Dress.topExtend` 初始化时读 `InputBand()`，切到 hidden 后需 `/reload` 生效（桩与真客户端都不支持运行期改 topExtend）。
+- **§8.90 隐患顺手修**：`ApplyChannelColor` 原本用裸全局 `Marked`（项目里无 `_G.Marked` 全局赋值，wuxian 标 `nil in the running game`），改为 `ns.Marked`（Core.lua:576 定义，运行时确定存在），消除 warning 并兜底频道色功能。
+- **硬约束**：无 `CHAT_MSG_*` 注册、无消息文本解析、不碰 cf 锚点（`HideEditBox` 只 `SetShown`，taint 安全）。
+- **配置入口**：SimpleConfig「界面美化」页——① 复选框"输入框自动隐藏（仅聚焦才显示）"（默认勾选，写 `chatEditBoxAutoHide`）；② 下拉"输入框位置（关闭隐藏时）"（`top`/`bottom`，写 `chatEditBoxPos`）。Core DEFAULTS 加 `chatEditBoxAutoHide = true`，`chatEditBoxPos` 保留为 `top`。
+- **回归桩**：`chat-band-probe.lua` 更新 §8.91 断言（改校验 `chatEditBoxAutoHide` 控制 + 复选框/位置下拉入口 + DEFAULTS 默认 true），并新增 controlBg 同步测试（桩里让 `ns.Marked` 返回 bg 对象，验未聚焦/聚焦/PinLayout 三场景 EditBox 与背板同显隐），全绿。
+- **改动文件**：`Core.lua`（DEFAULTS 加 `chatEditBoxAutoHide=true`）、`Modules/Skins/Social.lua`（EditBoxPos/InputBand/TargetHeight/PinDock.want/两处 Dress.topExtend/skinner.frame hidden 分支/HideEditBox 同步 controlBg/ApplyChannelColor 改 ns.Marked）、`Config/SimpleConfig.lua`（复选框+位置下拉替代 hidden 三态）、`tools/harness/chat-band-probe.lua`、`docs/HANDOFF.md`。
+- **修正·输入框落底（2026-11-11 二次）**：hidden 改为"保留 32 带 + 先 PinEditBox 钉顶部"，修复"输入框跑到下面了"；探针同步改断言（InputBand hidden=32、TargetHeight 仍扣 32、PinHeight 写回 224、PinDock want=32）。
+- **未提交 / 未打 tag / 未发版**；并入 0.13.3 候选，发布须作者明确授权。实机验收需 `/reload`。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 

@@ -1321,6 +1321,99 @@ function SimpleConfig:Build()
         fontHint:SetJustifyH("LEFT")
         fontHint:SetText("统一字体影响所有暴雪窗口文字；关闭需重载界面恢复。")
 
+        -- §8.89：页签行整框 alpha 由 GDM 控制，改设置即时生效（不用 /reload）。
+        MakeCheckbox(content, "聊天页签悬停才显示", row(26),
+            function() return ns:DB().skins.hoverChatTabs ~= false end,
+            function(value)
+                ns:DB().skins.hoverChatTabs = value and true or false
+                if ns.Skins and ns.Skins.RefreshChatTabHover then
+                    ns.Skins:RefreshChatTabHover()
+                end
+            end)
+
+        -- §8.91 输入框自动隐藏：默认开启（折叠输入框带、仅聚焦才显示）；关闭则按位置常显。
+        -- 切换由 PollWatch 下一拍按新值重钉 / 折叠；需 /reload 生效。
+        MakeCheckbox(content, "输入框自动隐藏（仅聚焦才显示）", row(26),
+            function() return ns:DB().skins.chatEditBoxAutoHide ~= false end,
+            function(value)
+                ns:DB().skins.chatEditBoxAutoHide = value
+                if ns.Skins and ns.Skins.RefreshChatTabHover then
+                    ns.Skins:RefreshChatTabHover()
+                end
+            end)
+
+        -- 关闭自动隐藏时的输入框位置（§8.89.4 / C）。
+        MakeDropdown(content, row(26), "输入框位置（关闭隐藏时）", {
+            { value = "top",    text = "框内顶部（推荐）" },
+            { value = "bottom", text = "框底（原生位置）" },
+        },
+            function()
+                local p = ns:DB().skins.chatEditBoxPos
+                return (p == "bottom") and "bottom" or "top"
+            end,
+            function(value)
+                ns:DB().skins.chatEditBoxPos = value
+                if ns.Skins and ns.Skins.RefreshChatTabHover then
+                    ns.Skins:RefreshChatTabHover()
+                end
+            end)
+
+        -- §8.90 聊天页签三态色 + 独立淡入时长。颜色用预设命名色（hex，不含 #），值直接存进
+        -- ns:DB().skins.tabColor*；0.5 秒页签驱动会重上色（≤0.5s 即时反馈）。
+        local function HexToRGB(hex)
+            if type(hex) ~= "string" then return nil end
+            local h = hex:gsub("#", "")
+            if #h ~= 6 then return nil end
+            local r, g, b = h:match("(..)(..)(..)")
+            if not r then return nil end
+            return tonumber(r, 16) / 255, tonumber(g, 16) / 255, tonumber(b, 16) / 255
+        end
+        local function TabColorSwatch(hex)
+            local r, g, b = HexToRGB(hex)
+            if r then return r, g, b end
+            return 1, 1, 1
+        end
+        local TAB_COLOR_ITEMS = {
+            { value = "9a9a9a", text = "中性灰" },
+            { value = "ffffff", text = "白" },
+            { value = "ff6b6b", text = "警示红" },
+            { value = "5bd6a0", text = "绿（公会）" },
+            { value = "6db3ff", text = "蓝（说 / 密）" },
+            { value = "ffd479", text = "金" },
+            { value = "c08bff", text = "紫" },
+        }
+        local function TabColorGetter(key)
+            return function() return ns:DB().skins[key] end
+        end
+        local function TabColorSetter(key)
+            return function(value)
+                ns:DB().skins[key] = value
+                if ns.Skins and ns.Skins.RefreshChatTabHover then
+                    ns.Skins:RefreshChatTabHover()
+                end
+            end
+        end
+
+        MakeDropdown(content, row(26), "页签淡入时长", {
+            { value = 0.1,  text = "0.1 秒" },
+            { value = 0.18, text = "0.18 秒（默认）" },
+            { value = 0.3,  text = "0.3 秒" },
+            { value = 0.5,  text = "0.5 秒" },
+        }, function() local f = ns:DB().skins.tabFade; return tonumber(f) or 0.18 end,
+           function(value)
+               ns:DB().skins.tabFade = value
+               if ns.Skins and ns.Skins.RefreshChatTabHover then
+                   ns.Skins:RefreshChatTabHover()
+               end
+           end)
+
+        MakeDropdown(content, row(26), "页签色·未选中", TAB_COLOR_ITEMS,
+            TabColorGetter("tabColorNormal"), TabColorSetter("tabColorNormal"), TabColorSwatch)
+        MakeDropdown(content, row(26), "页签色·选中", TAB_COLOR_ITEMS,
+            TabColorGetter("tabColorSelected"), TabColorSetter("tabColorSelected"), TabColorSwatch)
+        MakeDropdown(content, row(26), "页签色·未读", TAB_COLOR_ITEMS,
+            TabColorGetter("tabColorFlash"), TabColorSetter("tabColorFlash"), TabColorSwatch)
+
         -- Group the windows by section, in registration order.
         local groups, seen = {}, {}
         for _, entry in ipairs(skins.registry) do

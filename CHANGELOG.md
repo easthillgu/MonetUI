@@ -3,6 +3,24 @@
 This file is used verbatim as the CurseForge release changelog (see `.pkgmeta`).
 Update the top section before tagging a new release.
 
+## 0.13.3 (2026-11-11)
+
+- Chat tabs: tabs now fade in only while the chat frame is hovered and fade
+  out two seconds after the mouse leaves, so the tab row no longer takes space
+  when idle. The fade duration is configurable.
+- Chat tabs: tab text uses three configurable colors (unselected / selected /
+  unread-flash) instead of a single border color.
+- Chat input: the edit box border follows the active chat channel color
+  (say / party / guild / channel N) and updates immediately when you switch.
+- Chat input: the box can auto-hide (on by default). It folds away when idle
+  and pops up in the top band when you press Enter or click the chat frame; it
+  can be turned off from the options panel. When auto-hide is off, the box can
+  sit either at the top or at Blizzard's native bottom position.
+- Chat windows: dynamically created temporary windows (numbered above 10, e.g.
+  whispers opened in a new window) are now skinned like the main windows.
+- Tweaks: removed a settings entry for a loot-range option that no longer
+  exists.
+
 ## 0.13.2 (2026-11-10)
 
 - Tooltips: fixed tooltips occasionally appearing on top of the minimap when

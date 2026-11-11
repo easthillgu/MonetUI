@@ -25,7 +25,6 @@ ns.Tweaks = M
 -- 和 CVar 的存储形态一致）；label = 面板 / 探针上给玩家看的一句话。
 local TWEAKS = {
     { key = "cameraZoom",  cvar = "cameraDistanceMaxZoomFactor",           value = "4", label = "拉远视距（镜头能拉得更高更远）" },
-    { key = "lootRange",   cvar = "autoLootRange",                         value = "1", label = "加大自动拾取范围（站远也能拾取掉落）" },
     { key = "combatText",  cvar = "WorldTextScale_v2",                     value = "2", label = "放大伤害数字（打击感更明显）" },
     { key = "questGlow",   cvar = "outlineModeShowLootEffectWhenDisabled", value = "1", label = "任务物品发光（关掉高亮也发光）" },
     { key = "noDeathGray", cvar = "ffxDeath",                              value = "0", label = "复活不灰屏（死亡后屏幕不变灰）" },
@@ -67,11 +66,13 @@ local FACTORY_VISION = {
     weatherDensity        = "3",
 }
 
--- 出厂默认开关组合（同上，来自实盘 MonetUI.lua 的 db.tweaks：5 开 4 关）。
+-- 出厂默认开关组合（同上，来自实盘 MonetUI.lua 的 db.tweaks：5 开 3 关）。
 -- 只用于**新存档**（db.tweaks 还不存在时）；老存档已经有玩家显式拨过的开关，一个键都不动。
 -- 稀疏存：关着的键不写，IsOn 判 nil 就是关，跟 Core 的 StripDefaults 不冲突（这个表不在 DEFAULTS 里）。
+-- 注：`lootRange`（cvar=autoLootRange）已移除 —— 该 CVar 在 Forever 1.60 不存在（§Tweaks），留着只会
+-- 在账本里落一行 ✗ 空转，对面板 / 玩家零价值。
 local DEFAULT_SWITCHES = {
-    cameraZoom = true, lootRange = false, combatText = true, questGlow = true,
+    cameraZoom = true, combatText = true, questGlow = true,
     noDeathGray = true, sharpen = false, noWeather = true,
     fewParticles = false, noFog = false,
 }
@@ -160,7 +161,8 @@ local function WriteCVar(cvar, value)
 
     -- 两个 getter 都答 nil ⇒ 本客户端没这个 CVar（名字错 / 不存在）。不拦的话会一路走到
     -- SetCVar（不报错）+ 复验读回 nil（不是 string，旧判据放过）⇒ 假记"已写"。
-    -- 实机判例 1.60：autoLootRange 不存在，旧版就把它记成了"已写"。
+    -- 实机判例 1.60：autoLootRange 这个 CVar 在 Forever 不存在，旧版就把它记成了"已写"；
+    -- 此守卫对所有条目生效，不再把不存在的 CVar 误记成功（lootRange 子项已据此外删）。
     if cur == nil and (not info or info.value == nil) then
         CVarFlag(cvar, "本客户端没有这个 CVar（名字不存在）")
         return false
@@ -227,7 +229,7 @@ end
 --- 两档：有账 → 玩家原值；没账（旧版遗留）→ 只在「当前值 == 我们的目标值、且 ≠ 客户端默认值」
 --- 时推回默认值，绝不碰玩家自己设的值（他设 55，既非目标也非默认，一个字节不动）。
 ---
---- **为什么不并进 Apply 的逐条循环**（2026-11-07 判例）：Apply 每次都会遍历九条，
+--- **为什么不并进 Apply 的逐条循环**（2026-11-07 判例）：Apply 每次都会遍历所有条目，
 --- 若关着的条目也走「没账就推默认值」这档，玩家自己把 volumefog 设成 0 之后，
 --- 只是去开另一条开关，就会被顺手改成 1 —— 这不是还原，是误伤。
 --- 所以兜底只在**玩家显式关这一条**时发生。
@@ -275,14 +277,14 @@ function M:Apply()
     end
 end
 
---- 关掉整个模块 / `/mui tweaks all 0`：九条全部走 RestoreOne。
+--- 关掉整个模块 / `/mui tweaks all 0`：所有条目全部走 RestoreOne。
 function M:RestoreAll()
     for i = 1, #TWEAKS do
         RestoreOne(TWEAKS[i])
     end
 end
 
---- `/mui tweaks restore`：九条全部推回原值；没记账的用客户端默认值。
+--- `/mui tweaks restore`：所有条目全部推回原值；没记账的用客户端默认值。
 --- 这是「画面调不回来」时的最后一道 —— 旧版没记账、值却被写过的那批，只有这条能救。
 --- @return number 实际写成功的条数
 function M:RestoreToDefault()
@@ -560,7 +562,8 @@ function M:HandleCommand(rest)
             self:Settings()[TWEAKS[i].key] = on
         end
         if on then self:Apply() else self:RestoreAll() end
-        ns:Print(on and "控制台优化：九条全部打开。" or "控制台优化：九条全部关闭并还原。")
+        ns:Print(on and ("控制台优化：" .. tostring(#TWEAKS) .. " 条全部打开。")
+                      or ("控制台优化：" .. tostring(#TWEAKS) .. " 条全部关闭并还原。"))
         return true
     end
 
