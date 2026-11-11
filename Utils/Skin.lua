@@ -1766,6 +1766,20 @@ local function ScanArrowFrame(self, frame)
             -- 1.60 上这个数要重数才算，待 1.60 复验。见 Skin:CloseButtonByArt。
             self:CloseButtonByArt(frame)
         end
+        -- 滑条兜底：deep 窗口的滑条由 SweepDeep → SkinSlidersIn 接住，但懒建 / 没美化过的
+        -- 窗口里的滑条（设置面板子页、编辑模式对话框这类）会漏 —— 与关闭按钮同一条口径
+        -- （"全部统一"），全量扫碰上 Slider 就穿上。Skin:Slider 全链幂等，重复扫零成本。
+        local isSlider = false
+        if frame.IsObjectType then
+            local okS, s = pcall(frame.IsObjectType, frame, "Slider")
+            isSlider = (okS and s) or false
+        elseif frame.GetObjectType then
+            local okK, kind = pcall(frame.GetObjectType, frame)
+            isSlider = okK and kind == "Slider" or false
+        end
+        if isSlider then
+            self:Slider(frame)
+        end
     end)
 end
 

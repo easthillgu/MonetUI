@@ -15,6 +15,7 @@ local Marked = function(o, k) return ns:Marked(o, k) end
 local Widget   = ns.Widget
 local Math     = ns.Math
 local Color    = ns.Color
+local Media    = ns.Media
 local EventBus = ns.EventBus
 local Secrets  = ns.Secrets
 local Skin     = ns.Skin
@@ -56,11 +57,14 @@ local BANK_TABS    = { 6, 7, 8, 9, 10, 11, 12, 13, 14 }    -- CharacterBankTab_1
 --   未购买的 7..14 全 0 槽 ⇒ **索引与物理格子 1:1，不存在"同一格出现在多个索引"**（那条旧担忧作废）。
 local BANK_PAGE_CANDIDATES = { -2, -3 }   -- -1 是钥匙扣，见上（保留 -2/-3 只为将来客户端有内容时自动接上）
 
--- 「整理」按钮（背包档「剩余空间」标题行右端）：宽 40、右内边距 8、与货币文字间隔 6。
+-- 「整理」按钮（背包档「剩余空间」标题行右端）：宽 44（10px 图标 + 「整理」两字）、
+-- 右内边距 8、与货币文字间隔 6。
 -- 两处必须共用一个数：`EnsureWindow` 里货币文字的右端锚，和 `UpdateCurrencyTitle`
--- 算可用宽度时的 reserve。银行档不建这颗钮，仍按原来的 132 给两颗工具钮留位。
-local SORT_BTN_W  = 40
-local SORT_RESERVE = 8 + SORT_BTN_W + 6    -- 54
+-- 算可用宽度时的 reserve。银行档不建这颗钮，按 BANK_TOOLS_RESERVE 给两颗工具钮留位。
+local SORT_BTN_W  = 44
+local SORT_RESERVE = 8 + SORT_BTN_W + 6    -- 58
+-- 银行两颗工具钮（各 64 宽，图标 + 四字）的标题行留位：右 4 + 64 + 间隔 4 + 64 + 余量 8。
+local BANK_TOOLS_RESERVE = 144
 
 -- ---- 标题行货币的图标模式（§8.84）-------------------------------------------
 -- 每格 = 14px 图标 + 3px 间隔 + 短数量文字，格间 8px；名称与完整数量移到悬停提示。
@@ -717,10 +721,10 @@ local function EnsureWindow(key)
 
     -- 「剩余空间」标题行右端的货币文字。银行那扇的右端挂着"一键存入 / 栏位管理"两颗钮，
     -- 背包那扇挂着「整理」钮（都是 Rebuild 里懒建）—— 所以这里按模式**先**把位置留出来，
-    -- 不依赖按钮是否已经存在：银行 132，背包 SORT_RESERVE（40 宽的钮 + 右侧 8 + 间隔 6）。
+    -- 不依赖按钮是否已经存在：银行 BANK_TOOLS_RESERVE，背包 SORT_RESERVE（44 宽的钮 + 右侧 8 + 间隔 6）。
     if BaseKey(key) == FREE_CAT.key then
         local currency = Widget:Font(win, 12, "pixel", "bright", "RIGHT")
-        currency:SetPoint("TOPRIGHT", win, "TOPRIGHT", isBank and -132 or -SORT_RESERVE, -5)
+        currency:SetPoint("TOPRIGHT", win, "TOPRIGHT", isBank and -BANK_TOOLS_RESERVE or -SORT_RESERVE, -5)
         currency:SetJustifyH("RIGHT")
         currency:SetWordWrap(false)
         currency:Hide()
@@ -974,7 +978,7 @@ local function UpdateCurrencyTitle(win)
     end
 
     local isBank = ModeOf(win.catKey) == "bank"
-    local reserve = isBank and 132 or SORT_RESERVE   -- 银行两颗工具钮 / 背包一颗「整理」钮
+    local reserve = isBank and BANK_TOOLS_RESERVE or SORT_RESERVE   -- 银行两颗工具钮 / 背包一颗「整理」钮
     local okW, winW = pcall(win.GetWidth, win)
     winW = (okW and Secrets.Number(winW)) or 300
     local titleW = 0
@@ -1634,7 +1638,10 @@ end
 -- 原来的「包裹管理」折叠面板整块删除（作者 11-06 拍板）：两个动作只剩这一处入口，
 -- 一行账（栏位 n/max · 空格 · 物品）在 `/mui bags probe` 里已经有，不再占一扇窗。
 local bankFreeWin, bankDepositBtn, bankTabBtn
-local function BankHeadButton(parent, label, width, onClick)
+--- 标题行工具钮（银行两颗 / 背包「整理」共用）。iconKey = Media.texture 的键（可选）：
+--- 有图标时排版是「左 5 + 10px 图标 + 3 + 文字 + 右 4」，文字左对齐跟在图标后面；
+--- 没图标时退回原来的居中文字。图标与文字同染 bright 档（深底板上的对比色，见下）。
+local function BankHeadButton(parent, label, width, onClick, iconKey)
     -- kind 必须是 "Button"：`Widget:CreateFrame` 不传 kind 默认建 Frame，Frame 没有
     -- RegisterForClicks / OnClick（建出来那一刻就 attempt to call nil）。
     local button = Widget:CreateFrame(nil, parent, width, 18, nil, "Button")
@@ -1644,7 +1651,21 @@ local function BankHeadButton(parent, label, width, onClick)
     button:RegisterForClicks("AnyUp")
     -- 色键是 bright：`edge` 摆在 bgAlpha 0.9 的深底板上会读成"禁用"（11-04 的实测判例）。
     local text = Widget:Font(button, 10, "pixel", "bright", "CENTER")
-    text:SetAllPoints()
+    local iconPath = iconKey and Media:Texture(iconKey)
+    if iconPath then
+        local icon = button:CreateTexture(nil, "ARTWORK", nil, 2)
+        icon:SetSize(10, 10)
+        icon:SetPoint("LEFT", button, "LEFT", 5, 0)
+        icon:SetTexture(iconPath)
+        local ir, ig, ib = Widget:PaletteColor("bright")
+        if ir then icon:SetVertexColor(ir, ig, ib) end
+        Mark(icon, "art", true)   -- 自建贴图打标：认脸探针只信标记与字符串路径（#44/#45）
+        text:SetPoint("LEFT", icon, "RIGHT", 3, 0)
+        text:SetPoint("RIGHT", button, "RIGHT", -4, 0)
+        text:SetJustifyH("LEFT")
+    else
+        text:SetAllPoints()
+    end
     text:SetText(label)
     button:SetScript("OnClick", onClick)
     return button
@@ -1689,13 +1710,13 @@ EnsureBankTitleTools = function(win)
     if bankFreeWin == win and bankDepositBtn then return end
     bankFreeWin = win
     if not bankDepositBtn then
-        bankTabBtn = BankHeadButton(win, "栏位管理", 58, ReleaseBlizzardBank)
+        bankTabBtn = BankHeadButton(win, "栏位管理", 64, ReleaseBlizzardBank, "monet_tool_slots")
         bankTabBtn:SetPoint("TOPRIGHT", win, "TOPRIGHT", -4, -6)
-        bankDepositBtn = BankHeadButton(win, "一键存入", 58, DepositAllBank)
+        bankDepositBtn = BankHeadButton(win, "一键存入", 64, DepositAllBank, "monet_tool_deposit")
         bankDepositBtn:SetPoint("TOPRIGHT", bankTabBtn, "TOPLEFT", -4, 0)
     end
     -- 标题文字别伸到钮底下：标题是 FontString，限宽即可（Rule 仍按标题宽度画）。
-    if win.title then win.title:SetWidth(math.max(60, win:GetWidth() - 132)) end
+    if win.title then win.title:SetWidth(math.max(60, win:GetWidth() - BANK_TOOLS_RESERVE)) end
 end
 
 local SetBankToolsSetting = function(key, value)
@@ -1740,7 +1761,7 @@ end
 --- SORT_RESERVE 让位，不依赖这颗钮是否建好。
 EnsureSortButton = function(win)
     if not win or sortBtn then return end
-    sortBtn = BankHeadButton(win, "整理", SORT_BTN_W, SortBagsNow)
+    sortBtn = BankHeadButton(win, "整理", SORT_BTN_W, SortBagsNow, "monet_tool_sort")
     sortBtn:SetPoint("TOPRIGHT", win, "TOPRIGHT", -8, -6)
 end
 

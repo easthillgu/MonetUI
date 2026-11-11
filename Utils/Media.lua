@@ -314,6 +314,13 @@ Media.texture = {
     ["monet_map_compartment"] = ASSET .. "Textures\\monet_map_compartment",
     ["monet_map_difficulty"]  = ASSET .. "Textures\\monet_map_difficulty",
 
+    -- 背包 / 银行标题行工具钮图标（整理 / 一键存入 / 栏位管理，SVG 手绘，
+    -- tools/svg/monet_tool_*.svg，32×32 实心剪影）：纯白无色相模具，运行期
+    -- SetVertexColor 染 bright 档（深底板上 edge 会读成"禁用"，同 BankHeadButton 文字色）。
+    ["monet_tool_sort"]       = ASSET .. "Textures\\monet_tool_sort",
+    ["monet_tool_deposit"]    = ASSET .. "Textures\\monet_tool_deposit",
+    ["monet_tool_slots"]      = ASSET .. "Textures\\monet_tool_slots",
+
     -- A4 氛围暗角（Modules/Atmosphere）：128x128 纯白模具，整张图只给**径向 alpha**，
     -- 压暗的近黑由运行期 SetVertexColor 给，强度（.06 / .10 / .12）给顶点 alpha。
     -- 键名里的数字是剖面里"平段半径" r0（候选页 tools/gen-beauty-candidates.js 的 vignette）：

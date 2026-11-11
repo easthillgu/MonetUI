@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- MonetUI —— 银行「一键存入」钮图标，tools/svg/monet_tool_deposit.svg
+     画布 32×32（2 的幂），显示约 10×10 UI 单位 —— 先画大、再缩小，边缘才干净。
+
+     图形语义：向下箭头落进托盘 = 「存入 / 收纳」。箭头（杆 + 三角头）与托盘
+     （U 形，臂厚 3）都是实心剪影，10px 下不糊。
+
+     纯白染色模具（无色相）：运行期 SetVertexColor 染 bright 档；
+     透明像素 RGB 由 tools/svg-to-tga.js 补白衬底。 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <rect x="14" y="3" width="4" height="11" fill="#ffffff"/>
+  <polygon points="8,14 24,14 16,22" fill="#ffffff"/>
+  <path d="M4,20 H7 V25 H25 V20 H28 V28 H4 Z" fill="#ffffff"/>
+</svg>

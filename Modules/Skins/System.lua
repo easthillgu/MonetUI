@@ -428,6 +428,58 @@ local function WatchModernMenus(anchor)
     end, MENU_POLL)
 end
 
+--- 老式下拉的子菜单箭头（`DropDownList*ExpandArrow`）：认脸账本（§8.48）里这批一直是
+--- "无我们的图" —— 暴雪原生三角。做法照 ScrollArrowButton 那一套"压原图 + 另建自己的"：
+--- 按钮进池复用、暴雪重建列表时可能重设原图，SwapArt 的一次性换图扛不住，
+--- 自建贴图 + `art` 标记才既认得出脸也盖不掉。幂等守卫记在按钮上（旁表）。
+local function DressDropdownArrows(list)
+    local ok, kids = pcall(list.GetChildren, list)
+    if not ok then return end
+    local Widget, Color, Media = ns.Widget, ns.Color, ns.Media
+    for i = 1, #kids do
+        local button = kids[i]
+        pcall(function()
+            if Marked(button, "muiExpandArrow") then return end
+            local okT, isBtn = pcall(button.IsObjectType, button, "Button")
+            if not (okT and isBtn) or not Widget:Readable(button) then return end
+            local arrow = button.expandArrow
+            if type(arrow) ~= "table" then
+                -- 老命名法：箭头是按钮名下的 region，只认名字结尾 ExpandArrow
+                local okR, regions = pcall(button.GetRegions, button)
+                if okR then
+                    for j = 1, #regions do
+                        local reg = regions[j]
+                        local okN, nm = pcall(reg.GetName, reg)
+                        if okN and type(nm) == "string" and nm:find("ExpandArrow$") then
+                            arrow = reg
+                            break
+                        end
+                    end
+                end
+            end
+            if type(arrow) ~= "table" then return end
+            -- 池复用的按钮可能带着**藏起来**的箭头（该行没有子菜单）：只在它真显示时上色，
+            -- 否则会给没有子菜单的行画出一个假箭头。没标记，下一拍显示了还能补。
+            if arrow.IsShown and not arrow:IsShown() then return end
+            Mark(button, "muiExpandArrow", true)
+            Skin:Fade(arrow)
+
+            local our = button:CreateTexture(nil, "ARTWORK", nil, 2)
+            our:SetSize(10, 10)
+            our:SetPoint("RIGHT", button, "RIGHT", -2, 0)
+            our:SetTexture(Media:Texture("monet_chevron_up"))
+            Widget:Arrow(our, "right")
+            Mark(our, "art", true)   -- 自建贴图必须打标：认脸探针只信标记与字符串路径（#44/#45）
+            local function tint()
+                local r, g, b = Color:GetBorder()
+                if r and our.SetVertexColor then our:SetVertexColor(r, g, b) end
+            end
+            tint()
+            Skin:OnTheme(tint)
+        end)
+    end
+end
+
 local function SkinMenus()
     local up = Skin:Need("UIParent")
     if not up or Marked(up, "menuPoll") then return end
@@ -437,10 +489,16 @@ local function SkinMenus()
     ns.Widget:PollWatch(up, function()
         for level = 1, 8 do
             local list = _G["DropDownList" .. level]
-            if list and list.IsShown and list:IsShown() then TintPanel(list) end
+            if list and list.IsShown and list:IsShown() then
+                TintPanel(list)
+                DressDropdownArrows(list)
+            end
             for menu = 1, 8 do
                 local sub = _G["DropDownList" .. level .. "Menu" .. menu]
-                if sub and sub.IsShown and sub:IsShown() then TintPanel(sub) end
+                if sub and sub.IsShown and sub:IsShown() then
+                    TintPanel(sub)
+                    DressDropdownArrows(sub)
+                end
             end
         end
     end)

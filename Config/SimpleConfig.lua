@@ -97,6 +97,7 @@ end
 -- Blizzard's menu framework (UIDropDownMenu / MenuUtil) is not part of the documented client API and differs between builds, so the panel paints its own small themed list instead of depending on either.
 
 local dropdowns = {}   -- list of refreshers, run when the panel is shown
+local chevrons = {}    -- 下拉箭头贴图（真材质 chevron）：主题换色时统一重染，Build 里注册一次
 local openList         -- the list currently on screen, if any
 local catcher          -- the click-anywhere-else closer
 
@@ -161,9 +162,16 @@ local function MakeDropdown(parent, y, caption, items, getter, setter, swatch)
     -- 压到下一行上。关掉换行，超宽就切在按钮右边。
     value:SetWordWrap(false)
 
-    local chevron = Widget:Font(button, 12, "pixel", "neutral", "RIGHT")
-    chevron:SetPoint("RIGHT", button, "RIGHT", -5, 0)
-    chevron:SetText("v")
+    -- 箭头用真材质（monet_chevron_up 朝下翻转）：像素字体的 "v" 在小字号下读成字母而不是
+    -- 控件符号，和全仓滚动条/步进钮的 chevron 也不是一种画风。主题换色跟着下面的 chevrons 表走。
+    local chevron = button:CreateTexture(nil, "ARTWORK", nil, 2)
+    chevron:SetSize(8, 8)
+    chevron:SetPoint("RIGHT", button, "RIGHT", -6, 0)
+    chevron:SetTexture(Media:Texture("monet_chevron_up"))
+    Widget:Arrow(chevron, "down")
+    local cr, cg, cb = Color:GetNeutral()
+    chevron:SetVertexColor(cr, cg, cb)
+    chevrons[#chevrons + 1] = chevron
 
     -- The list hangs off the panel (UIParent) so the panel can never clip it.
     local list = Widget:CreateFrame(nil, UIParent, 190, #items * 20 + 4)
@@ -469,6 +477,14 @@ function SimpleConfig:Build()
         local er, eg, eb = Color:GetEdge()
         scrollTrack:SetColorTexture(nr, ng, nb, 0.25)
         thumbTex:SetColorTexture(er, eg, eb, 0.8)
+    end)
+
+    -- 下拉箭头是贴图（不吃 Widget:Theme 的字体色轨），主题换色时同样要重染一遍。
+    ns.EventBus:Register("MONETUI_THEME_CHANGED", function()
+        local r, g, b = Color:GetNeutral()
+        for i = 1, #chevrons do
+            if chevrons[i].SetVertexColor then chevrons[i]:SetVertexColor(r, g, b) end
+        end
     end)
 
     -- 主题 / 模块：默认展开（其余收起，一屏就能看完，点标题带展开）

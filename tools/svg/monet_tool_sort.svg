@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- MonetUI —— 背包「整理」钮图标，tools/svg/monet_tool_sort.svg
+     画布 32×32（2 的幂），显示约 10×10 UI 单位 —— 先画大、再缩小，边缘才干净。
+
+     图形语义：三条左对齐、逐级收窄的横杠 = 「对齐 / 归置」（通用 sort 符号）。
+     10px 显示尺寸下实心横杠比扫帚 / 漏斗一类细笔画剪影可读性高（像素字号下
+     细笔画会糊成一团，同 role 图标"实心剪影"那条纪律）。
+
+     纯白染色模具（无色相）：运行期 SetVertexColor 染 bright 档；
+     透明像素 RGB 由 tools/svg-to-tga.js 补白衬底。 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <rect x="4" y="7"  width="24" height="4" fill="#ffffff"/>
+  <rect x="4" y="14" width="17" height="4" fill="#ffffff"/>
+  <rect x="4" y="21" width="10" height="4" fill="#ffffff"/>
+</svg>
