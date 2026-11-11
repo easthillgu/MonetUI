@@ -6762,6 +6762,44 @@ MonetUI UNKNOWN()` 是探针自己在 ForceTaint 上下文做真值测试撞的�
 **验收**：按 B 开背包 / 开银行看三颗钮（整理条 / 入盘箭头 / 格阵）；子菜单箭头
 （§8.101 第 2 条）仍待开一次老式下拉肉眼扫一眼。
 
+### §8.104 缺口清单第一波：死名定案 + 邮箱信纸 + 零调用资产调研（2026-11-11 晚）
+
+作者暂离期间按 §8.100 清单推进（不需要肉眼拍板的部分）：
+
+**P0-2 死名定案（`4b83421`）** —— 游戏关着，按 §8.100 口径用 framexml 转储
+（1.60.1.70707）定案，`/mui skins diagnose` 实机复核等作者回来补跑：
+- `ChatChannelManagerPopup` / `EditChannelPopup` 及三颗 `ChatChannelManagerPopup*Button`
+  转储零命中：1.60 频道 UI 真身 `ChannelFrame` + `CreateChannelPopup`（均已在名单）。
+  死名摘除，`CHAT_CHANNEL_POPUPS` 只留 `CreateChannelPopup`。
+- **拍卖行整块移除**：`AuctionFrame` / `AuctionFrameTab1..3` / `AuctionFrameBrowse|
+  Auctions|Bid` / `Browse*` 钮与编辑框在 1.60 全不存在，真身 `AuctionHouseFrame`
+  （`Blizzard_AuctionHouseUI/Shared/Blizzard_AuctionHouseFrame.xml:4`，
+  PortraitFrameTemplate）+ AuctionHouse* 模板实例。照 §8.40「全不存在 ⇒ 整组删」
+  移除 `SkinAuction` + `M:Panel("auction")`（配置面板勾选项随之消失——它从登录起
+  静默空转，留着是假覆盖）。按新系统重做 = 新功能，要实机开着拍卖行调研模板实例
+  真名，留待下一轮。
+
+**P0-1 邮箱信纸（`9f07a77`，§8.99 落地）** —— 四张 `*StationeryBackground*` 点名 +
+`MailFrame` 挂 1s 纠回轮询（暴雪运行期 `SetTexture` 重设，MailFrame.lua:784-785 /
+1396-1397；转储复核行号一致）。贴图在邮箱出生（LoD）后解析一次，`Skin.With("mail")`
+作用域记账。四张名进 `M:Panel("mail")` frames 名单。**待验**（游戏重开后）：开邮箱
+读/写信页羊皮纸消失；diagnose 的 mail 档四张记 hit。
+
+**P2-10 零调用资产调研（只调研，未接线未删）**：
+- `monet_win_maximize` / `monet_win_minimize`：**1.60 有真实客户**。
+  `MaximizeMinimizeButtonFrameTemplate`（SharedUIPanelTemplates.xml:1070）的
+  `.MaximizeButton`（atlas `RedButton-Expand`）/ `.MinimizeButton`（`RedButton-MiniCondense`）
+  挂在 Camelot 覆写加出的 `MaximizeMinimizeButton` 上；我们已换皮的
+  `PlayerSpellsFrame` / `CommunitiesFrame` / `ProfessionsFrame` 都带这个控件
+  （`SpellBookFrame` 的 Camelot 覆写也加了它，`Blizzard_PlayerSpellsFrame.xml:17`）。
+  `CloseButtonByArt` 刻意不碰 `RedButton-MiniCondense`（AGENTS 红线：那是最小化不是
+  关闭），所以这两颗钮目前全是暴雪红钮美术。接线 = 对两颗钮的 Normal/Pushed 贴图
+  `SwapArt` 我们的模具 + 主题染色，属视觉改动，**等作者回来过目再动**。
+- `monet_scrollbar_thumb` / `monet_scrollbar_track`：无自然客户——现役滚动条把手走
+  `monet_barfill` + 悬停提亮、轨走 `monet_hairline`（细线风定案），滑条（§8.101 第 3 条）
+  也复用 barfill。建议按孤儿资产先例（2026-10-28 那批）**连注册键一起删**，或留作
+  滑条拇指候选；删资产属破坏性动作，等作者拍板。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 
