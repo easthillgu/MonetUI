@@ -383,8 +383,30 @@ function Skin:Fade(region)
     return region
 end
 
+--- 一张贴图的"身份串"，供各分类器做前缀 / 片段判据：**atlas 名优先，其次是 SetTexture 的文件路径**。
+--- 两者都小写、路径分隔符统一成反斜杠（`Interface/Icons/…` 与 `Interface\Icons\…` 同判）。
+--- **数字文件 ID 返回 nil**：我们自己的 BLP（`Media:Texture`）与一部分暴雪图标走数字 ID，
+--- 没有可读路径，不该被任何路径判据命中 —— 保持旧行为（GetAtlas 回 nil ⇒ 不认）。
+--- 2026-11-12（P1-9）：以前 `IsContentIcon` / `FadeRowArt` 只读 `GetAtlas`，
+--- `file="Interface\Icons\…"` 型老贴图拿到 nil 就被当窗体装饰剥掉 —— 商人铁槌那条红线的另一面
+--- （功能图标走 atlas 时豁免、走 file= 路径时却漏）。这一层把路径也认出来，分类器共用同一只眼睛。
+local function ArtIdentity(tex)
+    if not tex then return nil end
+    if type(tex.GetAtlas) == "function" then
+        local okA, atlas = pcall(tex.GetAtlas, tex)
+        if okA and type(atlas) == "string" and atlas ~= "" then return (string.lower(atlas)) end
+    end
+    if type(tex.GetTexture) == "function" then
+        local okT, path = pcall(tex.GetTexture, tex)
+        if okT and type(path) == "string" and path ~= "" then
+            return (string.lower(path):gsub("/", "\\"))
+        end
+    end
+    return nil
+end
+
 --- Fade a texture's four sprite edges / a whole button's art, whatever shape it has.
---- **内容图标类 atlas**：这些画的是"这个按钮是什么功能"，不是窗体装饰 —— 压掉就等于把功能图标删了。
+--- **内容图标类 atlas / 图标路径**：这些画的是"这个按钮是什么功能"，不是窗体装饰 —— 压掉就等于把功能图标删了。
 --- 11-05 玩家实测判例：商人窗的修理 / 修全部（`SpellIcon-256x256-Repair` / `-RepairAll`）
 --- 被 `FadeButtonArt` 连 normal 贴图一起压成 α0 ⇒ "维修和全修的铁槌图标看不到了"。
 --- （更早那一版 `RepairAll` 也已经被压掉，只是当时没人看它 —— 一次"看不见的美术变少了"的绿灯
@@ -395,10 +417,11 @@ local CONTENT_ICON_ATLAS = {
 }
 
 local function IsContentIcon(tex)
-    if not tex or type(tex.GetAtlas) ~= "function" then return false end
-    local ok, atlas = pcall(tex.GetAtlas, tex)
-    if not ok or type(atlas) ~= "string" or atlas == "" then return false end
-    local low = string.lower(atlas)
+    -- 走 ArtIdentity：atlas 与 file= 路径都认。名单里 `^icons\\` / `^interface\\icons\\`
+    -- 两条本来就是**路径前缀**，以前只喂 atlas 时是死规则，现在 SetTexture 的图标路径也能命中。
+    -- 方向严格安全：只多豁免（保住功能图标），绝不会多剥一张。
+    local low = ArtIdentity(tex)
+    if not low then return false end
     for i = 1, #CONTENT_ICON_ATLAS do
         if low:find(CONTENT_ICON_ATLAS[i]) then return true end
     end
@@ -1194,9 +1217,10 @@ function Skin:FadeRowArt(button)
     if not okRegions or type(regions) ~= "table" then return false end
     local touched = 0
     for _, reg in ipairs(regions) do
-        local okA, atlas = pcall(reg.GetAtlas, reg)
-        if okA and type(atlas) == "string" and atlas ~= "" then
-            local low = string.lower(atlas)
+        -- 与 IsContentIcon 共用 ArtIdentity：atlas 与 file= 路径都认（P1-9）。
+        -- 现有三条判据都是 atlas 专名，不会误命中路径；机制统一后补 file= 装饰判据即可生效。
+        local low = ArtIdentity(reg)
+        if low then
             for i = 1, #ROW_ART_PATTERNS do
                 if low:find(ROW_ART_PATTERNS[i]) then
                     local isHighlight = false
