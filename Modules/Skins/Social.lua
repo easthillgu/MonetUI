@@ -171,12 +171,11 @@ local CHAT_EDITS = {
     "ChatFrame9EditBox", "ChatFrame10EditBox",
 }
 
-local CHAT_CHANNEL_POPUPS = { "ChatChannelManagerPopup", "CreateChannelPopup", "EditChannelPopup" }
-
-local CHAT_CHANNEL_BUTTONS = {
-    "ChatChannelManagerPopupAcceptButton", "ChatChannelManagerPopupCancelButton",
-    "ChatChannelManagerPopupDeleteButton",
-}
+-- 2026-11-11 转储定案（§8.100 P0-2，framexml-source 1.60.1.70707 零命中）：
+-- `ChatChannelManagerPopup` / `EditChannelPopup` 及三颗 `ChatChannelManagerPopup*Button`
+-- 在 1.60 不存在（频道 UI 真身是 `ChannelFrame` + `CreateChannelPopup`，已在
+-- CHAT_EXTRA_WINDOWS / 本表）。死名整组摘掉，只留真存在的 CreateChannelPopup。
+local CHAT_CHANNEL_POPUPS = { "CreateChannelPopup" }
 
 -- A 档补：频道主窗 + 聊天设置窗（实机 skin-coverage 核对存在）。
 local CHAT_EXTRA_WINDOWS = { "ChannelFrame", "ChatConfigFrame" }
@@ -1103,7 +1102,6 @@ local function SkinChat()
     end
 
     M:Dress(CHAT_CHANNEL_POPUPS, { window = true, inset = true, panel = { bgAlpha = 0.96 } })
-    M:Dress(CHAT_CHANNEL_BUTTONS, { as = "button" })
     M:Dress(CHAT_EXTRA_WINDOWS, { window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true })
 
     -- 重钉：每个聊天窗挂**一个模块级稳定闭包**（`Widget:PollWatch` 按引用去重，
@@ -1127,7 +1125,7 @@ ChatBand.SkinChat = SkinChat
 M:Panel("chat", { label = "聊天", group = "社交", apply = SkinChat,
     frames = {
         CHAT_FRAMES, CHAT_BUTTONS, CHAT_TABS, CHAT_EDITS,
-        CHAT_CHANNEL_POPUPS, CHAT_CHANNEL_BUTTONS,
+        CHAT_CHANNEL_POPUPS,
         CHAT_EXTRA_WINDOWS,
     } })
 -- === CHAT BAND §8.89 END ===

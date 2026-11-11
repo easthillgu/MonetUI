@@ -255,24 +255,14 @@ local function SkinTrainer()
     })
 end
 
-local AUCTION_TABS = { "AuctionFrameTab1", "AuctionFrameTab2", "AuctionFrameTab3" }
-
-local AUCTION_PANELS = { "AuctionFrameBrowse", "AuctionFrameAuctions", "AuctionFrameBid" }
-
-local AUCTION_BUTTONS = {
-    "BrowseSearchButton", "BrowseResetButton", "BrowseBuyoutButton",
-    "AuctionsCreateAuctionButton", "AuctionsCancelAuctionButton", "BidBidButton",
-}
-
-local AUCTION_EDITS = { "BrowseName", "BrowseMinLevel", "BrowseMaxLevel", "BrowsePrice" }
-
-local function SkinAuction()
-    M:Dress("AuctionFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 }, tabs = AUCTION_TABS })
-    M:Dress(AUCTION_PANELS, { panel = { bgAlpha = 0.96 }, deep = true })
-    M:Dress(AUCTION_BUTTONS, { as = "button" })
-    -- BrowseMinLevel 一类在别的构建里是 Slider：editbox 档会先认类型，认错就跳过。
-    M:Dress(AUCTION_EDITS, { as = "editbox" })
-end
+-- 拍卖行整块移除（2026-11-11 转储定案，§8.100 P0-2）：`AuctionFrame` / `AuctionFrameTab1..3` /
+-- `AuctionFrameBrowse|Auctions|Bid` / `Browse*Button` / `Browse*EditBox` 在 1.60
+-- （framexml-source 1.60.1.70707）**全部零命中** —— 1.60 的拍卖行是 `AuctionHouseFrame`
+-- （`Blizzard_AuctionHouseUI/Shared/Blizzard_AuctionHouseFrame.xml:4`，PortraitFrameTemplate）
+-- 加一套 AuctionHouse* 模板实例，老名单一颗都接不上，这个面板从登录起就是静默空转。
+-- 整组摘掉（照 §8.40 "名字全不存在 ⇒ 整组删" 的口径），配置面板的「拍卖行」勾选项随
+-- M:Panel 注册消失。按新系统重做换皮 = 新功能，要实机开着拍卖行调研模板实例的真名，
+-- 留给下一轮，不在缺口清理范围。
 
 -- **专业窗的暴雪装饰件（11-05 作者选 B：剥水印 + 选中条换我们的颜色）**。
 -- layers 实测这些 atlas 挂在 ScrollBox 回收行的匿名子帧上，deep 够不到：
@@ -375,8 +365,7 @@ M:Panel("trainer", { label = "训练师", group = "交易", apply = SkinTrainer,
         "ClassTrainerTrainButton", "ClassTrainerCancelButton",
     } })
 
-M:Panel("auction", { label = "拍卖行", group = "交易", apply = SkinAuction,
-    frames = { "AuctionFrame", AUCTION_TABS, AUCTION_PANELS, AUCTION_BUTTONS, AUCTION_EDITS } })
+-- 拍卖行面板已随死名整组移除（见上文注；1.60 真身 AuctionHouseFrame，重做留待下一轮）。
 
 M:Panel("professions", { label = "专业 / 制造", group = "交易", apply = SkinProfessions,
     frames = { "ProfessionsFrame" } })
