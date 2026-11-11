@@ -3,6 +3,31 @@
 This file is used verbatim as the CurseForge release changelog (see `.pkgmeta`).
 Update the top section before tagging a new release.
 
+## 0.13.4 (2026-11-11)
+
+- Chat frame: the outer plate is now exactly as tall as the minimap, with its
+  top edge on the minimap's top edge. The tab row and the input box moved out of
+  the frame body and now ride on the top border.
+- Chat frame: tabs and input box share that strip. While the input box has focus
+  it is raised above the tabs (and its own backdrop raised with it); when focus
+  is lost it drops back and hides again.
+- Chat frame: tab backdrop, input box backdrop and the frame plate now use one
+  shared opacity and one shared border strength, so the tab block no longer
+  reads as a solid slab next to a hollow frame. Blizzard's own dark plate plus
+  its eight border textures on the chat frame are faded out too -- they were
+  stacking roughly 0.25 extra opacity on top of ours, which is why the frame
+  body looked denser than the tabs sitting on it.
+- Chat frame: the native menu / channel / minimize buttons, the "quick join"
+  social button and the text-to-speech button now follow the same show/hide
+  rhythm as the tabs, so nothing is left floating beside the frame when idle.
+  They are click-through while hidden and fade back in together with the tabs
+  when you hover the chat frame.
+- Chat input: fixed the channel color and the hidden backdrop not taking effect
+  in game (an internal call used a dot call on a colon method, so it always
+  evaluated to nothing).
+- TOC: the version file is deployed along with the code again, so the in-game
+  version number matches the release.
+
 ## 0.13.3 (2026-11-11)
 
 - Chat tabs: tabs now fade in only while the chat frame is hovered and fade

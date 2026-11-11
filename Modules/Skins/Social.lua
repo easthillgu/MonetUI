@@ -10,6 +10,12 @@ local Skin = ns.Skin
 local Widget = ns.Widget   -- 置顶那条要用 Widget:PollWatch；本文件以前没有这个 local
                            -- （AGENTS 记过：写成 `Widget:...` 就是全局 nil，闸门全绿、实机不生效）
 
+-- 项目惯例（其余模块同款）：`ns:Marked` 是**冒号方法**（`function ns:Marked(object, key)`，
+-- 见 Core.lua:576），必须带 self。本文件曾用点调用（`ns` 后接点、再传 eb 与键名），
+-- self 被当成 object、键名被当成 key → 恒返回 nil，输入框背板永远取不到，
+-- 表现就是"输入框背景色一直在、频道色不生效"（2026-11-11 实机截图 + 枚举定位）。
+local Marked = function(o, k) return ns:Marked(o, k) end
+
 -- **1.60 实测（开服日 11-05，`/mui compat find Friends` 走 19805 个框，只返回这 18 个实名）**：
 -- 编号页签只有 **1 / 3 / 4**，`FriendsFrameTab2`、`FriendsFrameTab5` 与
 -- `FriendsFrameAddIgnoreButton`、`FriendsFrameBroadcastButton`、`FriendsFrameListScrollFrame`
@@ -199,10 +205,20 @@ local CHAT_EXTRA_WINDOWS = { "ChannelFrame", "ChatConfigFrame" }
 --- 扩散污染（脏字段数不变、taint.log 空），而 SetPoint / SetClampRectInsets 会把帧标脏
 --- （见上方"贴底已移除"的说明）。所以只改**高度**，位置和宽度完全交给暴雪/玩家。
 local CHAT_INPUT_BAND = 32        -- 必须等于 EditBox 模板的 `<Size y="32"/>`
+local CHAT_TAB_LIFT   = 0         -- §8.92 页签容器相对 cf 顶的抬升量：0 = 落进输入带内、与 EditBox 同区
+local CHAT_INPUT_BOOST = 3        -- §8.92 聚焦时 EditBox 抬到 GDM 之上所需的层数（页签 Tab = GDM+1）
 local CHAT_TAB_FADE   = 0.18      -- 页签淡入淡出时长（秒），贴近 Chattynator 的 0.15（§8.90 改读配置）
+--- §8.94 三层底板统一口径。改前实测（11-11 14:1x，2560×1440）三处 RGB 完全相同都是
+--- (0.110,0.106,0.122)，但浓度三档：聊天框 0.349 / 页签 0.902 / 输入框 0.902，边框浓度两档：
+--- 页签 0.80、聊天框与输入框 1.00。§8.93 把页签和输入框挪到框沿外侧之后，这两种密度紧挨着，
+--- 视觉上"页签是实心块、聊天框只剩一圈线"，作者判为"背景和边框不统一"。
+--- 现统一为：三处底板 CHAT_PLATE_ALPHA、三处 1px 边框 CHAT_EDGE_ALPHA。**任何一处改档都要一起改**。
+local CHAT_PLATE_ALPHA = 0.35     -- 底板浓度（对齐聊天框既有的 0.35）
+local CHAT_EDGE_ALPHA  = 0.80     -- 边框浓度（对齐页签既有的 0.80）
 local CHAT_PIN_FNS = {}           -- 名字 → 稳定闭包（PollWatch 按引用去重）
 local CHAT_HOVER = setmetatable({}, { __mode = "k" })  -- frame → true：任一悬停即显示页签
 local KNOWN_EB = {}               -- 已纳入频道色跟踪的输入框名（ChatFrameNEditBox）
+local INPUT_LAYER = {}            -- §8.92 名字 → { eb = 原始 frameLevel, cb = 原始背板 level }
 local chatHideToken = 0
 local CHAT_FADE_TARGET           -- 淡入淡出目标 alpha（1 显示 / 0 隐藏）
 local CHAT_FADE_FRAME            -- 承载 OnUpdate 插值的私有帧（仅在真客户端创建）
@@ -220,12 +236,15 @@ ChatBand.ReadNum = ReadNum
 
 --- 目标高度每次从 Minimap 现算 ⇒ 天然幂等，不需要「记住 base」的账本，
 --- 玩家在 EditMode 改高度 / FCF_DockUpdate 重排，由 PollWatch 下一拍纠回。
+--- §8.93：不再扣 `InputBand()`（恒 0），而是固定扣掉 `CHAT_INPUT_BAND`——cf 顶边于是落在
+--- `minimapTop - 32`，正好等于小地图上沿（实机：小地图 T256，cf 底 32 ⇒ 高 224 ⇒ cf 顶 256）。
+--- 输入框/页签都挂在这条顶边**外面**，不再从消息区里挖空间。
 function ChatBand:TargetHeight()
     local mm = Skin:Need("Minimap")
     if not mm or type(mm.GetHeight) ~= "function" then return nil end
     local ok, h = pcall(mm.GetHeight, mm)
     if not ok or type(h) ~= "number" or h <= CHAT_INPUT_BAND then return nil end
-    return h - self:InputBand()
+    return h - CHAT_INPUT_BAND
 end
 
 --- 只对**一个** cf 校高度；PollWatch 每窗一拍各管各的，不对 10 个窗重复全扫。
@@ -245,6 +264,30 @@ local function MatchChatHeight()
     end)
 end
 ChatBand.MatchChatHeight = MatchChatHeight
+
+--- §8.94 压掉 cf 自带的那层"黑底板 + 16px 黑边框"。
+--- 实测（11-11 14:2x）`ChatFrame4:GetRegions()` 有 9 张 Texture：1 张 BACKGROUND（447×233，全黑）
+--- + 8 张 BORDER（全黑 8/16/439 三种），**vertex alpha 全是 0.25 且 GetAlpha 也是 0.25**
+--- ⇒ 有效 α ≈ 0.25。它叠在我们的 skinBg（0.35）之上，框体实际压暗 ≈ 0.51 ——
+--- 而页签块只有我们那层 0.35，于是"页签块通透、聊天框发实"，正是作者说的"背景和边框不统一"。
+--- 只写 SetAlpha(0)（不碰贴图/几何/顶点色），任一被暴雪重设都由 PinLayout 的 1 秒轮询纠回。
+--- 判据只看 layer（BACKGROUND / BORDER）+ 对象类型 Texture，不点名贴图路径。
+function ChatBand:FadeNativePlate(cf)
+    if not cf or type(cf.GetRegions) ~= "function" then return end
+    local okR, regions = pcall(function() return { cf:GetRegions() } end)
+    if not okR then return end
+    for _, reg in ipairs(regions) do
+        if type(reg) == "table" and type(reg.SetAlpha) == "function" then
+            local okK, kind = pcall(reg.GetObjectType, reg)
+            local okL, layer = pcall(reg.GetDrawLayer, reg)
+            if okK and kind == "Texture" and okL
+                and (layer == "BACKGROUND" or layer == "BORDER") then
+                local okA, a = pcall(reg.GetAlpha, reg)
+                if not okA or a ~= 0 then pcall(reg.SetAlpha, reg, 0) end
+            end
+        end
+    end
+end
 
 --- 输入框：底边贴 cf 顶边，正好填满 skinBg 上扩出来的 32 空带。
 --- **两个锚点都要判**（暴雪 FCF_DockUpdate 可能只改第二个点），否则会留半个错位框。
@@ -277,6 +320,54 @@ function ChatBand:PinEditBox(name)
     return not already
 end
 
+--- §8.92 输入框与页签同区（都在 32 输入带内）的层级切换：
+--- 平时页签容器 `GeneralDockManager` 在带内可见（悬停淡入照旧），EditBox 收起来；
+--- 聚焦输入时暴雪会把 EditBox 显示出来，但它与页签同区、原始 level 只等于 GDM（实机 LOW/lvl1），
+--- 会被页签（GDM+1）压住 —— 于是把 eb 与它的 controlBg 一起抬到 GDM 之上，失焦再原样放回。
+--- 只写我们自己能写的框（非保护 EditBox + 私有背板），pcall 兜住；原始 level 记在旁表，
+--- 反复聚焦不会越抬越高。
+function ChatBand:SyncInputLayer(name)
+    local eb = Skin:Need(name .. "EditBox")
+    if not eb or type(eb.SetFrameLevel) ~= "function" then return end
+    local okF, focused = pcall(eb.HasFocus, eb)
+    local up = okF and focused
+    local rec = INPUT_LAYER[name]
+
+    if up then
+        if not rec then
+            local okE, el = pcall(eb.GetFrameLevel, eb)
+            rec = { eb = okE and el or nil, cb = nil }
+            local cb = Marked(eb, "controlBg")
+            if cb and type(cb.GetFrameLevel) == "function" then
+                local okC, cl = pcall(cb.GetFrameLevel, cb)
+                rec.cb = okC and cl or nil
+            end
+            INPUT_LAYER[name] = rec
+        end
+        local gdm = Skin:Need("GeneralDockManager")
+        local gl = 1
+        if gdm then
+            local okG, g = pcall(gdm.GetFrameLevel, gdm)
+            if okG and type(g) == "number" then gl = g end
+        end
+        local want = gl + CHAT_INPUT_BOOST
+        pcall(eb.SetFrameLevel, eb, want)
+        local cb = Marked(eb, "controlBg")
+        if cb and type(cb.SetFrameLevel) == "function" then
+            pcall(cb.SetFrameLevel, cb, want - 1)
+        end
+        return
+    end
+
+    if not rec then return end
+    if rec.eb then pcall(eb.SetFrameLevel, eb, rec.eb) end
+    local cb = Marked(eb, "controlBg")
+    if cb and rec.cb and type(cb.SetFrameLevel) == "function" then
+        pcall(cb.SetFrameLevel, cb, rec.cb)
+    end
+    INPUT_LAYER[name] = nil
+end
+
 --- §8.91 输入框隐藏档：平时 `SetShown(false)` 折叠输入框带；当用户聚焦输入框（按 Enter / 点击聊天框进入输入态）
 --- 暴雪会自动 Show 并聚焦，这里按焦点态保持显示，失焦后下一拍 PollWatch 重新隐藏。`HasFocus` 是 EditBox 标准方法，
 --- 非保护框操作无 taint 风险；全程 pcall 兜住运行期异常。
@@ -285,10 +376,12 @@ function ChatBand:HideEditBox(name)
     if not eb then return end
     local okF, focused = pcall(eb.HasFocus, eb)
     local show = okF and focused
+    -- 先抬层再显示：否则这一拍 EditBox 会先以原 level 露出来、被同区的页签压住闪一下。
+    self:SyncInputLayer(name)
     pcall(eb.SetShown, eb, show)
     -- §8.91 修正：controlBg 背板（输入框背景色 / 频道色，见 §8.90）必须同步显隐，
     -- 否则 EditBox 藏了、背景色还挂在那（用户反馈"输入框背景色一直在"）。
-    local okM, cb = pcall(ns.Marked, eb, "controlBg")
+    local okM, cb = pcall(Marked, eb, "controlBg")
     if okM and cb and type(cb.SetShown) == "function" then
         pcall(cb.SetShown, cb, show)
     end
@@ -302,6 +395,7 @@ end
 ChatBand.skinners = {
     frame = function(self, name, cf)
         self:PinHeight(cf)
+        self:FadeNativePlate(cf)   -- §8.94 暴雪黑底板/黑边框（α0.25）压 0，框体只剩我们那层 0.35
         local pos = self:EditBoxPos()
         if pos == "top" or pos == "hidden" then
             self:PinEditBox(name)   -- hidden 也先钉到顶部带，避免聚焦时掉到底部
@@ -331,11 +425,46 @@ function ChatBand:PinLayout(name)
     local cf = Skin:Need(name)
     if not cf then return end
     self:Dispatch("frame", name, cf)
+    -- 镀铬（页签容器 + ButtonFrame）是**全局一份**，只在 ChatFrame1 这一拍同步，别 10 个窗各写一遍。
+    if name == "ChatFrame1" then self:SyncChrome() end
 end
 
---- 把页签容器抬回输入框带上方。读取它当前第一锚点的相对框（暴雪用的 background），
---- 只改 y 偏移，不动相对框本身；第二锚点一并抬，防暴雪只重设其一。
---- `target` 为 nil（minimap 太矮、band 没激活）时不抬，避免把页签推离原位置。
+--- §8.94 页签在容器内的"落座"量：页签底 − 容器底（实测 ChatFrame4Tab 260 / GDM 259 ⇒ 1）。
+--- 暴雪把页签挂在 GDM（或 GDM 的 ScrollFrameChild）里，页签比容器高 6、下沿还低 1，
+--- 所以"容器底对齐框顶"会让页签底下留一条草地缝（作者 11-11 说"背景和边框不统一"时看到的那条）。
+--- 这里现量，不写死数字；取不到可见页签就当 0（最多差 1 个单位）。
+local function TabSeat(gdm)
+    if not gdm or type(gdm.GetChildren) ~= "function" then return 0 end
+    local okG, gb = pcall(gdm.GetBottom, gdm)
+    if not okG or type(gb) ~= "number" then return 0 end
+    local ok, kids = pcall(function() return { gdm:GetChildren() } end)
+    if not ok then return 0 end
+    local pool = {}
+    for _, child in ipairs(kids) do
+        pool[#pool + 1] = child
+        local okC, gkids = pcall(function() return { child:GetChildren() } end)
+        if okC then
+            for _, g in ipairs(gkids) do pool[#pool + 1] = g end
+        end
+    end
+    for _, tab in ipairs(pool) do
+        local okN, nm = pcall(tab.GetName, tab)
+        if okN and type(nm) == "string" and nm:match("Tab%d+$") then
+            local okS, shown = pcall(tab.IsShown, tab)
+            local okB, tb = pcall(tab.GetBottom, tab)
+            if okS and shown and okB and type(tb) == "number" then
+                return tb - gb
+            end
+        end
+    end
+    return 0
+end
+
+--- 把页签容器钉到**我们自己的聊天背板上沿**（不是暴雪 `ChatFrameNBackground`）。
+--- 那层暴雪背景比 cf 内缩 3（实测 bg1 顶 259 / cf 顶 256），锚它页签就永远悬在框顶上方；
+--- `skinBg` 与 cf 精确同边（32..256），锚它页签底板才能真正压住框顶那条 1px 线。
+--- 偏移再减 `seat`，页签**自己的底边**落上框顶线，中间不留缝。
+--- `target` 为 nil（minimap 太矮、band 没激活）时不钉，避免把页签推离原位置。
 function ChatBand:PinDock()
     local target = self:TargetHeight()
     if not target then return false end
@@ -343,14 +472,20 @@ function ChatBand:PinDock()
     if not gdm then return false end
     local okP, p1, r1, rp1, x1, y1 = pcall(gdm.GetPoint, gdm, 1)
     if not okP or not p1 or not r1 then return false end
-    local want = self:InputBand()
-    local already = p1 == "BOTTOMLEFT" and rp1 == "TOPLEFT"
+    -- 相对框换成宿主聊天窗的皮肤背板；拿不到就退回原相对框（宁可行不齐，也别不钉）。
+    local host = nil
+    local okParent, par = pcall(r1.GetParent, r1)
+    if okParent and par then host = par end
+    local bg = host and Marked(host, "skinBg") or nil
+    local ref = bg or r1
+    local want = CHAT_TAB_LIFT - TabSeat(gdm)
+    local already = p1 == "BOTTOMLEFT" and r1 == ref and rp1 == "TOPLEFT"
         and math.abs((ReadNum(x1) or 99) - 0) < 0.6
         and math.abs((ReadNum(y1) or 99) - want) < 0.6
     if not already then
         pcall(gdm.ClearAllPoints, gdm)
-        pcall(gdm.SetPoint, gdm, "BOTTOMLEFT", r1, "TOPLEFT", 0, want)
-        pcall(gdm.SetPoint, gdm, "BOTTOMRIGHT", r1, "TOPRIGHT", 0, want)
+        pcall(gdm.SetPoint, gdm, "BOTTOMLEFT", ref, "TOPLEFT", 0, want)
+        pcall(gdm.SetPoint, gdm, "BOTTOMRIGHT", ref, "TOPRIGHT", 0, want)
     end
     return not already
 end
@@ -363,7 +498,7 @@ end
 --- 页签照样点得到。暴雪自带的 `CHAT_FRAME_TAB_*_NOMOUSE_ALPHA`(0.2/0.4) 只是淡化，
 --- 不是隐藏，所以不复用 `ChatFrameUtil.SetTabAlphas`。
 --- 集中的配置读取（D）：所有聊天皮肤设置走这一层，SimpleConfig 只写 `db.skins.*`，
---- 不直接碰 ChatBand 内部；配置变化由 `CHAT_SKIN_SETTING_CHANGED` 事件总线广播。
+--- 不直接碰 ChatBand 内部；配置变化由 `MONETUI_CHAT_SKIN_SETTING_CHANGED` 事件总线广播。
 function ChatBand:Opt(key)
     local db = (type(ns.DB) == "function") and ns:DB() or nil
     local cfg = db and db.skins
@@ -379,13 +514,12 @@ function ChatBand:EditBoxPos()
     return (p == "bottom") and "bottom" or "top"
 end
 
---- 输入框带高度（topExtend / 页签抬升量）：`hidden` 时折叠为 0，否则 CHAT_INPUT_BAND。
---- 三处联动（Dress.topExtend、TargetHeight、PinDock.want）都读它，页签位置才不会错位。
+--- 顶部外扩量（topExtend）：§8.93 起**恒 0**。外框不再从框内挖一条 32 的输入带 ——
+--- 上沿与 cf 顶边齐平（cf 顶边又被 `TargetHeight` 对齐到小地图上沿），框内 100% 是消息区；
+--- 页签与输入框（§8.92 同区、平时渐隐）骑在框顶上沿的**外侧**，像挂在边框上。
+--- 保留这个函数是留一个语义出口：以后想恢复"框内含输入带"，只改这里一处。
 function ChatBand:InputBand()
-    -- `top` / `hidden` 都保留顶部输入框带（hidden 只是折叠 EditBox，不回收带高度，
-    -- 否则聚焦弹出时输入框无处可去、会被暴雪原生钉到底部 —— 用户反馈"输入框跑到下面了"）。
-    -- 仅 `bottom` 不预留带（输入框在原生底部）。
-    return (self:EditBoxPos() == "bottom") and 0 or CHAT_INPUT_BAND
+    return 0
 end
 
 --- §8.90 输入框边框跟随当前频道色（Chatter 式）：读编辑框正在用的 `chatType` / `channelTarget`
@@ -411,11 +545,11 @@ end
 
 function ChatBand:ApplyChannelColor(eb)
     if not eb then return end
-    local cb = ns.Marked(eb, "controlBg")
+    local cb = Marked(eb, "controlBg")
     if not cb or type(Widget.SetBorderState) ~= "function" then return end
     local r, g, b = self:ChannelColor(eb)
     if not r then return end
-    Widget:SetBorderState(cb, r, g, b, 1)
+    Widget:SetBorderState(cb, r, g, b, CHAT_EDGE_ALPHA)
 end
 
 function ChatBand:ApplyChannelColorByName(name)
@@ -450,9 +584,12 @@ end
 function ChatBand:RegisterRuntimeChatFrame(name)
     local cf = Skin:Need(name)
     if not cf then return end
-    M:Dress({ name }, { panel = { thickness = 1, bgAlpha = 0.35, borderAlpha = 1, topExtend = self:InputBand() } })
-    M:Dress({ name .. "Tab" }, { as = "tab", control = { fullAlpha = true } })
-    M:Dress({ name .. "EditBox" }, { as = "editbox" })
+    M:Dress({ name }, { panel = { thickness = 1, bgAlpha = CHAT_PLATE_ALPHA,
+                                  borderAlpha = CHAT_EDGE_ALPHA, topExtend = self:InputBand() } })
+    M:Dress({ name .. "Tab" }, { as = "tab", control = {
+        fullAlpha = true, bgAlpha = CHAT_PLATE_ALPHA, borderAlpha = CHAT_EDGE_ALPHA } })
+    M:Dress({ name .. "EditBox" }, { as = "editbox", control = {
+        bgAlpha = CHAT_PLATE_ALPHA, borderAlpha = CHAT_EDGE_ALPHA } })
     if type(cf.ScrollToBottomButton) == "table" then
         Skin:ChatScrollAlert(cf.ScrollToBottomButton)
     end
@@ -508,14 +645,78 @@ function ChatBand:HoverEnabled()
     return (ok and on) and true or false
 end
 
+--- 单个框写 alpha + 鼠标开关。α0 时必须**同时**关鼠标：暴雪按钮在 alpha 0 下仍然吃点击，
+--- 否则鼠标扫过聊天窗左侧/左上角空白会莫名其妙弹出频道菜单、或拦住别人对底下的点击。
+local function SetChromeOn(f, a)
+    if not f then return end
+    local ok, cur = pcall(f.GetAlpha, f)
+    if not (ok and type(cur) == "number" and math.abs(cur - a) < 0.01) then
+        pcall(f.SetAlpha, f, a)
+    end
+    if type(f.EnableMouse) == "function" then
+        -- 鼠标开关单独判：暴雪在 Show / SetEnabled 里会重开鼠标，而 alpha 可能一点没变 ——
+        -- 跟着 alpha 的"有变化才写"走，就会出现"看不见但突然又能点"。
+        local want = (a or 0) > 0.05
+        local okM, was = pcall(f.IsMouseEnabled, f)
+        if not okM or was ~= want then
+            pcall(f.EnableMouse, f, want)
+        end
+    end
+end
+
+--- 模块级稳定闭包：`IterateFrames` 每帧都要跑一次，现造闭包会每秒分配上百个（AGENTS 判例）。
+local chromeAlpha = 1
+local function ChromeOne(name)
+    SetChromeOn(Skin:Need(name .. "ButtonFrame"), chromeAlpha)
+end
+
+--- 挂在聊天框外、但逻辑属于聊天框的两枚暴雪按钮（`FloatingChatFrame.lua` 的 `ReparentChatFrames`
+--- 把它们从聊天框重挂到 UIParent，位置仍跟随 `chatFrame.buttonSide`）：
+---   · `QuickJoinToastButton` —— 作者 11-11 说的"聊天框左上的社交按钮"，实机 32×32、t341/b309/l1，
+---     有公会/好友组队邀请时左上角那个带数字的方块；
+---   · `TextToSpeechButtonFrame` —— 语音朗读按钮容器，紧贴在它下方（t309/b283）。
+local CHAT_CHROME_EXTRA = { "QuickJoinToastButton", "TextToSpeechButtonFrame" }
+
+--- 页签容器 + 暴雪原生聊天镀铬（`ChatFrameNButtonFrame`：菜单 / 频道 / 最小化三枚按钮）同链显隐。
+--- 作者 11-11 报"聊天框左上的社交按钮没有隐藏掉"：页签早已淡到 0，但 ButtonFrame 的 alpha 我们
+--- 从没管过 —— 暴雪按窗口激活态自己写 1.0（实测 ChatFrame1..4）或 0.2（未激活窗 5..10），
+--- 于是框左侧那枚喇叭按钮一直亮着，跟渐隐的页签明显不是一套。
+--- 现在它跟 GDM 写同一个值：0 = 连按钮带背板一起消失，1 = 完整可用。
+function ChatBand:ApplyChromeAlpha(a)
+    chromeAlpha = a
+    local gdm = Skin:Need("GeneralDockManager")
+    if gdm then
+        local ok, cur = pcall(gdm.GetAlpha, gdm)
+        if not (ok and type(cur) == "number" and math.abs(cur - a) < 0.01) then
+            pcall(gdm.SetAlpha, gdm, a)
+        end
+    end
+    self:IterateFrames(ChromeOne)
+    for _, nm in ipairs(CHAT_CHROME_EXTRA) do
+        SetChromeOn(Skin:Need(nm), a)
+    end
+end
+
+--- GDM 已在目标档时也照样同步 ButtonFrame：暴雪会在窗口激活 / CHAT_UPDATE 时把它改回 1.0 或 0.2，
+--- 只比 GDM 就永远发现不了这个漂移（这正是"没隐藏掉"的直接原因）。
 function ChatBand:SetTabsVisible(on)
     local gdm = Skin:Need("GeneralDockManager")
     if not gdm then return false end
     local want = on and 1 or 0
     local ok, cur = pcall(gdm.GetAlpha, gdm)
-    if ok and type(cur) == "number" and math.abs(cur - want) < 0.01 then return false end
-    pcall(gdm.SetAlpha, gdm, want)
-    return true
+    local changed = not (ok and type(cur) == "number" and math.abs(cur - want) < 0.01)
+    self:ApplyChromeAlpha(want)
+    return changed
+end
+
+--- 1 秒轮询里的兜底：淡入插值进行中交给 OnUpdate（`CHAT_FADE_TARGET` 非空时不抢写），
+--- 平时按 GDM 现值纠回被暴雪改过的 ButtonFrame alpha。
+function ChatBand:SyncChrome()
+    if CHAT_FADE_TARGET then return end
+    local gdm = Skin:Need("GeneralDockManager")
+    if not gdm then return end
+    local ok, cur = pcall(gdm.GetAlpha, gdm)
+    if ok and type(cur) == "number" then self:ApplyChromeAlpha(cur) end
 end
 
 --- 页签淡入淡出（B，借鉴 Chattynator 的 fadeInterpolator）。
@@ -531,7 +732,11 @@ function ChatBand:FadeTo(show)
     local want = show and 1 or 0    -- 布尔 → alpha 数值；两种 Lua 里 0 都是真值，这里只把布尔 on/off 拼成 1/0
     local ok, cur = pcall(gdm.GetAlpha, gdm)
     cur = (ok and type(cur) == "number") and cur or want
-    if math.abs(cur - want) < 0.01 then return end
+    if math.abs(cur - want) < 0.01 then
+        -- GDM 已在目标档，但暴雪可能单独把 ButtonFrame 改回 1.0/0.2 ⇒ 顺手同步一次（§8.95）。
+        self:ApplyChromeAlpha(want)
+        return
+    end
     CHAT_FADE_TARGET = want
     if not CHAT_FADE_FRAME then
         CHAT_FADE_FRAME = CreateFrame("Frame")
@@ -545,9 +750,10 @@ function ChatBand:FadeTo(show)
             c = (ok2 and type(c) == "number") and c or tgt
             local step = (dt or 0) / ChatBand:FadeTime()   -- 闭包里 self 是帧，不是 ChatBand；必须显式用表名调
             if tgt > c then c = math.min(tgt, c + step) else c = math.max(tgt, c - step) end
-            pcall(g.SetAlpha, g, c)
+            -- 页签容器 + 按钮框写同一条曲线（§8.95）：只写 GDM 会看到"页签淡掉了、喇叭还亮着"。
+            ChatBand:ApplyChromeAlpha(c)
             if math.abs(c - tgt) < 0.01 then
-                pcall(g.SetAlpha, g, tgt)
+                ChatBand:ApplyChromeAlpha(tgt)
                 CHAT_FADE_TARGET = nil
                 self:Hide()
             end
@@ -622,7 +828,7 @@ ChatBand.Setup = SetupChatTabHover
 --- 解耦后 SimpleConfig 不依赖 ChatBand 的任何方法名，只有 `RefreshChatTabHover` 这个稳定入口。
 function M:RefreshChatTabHover()
     if ns.EventBus and type(ns.EventBus.Fire) == "function" then
-        ns.EventBus:Fire("CHAT_SKIN_SETTING_CHANGED")
+        ns.EventBus:Fire("MONETUI_CHAT_SKIN_SETTING_CHANGED")
     end
 end
 
@@ -631,7 +837,7 @@ if ns.EventBus then
     ns.EventBus:Register("PLAYER_ENTERING_WORLD", MatchChatHeight)
     -- D：配置变化（悬停开关 / 输入框位置）统一由这条事件触发页签刷新；
     -- 输入框位置由 PollWatch 下一拍自动按新值重钉，无需在这里手动重排。
-    ns.EventBus:Register("CHAT_SKIN_SETTING_CHANGED", function()
+    ns.EventBus:Register("MONETUI_CHAT_SKIN_SETTING_CHANGED", function()
         ChatBand:Refresh()
     end)
 end
@@ -640,12 +846,12 @@ end
 -- 新落点是框内顶部空带，几何与页签不再互相让位。历史推导留在 HANDOFF §8.62 / §8.88。
 
 local function SkinChat()
-    -- 底板**保持半透**（聊天浮在世界之上，要能透），1px 边框抬到满 alpha。
-    -- `topExtend` 把上沿上扩 32 ⇒ cf 矮了 32 但外框轮廓仍是 B32..T288，
-    -- 输入框就落在这条扩展出来的空带里（`Utils/Skin.lua` 的 `Skin:Panel`）。
+    -- 底板**保持半透**（聊天浮在世界之上，要能透）；边框浓度与底板浓度都由 §8.94 的两个常量给，
+    -- 与页签背板、输入框背板同档 —— 三块紧邻的板子必须是同一密度，否则读成"实心页签 + 空心框"。
+    -- `topExtend` 见 `ChatBand:InputBand()`（§8.93 起恒 0，外框上沿与小地图上沿齐平）。
     M:Dress(CHAT_FRAMES, {
-        panel = { thickness = 1, bgAlpha = 0.35, borderAlpha = 1,
-                  topExtend = ChatBand:InputBand() },
+        panel = { thickness = 1, bgAlpha = CHAT_PLATE_ALPHA,
+                  borderAlpha = CHAT_EDGE_ALPHA, topExtend = ChatBand:InputBand() },
     })
 
     MatchChatHeight()
@@ -654,8 +860,12 @@ local function SkinChat()
     -- 页签走 Skin:Tab：选中态由现成的 0.5 秒轮询跟随（不 hook PanelTemplates_*，
     -- 全局函数钩会把整条编辑模式链带脏）。`fullAlpha` 抬平暴雪的整框鬼影；
     -- 页签**整体显隐**由父容器 GDM 的 alpha 管（见 ChatBand），两者不打架。
-    M:Dress(CHAT_TABS, { as = "tab", control = { fullAlpha = true } })
-    M:Dress(CHAT_EDITS, { as = "editbox" })
+    -- §8.94 页签背板原来吃 Skin:Button 的默认档（0.90 底 / 0.80 边），现在显式与聊天框同档。
+    M:Dress(CHAT_TABS, { as = "tab", control = {
+        fullAlpha = true, bgAlpha = CHAT_PLATE_ALPHA, borderAlpha = CHAT_EDGE_ALPHA } })
+    -- §8.94 输入框背板原来是 `Skin:EditBox` 里写死的 0.9，现在由这里传同一档（dresser 已支持 control）。
+    M:Dress(CHAT_EDITS, { as = "editbox", control = {
+        bgAlpha = CHAT_PLATE_ALPHA, borderAlpha = CHAT_EDGE_ALPHA } })
     -- §8.90 输入框边框跟频道色：认领这 10 个输入框 + 安装头部钩子（切频道即时重染）。
     EnsureChannelHeaderHook()
     -- §8.90 临时聊天窗（>10）动态覆盖钩子。

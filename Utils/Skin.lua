@@ -2083,14 +2083,17 @@ local function KeepEditBoxArt(region)
 end
 
 --- Restyle an edit box.
-function Skin:EditBox(editBox)
+--- 输入框换皮：`opts` 可传 `bgAlpha` / `borderAlpha`（§8.94 聊天窗用它对齐底板与边框浓度）。
+--- 不传时维持历史默认 0.9/主题边 —— 其他窗口的搜索框/输入框行为不变。
+function Skin:EditBox(editBox, opts)
     if not editBox then return editBox end
+    opts = opts or {}
 
     self:Fade(editBox.Left)
     self:Fade(editBox.Middle)
     self:Fade(editBox.Right)
     self:Strip(editBox, { regions = true, keep = KeepEditBoxArt })
-    self:ControlBg(editBox, { bgAlpha = 0.9 })
+    self:ControlBg(editBox, { bgAlpha = opts.bgAlpha or 0.9, borderAlpha = opts.borderAlpha })
     return editBox
 end
 

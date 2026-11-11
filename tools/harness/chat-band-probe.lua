@@ -62,6 +62,11 @@ local function Frame(name, h, alpha)
     function f:IsShown() return self.shown ~= false end
     function f:HasFocus() return self.focused == true end
     function f:SetShown(v) self.shown = v end
+    -- §8.92 层级切换：桩里给一个可读写的 frameLevel（默认 1，与实机 LOW/lvl1 一致）
+    function f:GetFrameLevel() return self.frameLevel or 1 end
+    function f:SetFrameLevel(v) self.frameLevel = v; self.levelWrites = (self.levelWrites or 0) + 1 end
+    -- §8.95 按钮框：α0 时必须同时关鼠标，否则"看不见但点得到"
+    function f:EnableMouse(v) self.mouse = v and true or false; self.mouseWrites = (self.mouseWrites or 0) + 1 end
     return f
 end
 
@@ -74,11 +79,16 @@ end
 local minimap = add("Minimap", 256, 1)
 local gdm = add("GeneralDockManager", 26, 1)
 local bg1 = add("ChatFrame1Background", 256, 1)   -- GDM 在暴雪源码里锚在它身上
-local cfs, ebs = {}, {}
+local cfs, ebs, bfs = {}, {}, {}
 for i = 1, 10 do
     cfs[i] = add("ChatFrame" .. i, 256, 1)
     ebs[i] = add("ChatFrame" .. i .. "EditBox", 32, (i == 1 and 1 or 0.35))
+    -- §8.95 实机：ChatFrame1..4 = 1.00、5..10 = 0.20（暴雪按窗口激活态写），我们接手后统一写同一值
+    bfs[i] = add("ChatFrame" .. i .. "ButtonFrame", 32, (i <= 4 and 1 or 0.2))
 end
+-- §8.95 挂在聊天框外、逻辑属聊天框的两枚暴雪按钮（ReparentChatFrames 重挂到 UIParent）
+local qj = add("QuickJoinToastButton", 32, 1)          -- 作者说的"左上的社交按钮"
+local tts = add("TextToSpeechButtonFrame", 26, 1)
 
 local CHAT_FRAMES, CHAT_EDITS, CHAT_TABS = {}, {}, {}
 for i = 1, 10 do
@@ -205,11 +215,11 @@ check("§8.90 UpdateTabState 按三态上色（Normal/Selected/Flash）",
 check("§8.91 EditBoxPos 由 chatEditBoxAutoHide 控制 hidden",
     band:find('function ChatBand:EditBoxPos', 1, true) ~= nil
     and band:find('self:Opt("chatEditBoxAutoHide")', 1, true) ~= nil)
-check("§8.91 新增 InputBand（仅 bottom→0，top/hidden 保留带）",
+check("§8.93 InputBand 恒 0（外框不再从框内挖 32 输入带）",
     band:find("function ChatBand:InputBand", 1, true) ~= nil
-    and band:find('return (self:EditBoxPos() == "bottom") and 0 or CHAT_INPUT_BAND', 1, true) ~= nil)
-check("§8.91 TargetHeight 改读 InputBand（带高度联动）",
-    band:find("return h - self:InputBand()", 1, true) ~= nil)
+    and band:find("function ChatBand:InputBand()\n    return 0\nend", 1, true) ~= nil)
+check("§8.93 TargetHeight 固定扣 CHAT_INPUT_BAND（cf 顶边对齐小地图上沿）",
+    band:find("return h - CHAT_INPUT_BAND", 1, true) ~= nil)
 check("§8.91 skinner.frame hidden 也 PinEditBox（不落底部）+ HideEditBox",
     band:find('pos == "top" or pos == "hidden"', 1, true) ~= nil
     and band:find("self:HideEditBox(name)", 1, true) ~= nil)
@@ -220,6 +230,19 @@ check("§8.91 配置面板暴露自动隐藏开关 + 关闭时位置下拉",
     and cfgSrc:find('"输入框位置（关闭隐藏时）"', 1, true) ~= nil)
 check("§8.91 DEFAULTS 默认开启自动隐藏",
     coreSrc:find('chatEditBoxAutoHide = true', 1, true) ~= nil)
+
+-- §8.90/§8.91 判例（2026-11-11 实机：输入框背景色一直在、频道色不生效）
+-- `ns:Marked` 是冒号方法，写成 `ns.Marked(obj, "controlBg")` 会把 self 顶成 object、
+-- 把 key 顶成 "controlBg" 的上一级 → 恒返回 nil，背板永远取不到。这里把该类写法钉死。
+check("§8.91 无 ns.Marked( 点调用（少 self 的回归）",
+    social:find("ns%.Marked%(") == nil)
+check("§8.91 有 ns:Marked 局部别名（项目惯例）",
+    social:find("local Marked = function(o, k) return ns:Marked(o, k) end", 1, true) ~= nil
+    or social:find("local Marked = function(o,k) return ns:Marked(o,k) end", 1, true) ~= nil)
+check("§8.90 ApplyChannelColor 走局部 Marked 取 controlBg",
+    band:find('local cb = Marked(eb, "controlBg")', 1, true) ~= nil)
+check("§8.91 HideEditBox 走局部 Marked 取 controlBg",
+    band:find('pcall(Marked, eb, "controlBg")', 1, true) ~= nil)
 
 -- ---------------------------------------------------------------- 高度账本
 check("目标高度 = 小地图高 - 32", ChatBand:TargetHeight() == 224, ChatBand:TargetHeight())
@@ -262,25 +285,46 @@ check("Skin:Need 缺对象时安全返回", ChatBand:PinEditBox("ChatFrame99") =
 -- ---------------------------------------------------------------- 页签容器抬升
 check("PinLayout 对 ChatFrame1 调 PinDock", band:find("self:PinDock()", 1, true) ~= nil)
 check("PinDock 只在 name==ChatFrame1 时调用", band:find('if name == "ChatFrame1" then', 1, true) ~= nil)
-check("PinDock 抬升量取自 InputBand（top/hidden→32，bottom→0）", band:find("local want = self:InputBand()", 1, true) ~= nil)
+check("PinDock 目标偏移 = CHAT_TAB_LIFT − 页签落座量（§8.94）",
+    band:find("local want = CHAT_TAB_LIFT - TabSeat(gdm)", 1, true) ~= nil)
+check("PinDock 锚我们自己的 skinBg（不锚内缩 3 的暴雪 Background）",
+    band:find('Marked(host, "skinBg")', 1, true) ~= nil
+    and band:find("local ref = bg or r1", 1, true) ~= nil)
 check("PinDock 有 target 空守卫", band:find("local target = self:TargetHeight()", 1, true) ~= nil)
+-- §8.94 三层浓度统一：常量定义 + 三处引用，任何一处被改回裸数字都会红。
+check("§8.94 统一定义 CHAT_PLATE_ALPHA / CHAT_EDGE_ALPHA",
+    band:find("local CHAT_PLATE_ALPHA = 0.35", 1, true) ~= nil
+    and band:find("local CHAT_EDGE_ALPHA  = 0.80", 1, true) ~= nil)
+check("§8.94 聊天框 / 页签 / 输入框三处共用同一档",
+    band:find("bgAlpha = CHAT_PLATE_ALPHA", 1, true) ~= nil
+    and band:find("borderAlpha = CHAT_EDGE_ALPHA", 1, true) ~= nil
+    and band:find("bgAlpha = CHAT_PLATE_ALPHA, borderAlpha = CHAT_EDGE_ALPHA", 1, true) ~= nil)
+check("§8.94 频道色边框也用同一档浓度",
+    band:find("Widget:SetBorderState(cb, r, g, b, CHAT_EDGE_ALPHA)", 1, true) ~= nil)
+-- §8.94 暴雪自带的黑底板（BACKGROUND 447×233）+ 8 张黑边框（BORDER）有效 α0.25，
+-- 叠在我们的 0.35 板上会让框体比页签块实一倍 —— 必须在每次 PinLayout 里压成 0。
+check("§8.94 压掉 cf 自带的黑底板/黑边框",
+    band:find("function ChatBand:FadeNativePlate", 1, true) ~= nil
+    and band:find("self:FadeNativePlate(cf)", 1, true) ~= nil)
+check("§8.94 只按 layer 认（BACKGROUND/BORDER），不点名贴图",
+    band:find('layer == "BACKGROUND" or layer == "BORDER"', 1, true) ~= nil)
 
 local function DockPointY(i)
     local p = gdm.points[i]
     return p and p[5] or nil
 end
--- 模拟 Blizzard 默认锚（GDM 锚在 ChatFrame1Background:TOPLEFT，偏移 0）：cf 缩高 32 后
--- 整条掉进输入框带。PinLayout 在 PinHeight 之后跑 PinDock ⇒ 应抬回 32。
-gdm.points = { { "BOTTOMLEFT", bg1, "TOPLEFT", 0, 0 }, { "BOTTOMRIGHT", bg1, "TOPRIGHT", 0, 0 } }
+-- §8.92：页签与 EditBox 共用 32 带，目标偏移是 0。模拟暴雪把整条抹到 -32（掉进消息区）：
+-- PinLayout 在 PinHeight 之后跑 PinDock ⇒ 应拉回 0。
+gdm.points = { { "BOTTOMLEFT", bg1, "TOPLEFT", 0, -32 }, { "BOTTOMRIGHT", bg1, "TOPRIGHT", 0, -32 } }
 ChatBand:PinLayout("ChatFrame1")
-check("PinLayout 把页签容器抬 CHAT_INPUT_BAND（第一锚点）",
-    DockPointY(1) == 32 and gdm.points[1][2] == bg1, DockPointY(1))
-check("页签容器第二锚点也抬", DockPointY(2) == 32, DockPointY(2))
+check("PinLayout 把页签容器拉回输入带内（第一锚点偏移 0）",
+    DockPointY(1) == 0 and gdm.points[1][2] == bg1, DockPointY(1))
+check("页签容器第二锚点也回 0", DockPointY(2) == 0, DockPointY(2))
 local dockCalls = gdm.setCalls
 ChatBand:PinDock()
-check("已抬到位时不重复写", gdm.setCalls == dockCalls, gdm.setCalls - dockCalls)
-gdm.points = { { "BOTTOMLEFT", bg1, "TOPLEFT", 0, 0 }, { "BOTTOMRIGHT", bg1, "TOPRIGHT", 0, 0 } }
-check("Blizzard 抹回偏移后自愈", ChatBand:PinDock() == true and DockPointY(1) == 32)
+check("已到位时不重复写", gdm.setCalls == dockCalls, gdm.setCalls - dockCalls)
+gdm.points = { { "BOTTOMLEFT", bg1, "TOPLEFT", 0, -32 }, { "BOTTOMRIGHT", bg1, "TOPRIGHT", 0, -32 } }
+check("Blizzard 抹回偏移后自愈", ChatBand:PinDock() == true and DockPointY(1) == 0)
 gdm.points = { { "BOTTOMLEFT", bg1, "TOPLEFT", 0, 0 }, { "BOTTOMRIGHT", bg1, "TOPRIGHT", 0, 0 } }
 local callsBefore = gdm.setCalls
 ChatBand:PinLayout("ChatFrame2")
@@ -293,14 +337,14 @@ minimap.height = 256
 
 -- ---------------------------------------------------------------- 几何重放
 local frameTop = 31 + cfs[1].height           -- cf 只锚 BOTTOMLEFT(35,31)，顶 = 底 + 高
-local inset, topExtend = 0, BAND
+local inset, topExtend = 0, ChatBand:InputBand()
 local bgTop = frameTop + (-inset + topExtend) -- Skin:Panel 的 TOPLEFT 相对 cf:TOPLEFT
 local ebBottom, ebTop = frameTop, frameTop + 32 -- eb 底贴 cf 顶；Size.y = 32 向下延伸
-check("外框比消息区多出整整一条 32 输入带", bgTop - frameTop == 32, bgTop - frameTop)
-check("输入框上沿与外框上沿齐平", ebTop == bgTop, ebTop .. " vs " .. bgTop)
-check("输入框带完全落在消息区之外（零遮字）", ebBottom >= frameTop)
-check("外框顶不侵入页签条（B291）", bgTop <= 291, bgTop)
-check("外框轮廓保持原高度（B32..T288）", bgTop - 31 == 256, bgTop - 31)
+check("§8.93 外框与消息区等高（不再多出 32 输入带）", bgTop - frameTop == 0, bgTop - frameTop)
+check("§8.93 输入框整条落在框顶外侧（骑在边框上）", ebBottom == bgTop and ebTop == bgTop + 32,
+    ebBottom .. ".." .. ebTop)
+check("§8.93 输入框带零遮字（底边不低于框顶）", ebBottom >= frameTop)
+check("§8.93 外框高度 = 小地图高 − 32（顶边落在上沿的前提）", bgTop - 31 == 224, bgTop - 31)
 
 -- ---------------------------------------------------------------- 悬停显示
 check("HoverEnabled：配置开 + chat 面板开", ChatBand:HoverEnabled() == true)
@@ -326,6 +370,41 @@ check("跨缝进页签：旧隐藏请求被 token 作废", gdm.alpha == 1, gdm.a
 ChatBand.Leave(gdm)
 FlushTimers()
 check("真正离开后页签隐藏", gdm.alpha == 0, gdm.alpha)
+
+-- ---------------------------------------------------------------- §8.95 聊天镀铬
+-- 作者 11-11："聊天框左上的社交按钮没有隐藏掉"。实机 ChatFrameNButtonFrame 的 alpha 我们从没管过，
+-- 暴雪按窗口激活态写 1.00（1..4）或 0.20（5..10），所以页签淡到 0 了喇叭按钮还亮着。
+check("§8.95 页签隐藏时 ButtonFrame 一起归 0",
+    bfs[1].alpha == 0 and bfs[4].alpha == 0,
+    "bf1=" .. tostring(bfs[1].alpha) .. " bf4=" .. tostring(bfs[4].alpha))
+check("§8.95 未激活窗的 0.2 也统一到同一档", bfs[5].alpha == 0, bfs[5].alpha)
+check("§8.95 α0 时关掉鼠标（否则看不见但能点，会误弹频道菜单）",
+    bfs[1].mouse == false, tostring(bfs[1].mouse))
+bfs[2].alpha = 1                       -- 模拟暴雪在 CHAT_UPDATE / 窗口激活时写回 1.0
+ChatBand:SyncChrome()
+check("§8.95 暴雪改回 1.0 后 1 秒轮询纠回 0", bfs[2].alpha == 0, bfs[2].alpha)
+bfs[3].alpha = 0.2
+check("§8.95 GDM 已达标时 SetTabsVisible 仍纠 ButtonFrame",
+    ChatBand:SetTabsVisible(false) == false and bfs[3].alpha == 0, bfs[3].alpha)
+check("§8.95 框外两枚社交按钮（QuickJoin / TTS）同样归 0 且关鼠标",
+    qj.alpha == 0 and qj.mouse == false and tts.alpha == 0 and tts.mouse == false,
+    "qj=" .. tostring(qj.alpha) .. "/" .. tostring(qj.mouse))
+qj.alpha = 1                           -- 暴雪给快速加入按钮做 toast 动画时会写回 1.0
+ChatBand:SyncChrome()
+check("§8.95 QuickJoin 被暴雪写回后仍纠回 0", qj.alpha == 0, qj.alpha)
+ChatBand:SetTabsVisible(true)
+check("§8.95 显示时 ButtonFrame α1 且鼠标恢复",
+    bfs[1].alpha == 1 and bfs[1].mouse == true,
+    tostring(bfs[1].alpha) .. "/" .. tostring(bfs[1].mouse))
+check("§8.95 显示时框外社交按钮也恢复可点",
+    qj.alpha == 1 and qj.mouse == true, tostring(qj.alpha) .. "/" .. tostring(qj.mouse))
+check("§8.95 新增 ApplyChromeAlpha / SyncChrome",
+    band:find("function ChatBand:ApplyChromeAlpha", 1, true) ~= nil
+    and band:find("function ChatBand:SyncChrome", 1, true) ~= nil)
+check("§8.95 按钮框名由窗口名派生（不硬编码十个）",
+    band:find('Skin:Need(name .. "ButtonFrame")', 1, true) ~= nil)
+check("§8.95 PinLayout 只在 ChatFrame1 这一拍同步镀铬",
+    band:find('if name == "ChatFrame1" then self:SyncChrome() end', 1, true) ~= nil)
 chatPanelEnabled = false
 ChatBand:Refresh()
 check("chat 皮肤面板关掉时页签恢复常显", gdm.alpha == 1, gdm.alpha)
@@ -344,7 +423,7 @@ for _, e in ipairs(dressLog) do
         topExtendSeen = e.opts.panel.topExtend
     end
 end
-check("Apply 把 topExtend 传给 Skin:Panel", topExtendSeen == BAND, topExtendSeen)
+check("§8.93 Apply 传 topExtend = 0（框内不再留带）", topExtendSeen == 0, topExtendSeen)
 check("Apply 为 10 个聊天窗各挂一条 PollWatch", #pollLog == 10, #pollLog)
 check("PEW 再校一次高度", #busLog >= 1 and busLog[1] == "PLAYER_ENTERING_WORLD")
 check("chat 面板注册带 apply", #panelLog == 1 and panelLog[1].key == "chat"
@@ -354,17 +433,20 @@ check("chat 面板注册带 apply", #panelLog == 1 and panelLog[1].key == "chat"
 db.skins.chatEditBoxAutoHide = true
 db.skins.chatEditBoxPos = "top"   -- 关闭时的位置
 check("§8.91 EditBoxPos 默认隐藏（autoHide 开）", ChatBand:EditBoxPos() == "hidden")
-check("§8.91 InputBand 保留 32 带（hidden 不回收，避免聚焦落底）",
-    ChatBand:InputBand() == 32, ChatBand:InputBand())
-check("§8.91 hidden 时目标高度仍扣 32（带保留）", ChatBand:TargetHeight() == 224, ChatBand:TargetHeight())
+check("§8.93 InputBand 恒 0（与 EditBox 位置档无关）",
+    ChatBand:InputBand() == 0, ChatBand:InputBand())
+check("§8.93 目标高度 = 小地图高 − 32（与隐藏档无关）", ChatBand:TargetHeight() == 224, ChatBand:TargetHeight())
 cfs[1].height = 256   -- 模拟 bottom 遗留高度（不扣带），hidden 应写回 224
 check("§8.91 PinHeight 写回 224", ChatBand:PinHeight(cfs[1]) == true and cfs[1].height == 224, cfs[1].height)
 gdm.points = { { "BOTTOMLEFT", bg1, "TOPLEFT", 0, 0 }, { "BOTTOMRIGHT", bg1, "TOPRIGHT", 0, 0 } }
 ChatBand:PinLayout("ChatFrame1")
-check("§8.91 hidden 时页签容器仍抬 32（带保留）", DockPointY(1) == 32, DockPointY(1))
+check("§8.91 hidden 时页签容器仍落带内（偏移 0，§8.92 同区）", DockPointY(1) == 0, DockPointY(1))
 -- controlBg 背板同步（修复"背景色一直显示"）：桩里让 Marked 返回 bg 对象
+-- 注意：切片在 env 里执行，`Marked(...)` 解析到 **env.Marked**（不是 ns.Marked）。
+-- 2026-11-11 实机判例：写成 `ns.Marked(eb,"controlBg")`（点调用少 self）会恒返回 nil，
+-- 背板永远取不到 —— 所以这里必须覆盖 env.Marked，才能验到真实取背板路径。
 ebs[1].bg = add("ChatFrame1EditBoxBg", 32, 1)
-ns.Marked = function(o, k)
+env.Marked = function(o, k)
     if k == "controlBg" and o == ebs[1] then return ebs[1].bg end
     return nil
 end
@@ -378,11 +460,21 @@ ChatBand:HideEditBox("ChatFrame1")
 check("§8.91 聚焦时显示输入框 + 背景色背板",
     ebs[1].shown == true and ebs[1].bg.shown == true,
     "eb=" .. tostring(ebs[1].shown) .. " bg=" .. tostring(ebs[1].bg.shown))
+-- §8.92 同区层级：页签与输入框共用 32 带，聚焦时把输入框压到页签（GDM+1）之上，失焦原样放回。
+check("§8.92 聚焦时输入框抬到 GDM 之上（GDM+3）",
+    ebs[1]:GetFrameLevel() == gdm:GetFrameLevel() + 3, tostring(ebs[1]:GetFrameLevel()))
+check("§8.92 背板随输入框一起抬（eb-1）",
+    ebs[1].bg:GetFrameLevel() == ebs[1]:GetFrameLevel() - 1, tostring(ebs[1].bg:GetFrameLevel()))
+check("§8.92 HideEditBox 先 SyncInputLayer 再 SetShown",
+    band:find("self:SyncInputLayer(name)", 1, true) ~= nil)
 ebs[1].focused = false
 ChatBand:PinLayout("ChatFrame1")
 check("§8.91 PinLayout hidden 分支调 HideEditBox 折叠输入框 + 背板",
     ebs[1].shown == false and ebs[1].bg.shown == false,
     "eb=" .. tostring(ebs[1].shown) .. " bg=" .. tostring(ebs[1].bg.shown))
+check("§8.92 失焦后输入框与背板层级都还原",
+    ebs[1]:GetFrameLevel() == 1 and ebs[1].bg:GetFrameLevel() == 1,
+    tostring(ebs[1]:GetFrameLevel()) .. "/" .. tostring(ebs[1].bg:GetFrameLevel()))
 db.skins.chatEditBoxAutoHide = false
 
 print(failed == 0 and "ALL PASS" or (failed .. " FAILED"))

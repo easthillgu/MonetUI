@@ -278,7 +278,7 @@ local DRESSERS = {
     scroll   = function(obj) Skin:ScrollFrame(obj) end,
     slider   = function(obj) if IsAnyType(obj, "Slider") then Skin:Slider(obj) end end,
     dropdown = function(obj, opts) Skin:Dropdown(obj, opts and opts.control) end,
-    editbox  = function(obj) if IsAnyType(obj, "EditBox", "SearchBox") then Skin:EditBox(obj) end end,
+    editbox  = function(obj, opts) if IsAnyType(obj, "EditBox", "SearchBox") then Skin:EditBox(obj, opts and opts.control) end end,
     fade     = function(obj) Skin:Fade(obj) end,
 }
 

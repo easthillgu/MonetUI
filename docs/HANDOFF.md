@@ -6416,7 +6416,7 @@ ChannelColor / ApplyChannelColor / dynamic / IterateFrames / RegisterRuntimeChat
 EnsureChannelHeaderHook / EnsureTempWindowHook / FadeTime）、`Config/SimpleConfig.lua`（三态色 + 淡入时长下拉）、
 `tools/harness/chat-band-probe.lua`（+9 断言）、`docs/HANDOFF.md`。
 
-**未提交 / 未打 tag / 未发版**；本节与 §8.89 系列一起作为 `0.13.3` 候选，发布须作者明确授权。实机验收需 `/reload`。
+**已随 0.13.3 发布**（11-11，commit `8c6119d`，Actions「Release to CurseForge」run 42957144497 success）；CF 审核约 6h 后公开。
 
 ### §8.91 输入框自动隐藏（默认开启 + 关闭开关，2026-11-11）
 - **需求**：作者 reload 后指出输入框无"自动隐藏"能力（§8.89 悬停显隐只作用于页签 GDM，输入框带常驻）。最终落地为**默认开启**的自动隐藏：平时折叠输入框带、仅聚焦（Enter/点击）才显示；控制台提供明确"关闭"开关，关掉则按位置常显。
@@ -6425,13 +6425,91 @@ EnsureChannelHeaderHook / EnsureTempWindowHook / FadeTime）、`Config/SimpleCon
   - 早期设计 hidden→0（回收带、cf 高度恢复）已**废弃**：那样聚焦弹出时输入框在 cf 顶部无带可落，会被暴雪原生钉到底部（作者反馈"输入框跑到下面了"）。现改为 hidden 保留顶部带、仅折叠 EditBox。
 - **EditBox 隐藏（修复背景色残留 + 落底）**：`skinner.frame` 在 `pos == "top" or pos == "hidden"` 时先调 `PinEditBox(name)` 把输入框钉到**顶部带**，`pos == "hidden"` 再调 `ChatBand:HideEditBox(name)` 折叠——早期 hidden 不钉只折叠，输入框保持暴雪原生底部，聚焦就从底部冒出。折叠时 `SetShown(false)` 隐藏 EditBox，**同时同步隐藏它的 `controlBg` 背板**（输入框背景色/频道色，由 §8.90 的 `Widget:SetBorderState` 写到 `ns.Marked(eb,"controlBg")`），否则 EditBox 藏了背景色还挂在那（作者反馈"输入框背景色一直在"）。聚焦时（`HasFocus` 为真）PollWatch 下一拍保持显示，失焦后重新隐藏。EditBox 是非保护框、`HasFocus` 是标准方法、全程 pcall，无 taint。
 - **切换约定**：与 top↔bottom 一致，`Dress.topExtend` 初始化时读 `InputBand()`，切到 hidden 后需 `/reload` 生效（桩与真客户端都不支持运行期改 topExtend）。
-- **§8.90 隐患顺手修**：`ApplyChannelColor` 原本用裸全局 `Marked`（项目里无 `_G.Marked` 全局赋值，wuxian 标 `nil in the running game`），改为 `ns.Marked`（Core.lua:576 定义，运行时确定存在），消除 warning 并兜底频道色功能。
+- **§8.90 隐患 → 真 bug（2026-11-11 实机定位，重要判例）**：`ApplyChannelColor` 原本用裸全局 `Marked`（项目无 `_G.Marked`，wuxian 标 `nil`）。当时改成 `ns.Marked(eb, "controlBg")` —— **写法错了**：`ns:Marked` 是冒号方法（`function ns:Marked(object, key)`，Core.lua:576），点调用会把 `eb` 顶成 self、把 `"controlBg"` 顶成 object、key 变 nil，**恒返回 nil**。后果：① 输入框 `controlBg` 永远取不到 → §8.90"边框跟频道色"从未生效；② §8.91 的 `HideEditBox` 也取不到背板 → "输入框背景色一直在"根本没好（当时误以为已修）。
+  现已按项目惯例在 Social.lua 加 `local Marked = function(o, k) return ns:Marked(o, k) end`，两处改用 `Marked(...)`；`chat-band-probe` 增加**防回归断言**："全仓不得出现 `ns.Marked(` 点调用"+"必须有局部别名"，并让桩覆盖 `env.Marked`（切片在 env 里执行，解析的是 env.Marked 而非 ns.Marked）。探针 86 → 91 项全绿。
 - **硬约束**：无 `CHAT_MSG_*` 注册、无消息文本解析、不碰 cf 锚点（`HideEditBox` 只 `SetShown`，taint 安全）。
 - **配置入口**：SimpleConfig「界面美化」页——① 复选框"输入框自动隐藏（仅聚焦才显示）"（默认勾选，写 `chatEditBoxAutoHide`）；② 下拉"输入框位置（关闭隐藏时）"（`top`/`bottom`，写 `chatEditBoxPos`）。Core DEFAULTS 加 `chatEditBoxAutoHide = true`，`chatEditBoxPos` 保留为 `top`。
 - **回归桩**：`chat-band-probe.lua` 更新 §8.91 断言（改校验 `chatEditBoxAutoHide` 控制 + 复选框/位置下拉入口 + DEFAULTS 默认 true），并新增 controlBg 同步测试（桩里让 `ns.Marked` 返回 bg 对象，验未聚焦/聚焦/PinLayout 三场景 EditBox 与背板同显隐），全绿。
 - **改动文件**：`Core.lua`（DEFAULTS 加 `chatEditBoxAutoHide=true`）、`Modules/Skins/Social.lua`（EditBoxPos/InputBand/TargetHeight/PinDock.want/两处 Dress.topExtend/skinner.frame hidden 分支/HideEditBox 同步 controlBg/ApplyChannelColor 改 ns.Marked）、`Config/SimpleConfig.lua`（复选框+位置下拉替代 hidden 三态）、`tools/harness/chat-band-probe.lua`、`docs/HANDOFF.md`。
 - **修正·输入框落底（2026-11-11 二次）**：hidden 改为"保留 32 带 + 先 PinEditBox 钉顶部"，修复"输入框跑到下面了"；探针同步改断言（InputBand hidden=32、TargetHeight 仍扣 32、PinHeight 写回 224、PinDock want=32）。
-- **未提交 / 未打 tag / 未发版**；并入 0.13.3 候选，发布须作者明确授权。实机验收需 `/reload`。
+- **已随 0.13.3 发布**（11-11，commit `8c6119d`，Actions「Release to CurseForge」run 42957144497 success）；CF 审核约 6h 后公开。
+- **发布后修正（待发 0.13.4）**：`ns.Marked` 点调用 bug（见上条）修好后 **未提交 / 未打 tag**，需作者 `/reload` 验证"输入框背板随折叠消失 + 切频道边框变色"，再随下个版本发。
+- **截图复核（2026-11-11，2560×1440 实机 WGC 抓帧）**：
+  - 材质：边框与背景**都无贴图**，全是 `Media.texture.blank`(WHITE8X8 1×1) + `SetBackdrop`，`edgeSize = thickness(1) × Media:Mult()`、`insets = 1` → **不存在九宫格拉伸失真**。
+  - 尺寸：面板 430×256 UI（= cf 224 + 输入带 32），抓帧实测 515×307 px（≈1.195 px/UI）；边框在物理层呈 **顶/底 2px、左右 1px**（edgeSize 取整落在不同亚像素上，非厚度不一致）。
+  - **遗留视觉缺陷**：顶边颜色 (221,177,208) 明显亮于左/右/底边 (164,132,155)，且左/右边框在**距顶部 32px 处**亮度突变（上方亮、下方暗）。说明顶部 32px 输入带范围内还叠着一层带边框的元素，与面板主体不同层。已排除 EditBox 本体（`SetAlpha(0)` 无变化）与 `controlBg`（手动 `Hide` 后亮带仍在）与暴雪 9-slice（`GetRegions()` 9 张 alpha 归 0 后无变化）——**来源待定**，下一步用逐框探针定位。
+
+### §8.92 页签与输入框同区 + 聚焦临时抬层（2026-11-11，待 0.13.4）
+- **需求（作者原话）**："能否做页面签动态换层级，然后输入框激活时临时提高层级，这样就可以放在一个位置上了，更美观"。
+- **同区**：新增 `CHAT_TAB_LIFT = 0`，`PinDock` 的目标偏移从 `InputBand()`(32) 改成它 —— 页签容器 `GeneralDockManager` 落进 32px 输入带（页签底边贴 cf 顶、页签高 26，正好整条落在带内）。`InputBand()` 不再兼任页签抬升量，只服务 `Dress.topExtend` 与 `TargetHeight`（注释与探针同步改口径）。
+- **层级切换（核心）**：实机 2026-11-10 记录 GDM `LOW/lvl1`、Tab `lvl2`、EditBox `LOW/lvl1` —— 同区时输入框原始 level 只等于 GDM，会被页签（GDM+1）压住。新增 `ChatBand:SyncInputLayer(name)`：聚焦时把 `eb` 抬到 `GDM + CHAT_INPUT_BOOST(3)`、`controlBg` 抬到 `eb-1`；失焦原样放回。原始 level 记在 `INPUT_LAYER[name]` 旁表，反复聚焦不会越抬越高；只写非保护 EditBox 与私有背板，全程 pcall。
+- **调用顺序**：`HideEditBox` 里 **先** `SyncInputLayer` **再** `SetShown`，否则这一拍输入框会先以原 level 露出来、被同区页签压住闪一下。
+- **交互结果**：输入框平时隐藏（§8.91）⇒ 不挡页签点击；聚焦后输入框在上、页签在其下（0.9 背板遮住），失焦立刻还原并折叠。页签是否常驻由既有开关决定：§8.89 的悬停淡入不变，想让页签一直在带内可见就在控制台关掉"聊天页签悬停才显示"（GDM alpha 写 1）。
+- **回归桩**：`chat-band-probe.lua` 91 → **97 项 ALL PASS**。旧断言"页签抬 32"全部改为"落带内偏移 0"（含暴雪抹回 -32 后的自愈用例）；桩补 `GetFrameLevel/SetFrameLevel`，新增四断言：聚焦抬到 `GDM+3`、背板 `eb-1`、`HideEditBox` 先抬层、失焦双双还原。
+- **顺手修**：自定义事件 `CHAT_SKIN_SETTING_CHANGED` → **`MONETUI_CHAT_SKIN_SETTING_CHANGED`**。`tools/api-audit.js` 只豁免 `MONETUI_` 前缀的 EventBus 事件，原名被报 `HARD unknown event`（改了之后 HARD 全 0）。
+- **验收**：游戏内手动 `/reload`（`wuxian load` / 重载按钮都不算重载）。**未提交、未发版**，随 0.13.4。
+- **改动文件**：`Modules/Skins/Social.lua`、`tools/harness/chat-band-probe.lua`、`docs/HANDOFF.md`。另：部署脚本漏拷 `MonetUI.toc`，游戏内 `## Version` 还停在 0.13.2，已手工同步。
+
+### §8.93 外框缩到与小地图上沿齐平 + 页签/输入框挂到框沿外（2026-11-11，待 0.13.4）
+- **需求（作者原话）**："边框尺寸能否缩到跟小地图一样高，然后渐隐掉的页面签和输入框放在边框上？"
+- **实测几何（改前）**：小地图 `B0..T256`；外框 `B32..T256+32=B288`（= cf 224 + topExtend 32）；页签/输入框都在 `T256..T288` 的"框内带"里。高度数字虽同为 256，但**上沿比小地图上沿高 32**，且这条带是从消息区里挖出来的。
+- **改法**：`ChatBand:InputBand()` 由"top/hidden→32、bottom→0"改为**恒 0**（外框不再外扩），`TargetHeight()` 固定 `minimapH - CHAT_INPUT_BAND`（= 224）。结果外框 `B32..T256`：**上沿与小地图上沿齐平**，框内 100% 是消息区（cf 224 不缩、不挖带）。
+- **页签/输入框位置不变**（仍钉 cf 顶边 `T256`，`CHAT_TAB_LIFT=0`）—— 只是它们现在整条落在**框外上方**，视觉上"骑在边框上"：页签 `256..282`、输入框 `256..288`。§8.92 的同区层级切换照旧（聚焦时输入框抬到页签之上）。
+- **为什么不能连底边也对齐**：cf 底边 32 是玩家在编辑模式里的布局，`SetPoint` 会被标脏（HANDOFF 既有 taint 判例），我们只改高度。想让框底也到 0，需要作者自己在编辑模式把聊天框往下拖 32。
+- **回归桩**：97 项 **ALL PASS**。断言改口径：InputBand 恒 0、TargetHeight 固定扣 32、Apply 传 topExtend=0、外框与消息区等高（差 0）、输入框整条在框顶外侧（`ebBottom == bgTop` 且 `ebTop == bgTop+32`）、框高 = 小地图高 − 32。
+- **验收**：游戏内 `/reload`。**未提交、未发版**，随 0.13.4。
+
+### §8.94 三层底板/边框浓度统一 + 页签真正坐进框顶线（2026-11-11，待 0.13.4）
+- **需求（作者原话）**："背景和边框不统一啊"。§8.93 把页签与输入框挪到框沿外侧后，两块板紧邻，密度差被放大。
+- **实测（2560×1440，改前，运行期读值）**：三处底色 RGB 完全相同 `(0.110,0.106,0.122)`，但**浓度三档**：
+  聊天框 `bg4` α **0.349** / 页签背板 `tabN.cb` α **0.902** / 输入框背板 `eb4.cb` α **0.902**；
+  **边框两档**：页签 0.80、聊天框与输入框 1.00。⇒ "页签是实心块、聊天框只剩一圈线"。
+- **改法一（浓度）**：`Modules/Skins/Social.lua` 顶部新增 `CHAT_PLATE_ALPHA = 0.35`、`CHAT_EDGE_ALPHA = 0.80`，
+  聊天框 `panel`、页签 `control`、输入框 `control` 三处全部引用；`ApplyChannelColor` 的频道色边框也从 `1` 改 `CHAT_EDGE_ALPHA`。
+  `Skin:EditBox(editBox, opts)` 新增 `opts.bgAlpha/borderAlpha`，`DRESSERS.editbox` 改为把 `control` 透传（原来写死 0.9）。
+  **其他窗口的输入框不受影响**（不传仍走 0.9）。
+- **改法二（那条缝）**：`PinDock` 原来锚宿主的 `ChatFrameNBackground`，实测那层比 cf **内缩 3**（bg1 顶 259 / cf 顶 256），
+  页签底又比 GDM 底高 1（`tab4 260` / `gdm 259`）⇒ 页签底下永远留 3~4 单位草地缝。
+  改为锚**我们自己的 `skinBg`**（与 cf 精确同边 32..256），偏移 `CHAT_TAB_LIFT - TabSeat(gdm)`，
+  `TabSeat` 现量"页签底 − 容器底"（不写死）。预演实测：`gdm 255..281`、`tab4 256..288`、`cf4 顶 256` —— **页签底边正好压在框顶线上**。
+- **改法三（根因：暴雪黑底）**：这是"框体比页签发实"的真正来源。`ChatFrame4:GetRegions()` 有 9 张 Texture：
+  1 张 `BACKGROUND`（447×233）+ 8 张 `BORDER`（8/16/439 三种），**全黑、vertex α 0.25 且 GetAlpha 也是 0.25** ⇒ 有效 α≈0.25。
+  它叠在我们的 0.35 上，框体实际压暗≈0.51，而页签块只有 0.35。新增 `ChatBand:FadeNativePlate(cf)`：只对
+  `Texture` + layer `BACKGROUND`/`BORDER` 写 `SetAlpha(0)`（不碰贴图/几何/顶点色），在 `skinners.frame` 每拍跑，
+  被暴雪重设由 1 秒轮询纠回。运行期实测 10 窗 × 9 = **90 张全部归 0**，同位置像素从"页签 186 / 框内 112"变成
+  "页签 109,37,0 / 框内 111,39,0"——**两块同档**。
+- **已知遗留（未处理，等作者定）**：页签背板的**底边框**与聊天框的**上边框**现在完全重合，两条 1px α0.8 线复合 ≈0.96，
+  所以页签正下方那条线会比左右/底边略亮。`SetBackdrop` 不支持单边去边框，要彻底消掉得给页签换"只画左/右/上"的两段式背板，成本大于收益。
+- **回归桩**：**99 项 ALL PASS**，新增 6 条：`PinDock` 目标偏移公式、锚 `skinBg` 而非暴雪 Background、两个常量定义、
+  三处共用同档、频道色边框同档、`FadeNativePlate` 存在 + 在 `skinners.frame` 被调用 + 只按 layer 认。
+- **闸门**：`luac` OK；`api-audit` HARD 全 0；`audit-taint` 仍是既有 2 条 `hooksecurefunc`（§8.90 有意使用）。
+- **改动文件**：`Modules/Skins/Social.lua`、`Utils/Skin.lua`、`Modules/Skins/Skins.lua`、`tools/harness/chat-band-probe.lua`、`docs/HANDOFF.md`。
+- **验收**：游戏内 `/reload`。**未提交、未发版**，随 0.13.4。
+
+### §8.95 聊天框外"社交按钮"跟页签同链显隐（2026-11-11，待 0.13.4）
+- **需求（作者原话）**："再截图，聊天框左上的社交按钮没有隐藏掉"。此时页签已淡到 α0，但框左上仍亮着两处原生控件。
+- **实测（改前，运行期读值，UI 单位）**：
+  | 控件 | 归属 | 几何 | 改前 alpha |
+  |---|---|---|---|
+  | `ChatFrameNButtonFrame`（菜单/频道/最小化三枚） | cf 子框，`Skin:Ctrl` 只换了皮 | `t256 b32 l1 r30` | **1.00**（1..4 窗）／**0.20**（5..10 窗） |
+  | `QuickJoinToastButton`（左上带数字的方块＝"快速加入"/社交） | `ReparentChatFrames` 重挂到 UIParent，位置跟 `buttonSide` | `t341 b309 l1 r33`（32×32） | 1.00 |
+  | `TextToSpeechButtonFrame`（语音朗读，紧贴其下） | 同上 | `t309 b283` | 1.00 |
+- **根因**：`ChatBand:FadeTo` 从来只写 `GeneralDockManager` 的 alpha。上述三处的 alpha 由暴雪按**窗口激活态**自己写
+  （1.00 / 0.20），我们既没接管也没纠回 ⇒ 页签渐隐了，按钮照旧全亮。
+- **改法**：新增 `ChatBand:ApplyChromeAlpha(a)` —— 一次写 GDM + 每个 `ChatFrameNButtonFrame` + `CHAT_CHROME_EXTRA`
+  （`QuickJoinToastButton` / `TextToSpeechButtonFrame`）。`FadeTo` 的插值每帧改走它，`SetTabsVisible` 与
+  `SyncChrome`（`PinLayout` 里只在 `ChatFrame1` 这一拍跑）都按 GDM 现值纠回被暴雪改过的值。
+- **α0 必须同时关鼠标**：暴雪按钮在 alpha 0 下**仍然吃点击**，只压 alpha 会变成"看不见但点得到"——
+  鼠标扫过聊天框左侧空白就会弹出频道/聊天菜单。`SetChromeOn` 里 alpha 与 `EnableMouse` 分开判
+  （暴雪 `Show`/`SetEnabled` 会重开鼠标而 alpha 不变，跟着 alpha 的"有变化才写"就会漏）。
+- **副作用（已向作者说明）**：`QuickJoinToastButton` 平时不可见 ⇒ 公会/好友组队邀请的"快速加入"提示被一起藏起来；
+  鼠标移进聊天框（页签淡入）时它同步出现、可点。
+- **回归桩**：**111 项 ALL PASS**，新增 12 条：ButtonFrame 与 GDM 同值、未激活窗 0.2 一并统一、α0 关鼠标、
+  暴雪写回后被 `SyncChrome` 纠回、GDM 已达标时仍纠、显示时 α1 且鼠标恢复、框外两枚按钮同链、
+  `ApplyChromeAlpha`/`SyncChrome` 存在、按钮框名由窗名派生、`PinLayout` 只在 ChatFrame1 同步。
+- **闸门**：`luac` OK；`api-audit` HARD 全 0；`audit-taint` 仍是既有 2 条 `hooksecurefunc`。
+- **改动文件**：`Modules/Skins/Social.lua`、`tools/harness/chat-band-probe.lua`、`docs/HANDOFF.md`。
+- **验收**：游戏内 `/reload`。**未提交、未发版**，随 0.13.4。
 
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
