@@ -58,10 +58,48 @@ local MAIL_BUTTONS = {
     "OpenAllMail",
 }
 
+-- §8.99 四张信纸（写信 / 读信页背景）：挂在两个 ScrollFrame 的 Layers 上
+-- （MailFrame.xml:525/531/989/995）。Strip 不递归子帧、deep 只认 Button、滚动框补扫
+-- 只换滚动条 —— 三条路径都够不着；暴雪还在运行期 SetTexture 重设
+-- （MailFrame.lua:784-785 读信 / 1396-1397 写信）。照专业窗先例：点名 + 轮询纠回。
+local STATIONERY_BG = {
+    "SendStationeryBackgroundLeft", "SendStationeryBackgroundRight",
+    "OpenStationeryBackgroundLeft", "OpenStationeryBackgroundRight",
+}
+
+local stationeryTex   -- 邮箱出生后解析一次（Need 走账本，不每秒重复记）
+
+--- 模块级稳定引用：PollWatch 按引用去重，在 Apply 里现造闭包会每开一次窗多挂一条。
+local function FadeStationery()
+    if not stationeryTex then
+        -- 轮询回调跑在 Apply 之外，作用域自己带（System.lua 的同型注释），账别落到 "_"。
+        Skin.With("mail", function()
+            stationeryTex = {}
+            for _, nm in ipairs(STATIONERY_BG) do
+                local t = Skin:Need(nm)
+                stationeryTex[#stationeryTex + 1] =
+                    (t and type(t.SetAlpha) == "function") and t or false
+            end
+        end)
+    end
+    for i = 1, #stationeryTex do
+        local t = stationeryTex[i]
+        if t then
+            local okA, a = pcall(t.GetAlpha, t)
+            if not okA or a ~= 0 then pcall(t.SetAlpha, t, 0) end
+        end
+    end
+end
+
 local function SkinMail()
     M:Dress(MAIL_FRAMES, {
         window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true, buttons = MAIL_BUTTONS,
     })
+    -- 邮箱是 LoD：头几拍 Apply 时 MailFrame 还是 nil（Need 记"还没出生"的 miss），
+    -- Blizzard_MailFrame 加载后下一轮 ApplyAll 接住，纠回轮询那时才挂上
+    -- （PollWatch 自带可见性门槛，窗口关着不跑，零成本）。
+    local mf = Skin:Need("MailFrame")
+    if mf then Widget:PollWatch(mf, FadeStationery, 1) end
 end
 
 -- **11-05 实机（商人开过）**：`MerchantRepairButton` / `MerchantSellButton` /
@@ -348,7 +386,7 @@ M:Panel("trade", { label = "交易", group = "交易", apply = SkinTrade,
     } })
 
 M:Panel("mail", { label = "邮箱", group = "交易", apply = SkinMail,
-    frames = { MAIL_FRAMES, MAIL_BUTTONS } })
+    frames = { MAIL_FRAMES, MAIL_BUTTONS, STATIONERY_BG } })
 
 M:Panel("merchant", { label = "商贩", group = "交易", apply = SkinMerchant,
     frames = { "MerchantFrame", MERCHANT_BUTTONS, "MerchantBuyBackItem" } })
