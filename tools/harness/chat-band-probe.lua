@@ -281,6 +281,18 @@ check("PinHeight 已对齐时不重复写", ChatBand:PinHeight(cfs[1]) == false
 minimap.height = 300
 check("小地图变高时目标跟着变", ChatBand:TargetHeight() == 268, ChatBand:TargetHeight())
 minimap.height = 256
+-- controlBg 背板桩 + env.Marked 覆盖**必须**在第一次行为级 PinLayout 之前装好：
+-- §8.92 三态层级在 skinner 拍里跑 SyncInputLayer，第一次见输入框就记原始层级；
+-- 那时 Marked 还取不到背板，rec.cb 记成 nil，后面"还原"分支就永远跳过背板
+-- （2026-11-11 三态层级修复时抓到的桩序问题；实机 Marked 恒可用，不受影响）。
+-- 另：切片在 env 里执行，`Marked(...)` 解析到 **env.Marked**（不是 ns.Marked）；
+-- 2026-11-11 实机判例：写成 `ns.Marked(eb,"controlBg")`（点调用少 self）会恒返回 nil，
+-- 背板永远取不到 —— 所以这里必须覆盖 env.Marked，才能验到真实取背板路径。
+ebs[1].bg = add("ChatFrame1EditBoxBg", 32, 1)
+env.Marked = function(o, k)
+    if k == "controlBg" and o == ebs[1] then return ebs[1].bg end
+    return nil
+end
 cfs[1].height = 256   -- 模拟 FCF_DockUpdate / EditMode 把高度改回去
 ChatBand:PinLayout("ChatFrame1")
 check("PinLayout 把重排后的高度纠回 224", cfs[1].height == 224, cfs[1].height)
@@ -468,15 +480,7 @@ check("§8.91 PinHeight 写回 224", ChatBand:PinHeight(cfs[1]) == true and cfs[
 gdm.points = { { "BOTTOMLEFT", bg1, "TOPLEFT", 0, 0 }, { "BOTTOMRIGHT", bg1, "TOPRIGHT", 0, 0 } }
 ChatBand:PinLayout("ChatFrame1")
 check("§8.91 hidden 时页签容器仍落带内（偏移 0，§8.92 同区）", DockPointY(1) == 0, DockPointY(1))
--- controlBg 背板同步（修复"背景色一直显示"）：桩里让 Marked 返回 bg 对象
--- 注意：切片在 env 里执行，`Marked(...)` 解析到 **env.Marked**（不是 ns.Marked）。
--- 2026-11-11 实机判例：写成 `ns.Marked(eb,"controlBg")`（点调用少 self）会恒返回 nil，
--- 背板永远取不到 —— 所以这里必须覆盖 env.Marked，才能验到真实取背板路径。
-ebs[1].bg = add("ChatFrame1EditBoxBg", 32, 1)
-env.Marked = function(o, k)
-    if k == "controlBg" and o == ebs[1] then return ebs[1].bg end
-    return nil
-end
+-- controlBg 背板桩与 env.Marked 覆盖已前移到第一次行为级 PinLayout 之前（见上文注）。
 ebs[1].focused = false
 ChatBand:HideEditBox("ChatFrame1")
 check("§8.91 未聚焦时折叠输入框 + 背景色背板",
@@ -493,7 +497,7 @@ check("§8.92 聚焦时输入框抬到 GDM 之上（GDM+3）",
 check("§8.92 背板随输入框一起抬（eb-1）",
     ebs[1].bg:GetFrameLevel() == ebs[1]:GetFrameLevel() - 1, tostring(ebs[1].bg:GetFrameLevel()))
 check("§8.92 HideEditBox 先 SyncInputLayer 再 SetShown",
-    band:find("self:SyncInputLayer(name)", 1, true) ~= nil)
+    band:find("self:SyncInputLayer(name", 1, true) ~= nil)
 ebs[1].focused = false
 ChatBand:PinLayout("ChatFrame1")
 check("§8.91 PinLayout hidden 分支调 HideEditBox 折叠输入框 + 背板",
@@ -541,6 +545,24 @@ db.skins.chatEditBoxMode = "show"
 ChatBand:SyncEditMouse("ChatFrame1")
 check("§8.96 非 fade 档鼠标常开（不走让位这条路）",
     ebs[1].mouse == true, tostring(ebs[1].mouse))
+-- §8.92 三态层级（2026-11-11 页签点击修复）：常显 + 未聚焦时输入框压到页签容器之下（GDM−1），
+-- 点击归页签 —— 平局裁决按建框先后，同 level 时晚建的输入框会赢，必须显式错开。
+db.skins.chatEditBoxMode = "fade"
+ebs[1].shown = true
+ebs[1].focused = false
+ChatBand:SyncInputLayer("ChatFrame1")
+check("§8.92 常显未聚焦：输入框压到 GDM-1（页签点击修复）",
+    ebs[1]:GetFrameLevel() == gdm:GetFrameLevel() - 1, tostring(ebs[1]:GetFrameLevel()))
+check("§8.92 常显未聚焦：背板跟着压（eb-1，不低于 0）",
+    ebs[1].bg:GetFrameLevel() == math.max(0, ebs[1]:GetFrameLevel() - 1), tostring(ebs[1].bg:GetFrameLevel()))
+ebs[1].focused = true
+ChatBand:SyncInputLayer("ChatFrame1")
+check("§8.92 聚焦仍抬到 GDM+3（原设计不变）",
+    ebs[1]:GetFrameLevel() == gdm:GetFrameLevel() + 3, tostring(ebs[1]:GetFrameLevel()))
+ebs[1].focused = false
+ChatBand:SyncInputLayer("ChatFrame1")
+check("§8.92 失焦仍显示：再压回 GDM-1",
+    ebs[1]:GetFrameLevel() == gdm:GetFrameLevel() - 1, tostring(ebs[1]:GetFrameLevel()))
 db.skins.chatEditBoxAutoHide = false
 
 print(failed == 0 and "ALL PASS" or (failed .. " FAILED"))

@@ -341,48 +341,61 @@ end
 --- 会被页签（GDM+1）压住 —— 于是把 eb 与它的 controlBg 一起抬到 GDM 之上，失焦再原样放回。
 --- 只写我们自己能写的框（非保护 EditBox + 私有背板），pcall 兜住；原始 level 记在旁表，
 --- 反复聚焦不会越抬越高。
-function ChatBand:SyncInputLayer(name)
+---
+--- **2026-11-11 订正（记录仪实锤 + 代码分析）**：上面"页签（GDM+1）压得住输入框"是错的 ——
+--- 页签的 +1 是 GDM **子树内部**的层级；命中裁决时 GDM 子树整体拿 GDM 自己的 level（L1）
+--- 去和直接挂 UIParent 的输入框（L1）比，**平局**，平局裁决按建框先后（输入框晚建 ⇒ 赢）。
+--- 0.13.4 的 hide 档输入框空闲时整个藏着、不参与裁决，所以从没暴露；§8.96 fade 档是第一个
+--- "常显 + 未聚焦"的档 ⇒ 点页签全落在输入框上（页签 OnClick 不触发、焦点翻到 eb，记录仪逐帧可见）。
+--- 因此层级从两态扩成三态：聚焦 = GDM+BOOST（抬到页签之上，原设计）；
+--- **常显未聚焦 = GDM−1（压到页签子树之下，点击归页签）**；隐藏 = 还原原始层级。
+function ChatBand:SyncInputLayer(name, shownOverride)
     local eb = Skin:Need(name .. "EditBox")
     if not eb or type(eb.SetFrameLevel) ~= "function" then return end
-    local okF, focused = pcall(eb.HasFocus, eb)
-    local up = okF and focused
+
+    -- 原始层级在**第一次见到**时就记（不是第一次聚焦）：fade / show 档可能永远不聚焦，
+    -- 没记就无从还原。
     local rec = INPUT_LAYER[name]
-
-    if up then
-        if not rec then
-            local okE, el = pcall(eb.GetFrameLevel, eb)
-            rec = { eb = okE and el or nil, cb = nil }
-            local cb = Marked(eb, "controlBg")
-            if cb and type(cb.GetFrameLevel) == "function" then
-                local okC, cl = pcall(cb.GetFrameLevel, cb)
-                rec.cb = okC and cl or nil
-            end
-            INPUT_LAYER[name] = rec
-        end
-        local gdm = Skin:Need("GeneralDockManager")
-        local gl = 1
-        if gdm then
-            local okG, g = pcall(gdm.GetFrameLevel, gdm)
-            if okG and type(g) == "number" then gl = g end
-        end
-        local want = gl + CHAT_INPUT_BOOST
-        pcall(eb.SetFrameLevel, eb, want)
+    if not rec then
+        local okE, el = pcall(eb.GetFrameLevel, eb)
+        rec = { eb = (okE and type(el) == "number") and el or nil, cb = nil }
         local cb = Marked(eb, "controlBg")
-        if cb and type(cb.SetFrameLevel) == "function" then
-            pcall(cb.SetFrameLevel, cb, want - 1)
+        if cb and type(cb.GetFrameLevel) == "function" then
+            local okC, cl = pcall(cb.GetFrameLevel, cb)
+            rec.cb = (okC and type(cl) == "number") and cl or nil
         end
-        self:SyncEditMouse(name)   -- 聚焦边沿：立刻能吃点击
-        return
+        INPUT_LAYER[name] = rec
     end
 
-    if not rec then return end
-    if rec.eb then pcall(eb.SetFrameLevel, eb, rec.eb) end
-    local cb = Marked(eb, "controlBg")
-    if cb and rec.cb and type(cb.SetFrameLevel) == "function" then
-        pcall(cb.SetFrameLevel, cb, rec.cb)
+    local gdm = Skin:Need("GeneralDockManager")
+    local gl = 1
+    if gdm then
+        local okG, g = pcall(gdm.GetFrameLevel, gdm)
+        if okG and type(g) == "number" then gl = g end
     end
-    INPUT_LAYER[name] = nil
-    self:SyncEditMouse(name)       -- 失焦边沿：fade 档没悬停就还给页签
+
+    local okF, focused = pcall(eb.HasFocus, eb)
+    local okS, shown = pcall(eb.IsShown, eb)
+    -- shownOverride：HideEditBox 在 SetShown **之前**调本函数（先抬层再显示，防闪），
+    -- 那一刻 IsShown 还是旧值，得用"打算变成"的显隐态来判。
+    local isShown = (shownOverride ~= nil) and shownOverride or (okS and shown == true)
+    local want
+    if okF and focused == true then
+        want = gl + CHAT_INPUT_BOOST            -- 聚焦：抬到页签之上（§8.92 原设计）
+    elseif isShown then
+        want = math.max(0, gl - 1)              -- 常显未聚焦：压到页签子树之下，点击归页签
+    else
+        want = rec.eb or 1                      -- 隐藏（hide 档空闲）：还原原始层级
+    end
+    pcall(eb.SetFrameLevel, eb, want)
+
+    local cb = Marked(eb, "controlBg")
+    if cb and type(cb.SetFrameLevel) == "function" then
+        -- 抬 / 压两态背板跟着走（eb−1，不低于 0）；还原态回到背板自己的原始层级。
+        local cbWant = ((okF and focused == true) or isShown) and math.max(0, want - 1) or rec.cb
+        if cbWant then pcall(cb.SetFrameLevel, cb, cbWant) end
+    end
+    self:SyncEditMouse(name)   -- 聚焦边沿：立刻能吃点击
 end
 
 --- §8.91 输入框隐藏档：平时 `SetShown(false)` 折叠输入框带；当用户聚焦输入框（按 Enter / 点击聊天框进入输入态）
@@ -399,7 +412,8 @@ function ChatBand:HideEditBox(name)
     local okF, focused = pcall(eb.HasFocus, eb)
     local show = okF and focused
     -- 先抬层再显示：否则这一拍 EditBox 会先以原 level 露出来、被同区的页签压住闪一下。
-    self:SyncInputLayer(name)
+    -- shownOverride 传目标显隐态：此刻 IsShown 还是旧值（见 SyncInputLayer 注）。
+    self:SyncInputLayer(name, show)
     pcall(eb.SetShown, eb, show)
     -- §8.91 修正：controlBg 背板（输入框背景色 / 频道色，见 §8.90）必须同步显隐，
     -- 否则 EditBox 藏了、背景色还挂在那（用户反馈"输入框背景色一直在"）。
@@ -486,8 +500,9 @@ local function EditFadeStep(_, dt)
                     local want = (now - st.idleSince >= CHAT_EDIT_IDLE_DELAY) and CHAT_EDIT_IDLE_ALPHA or 1
                     if st.target ~= want then st.from = st.cur; st.target = want end
                 end
-                -- 焦点边沿同拍结算鼠标开关：聚焦那一下必须立刻能吃点击（0.2s 节流够快）。
-                ChatBand:SyncEditMouse(name)
+                -- 焦点边沿同拍结算层级 + 鼠标：聚焦那一下必须立刻抬层、能吃点击（0.2s 节流够快）。
+                -- SyncInputLayer 末尾自带 SyncEditMouse，不必再单独调。
+                ChatBand:SyncInputLayer(name)
             end
             local cur, tgt = st.cur or 1, st.target or 1
             if math.abs(cur - tgt) > 0.004 then
@@ -541,7 +556,7 @@ ChatBand.skinners = {
         else
             self:ReleaseEditFade(name)
         end
-        self:SyncEditMouse(name)   -- 1s 轮询兜底：换挡 / 悬停漏拍时把鼠标开关纠回
+        self:SyncInputLayer(name)   -- 1s 轮询兜底：三态层级（聚焦抬 / 常显压 / 隐藏还原）+ 鼠标开关
         -- 页签容器 `GeneralDockManager` 在暴雪源码里锚在 `ChatFrameNBackground:TOPLEFT`
         -- （偏移 0），cf 缩高 32 后整条跟着框顶下移、掉进输入框带、被输入框吃掉点击。
         -- 框缩掉的高度正好 = CHAT_INPUT_BAND，所以把 GDM 相对它的原宿主框抬 CHAT_INPUT_BAND，
