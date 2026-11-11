@@ -217,6 +217,14 @@ local function SkinQuestFrame()
     -- 而 `portrait` 以前只点在 ClassTrainerFrame 上。给 GossipFrame 也补上（SquarePortrait 靠
     -- `<名>Portrait` 回退命中，GossipFrame 没有 .Portrait 成员）。
     M:Dress("GossipFrame", { window = true, inset = true, panel = { bgAlpha = READ_ALPHA }, deep = true, portrait = true })
+    -- **取消按钮（GOODBYE）必须点名**：它在 `GossipFrame.GreetingPanel` 里面，父链两深，
+    -- 而 `deep = true` 只开"要不要扫"这个开关，深度读的是 `opts.deepRows`（未设 → `SkinButtonsIn`
+    -- 的 `tonumber(depth) or 1` = **一层**）。`GossipFrame` 的直接子件只有 `GreetingPanel`(Frame)
+    -- 和 `FriendshipStatusBar`(StatusBar)，一颗 Button 都没有 ⇒ 这枚按钮从登录起一次也没被扫到，
+    -- 材质一直是原生 `UI-Panel-Button-Up`（作者实测："gossip 的取消按钮没换材质"）。
+    -- 不给整个窗口放开深度：`GreetingPanel` 下还有对话选项的运行期行，那是另一套时机，
+    -- 放开会把它们一并当普通按钮重铺。只点这一颗，零副作用。
+    M:Buttons({ "GossipFrame.GreetingPanel.GoodbyeButton" }, { thickness = 1 })
     M:Dress(QUESTFRAME_SCROLLS, { as = "scroll" })
 end
 
@@ -279,6 +287,8 @@ M:Panel("questframe", {
     apply = SkinQuestFrame,
     frames = {
         "QuestFrame", "GossipFrame",
+        -- 对话窗那颗取消钮在 `GreetingPanel` 里（两深，`deep` 扫不到），单独点名补的
+        "GossipFrame.GreetingPanel.GoodbyeButton",
         QUEST_PANELS, QUEST_FONTS, QUESTFRAME_BUTTONS, QUESTFRAME_SCROLLS,
     },
 })

@@ -6511,6 +6511,170 @@ EnsureChannelHeaderHook / EnsureTempWindowHook / FadeTime）、`Config/SimpleCon
 - **改动文件**：`Modules/Skins/Social.lua`、`tools/harness/chat-band-probe.lua`、`docs/HANDOFF.md`。
 - **验收**：游戏内 `/reload` 通过；已随 **0.13.4** 发布（commit `2f19b5b`，Actions run `42975049396` success）。
 
+### §8.96 输入框空闲渐隐 + 三档平时状态（2026-11-11，待 0.13.5）
+
+**来源**：作者贴来一份千问给的参考实现 `ChatEditFade.lua`（输入框空闲渐隐 0.25 + 聚焦 1.0 + 与 tab 互斥），
+问"我们能做吗"。评估结论：**能力可做，但实现不能照抄** —— 该文件在实测环境里有 4 处硬伤。
+
+**实测（运行期读值，2560×1440 / 1.60.1）**
+| 事实 | 实测 | 参考实现写法 | 后果 |
+|---|---|---|---|
+| `UIFade` | **nil**（只有 `UIFrameFade` / `UIFrameFadeOut`） | `UIFade(eb, info)`，注释称"是 UIFrameFade 的别名" | 一调用就 `attempt to call a nil value` |
+| `OnEditFocusGained` / `OnEditFocusLost` | **已被暴雪占用**（`GetScript` 返回非 nil） | `eb:SetScript(...)` 直接覆盖 | 顶掉暴雪自己的焦点逻辑（关空闲计时、清默认文本） |
+| `OnUpdate` / `OnShow` / `OnHide` | 同样已占用 | — | 同上 |
+| `eb:SetAlpha` 只调本体 | `controlBg` 是独立 frame | 未处理 | 渐隐后留一块"半截底板"（§8.91 踩过） |
+| `respectTab` | §8.92 已用层级切换解决 | 另做互斥 | 两套逻辑打架 |
+
+**作者选择**：三档下拉 + **默认渐隐**；渐隐档下**悬停不响应**（只有聚焦才变亮）。
+
+**改法**
+- `Core.lua` DEFAULTS 新增 `chatEditBoxMode = "fade"`（`hide` / `fade` / `show`）；§8.91 的
+  `chatEditBoxAutoHide` 保留为废弃键，仅在 `chatEditBoxMode` 被清成非法值时用于迁移（true→`hide`、false→`show`）。
+- `ChatBand:EditBoxMode()` 三档；`EditBoxPos()` 改为 `hide` 才返回 `"hidden"`，其余按 `chatEditBoxPos` 取 `top/bottom`。
+- `ChatBand:SetEditAlpha(name, a)`：一次写 `eb` 与 `Marked(eb,"controlBg")` 两块 alpha（幂等，差 <0.004 不写）。
+- `ChatBand:HoldEditBox(name)`：`fade` 档把输入框**保持 shown**（永不 SetShown 藏），建立 `EDIT_FADE[name]` 状态
+  `{cur, from, target, idleSince, pollAt}`，并拉起私有插值帧。
+- `EditFadeStep(_, dt)`：单个私有帧的 OnUpdate 推进**所有**输入框（不为每个 eb 各挂一个脚本）。
+  焦点态每 `CHAT_EDIT_POLL_STEP = 0.2` 秒用 `HasFocus()` 判一次；失焦满 `CHAT_EDIT_IDLE_DELAY = 3.0` 秒后
+  目标降到 `CHAT_EDIT_IDLE_ALPHA = 0.25`；聚焦目标回 1。步长按"整段跨度在 `CHAT_EDIT_FADE_OUT = 0.35` /
+  `CHAT_EDIT_FADE_IN = 0.20` 秒内走完"计算，所以 1→0.25 与 0.25→1 各自都在配置时长内结束。
+- `ChatBand:ReleaseEditFade(name)`：切到 `hide`/`show` 时清状态并把 alpha 复位 1（否则残留 0.25 会漂到 show 档）。
+- `HideEditBox` 开头 `fade` 档早退到 `HoldEditBox`（两条路都写显隐会闪）；`PinEditBox` 里"抬回 1.0"的兜底
+  加上 `self:EditBoxMode() ~= "fade"` 条件，否则每拍把渐隐抹平、永远渐不隐。
+- `SimpleConfig`：「输入框自动隐藏」复选框 → **「输入框平时状态」下拉**（渐隐 / 全隐 / 常显）；
+  位置下拉改名为「输入框位置（常显 / 渐隐时）」。
+- 桩环境没有 `CreateFrame`，`EnsureEditFadeFrame` 早退（fade 档在桩里退化为"保持 shown、alpha 不动"），
+  静态与显隐断言仍可验。
+
+**回归**：**122 项 ALL PASS**（111 → 122）。新增 11 条：四个参数常量对齐参考实现、不 SetScript 抢
+`OnEditFocus*`、焦点走 `HasFocus`、不调用不存在的 `UIFade`、三档 + 老布尔迁移、`PinEditBox` 的 fade 例外、
+`HideEditBox` fade 早退、`SetEditAlpha` 双写背板、`ReleaseEditFade` 幂等、`HoldEditBox` 保持 shown、退出渐隐复位 1。
+
+**闸门**：`luac` OK（Core / Social / SimpleConfig）；`api-audit` HARD 全 0；`audit-taint` 仍是既有 2 条 `hooksecurefunc`。
+
+**改动文件**：`Core.lua`、`Modules/Skins/Social.lua`、`Config/SimpleConfig.lua`、`tools/harness/chat-band-probe.lua`、`docs/HANDOFF.md`。
+
+**验收**：游戏内 `/reload`（运行期手工预演会被既有 PollWatch 按旧档冲掉，不能替代 reload）。**未提交、未发版**，随 0.13.5。
+
+### §8.97 世界地图关闭按钮从未换皮：名字取错了（2026-11-11）
+
+作者实测「世界地图的关闭按钮看不到」。查 `framexml-source`（`version.txt` = **1.60.1.70707**，就是本客户端）
+得到确定结论：**`WorldMapFrameCloseButton` 这个全局名在 1.60 里根本不存在。**
+
+- `Blizzard_WorldMap/Blizzard_WorldMap.xml:4` 的 `WorldMapFrameTemplate` 继承 `MapCanvasFrameTemplate`，
+  而后者（`Blizzard_MapCanvas.xml:56`）**只有 Size 和 Scripts，一颗按钮都不建**。
+- 关闭钮是实例化时由 `BorderFrame` 的 `PortraitFrameTemplateMinimizable` 生成、挂在 parentKey 上的。
+  暴雪自己的取法就是点路径：`Blizzard_WorldMap.lua:1102  self.CloseButton = self.BorderFrame.CloseButton`。
+- `WorldMap.lua:1059` 里那句 `WorldMapFrameCloseButton:Click()` 是 gamepad 分支的死代码，
+  以前把它当成了"名字存在的证据"，这是错的行号依据。
+
+⇒ 原代码 `Skin:CloseButton(Skin:Need("WorldMapFrameCloseButton"))` 里 `Need` 恒返回 nil，
+`Skin:CloseButton(nil)` 第一行就 `return`，**换皮从登录起一次都没生效**。
+
+**改法**：改取 `WorldMapFrame.BorderFrame.CloseButton`（`Skin:Need` 支持点路径），保留
+`WorldMapFrame.CloseButton` 作第二档回退；`frames` 名单同步换成点路径。
+
+### §8.98 `deep = true` 只扫一层：gossip 取消按钮的深度缺口（2026-11-11）
+
+作者实测「gossip 的取消按钮没换材质」。根因不是材质白名单，是**扫描深度**：
+
+- `GossipFrame.xml:34` 的父链是 `GossipFrame → GreetingPanel`(`GossipFramePanelTemplate`) `→ GoodbyeButton`，
+  **两深**。`GossipFrame` 的直接子件只有 `GreetingPanel`(Frame) 和 `FriendshipStatusBar`(StatusBar)，
+  一颗 Button 都没有。
+- `M:Dress` 里 `if opts.deep then M:SweepDeep(frame, opts.control, opts.slotInfo, opts.deepRows)` ——
+  `deep` 只决定"要不要扫"，**深度读的是 `opts.deepRows`**，未设时 `SkinButtonsIn` 的 `tonumber(depth) or 1` = **1 层**。
+  ⇒ 这枚按钮从来没被扫到，材质一直是原生 `UI-Panel-Button-Up`。
+
+**改法**：`M:Buttons({ "GossipFrame.GreetingPanel.GoodbyeButton" }, { thickness = 1 })` 精准点名，
+不放开整窗深度（`GreetingPanel` 下还有对话选项的运行期行，那是另一套时机，放开会被当成普通按钮重铺）。
+
+**系统性提示（待排查，不在这批处理）**：全仓 `deep = true` 有 **49 处**，其中只有 3 处给了 `deepRows`
+（`Social.lua:64` = 4、`Trade.lua:336` = 4、其余默认 1）。凡是"按钮/控件在第二层"的窗口都会像 gossip 一样漏掉。
+这批只修作者这次点到的，剩下按"作者报一个修一个"走，不做无差别放开（深度是轮询成本的主要来源）。
+
+**闸门**：`luac` OK（WorldMap / Quest）；`check-frame-list` 338 名字全有取用路径；`api-audit` no hard finding；
+`chat-band-probe` **ALL PASS**。两文件已部署到游戏目录，哈希一致。
+
+**未提交、未发版**，随 0.13.5。
+
+### §8.99 邮箱羊皮纸残留（2026-11-11，**根因已静态定位**；上一版推测作废）
+
+**订正**：上一版把残留归因为「`UIThemeContainerFrame` 主题刷新把 `InboxFrameBg` 的 alpha 写回」，
+那是推测，且**找错了对象**。`InboxFrameBg`（`MailFrame.xml:298`）挂在 `InboxFrame` 自己的
+Layers 里，而 `InboxFrame` 在 `MAIL_FRAMES` 中被单独 `M:Dress`（`Trade.lua:47,61-65`），
+正常路径下会被 `Skin:Strip` 压 0。玩家看到的「羊皮纸」是**写信 / 读信页的信纸背景**：
+
+| 贴图 | 位置 | 所属父帧 |
+|---|---|---|
+| `SendStationeryBackgroundLeft` / `Right` | `MailFrame.xml:525 / 531` | `SendMailScrollFrame` 的 Layers |
+| `OpenStationeryBackgroundLeft` / `Right` | `MailFrame.xml:989 / 995` | `OpenMailScrollFrame` 的 Layers |
+
+**为什么压不到**：`Skin:Strip` 只遍历**当前 frame** 的 `GetRegions()`（`Skin.lua:780-797`），
+不递归子 Frame；`deep = true` 的 `SweepDeep → SkinButtonsIn` 只认 Button 类子件
+（`Skins.lua:557`），`SkinScrollsIn → Skin:ScrollFrame` 只换滚动条、**不 Strip 背景**
+（`Skins.lua:724-725`、`Skin.lua:1917-1923`）。四张图挂的是 ScrollFrame 的 region，
+两条路径都够不着。全仓对 `Stationery` **零命中**。
+
+**还要防写回**：暴雪在 `MailFrame.lua:784-785`（读信）与 `1396-1397`（写信）用
+`SetTexture` 运行期重设这四张图。所以补法不是一次 `Fade`，而是点名四张 +
+按 §8.94 那套挂 `PollWatch` 纠回（法术书 / 专业窗已有同型先例）。
+
+**实机复核**（开邮箱后跑，只需确认当前 alpha 确为 1）：
+`/run print(SendStationeryBackgroundLeft:GetAlpha(), OpenStationeryBackgroundLeft:GetAlpha())`
+全为 1 ⇒ 坐实；若已是 0 却仍可见 ⇒ 另找 `MailFrame` 的 Background / NineSlice。
+
+### §8.100 材质美化覆盖盘点与缺口清单（2026-11-11，只读审查，未改代码）
+
+作者问「当前覆盖 / 需要补什么」。两侧对照口径：项目侧 50 个 panel 的接管路径，
+快照侧 `framexml-source` = **1.60.1.70707**（与本客户端一致，可采信）。
+
+**覆盖基线**
+
+| 项 | 数量 | 备注 |
+|---|---|---|
+| panel | 50 | 覆盖聊天 / 任务 / 收藏 / 交易 / 系统 / 地图等 |
+| frames 名单有效名 | 302 | 196 直接命中快照全局名、95 由 `name="$parent*"` 模板展开命中、11 查不到 |
+| 自有贴图资产 | 31 | 27 有调用点，4 张零调用 |
+| 显式材质替换 | 15 处 | 另 12 处 `buttons =` 点名 |
+| `window = true` | 48 | 只有 **7** 处配了 `wells =` 子内容区 |
+| `deep = true` | 49 | **仅 2 处**设 `deepRows`（Social:64=4、Trade:336=4），其余 47 处只扫 1 层 |
+| 独立 `PollWatch` 纠回 | 5 个面板 | 角色 / 收藏 / Forever / 专业 / 聊天 |
+
+**P0 已确证**
+
+1. 邮箱四张信纸 —— 见 §8.99。
+2. 疑似失效名字（需 `/mui skins diagnose` 定案）：`AuctionFrameBrowse` / `Auctions` / `Bid`、
+   `ChatChannelManagerPopup`、`EditChannelPopup`。快照里连 `AuctionFrame` 本身都无 XML 定义，
+   疑为经典旧版遗留名；`M:Dress` 拿 nil 会静默空跑。
+   ⚠️ **不算 bug 的两类**：`ColorPickerFrameOkay/Cancel` 是项目刻意并列的三套版本兼容候选
+   （真名 `ColorPickerOkayButton/CancelButton` 同在名单，`System.lua:679-689` 有注释）；
+   `ListingTab/BrowsingTab/WhoListingTab` 是 parentKey，走 `LFGParentFrame.` 点路径且已在
+   `tools/check-frame-list.js` 的 `ALLOW_DYNAMIC` 登记。
+3. §8.97 / §8.98 两处已修，待作者 `/reload` 验收。
+
+**P1 机制性缺口（不补会持续产生新漏）**
+
+| # | 机制 | 后果 | 补法 |
+|---|---|---|---|
+| 4 | `Strip` 不递归子 Frame regions | 装饰图挂在子 Frame Layers 里就永不消失（邮箱是首个实例） | `SweepDeep` 加一条按 `GetDrawLayer` + atlas 白名单的子帧纹理扫描，或逐窗点名 |
+| 5 | 47/49 处 `deep` 只 1 层 | 二层及更深按钮整颗漏（gossip 是实例） | 逐窗加 `deepRows`，**不要全局放开**（深度是轮询成本主因） |
+| 6 | 48 窗只有 7 处 `wells` | 次级内容区原生浅底没换成凹槽语言 | 按快照补 `wells` 后缀清单 |
+| 7 | `BACKDROP_PIECES` 只有 18 个固定名 | `TitleContainer` / `Footer` / NineSlice 子件 / 自定义 parentKey 压不到 | 补现代框架常见 parentKey，或改走 `GetDrawLayer` 判定 |
+| 8 | 仅 5 个面板挂纠回 | 暴雪开窗 / 换页 `SetTexture` / `SetAtlas` 写回时无第二次压回 | 对有运行期写回的窗口补 `PollWatch` |
+| 9 | `IsContentIcon` / `ROW_ART_PATTERNS` 只认 atlas 前缀 | `file="Interface\..."` 型老贴图既不识别为装饰也不豁免 | 补 `file=` 路径型判据（信纸 / 横条 / 金框均属这类） |
+
+**P2 资产侧**
+
+10. 只注册、零调用的 4 张：`monet_scrollbar_thumb`、`monet_scrollbar_track`、
+    `monet_win_maximize`、`monet_win_minimize`（仅 `Utils/Media.lua:267-268 / 307-308`）。
+    滚动条那两张现成可用却没接上；窗口最大化 / 最小化需先确认 1.60 有无对应控件。
+11. 真正需要**新材质**的只有一处：`Trade.lua:90-91` 记着商人三颗工具钮的
+    `SpellIcon-256x256-*` 把锤子与深色圆角底板画在同一张图里，裁切切不掉，
+    要连底板一起换得自绘模具。其余按钮 / 页签底板按设计准则走纯色 `ControlBg`
+    + 顶点色（`Skin.lua:1227`），**不缺贴图** —— 「美化不全」的本质是覆盖没到，不是资产不够。
+
+**验收**：`/mui skins diagnose` 看 P0-2 是否报 miss；开邮箱读四张信纸的 `GetAlpha()`。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 

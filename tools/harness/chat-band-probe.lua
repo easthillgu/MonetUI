@@ -225,11 +225,38 @@ check("§8.91 skinner.frame hidden 也 PinEditBox（不落底部）+ HideEditBox
     and band:find("self:HideEditBox(name)", 1, true) ~= nil)
 check("§8.91 新增 HideEditBox（按焦点态 SetShown）",
     band:find("function ChatBand:HideEditBox", 1, true) ~= nil)
-check("§8.91 配置面板暴露自动隐藏开关 + 关闭时位置下拉",
-    cfgSrc:find('"输入框自动隐藏（仅聚焦才显示）"', 1, true) ~= nil
-    and cfgSrc:find('"输入框位置（关闭隐藏时）"', 1, true) ~= nil)
-check("§8.91 DEFAULTS 默认开启自动隐藏",
-    coreSrc:find('chatEditBoxAutoHide = true', 1, true) ~= nil)
+check("§8.96 配置面板暴露输入框三档下拉 + 位置下拉",
+    cfgSrc:find('"输入框平时状态"', 1, true) ~= nil
+    and cfgSrc:find('"输入框位置（常显 / 渐隐时）"', 1, true) ~= nil
+    and cfgSrc:find('{ value = "fade"', 1, true) ~= nil)
+check("§8.96 DEFAULTS 默认渐隐档 + 保留废弃键做迁移",
+    coreSrc:find('chatEditBoxMode = "fade"', 1, true) ~= nil
+    and coreSrc:find('chatEditBoxAutoHide = true', 1, true) ~= nil)
+
+-- ---------------------------------------------------------------- §8.96 输入框空闲渐隐
+-- 参考实现（千问 ChatEditFade.lua）在实测环境里两处硬伤：`UIFade` 为 nil、
+-- `OnEditFocusGained/Lost/OnUpdate` 脚本槽已被暴雪占用（SetScript 会顶掉暴雪逻辑）。
+-- 这里把"必须换掉"钉成回归断言，防止以后有人照抄回去。
+check("§8.96 四个渐隐参数与参考实现对齐",
+    band:find("CHAT_EDIT_IDLE_ALPHA  = 0.25", 1, true) ~= nil
+    and band:find("CHAT_EDIT_FADE_OUT    = 0.35", 1, true) ~= nil
+    and band:find("CHAT_EDIT_FADE_IN     = 0.20", 1, true) ~= nil
+    and band:find("CHAT_EDIT_IDLE_DELAY  = 3.0", 1, true) ~= nil)
+check("§8.96 不占用暴雪的焦点脚本槽（不 SetScript OnEditFocus*）",
+    band:find('SetScript("OnEditFocusGained"', 1, true) == nil
+    and band:find('SetScript("OnEditFocusLost"', 1, true) == nil)
+check("§8.96 焦点态走 HasFocus 轮询（不挂钩子）",
+    band:find("eb.HasFocus, eb", 1, true) ~= nil)
+check("§8.96 不调用不存在的 UIFade",
+    band:find("UIFade(", 1, true) == nil)
+check("§8.96 EditBoxMode 三档 + 老布尔迁移",
+    band:find("function ChatBand:EditBoxMode", 1, true) ~= nil
+    and band:find('if m == "hide" or m == "fade" or m == "show" then return m end', 1, true) ~= nil
+    and band:find('if self:Opt("chatEditBoxAutoHide") == false then return "show" end', 1, true) ~= nil)
+check("§8.96 PinEditBox 在 fade 档不把 alpha 拉回 1（否则永远渐不隐）",
+    band:find('shown and self:EditBoxMode() ~= "fade"', 1, true) ~= nil)
+check("§8.96 HideEditBox 在 fade 档早退到 HoldEditBox（两条路不打架）",
+    band:find('if self:EditBoxMode() == "fade" then\n        self:HoldEditBox(name)\n        return\n    end', 1, true) ~= nil)
 
 -- §8.90/§8.91 判例（2026-11-11 实机：输入框背景色一直在、频道色不生效）
 -- `ns:Marked` 是冒号方法，写成 `ns.Marked(obj, "controlBg")` 会把 self 顶成 object、
@@ -475,6 +502,23 @@ check("§8.91 PinLayout hidden 分支调 HideEditBox 折叠输入框 + 背板",
 check("§8.92 失焦后输入框与背板层级都还原",
     ebs[1]:GetFrameLevel() == 1 and ebs[1].bg:GetFrameLevel() == 1,
     tostring(ebs[1]:GetFrameLevel()) .. "/" .. tostring(ebs[1].bg:GetFrameLevel()))
+-- §8.96 fade 档行为：只写 alpha、不写显隐；alpha 必须同时到背板（§8.91 踩过的坑）
+ebs[1].alpha, ebs[1].bg.alpha = 1, 1
+ChatBand:SetEditAlpha("ChatFrame1", 0.25)
+check("§8.96 SetEditAlpha 同时写 EditBox 与 controlBg 背板",
+    math.abs(ebs[1].alpha - 0.25) < 0.01 and math.abs(ebs[1].bg.alpha - 0.25) < 0.01,
+    tostring(ebs[1].alpha) .. "/" .. tostring(ebs[1].bg.alpha))
+db.skins.chatEditBoxMode = "fade"
+ChatBand:ReleaseEditFade("ChatFrame1")
+check("§8.96 ReleaseEditFade 无状态时不乱写 alpha",
+    math.abs(ebs[1].alpha - 0.25) < 0.01, tostring(ebs[1].alpha))
+ebs[1].shown = false
+ChatBand:HoldEditBox("ChatFrame1")
+check("§8.96 fade 档 HoldEditBox 把输入框保持 shown（渐隐不用 SetShown 藏）",
+    ebs[1].shown == true, tostring(ebs[1].shown))
+ChatBand:ReleaseEditFade("ChatFrame1")
+check("§8.96 退出渐隐档 alpha 复位 1（否则半透明会漂到 show 档）",
+    math.abs(ebs[1].alpha - 1) < 0.01, tostring(ebs[1].alpha))
 db.skins.chatEditBoxAutoHide = false
 
 print(failed == 0 and "ALL PASS" or (failed .. " FAILED"))

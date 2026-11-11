@@ -208,6 +208,16 @@ local CHAT_INPUT_BAND = 32        -- 必须等于 EditBox 模板的 `<Size y="32
 local CHAT_TAB_LIFT   = 0         -- §8.92 页签容器相对 cf 顶的抬升量：0 = 落进输入带内、与 EditBox 同区
 local CHAT_INPUT_BOOST = 3        -- §8.92 聚焦时 EditBox 抬到 GDM 之上所需的层数（页签 Tab = GDM+1）
 local CHAT_TAB_FADE   = 0.18      -- 页签淡入淡出时长（秒），贴近 Chattynator 的 0.15（§8.90 改读配置）
+--- §8.96 输入框空闲渐隐（`chatEditBoxMode == "fade"` 档）。参考实现（千问给的 ChatEditFade.lua）
+--- 的四个时长直接沿用，但**驱动方式全部换掉**：它的 `UIFade` 在本客户端是 nil（只有 `UIFrameFade`），
+--- 且它用 `eb:SetScript("OnEditFocus…")` 抢焦点脚本 —— 实测这些脚本槽**已全部被暴雪占用**
+--- （`GetScript` 均返回非 nil），直接 SetScript 会顶掉暴雪自己的焦点/更新逻辑。这里改为：
+--- 私有 OnUpdate 插值帧 + 每 0.2 秒节流查 `HasFocus`，一个脚本也不占、零 taint。
+local CHAT_EDIT_IDLE_ALPHA  = 0.25   -- 空闲透明度
+local CHAT_EDIT_FADE_OUT    = 0.35   -- 淡出时长（秒）
+local CHAT_EDIT_FADE_IN     = 0.20   -- 淡入时长（秒）
+local CHAT_EDIT_IDLE_DELAY  = 3.0    -- 失焦后多久开始渐隐（秒）
+local CHAT_EDIT_POLL_STEP   = 0.2    -- 焦点态判定节流间隔（秒）
 --- §8.94 三层底板统一口径。改前实测（11-11 14:1x，2560×1440）三处 RGB 完全相同都是
 --- (0.110,0.106,0.122)，但浓度三档：聊天框 0.349 / 页签 0.902 / 输入框 0.902，边框浓度两档：
 --- 页签 0.80、聊天框与输入框 1.00。§8.93 把页签和输入框挪到框沿外侧之后，这两种密度紧挨着，
@@ -222,6 +232,10 @@ local INPUT_LAYER = {}            -- §8.92 名字 → { eb = 原始 frameLevel,
 local chatHideToken = 0
 local CHAT_FADE_TARGET           -- 淡入淡出目标 alpha（1 显示 / 0 隐藏）
 local CHAT_FADE_FRAME            -- 承载 OnUpdate 插值的私有帧（仅在真客户端创建）
+--- §8.96 输入框渐隐状态：name → { cur, target, idleSince, pollAt }
+--- `cur` 是我们认定的当前 alpha（不每帧回读，避免暴雪写入时来回抖）；`idleSince` 是失焦时刻。
+local EDIT_FADE = {}
+local EDIT_FADE_FRAME            -- 私有 OnUpdate 帧，仅在存在 fade 档时创建
 
 local ChatBand = {}
 ChatBand.dynamic = {}    -- 运行期新建的临时聊天窗名（FCF_OpenTemporaryWindow，>10）
@@ -311,8 +325,9 @@ function ChatBand:PinEditBox(name)
         pcall(eb.SetPoint, eb, "BOTTOMRIGHT", cf, "TOPRIGHT", 0, 0)
     end
     -- 暴雪把"非活动窗口"的输入框整框淡到 0.35；显示着的那条抬回全不透明。
+    -- §8.96：`fade` 档的 alpha 归渐隐引擎（`EditFadeStep`）管，这里拉回 1 会把它每拍抹平、永远渐不隐。
     local okS, shown = pcall(eb.IsShown, eb)
-    if okS and shown then
+    if okS and shown and self:EditBoxMode() ~= "fade" then
         local okAl, aRaw = pcall(eb.GetAlpha, eb)
         local a = okAl and ReadNum(aRaw) or nil
         if a and a < 0.99 then pcall(eb.SetAlpha, eb, 1) end
@@ -372,6 +387,11 @@ end
 --- 暴雪会自动 Show 并聚焦，这里按焦点态保持显示，失焦后下一拍 PollWatch 重新隐藏。`HasFocus` 是 EditBox 标准方法，
 --- 非保护框操作无 taint 风险；全程 pcall 兜住运行期异常。
 function ChatBand:HideEditBox(name)
+    -- §8.96：`fade` 档靠 alpha 表达，不用显隐；两条路都写会闪（先藏后露一帧）。
+    if self:EditBoxMode() == "fade" then
+        self:HoldEditBox(name)
+        return
+    end
     local eb = Skin:Need(name .. "EditBox")
     if not eb then return end
     local okF, focused = pcall(eb.HasFocus, eb)
@@ -385,6 +405,92 @@ function ChatBand:HideEditBox(name)
     if okM and cb and type(cb.SetShown) == "function" then
         pcall(cb.SetShown, cb, show)
     end
+end
+
+--- §8.96 渐隐档的"保持显示"：`fade` 模式下输入框**始终 shown**，只靠 alpha 表达空闲/聚焦。
+--- 必须与 `HideEditBox` 的 SetShown 二值路径互斥——两条路都写显隐会闪（先藏后露一帧）。
+function ChatBand:HoldEditBox(name)
+    local eb = Skin:Need(name .. "EditBox")
+    if not eb then return end
+    local okS, shown = pcall(eb.IsShown, eb)
+    if okS and not shown then pcall(eb.SetShown, eb, true) end
+
+    local st = EDIT_FADE[name]
+    if not st then
+        local okA, a = pcall(eb.GetAlpha, eb)
+        local cur = (okA and type(a) == "number") and a or 1
+        st = { cur = cur, from = cur, target = cur, idleSince = nil, pollAt = 0 }
+        EDIT_FADE[name] = st
+    end
+    self:EnsureEditFadeFrame()
+end
+
+--- 退出渐隐档（切到 hide / show）时把 alpha 复位成 1 并清状态，
+--- 否则残留的 0.25 会跟着输入框进到别的档位（`show` 档本该常亮）。
+function ChatBand:ReleaseEditFade(name)
+    if not EDIT_FADE[name] then return end
+    EDIT_FADE[name] = nil
+    self:SetEditAlpha(name, 1)
+end
+
+--- 私有插值帧：一个 OnUpdate 推进所有输入框，不为每个 eb 各挂一个（10 窗 + 临时窗会散成十几个脚本）。
+--- 焦点态每 `CHAT_EDIT_POLL_STEP` 秒才判一次；alpha 每帧推进，步长按"整段跨度在 fadeTime 秒内走完"算，
+--- 所以 1→0.25 与 0.25→1 各自都在配置的时长内结束，而不是按绝对 1.0 尺度缩放。
+local function EditFadeStep(_, dt)
+    local now = 0
+    if type(GetTime) == "function" then
+        local ok, t = pcall(GetTime)
+        if ok and type(t) == "number" then now = t end
+    end
+    local alive = false
+    for name, st in pairs(EDIT_FADE) do
+        local eb = Skin:Need(name .. "EditBox")
+        local okS, shown = false, false
+        if eb then okS, shown = pcall(eb.IsShown, eb) end
+        if not (eb and okS and shown) then
+            st.pollAt = 0          -- 窗口被藏起来：清掉节流，下次露面立刻重判
+        else
+            alive = true
+            if now >= (st.pollAt or 0) then
+                st.pollAt = now + CHAT_EDIT_POLL_STEP
+                local okF, focused = pcall(eb.HasFocus, eb)
+                focused = okF and focused == true
+                if focused then
+                    st.idleSince = nil
+                    if st.target ~= 1 then st.from = st.cur; st.target = 1 end
+                else
+                    st.idleSince = st.idleSince or now
+                    local want = (now - st.idleSince >= CHAT_EDIT_IDLE_DELAY) and CHAT_EDIT_IDLE_ALPHA or 1
+                    if st.target ~= want then st.from = st.cur; st.target = want end
+                end
+            end
+            local cur, tgt = st.cur or 1, st.target or 1
+            if math.abs(cur - tgt) > 0.004 then
+                local dur = (tgt < cur) and CHAT_EDIT_FADE_OUT or CHAT_EDIT_FADE_IN
+                local span = math.abs(tgt - (st.from or cur))
+                local step = (dur > 0) and ((dt or 0) * math.max(span, 0.05) / dur) or 1
+                if tgt > cur then cur = math.min(tgt, cur + step) else cur = math.max(tgt, cur - step) end
+                st.cur = cur
+                ChatBand:SetEditAlpha(name, cur)
+            end
+        end
+    end
+    if not alive then EDIT_FADE_FRAME:Hide() end
+end
+
+function ChatBand:EnsureEditFadeFrame()
+    -- 桩环境（回归探针）没有 CreateFrame：不建帧，fade 档退化成"保持 shown、alpha 不动"，
+    -- 静态断言与显隐断言都还能验，只是不会真的插值。
+    if type(CreateFrame) ~= "function" then return end
+    if EDIT_FADE_FRAME then
+        if not EDIT_FADE_FRAME:IsShown() then EDIT_FADE_FRAME:Show() end
+        return
+    end
+    local f = CreateFrame("Frame")
+    f:Hide()
+    f:SetScript("OnUpdate", EditFadeStep)
+    EDIT_FADE_FRAME = f
+    f:Show()
 end
 
 --- §8.89.4 声明式分发（借鉴 Chattynator 的 `skinner[regionType]`）：
@@ -402,6 +508,13 @@ ChatBand.skinners = {
         end
         if pos == "hidden" then
             self:HideEditBox(name)  -- 平时折叠，聚焦弹出（在顶部带）
+        end
+        -- §8.96 三档：fade 保持 shown + alpha 渐隐；其余档（show/hide）必须清掉渐隐状态，
+        -- 否则残留的半透明会跟着输入框漂到别的档位。
+        if self:EditBoxMode() == "fade" then
+            self:HoldEditBox(name)
+        else
+            self:ReleaseEditFade(name)
         end
         -- 页签容器 `GeneralDockManager` 在暴雪源码里锚在 `ChatFrameNBackground:TOPLEFT`
         -- （偏移 0），cf 缩高 32 后整条跟着框顶下移、掉进输入框带、被输入框吃掉点击。
@@ -509,9 +622,42 @@ end
 --- `bottom` = 回到暴雪原生框底位置（不钉）；`hidden` = 输入框带折叠、cf 高度恢复、EditBox 隐藏。
 --- 其它值一律按 top 处理。切换后需 /reload 生效（与 top↔bottom 同约定）。
 function ChatBand:EditBoxPos()
-    if self:Opt("chatEditBoxAutoHide") then return "hidden" end
+    local mode = self:EditBoxMode()
+    -- `hide` 档：输入框折在顶部输入带里（§8.93 起这条带已在框沿外侧），聚焦才露出。
+    if mode == "hide" then return "hidden" end
     local p = self:Opt("chatEditBoxPos")
     return (p == "bottom") and "bottom" or "top"
+end
+
+--- §8.96 输入框平时状态三档：`hide` / `fade` / `show`。
+--- 取代 §8.91 的布尔 `chatEditBoxAutoHide`（老 DB 只存布尔，没有新键时按旧值迁移：
+--- 老值 true = 全隐 → `hide`，false = 常显 → `show`；两者都不是"渐隐"，不擅自替玩家改语义）。
+function ChatBand:EditBoxMode()
+    local m = self:Opt("chatEditBoxMode")
+    if m == "hide" or m == "fade" or m == "show" then return m end
+    -- 走到这里说明新键被清成非法值：退回 §8.91 的布尔语义（true = 全隐、false = 常显），
+    -- 不擅自把"常显"的用户改成渐隐。
+    if self:Opt("chatEditBoxAutoHide") == false then return "show" end
+    return "hide"
+end
+
+--- §8.96 输入框 alpha 一次写两处：EditBox 本体 + 主题化背板 `controlBg`（§8.90 的频道色底板）。
+--- 只写 eb 是本项目踩过的坑（§8.91「输入框的背景色一直在啊」）：背板是独立 frame，
+--- 父框 alpha 不会顺着它走，两块必须同步，否则渐隐后会剩一块"半截底板"。
+function ChatBand:SetEditAlpha(name, a)
+    local eb = Skin:Need(name .. "EditBox")
+    if not eb then return end
+    local okA, cur = pcall(eb.GetAlpha, eb)
+    if not (okA and type(cur) == "number" and math.abs(cur - a) < 0.004) then
+        pcall(eb.SetAlpha, eb, a)
+    end
+    local okM, cb = pcall(Marked, eb, "controlBg")
+    if okM and cb and type(cb.SetAlpha) == "function" then
+        local okB, cba = pcall(cb.GetAlpha, cb)
+        if not (okB and type(cba) == "number" and math.abs(cba - a) < 0.004) then
+            pcall(cb.SetAlpha, cb, a)
+        end
+    end
 end
 
 --- 顶部外扩量（topExtend）：§8.93 起**恒 0**。外框不再从框内挖一条 32 的输入带 ——

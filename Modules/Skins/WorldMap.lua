@@ -42,7 +42,16 @@ local function SkinWorldMap()
     M:Dress(MAP_BUTTONS, { as = "button", control = { thickness = 1 } })
 
     -- 关闭按钮保留自己的字形：那是我们的图，不是被压平的底板。
-    Skin:CloseButton(Skin:Need("WorldMapFrameCloseButton"))
+    -- **1.60 没有 `WorldMapFrameCloseButton` 这个全局名**（原文按 retail 老布局取它 ⇒ `Skin:Need`
+    -- 恒 nil ⇒ `Skin:CloseButton(nil)` 直接早退，换皮从登录起就没生效过一次）。
+    -- `Blizzard_WorldMap.xml` 里 `WorldMapFrame` 继承 `MapCanvasFrameTemplate`，那个模板**只有
+    -- Size 和 Scripts、一颗按钮都不建**；关闭钮是模板实例化时由 `BorderFrame` 的
+    -- `PortraitFrameTemplateMinimizable` 生成、挂在 parentKey 上，暴雪自己也是这么取的 ——
+    -- `Blizzard_WorldMap.lua:1102  self.CloseButton = self.BorderFrame.CloseButton`。
+    -- （同文件 1059 行那句 `WorldMapFrameCloseButton:Click()` 是 gamepad 死代码，不能当名字依据。）
+    local close = Skin:Need("WorldMapFrame.BorderFrame.CloseButton")
+        or Skin:Need("WorldMapFrame.CloseButton")
+    Skin:CloseButton(close)
 
     SkinQuestMap()
 end
@@ -53,7 +62,7 @@ M:Panel("worldmap", {
     apply = SkinWorldMap,
     frames = {
         "WorldMapFrame", "WorldMapFrame.BorderFrame",
-        "WorldMapFrameCloseButton", "WorldMapFrameHomeButton", "WorldMapFrameOverflowButton",
+        "WorldMapFrame.BorderFrame.CloseButton", "WorldMapFrameHomeButton", "WorldMapFrameOverflowButton",
         "QuestMapFrame", "QuestMapFrame.DetailsFrame", "QuestScrollFrame", "MapLegendScrollFrame",
     },
 })

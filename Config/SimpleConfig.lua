@@ -1347,19 +1347,28 @@ function SimpleConfig:Build()
                 end
             end)
 
-        -- §8.91 输入框自动隐藏：默认开启（折叠输入框带、仅聚焦才显示）；关闭则按位置常显。
-        -- 切换由 PollWatch 下一拍按新值重钉 / 折叠；需 /reload 生效。
-        MakeCheckbox(content, "输入框自动隐藏（仅聚焦才显示）", row(26),
-            function() return ns:DB().skins.chatEditBoxAutoHide ~= false end,
+        -- §8.96 输入框平时状态三档（取代 §8.91 的二元「自动隐藏」复选框）：
+        -- 渐隐（参考 ChatEditFade：空闲 25%、失焦 3 秒后开始、聚焦全亮）/ 全隐 / 常显。
+        -- 切换由 PollWatch 下一拍按新值重钉或交给渐隐引擎，不必 /reload。
+        MakeDropdown(content, row(26), "输入框平时状态", {
+            { value = "fade", text = "渐隐（空闲 25%，聚焦全亮）" },
+            { value = "hide", text = "全隐（仅聚焦才出现）" },
+            { value = "show", text = "常显" },
+        },
+            function()
+                local m = ns:DB().skins.chatEditBoxMode
+                if m == "hide" or m == "show" then return m end
+                return "fade"
+            end,
             function(value)
-                ns:DB().skins.chatEditBoxAutoHide = value
+                ns:DB().skins.chatEditBoxMode = value
                 if ns.Skins and ns.Skins.RefreshChatTabHover then
                     ns.Skins:RefreshChatTabHover()
                 end
             end)
 
-        -- 关闭自动隐藏时的输入框位置（§8.89.4 / C）。
-        MakeDropdown(content, row(26), "输入框位置（关闭隐藏时）", {
+        -- 输入框位置：`show` / `fade` 档才看得出区别（`hide` 档一律折在顶部带里）。
+        MakeDropdown(content, row(26), "输入框位置（常显 / 渐隐时）", {
             { value = "top",    text = "框内顶部（推荐）" },
             { value = "bottom", text = "框底（原生位置）" },
         },
