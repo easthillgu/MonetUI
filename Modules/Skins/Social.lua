@@ -378,7 +378,14 @@ function ChatBand:SyncInputLayer(name, shownOverride)
     local okS, shown = pcall(eb.IsShown, eb)
     -- shownOverride：HideEditBox 在 SetShown **之前**调本函数（先抬层再显示，防闪），
     -- 那一刻 IsShown 还是旧值，得用"打算变成"的显隐态来判。
-    local isShown = (shownOverride ~= nil) and shownOverride or (okS and shown == true)
+    -- **不能写 `and/or` 短路**：override 为 false 时 `false or ...` 会落回读实际值，
+    -- "还原"分支被吞成"压档"（Lua 短路惯用法不吃 false，2026-11-11 自查抓到）。
+    local isShown
+    if shownOverride ~= nil then
+        isShown = shownOverride
+    else
+        isShown = okS and shown == true
+    end
     local want
     if okF and focused == true then
         want = gl + CHAT_INPUT_BOOST            -- 聚焦：抬到页签之上（§8.92 原设计）
@@ -450,19 +457,43 @@ function ChatBand:ReleaseEditFade(name)
     self:SyncEditMouse(name)
 end
 
---- `fade` 档的点击语义（§8.96 回归修复，2026-11-11 作者实机确认）：常显的输入框会**接走**
---- 同带页签的点击 —— 页签淡出时容器 GDM α0 / 鼠标关，那状态下点击到不了页签，
---- 于是全落在常显的 EditBox 上（聚焦 = 渐隐引擎拉亮，看着就是"一点鼠标就打开输入框"）。
---- 规矩：fade 档**未聚焦且没悬停聊天区**时关输入框鼠标，退回 0.13.4 hide 档的穿透语义；
---- 悬停（几何判定，不依赖鼠标开关）或聚焦再开回来，保住"点输入框聚焦"的手感。
---- 其余档（hide / show）鼠标常开，不走这条。
+--- 输入框鼠标仲裁（2026-11-11 二次修复，三档通用）。
+--- 一次修复（关鼠标 + AnyHover 开回来）实机不够：悬停是点击的前置，悬停即开鼠标等于没关。
+--- 二次修复前的层级实验（输入框压到 L0、页签 L2）实机仍被抢 ⇒ **本客户端的点击裁决不看
+--- level**（至少在这组框上），结合全部证据唯一自洽的是建框先后（输入框随 ChatFrame1 建，
+--- 早于 GDM 子树，早建赢）。层级压档保留（绘制顺序上输入框本就该在页签下面），
+--- 但点击让位只能走"退出仲裁"：**鼠标关掉的框不参与裁决**。
+--- 规则：输入框显示着时，**鼠标在任何页签上 = 恒让位**（未聚焦让点击、聚焦也让——
+--- 顺带修掉"打字时点页签被输入框抢"）；其余位置聚焦或悬停输入框自身时开
+--- （保住"点输入框聚焦 / 点框内摆光标"）。hide 档空闲时整框藏着，天然安全。
 function ChatBand:SyncEditMouse(name)
     local eb = Skin:Need(name .. "EditBox")
     if not eb or type(eb.EnableMouse) ~= "function" then return end
-    local want = true
-    if self:EditBoxMode() == "fade" then
-        local okF, focused = pcall(eb.HasFocus, eb)
-        want = (okF and focused == true) or self:AnyHover()
+    local want = false
+    local okS, shown = pcall(eb.IsShown, eb)
+    if okS and shown == true then
+        local overTab = false
+        for _, cn in ipairs(CHAT_FRAMES) do
+            local t = Skin:Need(cn .. "Tab")
+            if t and not overTab then
+                local okO, o = pcall(t.IsMouseOver, t)
+                if okO and o == true then overTab = true end
+            end
+        end
+        if not overTab then
+            for cn in pairs(self.dynamic) do
+                local t = Skin:Need(cn .. "Tab")
+                if t and not overTab then
+                    local okO, o = pcall(t.IsMouseOver, t)
+                    if okO and o == true then overTab = true end
+                end
+            end
+        end
+        if not overTab then
+            local okF, focused = pcall(eb.HasFocus, eb)
+            local okO, overEb = pcall(eb.IsMouseOver, eb)
+            want = (okF and focused == true) or (okO and overEb == true)
+        end
     end
     local okM, was = pcall(eb.IsMouseEnabled, eb)
     if not okM or was ~= want then

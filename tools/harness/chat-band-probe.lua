@@ -67,6 +67,8 @@ local function Frame(name, h, alpha)
     function f:SetFrameLevel(v) self.frameLevel = v; self.levelWrites = (self.levelWrites or 0) + 1 end
     -- §8.95 按钮框：α0 时必须同时关鼠标，否则"看不见但点得到"
     function f:EnableMouse(v) self.mouse = v and true or false; self.mouseWrites = (self.mouseWrites or 0) + 1 end
+    -- §8.96/§8.92 鼠标仲裁断言用：几何悬停态（桩里手动置 mouseOver）
+    function f:IsMouseOver() return self.mouseOver == true end
     return f
 end
 
@@ -79,10 +81,12 @@ end
 local minimap = add("Minimap", 256, 1)
 local gdm = add("GeneralDockManager", 26, 1)
 local bg1 = add("ChatFrame1Background", 256, 1)   -- GDM 在暴雪源码里锚在它身上
-local cfs, ebs, bfs = {}, {}, {}
+local cfs, ebs, bfs, tabs = {}, {}, {}, {}
 for i = 1, 10 do
     cfs[i] = add("ChatFrame" .. i, 256, 1)
     ebs[i] = add("ChatFrame" .. i .. "EditBox", 32, (i == 1 and 1 or 0.35))
+    -- §8.92 鼠标仲裁断言用：页签对象（几何悬停态手动置 mouseOver）
+    tabs[i] = add("ChatFrame" .. i .. "Tab", 32, 1)
     -- §8.95 实机：ChatFrame1..4 = 1.00、5..10 = 0.20（暴雪按窗口激活态写），我们接手后统一写同一值
     bfs[i] = add("ChatFrame" .. i .. "ButtonFrame", 32, (i <= 4 and 1 or 0.2))
 end
@@ -524,27 +528,34 @@ ChatBand:ReleaseEditFade("ChatFrame1")
 check("§8.96 退出渐隐档 alpha 复位 1（否则半透明会漂到 show 档）",
     math.abs(ebs[1].alpha - 1) < 0.01, tostring(ebs[1].alpha))
 
--- §8.96 回归修复（2026-11-11 作者实机：fade 档常显输入框接走页签点击）：
--- 未聚焦 + 没悬停 = 关鼠标（穿透给页签 / 世界）；聚焦或悬停 = 开回来（点输入框聚焦的手感）。
+-- §8.92 输入框鼠标仲裁（2026-11-11 二次修复：实机证伪层级仲裁 —— 压到 L0 仍被抢，
+-- 裁决与 level 无关 ⇒ 改几何让位，三档通用）：鼠标在任何页签上 = 恒让位；
+-- 否则聚焦或悬停输入框自身时开。
 db.skins.chatEditBoxMode = "fade"
+ebs[1].shown = true
 ebs[1].focused = false
+ebs[1].mouseOver = false
+tabs[1].mouseOver = false
 ChatBand:SyncEditMouse("ChatFrame1")
-check("§8.96 fade 档未聚焦+未悬停关输入框鼠标（页签点击回归修复）",
+check("§8.92 鼠标不在聊天区：输入框鼠标关（让位页签 / 世界）",
+    ebs[1].mouse == false, tostring(ebs[1].mouse))
+ebs[1].mouseOver = true
+ChatBand:SyncEditMouse("ChatFrame1")
+check("§8.92 悬停输入框自身（不在页签上）：鼠标开（点输入框聚焦的手感）",
+    ebs[1].mouse == true, tostring(ebs[1].mouse))
+tabs[1].mouseOver = true
+ChatBand:SyncEditMouse("ChatFrame1")
+check("§8.92 悬停页签：未聚焦也让位（页签点击修复核心）",
     ebs[1].mouse == false, tostring(ebs[1].mouse))
 ebs[1].focused = true
 ChatBand:SyncEditMouse("ChatFrame1")
-check("§8.96 fade 档聚焦时输入框鼠标开回来",
+check("§8.92 聚焦但鼠标在页签上：仍让位（修打字时点页签被抢）",
+    ebs[1].mouse == false, tostring(ebs[1].mouse))
+tabs[1].mouseOver = false
+ChatBand:SyncEditMouse("ChatFrame1")
+check("§8.92 聚焦且不在页签上：鼠标开（点输入框内可摆光标）",
     ebs[1].mouse == true, tostring(ebs[1].mouse))
 ebs[1].focused = false
-ChatBand.Enter(ebs[1])
-ChatBand:SyncEditMouse("ChatFrame1")
-check("§8.96 fade 档悬停聊天区时输入框鼠标开回来",
-    ebs[1].mouse == true, tostring(ebs[1].mouse))
-ChatBand.Leave(ebs[1])
-db.skins.chatEditBoxMode = "show"
-ChatBand:SyncEditMouse("ChatFrame1")
-check("§8.96 非 fade 档鼠标常开（不走让位这条路）",
-    ebs[1].mouse == true, tostring(ebs[1].mouse))
 -- §8.92 三态层级（2026-11-11 页签点击修复）：常显 + 未聚焦时输入框压到页签容器之下（GDM−1），
 -- 点击归页签 —— 平局裁决按建框先后，同 level 时晚建的输入框会赢，必须显式错开。
 db.skins.chatEditBoxMode = "fade"
