@@ -371,6 +371,7 @@ function ChatBand:SyncInputLayer(name)
         if cb and type(cb.SetFrameLevel) == "function" then
             pcall(cb.SetFrameLevel, cb, want - 1)
         end
+        self:SyncEditMouse(name)   -- 聚焦边沿：立刻能吃点击
         return
     end
 
@@ -381,6 +382,7 @@ function ChatBand:SyncInputLayer(name)
         pcall(cb.SetFrameLevel, cb, rec.cb)
     end
     INPUT_LAYER[name] = nil
+    self:SyncEditMouse(name)       -- 失焦边沿：fade 档没悬停就还给页签
 end
 
 --- §8.91 输入框隐藏档：平时 `SetShown(false)` 折叠输入框带；当用户聚焦输入框（按 Enter / 点击聊天框进入输入态）
@@ -431,6 +433,27 @@ function ChatBand:ReleaseEditFade(name)
     if not EDIT_FADE[name] then return end
     EDIT_FADE[name] = nil
     self:SetEditAlpha(name, 1)
+    self:SyncEditMouse(name)
+end
+
+--- `fade` 档的点击语义（§8.96 回归修复，2026-11-11 作者实机确认）：常显的输入框会**接走**
+--- 同带页签的点击 —— 页签淡出时容器 GDM α0 / 鼠标关，那状态下点击到不了页签，
+--- 于是全落在常显的 EditBox 上（聚焦 = 渐隐引擎拉亮，看着就是"一点鼠标就打开输入框"）。
+--- 规矩：fade 档**未聚焦且没悬停聊天区**时关输入框鼠标，退回 0.13.4 hide 档的穿透语义；
+--- 悬停（几何判定，不依赖鼠标开关）或聚焦再开回来，保住"点输入框聚焦"的手感。
+--- 其余档（hide / show）鼠标常开，不走这条。
+function ChatBand:SyncEditMouse(name)
+    local eb = Skin:Need(name .. "EditBox")
+    if not eb or type(eb.EnableMouse) ~= "function" then return end
+    local want = true
+    if self:EditBoxMode() == "fade" then
+        local okF, focused = pcall(eb.HasFocus, eb)
+        want = (okF and focused == true) or self:AnyHover()
+    end
+    local okM, was = pcall(eb.IsMouseEnabled, eb)
+    if not okM or was ~= want then
+        pcall(eb.EnableMouse, eb, want)
+    end
 end
 
 --- 私有插值帧：一个 OnUpdate 推进所有输入框，不为每个 eb 各挂一个（10 窗 + 临时窗会散成十几个脚本）。
@@ -463,6 +486,8 @@ local function EditFadeStep(_, dt)
                     local want = (now - st.idleSince >= CHAT_EDIT_IDLE_DELAY) and CHAT_EDIT_IDLE_ALPHA or 1
                     if st.target ~= want then st.from = st.cur; st.target = want end
                 end
+                -- 焦点边沿同拍结算鼠标开关：聚焦那一下必须立刻能吃点击（0.2s 节流够快）。
+                ChatBand:SyncEditMouse(name)
             end
             local cur, tgt = st.cur or 1, st.target or 1
             if math.abs(cur - tgt) > 0.004 then
@@ -516,6 +541,7 @@ ChatBand.skinners = {
         else
             self:ReleaseEditFade(name)
         end
+        self:SyncEditMouse(name)   -- 1s 轮询兜底：换挡 / 悬停漏拍时把鼠标开关纠回
         -- 页签容器 `GeneralDockManager` 在暴雪源码里锚在 `ChatFrameNBackground:TOPLEFT`
         -- （偏移 0），cf 缩高 32 后整条跟着框顶下移、掉进输入框带、被输入框吃掉点击。
         -- 框缩掉的高度正好 = CHAT_INPUT_BAND，所以把 GDM 相对它的原宿主框抬 CHAT_INPUT_BAND，
@@ -917,6 +943,10 @@ end
 --- B291 有 3px 缝，直接 hide 会让鼠标跨缝那两帧闪一下。token 用来丢弃过期的隐藏请求，
 --- 0.18s 淡出让显隐更顺，跨缝不再硬跳。
 function ChatBand:Refresh()
+    -- 悬停边沿同拍结算输入框鼠标开关（fade 档：离开聊天区就还给页签/世界）。
+    for name in pairs(KNOWN_EB) do
+        self:SyncEditMouse(name)
+    end
     if not self:HoverEnabled() or self:AnyHover() then
         chatHideToken = chatHideToken + 1
         self:FadeTo(true)

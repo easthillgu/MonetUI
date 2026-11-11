@@ -519,6 +519,28 @@ check("§8.96 fade 档 HoldEditBox 把输入框保持 shown（渐隐不用 SetSh
 ChatBand:ReleaseEditFade("ChatFrame1")
 check("§8.96 退出渐隐档 alpha 复位 1（否则半透明会漂到 show 档）",
     math.abs(ebs[1].alpha - 1) < 0.01, tostring(ebs[1].alpha))
+
+-- §8.96 回归修复（2026-11-11 作者实机：fade 档常显输入框接走页签点击）：
+-- 未聚焦 + 没悬停 = 关鼠标（穿透给页签 / 世界）；聚焦或悬停 = 开回来（点输入框聚焦的手感）。
+db.skins.chatEditBoxMode = "fade"
+ebs[1].focused = false
+ChatBand:SyncEditMouse("ChatFrame1")
+check("§8.96 fade 档未聚焦+未悬停关输入框鼠标（页签点击回归修复）",
+    ebs[1].mouse == false, tostring(ebs[1].mouse))
+ebs[1].focused = true
+ChatBand:SyncEditMouse("ChatFrame1")
+check("§8.96 fade 档聚焦时输入框鼠标开回来",
+    ebs[1].mouse == true, tostring(ebs[1].mouse))
+ebs[1].focused = false
+ChatBand.Enter(ebs[1])
+ChatBand:SyncEditMouse("ChatFrame1")
+check("§8.96 fade 档悬停聊天区时输入框鼠标开回来",
+    ebs[1].mouse == true, tostring(ebs[1].mouse))
+ChatBand.Leave(ebs[1])
+db.skins.chatEditBoxMode = "show"
+ChatBand:SyncEditMouse("ChatFrame1")
+check("§8.96 非 fade 档鼠标常开（不走让位这条路）",
+    ebs[1].mouse == true, tostring(ebs[1].mouse))
 db.skins.chatEditBoxAutoHide = false
 
 print(failed == 0 and "ALL PASS" or (failed .. " FAILED"))
