@@ -6675,6 +6675,93 @@ Layers 里，而 `InboxFrame` 在 `MAIL_FRAMES` 中被单独 `M:Dress`（`Trade.
 
 **验收**：`/mui skins diagnose` 看 P0-2 是否报 miss；开邮箱读四张信纸的 `GetAlpha()`。
 
+### §8.101 材质补充三件：下拉箭头真材质 / 滑条全局兜底 / 工具钮图标（2026-11-11，`18d0a6b`）
+
+盘材质账（31 对 TGA/BLP 一一对应、Media 键全注册、自绘代码 `SetAtlas` 零调用）之后的
+三个实缺口，一次补齐：
+
+1. **设置面板下拉箭头**：`SimpleConfig` 的 `MakeDropdown` 原来用像素字体 `"v"` 冒充箭头，
+   小字号下读成字母。换成 `monet_chevron_up` 真材质（8×8、`Widget:Arrow` 朝下翻转、
+   neutral 染色），文件级 `chevrons` 表 + `MONETUI_THEME_CHANGED` 统一重染。
+2. **暴雪老式下拉子菜单箭头**（`DropDownList*ExpandArrow`，§8.48 认脸账本里最后一批
+   "无我们的图"）：`System.lua` 新增 `DressDropdownArrows`，挂在 `SkinMenus` 的 0.5s
+   轮询里与 `TintPanel` 同拍 —— 压原图 + 自建 chevron 朝右（照 `ScrollArrowButton` 那套
+   "压原图 + 另建自己的"，因为按钮进池复用、SwapArt 的一次性换图扛不住暴雪重设）；
+   幂等守卫记按钮、自建贴图打 `art` 标记、**隐藏的箭头不误画**（池复用的行可能带着
+   藏起来的箭头，只在 `IsShown` 时上色，没标记下一拍还能补）。
+3. **滑条**：`Skin:Slider` 本来就在（`SweepDeep` / `as="slider"` 都走它，TODO 那行
+   "首个实例出现时"是陈旧账），真缺口是全局兜底扫不认滑条 —— 补进 `ScanArrowFrame`
+   （`IsObjectType("Slider")` 双路探测），懒建 / 没美化过的窗口里的滑条也穿上。
+   实机 21 个滑条 4 个已穿，其中 `OpacityFrameSlider`（暴雪聊天透明度滑条）正是新兜底接住的。
+4. **新资产 `monet_tool_{sort,deposit,slots}`**：SVG 路线 32×32 实心剪影（整理 = 三条
+   递减横杠、一键存入 = 下箭头入托盘、栏位管理 = 2×2 格阵），无色相模具运行期染 bright，
+   `svg-to-tga.js` 出 TGA+BLP，Media 注册，`audit-pixels` STENCIL 名单 20→23。
+   清单收口：AGENTS 的 SVG 现役 6→11（顺手补记了 `combat_{sword,shield}` 那两张的旧账）、
+   STENCIL 旧文 21→23（实际数一直是 20，旧文本身就陈旧）。
+
+**闸门**：api-audit HARD=0 · audit-pixels 34 张 0 未过（新三张色相 0 / 孤立 0 / 白衬底 0）·
+check-frame-list 338 名一致 · audit-locals 过 · audit-taint 2 HIGH 与基线逐字一致（非本轮）·
+scheduler-probe 过 · luac 过。
+
+**实机**：44 个 chevron（id=-864）在位、字体 "v" 零残留；三张新 BLP 是**新文件**，
+运行中的客户端索引不到（`GetFileIDFromPath` 返回 nil，AGENTS「文件索引启动时建」判例），
+完全重启后 -941/-939/-940 就位。
+
+### §8.102 页签点击回归：fade 档输入框接走点击 —— 三刀修复（2026-11-11，`19b9343` / `76eeaaf` / `90908e0`）
+
+**症状**（§8.96 上线后作者实机）："聊天窗页面签点不到了，一点鼠标就会打开输入框"。
+作者对起因的记忆（"增加渐隐功能后才失效"）与 git log 完全吻合 —— 回归随对面车道 wip
+`25a656d` 镜像进本次 deploy。
+
+**根因两层**：
+1. **§8.92（0.13.4）的潜伏假设错误**："页签 = GDM+1 压得住输入框"。页签的 +1 是 GDM
+   **子树内部**层级；命中裁决时 GDM 子树整体拿 GDM 自己的 L1，与直挂 UIParent 的输入框
+   L1 **平局**。本客户端的裁决**不看 level**（实机：输入框压到 L0 仍被抢）—— 按**建框
+   先后**裁，晚建赢：`FloatingChatFrame.xml` 里 `GeneralDockManager`（:695）先于
+   `ChatFrame1`（:709）声明，输入框晚建。`hide` 档输入框空闲整个藏着、不参与裁决，雷没炸；
+   `fade` / `show` 是常显档，必炸。
+2. **fade 路径绕开层级管理**：`HideEditBox` 在 fade 档早退到 `HoldEditBox`，而
+   `SyncInputLayer` 只从 `HideEditBox` 调 —— fade 路径没有任何一拍结算过层级。
+
+**证据**：0.05s 记录仪（`_G.__muiDiag`，一次性诊断帧）ticks 1148–1164：鼠标稳定停在页签上
+（`ot=true` 连续 16 拍）、GDM α1 页签全亮、页签 LOW/L2 enabled 且 OnClick 完好 —— 点击
+仍把焦点翻到输入框（tick 1164），页签 OnClick 一次没触发、窗没切。排除有效 α0 跳过与
+L6 ButtonFrame（只压页签边缘）。
+
+**三刀**：
+- `19b9343` `SyncEditMouse` 初版：fade 档未聚焦且未悬停时关输入框鼠标 —— 必要不充分
+  （悬停是点击的前置，悬停即开鼠标等于没关）。
+- `76eeaaf` `SyncInputLayer` 两态→**三态**：聚焦 = GDM+BOOST（原设计）；**常显未聚焦 =
+  GDM−1**；隐藏 = 还原原始层级（原始层级改为第一次见到就记，fade/show 档可能永不聚焦；
+  `shownOverride` 用显式 if —— `and/or` 短路会吞 false）。实机仍被抢 ⇒ **证伪层级仲裁**；
+  压档保留（绘制顺序上输入框本就该在页签下面）。驱动接回 fade 路径：渐隐引擎 0.2s 拍 +
+  skinner 1s 拍。
+- `90908e0` **终局：鼠标几何让位**（三档通用）—— 输入框显示着时，**鼠标在任何页签上 =
+  恒关鼠标**（关鼠标的框不参与裁决 = 退出仲裁；顺带修掉"打字时点页签被输入框抢"的潜伏
+  同款）；其余位置聚焦或悬停输入框自身时才开（保住点输入框聚焦 / 点框内摆光标）。
+  驱动：渐隐引擎 0.2s 拍 + skinner 1s 拍 + 悬停边沿 `Refresh` 即时结算。
+
+**闸门**：`chat-band-probe` 122→131 项 ALL PASS。两个桩坑：页签对象 + `IsMouseOver`
+要补进桩；controlBg 的 `env.Marked` 桩必须装在**第一次行为级 PinLayout 之前**，否则
+`rec.cb` 记成 nil、还原分支静默跳过背板（harness 绿而实机错的那类洞）。
+
+**验收（作者实机通过）**：悬停页签等亮 → 点击正常切窗、输入框不弹；点输入框 → 正常聚焦
+渐亮；打着字点页签 → 也能切。
+
+**客户端行为入档**：camelot 1.60 的点击裁决不看 level、按建框先后（晚建赢）；同带控件
+让位只能**关鼠标退出裁决**，level 只管绘制顺序。诊断中那 4 条 `ADDON_ACTION_BLOCKED
+MonetUI UNKNOWN()` 是探针自己在 ForceTaint 上下文做真值测试撞的，不是游戏行为。
+
+### §8.103 工具钮改纯图标（2026-11-11，`179a388`）
+
+§8.101 的三颗钮第一版是"图标 + 文字"，作者实机反馈：18px 高的钮里 10px 像素字被挤成
+**竖排**。三颗统一改纯图标（10px 图标居中、不带文字，图标本身够表意），钮宽 44/64→20；
+`SORT_RESERVE` 58→34、`BANK_TOOLS_RESERVE` 144→56，货币文字让位跟着收窄。
+作者实机："图标大小刚好"。热加载即生效（钮是开包时懒建，文件级缓存 load 后重置）。
+
+**验收**：按 B 开背包 / 开银行看三颗钮（整理条 / 入盘箭头 / 格阵）；子菜单箭头
+（§8.101 第 2 条）仍待开一次老式下拉肉眼扫一眼。
+
 ## 9. 下一步（2026-11-04 深夜重写；旧版第 9 条"上线前 push + 徽章改正式版"已作废）
 
 
