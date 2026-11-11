@@ -57,14 +57,14 @@ local BANK_TABS    = { 6, 7, 8, 9, 10, 11, 12, 13, 14 }    -- CharacterBankTab_1
 --   未购买的 7..14 全 0 槽 ⇒ **索引与物理格子 1:1，不存在"同一格出现在多个索引"**（那条旧担忧作废）。
 local BANK_PAGE_CANDIDATES = { -2, -3 }   -- -1 是钥匙扣，见上（保留 -2/-3 只为将来客户端有内容时自动接上）
 
--- 「整理」按钮（背包档「剩余空间」标题行右端）：宽 44（10px 图标 + 「整理」两字）、
+-- 「整理」按钮（背包档「剩余空间」标题行右端）：纯图标钮 20 宽（10px 图标 + 两侧 5）、
 -- 右内边距 8、与货币文字间隔 6。
 -- 两处必须共用一个数：`EnsureWindow` 里货币文字的右端锚，和 `UpdateCurrencyTitle`
 -- 算可用宽度时的 reserve。银行档不建这颗钮，按 BANK_TOOLS_RESERVE 给两颗工具钮留位。
-local SORT_BTN_W  = 44
-local SORT_RESERVE = 8 + SORT_BTN_W + 6    -- 58
--- 银行两颗工具钮（各 64 宽，图标 + 四字）的标题行留位：右 4 + 64 + 间隔 4 + 64 + 余量 8。
-local BANK_TOOLS_RESERVE = 144
+local SORT_BTN_W  = 20
+local SORT_RESERVE = 8 + SORT_BTN_W + 6    -- 34
+-- 银行两颗工具钮（各 20 宽，纯图标）的标题行留位：右 4 + 20 + 间隔 4 + 20 + 余量 8。
+local BANK_TOOLS_RESERVE = 56
 
 -- ---- 标题行货币的图标模式（§8.84）-------------------------------------------
 -- 每格 = 14px 图标 + 3px 间隔 + 短数量文字，格间 8px；名称与完整数量移到悬停提示。
@@ -1638,9 +1638,10 @@ end
 -- 原来的「包裹管理」折叠面板整块删除（作者 11-06 拍板）：两个动作只剩这一处入口，
 -- 一行账（栏位 n/max · 空格 · 物品）在 `/mui bags probe` 里已经有，不再占一扇窗。
 local bankFreeWin, bankDepositBtn, bankTabBtn
---- 标题行工具钮（银行两颗 / 背包「整理」共用）。iconKey = Media.texture 的键（可选）：
---- 有图标时排版是「左 5 + 10px 图标 + 3 + 文字 + 右 4」，文字左对齐跟在图标后面；
---- 没图标时退回原来的居中文字。图标与文字同染 bright 档（深底板上的对比色，见下）。
+--- 标题行工具钮（银行两颗 / 背包「整理」共用）。iconKey = Media.texture 的键：
+--- 有图标就**只画图标不带文字** —— 18px 高的钮里图标 + 10px 像素字会把字挤成竖排
+--- （2026-11-11 作者实机反馈），图标本身够表意（整理条 / 入盘箭头 / 栏位格阵）。
+--- 没传图标时退回居中文字（当前三颗调用方都传了图标）。
 local function BankHeadButton(parent, label, width, onClick, iconKey)
     -- kind 必须是 "Button"：`Widget:CreateFrame` 不传 kind 默认建 Frame，Frame 没有
     -- RegisterForClicks / OnClick（建出来那一刻就 attempt to call nil）。
@@ -1649,24 +1650,21 @@ local function BankHeadButton(parent, label, width, onClick, iconKey)
     Widget:ButtonMaterial(button, { alpha = 0, weaveAlpha = 0.25 })
     button:EnableMouse(true)
     button:RegisterForClicks("AnyUp")
-    -- 色键是 bright：`edge` 摆在 bgAlpha 0.9 的深底板上会读成"禁用"（11-04 的实测判例）。
-    local text = Widget:Font(button, 10, "pixel", "bright", "CENTER")
     local iconPath = iconKey and Media:Texture(iconKey)
     if iconPath then
         local icon = button:CreateTexture(nil, "ARTWORK", nil, 2)
         icon:SetSize(10, 10)
-        icon:SetPoint("LEFT", button, "LEFT", 5, 0)
+        icon:SetPoint("CENTER")
         icon:SetTexture(iconPath)
+        -- 色键是 bright：`edge` 摆在 bgAlpha 0.9 的深底板上会读成"禁用"（11-04 的实测判例）。
         local ir, ig, ib = Widget:PaletteColor("bright")
         if ir then icon:SetVertexColor(ir, ig, ib) end
         Mark(icon, "art", true)   -- 自建贴图打标：认脸探针只信标记与字符串路径（#44/#45）
-        text:SetPoint("LEFT", icon, "RIGHT", 3, 0)
-        text:SetPoint("RIGHT", button, "RIGHT", -4, 0)
-        text:SetJustifyH("LEFT")
     else
+        local text = Widget:Font(button, 10, "pixel", "bright", "CENTER")
         text:SetAllPoints()
+        text:SetText(label)
     end
-    text:SetText(label)
     button:SetScript("OnClick", onClick)
     return button
 end
@@ -1710,9 +1708,9 @@ EnsureBankTitleTools = function(win)
     if bankFreeWin == win and bankDepositBtn then return end
     bankFreeWin = win
     if not bankDepositBtn then
-        bankTabBtn = BankHeadButton(win, "栏位管理", 64, ReleaseBlizzardBank, "monet_tool_slots")
+        bankTabBtn = BankHeadButton(win, "栏位管理", 20, ReleaseBlizzardBank, "monet_tool_slots")
         bankTabBtn:SetPoint("TOPRIGHT", win, "TOPRIGHT", -4, -6)
-        bankDepositBtn = BankHeadButton(win, "一键存入", 64, DepositAllBank, "monet_tool_deposit")
+        bankDepositBtn = BankHeadButton(win, "一键存入", 20, DepositAllBank, "monet_tool_deposit")
         bankDepositBtn:SetPoint("TOPRIGHT", bankTabBtn, "TOPLEFT", -4, 0)
     end
     -- 标题文字别伸到钮底下：标题是 FontString，限宽即可（Rule 仍按标题宽度画）。
