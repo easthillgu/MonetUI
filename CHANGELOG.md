@@ -3,6 +3,17 @@
 This file is used verbatim as the CurseForge release changelog (see `.pkgmeta`).
 Update the top section before tagging a new release.
 
+## 0.13.6 (2026-11-11)
+
+- Mailbox: fixed the parchment stationery background staying visible on the
+  read-mail and send-mail pages. It is now cleared like the rest of the
+  window, and stays cleared while the mailbox is open.
+- Skins: removed obsolete frame entries that do not exist on this client
+  (legacy chat-channel popups and the legacy auction house). The auction
+  house entry in the Skins settings is gone because it never matched
+  anything on this client; skinning the current auction UI is planned for a
+  later release.
+
 ## 0.13.5 (2026-11-11)
 
 - Chat input: new idle state with three modes (Settings -> Skins -> "input box
