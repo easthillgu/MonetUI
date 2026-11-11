@@ -3,6 +3,28 @@
 This file is used verbatim as the CurseForge release changelog (see `.pkgmeta`).
 Update the top section before tagging a new release.
 
+## 0.13.5 (2026-11-11)
+
+- Chat input: new idle state with three modes (Settings -> Skins -> "input box
+  idle state"): Fade (new default -- dims to 25% after 3 s idle, back to full on
+  focus), Hide (the previous auto-hide behavior) and Always shown. Switching
+  takes effect immediately, no reload needed.
+- Chat tabs: fixed a regression where clicking a tab focused the input box
+  instead of switching windows (introduced together with the fade mode; the
+  input box now yields every click on the tab strip, including while typing).
+- Settings panel: dropdown rows now use the same chevron artwork as the rest of
+  the UI instead of a font glyph.
+- Old-style dropdown menus: submenu arrows are now skinned with the same
+  chevron (the last batch of stock Blizzard art in the coverage ledger).
+- Sliders: skinned everywhere, including lazily created windows (e.g. the
+  Blizzard chat opacity slider).
+- Bags & Bank: the title-row tool buttons (Sort / Deposit All / Slot
+  Management) are now compact icon-only buttons.
+- World map: the close button is now actually skinned (the previous global
+  name does not exist on this client).
+- Gossip: the "Goodbye" button is now skinned (it sits two levels deep, past
+  the one-level deep scan).
+
 ## 0.13.4 (2026-11-11)
 
 - Chat frame: the outer plate is now exactly as tall as the minimap, with its
