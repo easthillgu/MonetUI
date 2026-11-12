@@ -10,20 +10,37 @@ local LibStub = _G.LibStub
 local LMC = LibStub and LibStub("LibMonetColor-1.0", true)
 local Secrets = ns.Secrets      -- Secrets.lua 在本文件之前加载（见 Utils.xml）
 
+-- 2026-11-12 作者拍板：默认（fallback）环境色 = 河林（mapID 2548，MonetColorMapData 实测行）。
+-- 引擎解析序 override -> data -> C_Map 父链 -> fallbackEnv（LibMonetColor:580-611），
+-- 原默认是无彩中灰 { h=0, s=0, l=0.5 }；此后认不出的地图一律按河林环境派生，
+-- 与作者常驻地观感一致。走引擎官方通道（SetFallbackEnv 内部 ClearCache+Refresh；
+-- 本文件加载时还没有消费者订阅 OnThemeColorsChanged，那次刷新只重算缓存、不广播重涂
+-- —— 与 MonetColorMapEnvOverride 的加载期论证同一条）。
+if LMC and type(LMC.SetFallbackEnv) == "function" then
+    pcall(LMC.SetFallbackEnv, LMC, 137.6, 0.305, 0.269)
+end
+
 local Color = {}
 ns.Color = Color
 
 -- Palette used when LibMonetColor is missing or the user turns the engine off.
+-- 2026-11-12 作者拍板：默认配色 = 河林（mapID 2548，h=137.6 s=0.305 l=0.269）。
+-- signature 3 + primary 的数值是**实机**把河林环境喂给引擎公共函数
+-- （LMC.ComputeEdgeColor / ComputeAmbientTint / ComputeHighlightWash / ComputeNeutral
+-- + GetRules）算出的逐位结果，不是手调 —— 引擎规则改版后应重跑一遍再同步这里。
+-- highlight / neutral 的引擎函数不返回 alpha，沿用原有 alpha（engine-on 时 Theme()
+-- 这两个 alpha 也永远取本表，两条路径观感一致）；health / resource / danger 是
+-- 功能色，设计上不 Monet 化（见文件头注释），不跟着环境换。
 local FALLBACK = {
-    edge      = { r = 0.85, g = 0.66, b = 0.36, a = 0.95 },  -- warm ochre
-    ambient   = { r = 0.24, g = 0.26, b = 0.36, a = 0.22 },  -- cool blue-grey
-    highlight = { r = 0.95, g = 0.93, b = 0.84, a = 0.50 },  -- soft cream
-    neutral   = { r = 0.62, g = 0.60, b = 0.57, a = 0.85 },  -- Monet grey
+    edge      = { r = 0.809, g = 0.653, b = 0.763, a = 0.800 },  -- 河林 edge（引擎实测）
+    ambient   = { r = 0.261, g = 0.248, b = 0.290, a = 0.253 },  -- 河林 ambient（引擎实测）
+    highlight = { r = 0.497, g = 0.541, b = 0.532, a = 0.50 },   -- 河林 highlight（RGB 引擎实测）
+    neutral   = { r = 0.726, g = 0.736, b = 0.729, a = 0.85 },   -- 河林 neutral（RGB 引擎实测）
 
     health    = { r = 0.20, g = 0.80, b = 0.20, a = 1.00 },
     resource  = { r = 0.20, g = 0.50, b = 0.90, a = 1.00 },
     danger    = { r = 0.90, g = 0.20, b = 0.20, a = 1.00 },
-    primary   = { r = 0.85, g = 0.66, b = 0.36, a = 1.00 },
+    primary   = { r = 0.809, g = 0.653, b = 0.763, a = 1.00 },   -- 河林 edge RGB
 }
 
 -- 亮度阶梯（CIE L*）：把"窗口底衬 / 悬停底衬 / 掉血空槽 / 织纹 / 血条填充"五档在同一个色相家族里拉开。

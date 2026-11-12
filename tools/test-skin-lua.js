@@ -154,8 +154,10 @@ check('不再往暴雪控件挂 OnDown/OnUp 脚本', !/HookScript\("OnDown"|Hook
 check('不再 hooksecurefunc 控件 Enable', !/hooksecurefunc\(control, "Enable"/.test(skin));
 has(skin, /Widget:PollWatch\(control, function\(\)[\s\S]{0,400}IsEnabled/,
     'enabled 状态走 PollWatch（暴雪切状态不经过任何脚本，只能比）');
+// 2026-11-12 校准：Skin:Button 的 self:ControlState 在 L1287，函数头在 L1251，
+// 旧的 1200 字符窗已经量不到（CheckButton 那条用 2500 一直过）。按函数体实际长度给。
 check('ControlState 从不在 Skin:Button 里被跳过',
-      /function Skin:Button[\s\S]{0,1200}self:ControlState\(/.test(skin));
+      /function Skin:Button[\s\S]{0,2500}self:ControlState\(/.test(skin));
 check('ControlState 从不在 Skin:CheckButton 里被跳过',
       /function Skin:CheckButton[\s\S]{0,2500}self:ControlState\(/.test(skin));
 
@@ -204,8 +206,11 @@ const registered = [...skinsFilesSrc.matchAll(/M:Panel\("(\w+)"/g)].map(m => m[1
 const required = {
   trade:          ['TradeFrame', 'TradeFrameTradeButton', 'TradeFrameCancelButton'],
   editmode:       ['EditModeManagerFrame', 'EditModeSystemSettingsDialog'],
-  chat:           ['ChatFrame1', 'ChatFrame1EditBox', 'ChatChannelManagerPopup'],
-  playerspells:   ['PlayerSpellsFrame', 'SpellBookFrame', 'PlayerSpellsTab1'],
+  // 2026-11-12 按 §8.104 死名定案校准：1.60 频道 UI 真身 ChannelFrame / CreateChannelPopup，
+  // 技能书真身 PlayerSpellsFrame。旧的 ChatChannelManagerPopup / SpellBookFrame /
+  // PlayerSpellsTab1 在 1.60 全不存在，名单里已摘掉，别再拿它们当正确性依据。
+  chat:           ['ChatFrame1', 'ChatFrame1EditBox', 'CreateChannelPopup'],
+  playerspells:   ['PlayerSpellsFrame', 'PlayerSpellsFrameCloseButton', 'HeroTalentsSelectionDialog'],
   objectivetracker: ['ObjectiveTrackerFrame', 'ObjectiveTrackerHeader'],
   tooltip:        ['ItemRefTooltip'],
 };
@@ -217,7 +222,12 @@ for (const [key, names] of Object.entries(required)) {
 }
 // 邮件滚动框曾经把子窗口 InboxFrame 直接当滚动框传进 Skin:ScrollFrame —— 拿不到 ScrollBar 成员，
 // 函数静默返回，邮件列表的滚动条从来没被换过。现在走 Skin:Need 点路径（错名会在账本里留 ✗）。
-has(skinsFilesSrc, /Skin:Need\("MailListScrollFrame"\)/, '邮件滚动框走 Skin:Need 正确成员名');
+// 2026-11-12 校准：11-05 实机确认三种 …MailListScrollFrame 拼法在 1.60 都没有实名，
+// 收件箱滚动区是 ScrollBox + MinimalScrollBar，点名整组摘掉、由 MAIL_FRAMES 的 deep 接住。
+// 断言改成「主框仍走点路径」+「死名不许回来」，不再拿不存在的名字当正确性依据。
+has(skinsFilesSrc, /Skin:Need\("MailFrame"\)/, '邮箱主框走 Skin:Need 点路径');
+check('收件箱不再点名 ...MailListScrollFrame 死名',
+      !/Skin:Need\("[^"]*MailListScrollFrame"\)/.test(skinsFilesSrc));
 check('Skin:ScrollFrame 不再直接收 frame.InboxFrame（那是子窗口不是滚动框）',
       !/Skin:ScrollFrame\(frame\.InboxFrame\s+or/.test(skinsFilesSrc));
 
@@ -323,6 +333,31 @@ has(np, /pcall\(c\.SetAlpha, c, 0\)/, '兄弟子框压 alpha 0（不是 Hide，�
 has(np, /local function RestoreBlizzardSiblings\(base\)/, '有还原创（模块关掉原样归还）');
 has(np, /FadeBlizzardSiblings\(base, plate\)/, 'HideBlizzardPlate 里真的调了');
 check('绝不在暴雪框上写字段的纪律注释还在', /绝不往暴雪的框体[\s\S]{0,80}上写字段/.test(np));
+
+// ---------------------------------------------------------------- 15
+console.log('\n[15] 默认配色 = 河林（2026-11-12 作者拍板：很喜欢，拿它当默认）');
+// 两层都要在：① 引擎层——认不出的地图经 SetFallbackEnv 落到河林环境
+// （mapID 2548，MonetColorMapData 实测行 h=137.6 s=0.305 l=0.269）；
+// ② MonetUI 层——引擎缺失/关闭时的 FALLBACK 表 = 引擎对河林环境的实机派生值。
+// 数值不是手调的：LMC.ComputeEdgeColor / ComputeAmbientTint / ComputeHighlightWash /
+// ComputeNeutral + GetRules 实机算出的逐位结果；引擎规则改版后应重跑再同步
+// （与 Color.lua FALLBACK 头注释同源）。
+const colorSrc = srcOf('Utils/Color.lua');
+has(colorSrc, /pcall\(LMC\.SetFallbackEnv,\s*LMC,\s*137\.6,\s*0\.305,\s*0\.269\)/,
+    '引擎 fallbackEnv 走 SetFallbackEnv 官方通道喂河林环境');
+has(colorSrc, /edge\s*=\s*\{\s*r = 0\.809,\s*g = 0\.653,\s*b = 0\.763,\s*a = 0\.800\s*\}/,
+    'FALLBACK.edge = 河林派生值（引擎实测）');
+has(colorSrc, /ambient\s*=\s*\{\s*r = 0\.261,\s*g = 0\.248,\s*b = 0\.290,\s*a = 0\.253\s*\}/,
+    'FALLBACK.ambient = 河林派生值（引擎实测）');
+has(colorSrc, /highlight\s*=\s*\{\s*r = 0\.497,\s*g = 0\.541,\s*b = 0\.532,\s*a = 0\.50\s*\}/,
+    'FALLBACK.highlight = 河林派生值（RGB 引擎实测，alpha 沿用原值）');
+has(colorSrc, /neutral\s*=\s*\{\s*r = 0\.726,\s*g = 0\.736,\s*b = 0\.729,\s*a = 0\.85\s*\}/,
+    'FALLBACK.neutral = 河林派生值（RGB 引擎实测，alpha 沿用原值）');
+has(colorSrc, /primary\s*=\s*\{\s*r = 0\.809,\s*g = 0\.653,\s*b = 0\.763,\s*a = 1\.00\s*\}/,
+    'FALLBACK.primary = 河林 edge RGB');
+// 功能色不跟着环境换（文件头设计口径：never Monetised）—— 河林化不许顺手改这三行。
+has(colorSrc, /health\s*=\s*\{\s*r = 0\.20,\s*g = 0\.80,\s*b = 0\.20,\s*a = 1\.00\s*\}/,
+    'FALLBACK.health 功能色不 Monet 化（不跟环境换）');
 
 console.log('\n' + (bad === 0 ? '全部通过' : bad + ' 项未通过'));
 process.exit(bad === 0 ? 0 : 1);
