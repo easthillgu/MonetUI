@@ -3,6 +3,31 @@
 This file is used verbatim as the CurseForge release changelog (see `.pkgmeta`).
 Update the top section before tagging a new release.
 
+## 0.13.7 (2026-11-12)
+
+- Skins (regression fix): decorations that were "cleared but came back" after
+  page switches, maximize/minimize or re-rendering are now re-applied on every
+  refresh instead of hidden once. Affected windows: character window (paper
+  doll and reputation pages), spell book and talent window, world map.
+- Character window: the skin now reaches deeper -- equipment slot backdrops,
+  the outer metal frame art and the divider lines are cleared, while the
+  paper-doll background artwork and our own dark plate stay visible.
+- Spell book / talents: pages keep a faint paper tint instead of going fully
+  black; the talent tree artwork is untouched. Newly learned spells and tab
+  switches get skinned as well.
+- World map: the border decorations stay cleared when maximizing/minimizing,
+  and the close button is visible again (a container-level fade was swallowing
+  it).
+- Chat: fixed the input box border not following the channel color when
+  switching chat types (a dead frame name made the lookup miss).
+- Colors: the fallback palette (used for maps without color data, or with the
+  color engine disabled) is now derived from the Helin (河林) environment
+  instead of neutral grey / warm ochre tones.
+- Unit frames: fixed a white frame flashing when joining a group while in
+  combat, and a one-shot notice row for that case.
+- Skins: texture detection now also recognizes `file=` art paths, keeping
+  functional icons exempt from skinning.
+
 ## 0.13.6 (2026-11-11)
 
 - Mailbox: fixed the parchment stationery background staying visible on the

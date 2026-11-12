@@ -2,7 +2,7 @@
 ## Title: MonetUI
 ## Notes: Monet-style UI addon - adaptive Impressionist color engine integration
 ## Author: EastHillGu
-## Version: 0.13.6
+## Version: 0.13.7
 ## Category: Interface
 ## IconTexture: Interface\AddOns\MonetUI\Assets\Textures\monet_addon_icon.blp
 ## X-Website: https://github.com/EastHillGu/MonetUI
