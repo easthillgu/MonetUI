@@ -3,8 +3,10 @@
 --
 -- 为什么单独一条：harness 只 pump 登录那一秒，DevProbe 是懒建模块 —— run.js 的红 0
 -- 对它是"没跑到"，不是"跑过没红"。本探针把真文件 loadfile 进假环境，手动驱动
--- 「开面板 → dig → 预览 tick → 左键确认 → 枚举 → 点行复制」整条链，外加
--- 右键取消 / 机密名 / forbidden / 匿名祖先 / GetMouseFoci 缺席退路 / 截断。
+-- 「开面板 → 指针下候选 → /mui dig 当拍枚举 → 点行复制」整条链，外加
+-- 指针下没货 / 机密名 / forbidden / 匿名祖先 / GetMouseFoci 缺席退路 / 截断。
+-- 流程（2026-11-12 定稿）：先点选目标（指针放到目标上），再输 /mui dig 触发探测
+-- —— 没有全屏接住器、没有预览轮询，命令当拍用 FindCandidate 取候选。
 --
 -- 跑法：lua tools/harness/devprobe-probe.lua
 -- 退出码：全过 0，任一失败 1。
@@ -203,6 +205,17 @@ local function FrameNamed(name)
     end
     return nil
 end
+local function SubCount()
+    local n = 0
+    for _ in pairs(subs) do n = n + 1 end
+    return n
+end
+local function StatusTextOf(panel)
+    for _, r in ipairs(panel.regions) do
+        if r.otype == "FontString" and (r.text or ""):find("框体", 1, true) then return r end
+    end
+    return nil
+end
 
 -- ---------------------------------------------------------------- 加载真文件
 
@@ -220,24 +233,10 @@ ok(M:HandleCommand("") == true, "/mui dev 入口消费命令")
 local panel = FrameNamed("MonetUIDevProbeFrame")
 ok(panel ~= nil and panel.shown, "面板建出来且显示")
 ok(panel and panel.w == 256 and panel.h == 256, "尺寸 256×256")
-ok(panel and panel.strata == "DIALOG", "strata = DIALOG（在普通窗口之上、接住器之下）")
+ok(panel and panel.strata == "DIALOG", "strata = DIALOG（普通窗口之上）")
 ok(panel and panel.themed ~= nil and panel.material ~= nil, "主题边框 + 斜纹画布都接上（Theme + ButtonMaterial）")
 
--- ---------------------------------------------------------------- 2. dig 起点选
-
-ok(M:HandleCommand("dig") == true, "/mui dig 入口消费命令")
-local catcher = FrameNamed("MonetUIDevProbeCatcher")
-local highlight = FrameNamed("MonetUIDevProbeHighlight")
-ok(catcher ~= nil and catcher.shown and catcher.mouse == true, "接住器显示且收鼠标")
-local subCount, tickFn, tickLabel, tickMs = 0, nil, nil, nil
-for _, s in pairs(subs) do
-    subCount = subCount + 1
-    tickFn, tickLabel, tickMs = s.fn, s.label, s.ms
-end
-ok(subCount == 1 and tickMs == 100 and tickLabel == "DevProbe:点选预览",
-    "点选预览 = Scheduler:Every(100ms) 且带显式标签")
-
--- ---------------------------------------------------------------- 3. 假目标树
+-- ---------------------------------------------------------------- 2. 假目标树 + /mui dig 当拍枚举
 
 local merchant = MakeFrame("Frame", "MerchantFrame", UIParent)
 merchant.rect = { 100, 200, 400, 500 }
@@ -251,33 +250,16 @@ local tex = MakeTexture()
 tex.atlas = "SpellIcon-256x256-Repair"
 repairBtn.regions = { tex }
 
-GetMouseFoci = function() return { catcher, merchant } end
+-- GetMouseFoci 返回我们自己的面板 + 目标：自家的要被跳过。
+GetMouseFoci = function() return { panel, merchant } end
 
--- ---------------------------------------------------------------- 4. 预览 tick
-
-tickFn()
-ok(highlight.shown and highlight.w == 400 and highlight.h == 500,
-    "预览高亮跟着候选矩形走（GetMouseFoci 跳过自家接住器）")
-local status = FrameNamed("MonetUIDevProbeFrame") and panel.regions
--- statusText 是面板的 FontString region；找含「点选目标」的那条
-local statusFS
-for _, r in ipairs(panel.regions) do
-    if r.otype == "FontString" and r.text:find("点选目标", 1, true) then statusFS = r end
-end
-ok(statusFS ~= nil and statusFS.text:find("MerchantFrame", 1, true),
-    "状态行报出候选名字 MerchantFrame")
-
--- ---------------------------------------------------------------- 5. 左键确认 → 枚举
-
-catcher.scripts.OnMouseDown(catcher, "LeftButton")
-local subAfter = 0
-for _ in pairs(subs) do subAfter = subAfter + 1 end
-ok(subAfter == 0 and not catcher.shown and not highlight.shown,
-    "确认后摘订阅、收接住器与高亮（不留常驻轮询）")
+ok(M:HandleCommand("dig") == true, "/mui dig 入口消费命令")
 local report = db.devProbeReport
 ok(report ~= nil and report.root == "MerchantFrame" and report.total > 0,
-    "枚举落账本 devProbeReport（root = MerchantFrame）")
+    "命令当拍枚举落账本 devProbeReport（root = MerchantFrame，候选跳过自家面板）")
 ok(any("已探测 MerchantFrame"), "聊天框打一行摘要")
+ok(panel.shown, "dig 后面板在屏（结果在面板里看）")
+ok(SubCount() == 0, "dig 不留常驻轮询订阅（Scheduler 一条都没挂）")
 
 local scroll = FrameNamed("MonetUIDevProbeList")
 local content = scroll and scroll.scrollChild
@@ -324,32 +306,17 @@ for _, row in ipairs(content.children) do
 end
 ok(not secretLeak, "机密名不出现在任何行文本里")
 
--- ---------------------------------------------------------------- 6. 右键取消
+-- ---------------------------------------------------------------- 3. 指针下没货 ⇒ 诚实一句
 
-M:HandleCommand("dig")
-ok(catcher.shown, "再输 /mui dig 重新进入点选")
+GetMouseFoci = function() return {} end
 local totalBefore = db.devProbeReport.total
-catcher.scripts.OnMouseDown(catcher, "RightButton")
-local subAfter2 = 0
-for _ in pairs(subs) do subAfter2 = subAfter2 + 1 end
-ok(subAfter2 == 0 and not catcher.shown and db.devProbeReport.total == totalBefore,
-    "右键 = 取消：摘订阅、收接住器、不触发枚举")
+ok(M:HandleCommand("dig") == true, "指针下没货：命令照样消费")
+ok(db.devProbeReport.total == totalBefore, "没候选时不覆盖账本")
+local statusFS = StatusTextOf(panel)
+ok(statusFS ~= nil and (statusFS.text or ""):find("鼠标下没有框体", 1, true),
+    "面板状态行诚实报「鼠标下没有框体」")
 
--- ---------------------------------------------------------------- 7. 关闭按钮 / 开关
-
-local closeBtn
-for _, fr in ipairs(allFrames) do
-    if fr.kind == "Button" and fr.parent == panel and fr.scripts.OnClick then closeBtn = fr end
-end
-ok(closeBtn ~= nil, "面板有关闭按钮")
-closeBtn.scripts.OnClick()
-ok(not panel.shown, "关闭按钮收面板（前置声明生效：闭包里的 DevProbe 不是全局 nil）")
-M:HandleCommand("")
-ok(panel.shown, "/mui dev 再开")
-M:HandleCommand("")
-ok(not panel.shown, "/mui dev 再关（开关语义）")
-
--- ---------------------------------------------------------------- 8. GetMouseFoci 缺席退路
+-- ---------------------------------------------------------------- 4. GetMouseFoci 缺席退路
 
 GetMouseFoci = nil
 merchant.mouseOver = true
@@ -362,58 +329,60 @@ EnumerateFrames = function()
     return enumList[enumIdx]
 end
 M:HandleCommand("dig")
-local tick2
-for _, s in pairs(subs) do tick2 = s.fn end
-tick2()
-local statusFS2
-for _, r in ipairs(panel.regions) do
-    if r.otype == "FontString" and r.text:find("点选目标", 1, true) then statusFS2 = r end
-end
-ok(statusFS2 ~= nil and statusFS2.text:find("MerchantRepairAllButton", 1, true),
-    "退路（EnumerateFrames+IsMouseOver）取最深的候选 = 子按钮")
-catcher.scripts.OnMouseDown(catcher, "LeftButton")
-ok(db.devProbeReport.root == "MerchantRepairAllButton", "退路点选后枚举的是子按钮子树")
+ok(db.devProbeReport.root == "MerchantRepairAllButton",
+    "退路（EnumerateFrames+IsMouseOver）取最深的候选 = 子按钮子树")
 EnumerateFrames = nil
 merchant.mouseOver = nil
 repairBtn.mouseOver = nil
 UIParent.mouseOver = nil
 
--- ---------------------------------------------------------------- 9. 两条腿都缺 ⇒ 不崩
+-- ---------------------------------------------------------------- 5. 两条腿都缺 ⇒ 不崩
 
-M:HandleCommand("dig")
-local tick3
-for _, s in pairs(subs) do tick3 = s.fn end
-local okTick = pcall(tick3)
-ok(okTick and not highlight.shown, "GetMouseFoci/EnumerateFrames 都缺：tick 不崩、不高亮")
-local okClick = pcall(catcher.scripts.OnMouseDown, catcher, "LeftButton")
-local statusFS3
-for _, r in ipairs(panel.regions) do
-    if r.otype == "FontString" and r.text:find("没有点中任何框体", 1, true) then statusFS3 = r end
-end
-ok(okClick and statusFS3 ~= nil, "此时左键 = 诚实一句（面板状态行），不崩")
+GetMouseFoci = nil
+EnumerateFrames = nil
+local okCmd = pcall(M.HandleCommand, M, "dig")
+ok(okCmd, "GetMouseFoci/EnumerateFrames 都缺：命令不崩")
+statusFS = StatusTextOf(panel)
+ok(statusFS ~= nil and (statusFS.text or ""):find("鼠标下没有框体", 1, true),
+    "此时诚实一句（面板状态行），不写账本")
 
--- ---------------------------------------------------------------- 10. 截断
+-- ---------------------------------------------------------------- 6. 截断
 
 local wide = MakeFrame("Frame", "WideFrame", UIParent)
 wide.children = {}
 for i = 1, 700 do
     wide.children[i] = MakeFrame("Button", "WideChild" .. i, wide)
 end
-GetMouseFoci = function() return { catcher, wide } end
+GetMouseFoci = function() return { wide } end
 M:HandleCommand("dig")
-local tick4
-for _, s in pairs(subs) do tick4 = s.fn end
-tick4()
-catcher.scripts.OnMouseDown(catcher, "LeftButton")
 ok(db.devProbeReport.root == "WideFrame" and db.devProbeReport.truncated == true
     and db.devProbeReport.total == 600,
     "700 件大窗：截断在 600 行且账本注明 truncated")
 
--- ---------------------------------------------------------------- 11. 静态边界
+-- ---------------------------------------------------------------- 7. 关闭按钮 / 开关
+
+GetMouseFoci = nil
+local closeBtn
+for _, fr in ipairs(allFrames) do
+    if fr.kind == "Button" and fr.parent == panel and fr.scripts.OnClick then closeBtn = fr end
+end
+ok(closeBtn ~= nil, "面板有关闭按钮")
+closeBtn.scripts.OnClick()
+ok(not panel.shown, "关闭按钮收面板（前置声明生效：闭包里的 DevProbe 不是全局 nil）")
+M:HandleCommand("")
+ok(panel.shown, "/mui dev 再开")
+M:HandleCommand("")
+ok(not panel.shown, "/mui dev 再关（开关语义）")
+
+-- ---------------------------------------------------------------- 8. 静态边界
 
 local codeSrc = src:gsub("%-%-[^\n]*", "")
 ok(not codeSrc:find("hooksecurefunc", 1, true) and not codeSrc:find("HookScript", 1, true),
     "不挂 hooksecurefunc / HookScript（暴雪框只读，脚本只挂自建框）")
+ok(not codeSrc:find("FULLSCREEN_DIALOG", 1, true) and not codeSrc:find("MonetUIDevProbeCatcher", 1, true),
+    "旧点选接住器已退役（不再有全屏接住框）")
+ok(not codeSrc:find("Every(", 1, true),
+    "不注册 Scheduler 常驻驱动（候选命令当拍取）")
 
 print(("devprobe-probe: %d 过 / %d 失"):format(pass, failcount))
 os.exit(failcount == 0 and 0 or 1)

@@ -1,16 +1,17 @@
 -- Modules/Tools/DevProbe.lua
 -- 游戏内元素探测面板（仅开发版）：
 --   /mui dev  开关面板（256×256，主题色边框 + 斜纹画布）
---   /mui dig  开始/取消鼠标点选：左键点中的窗体 = 探测目标，右键取消
--- 点中后枚举目标包含的框体与贴图，逐行列在面板里；点行选中，名字进底部输入框，
+--   /mui dig  枚举「指针下」的窗体：先把鼠标指到目标窗口上，再输这条命令
+-- 结果逐行列在面板里；点行选中，名字进底部输入框，
 -- Ctrl+C 复制出来接线美化。全量同时落 MonetUIDB.devProbeReport（聊天框装不下）。
 --
 -- 硬约束（对齐 AGENTS.md，逐条自检）：
---   * 面板 / 接住器 / 高亮框全是自建 CreateFrame（MonetUI* 名字），不做暴雪框的子框；
+--   * 面板全是自建 CreateFrame（MonetUI* 名字），不做暴雪框的子框；
 --   * 枚举暴雪框**只读**：每个 Get* 都 pcall，入口过 Widget:Readable，
 --     字符串/数字出栈前过 Secrets.CanRead（机密串的 type() 照样是 "string"）；
---   * 不往暴雪对象写字段、不挂 HookScript / hooksecurefunc；点选预览走 Scheduler 轮询
---     （本客户端没有 GetMouseFocus，优先 GetMouseFoci，缺席退回 EnumerateFrames+IsMouseOver）；
+--   * 不往暴雪对象写字段、不挂 HookScript / hooksecurefunc；候选在命令当拍取
+--     （本客户端没有 GetMouseFocus，优先 GetMouseFoci，缺席退回 EnumerateFrames+IsMouseOver），
+--     不留任何常驻轮询；
 --   * 脚本钩子只挂自建框（面板拖动 / 行点击 / 输入框），与 Config/SimpleConfig.lua 同例。
 
 local ADDON_NAME, ns = ...
@@ -19,7 +20,6 @@ local Secrets   = ns.Secrets
 local Widget    = ns.Widget
 local Media     = ns.Media
 local Color     = ns.Color
-local Scheduler = ns.Scheduler
 
 local PANEL_SIZE = 256
 local LIST_W, LIST_H = 240, 158
@@ -27,7 +27,6 @@ local ROW_H = 16
 local MAX_ROWS = 600          -- 大窗口（商人 ~600 件）截断上限，截断会在状态行注明
 local MAX_DEPTH = 10
 local MAX_REGIONS = 10        -- 每框最多列这么多 region，防 600 件窗刷屏
-local PICK_MS = 100           -- 点选预览轮询间隔
 
 -- ---------------------------------------------------------------------------
 -- 状态（全部模块级局部；框体懒建，登录时一个字节都不造）
@@ -39,15 +38,10 @@ local dataRows = {}           -- 当前探测结果 {label, copy, kind, objType,
 local truncated = false
 local currentRootName = nil
 
-local catcher, highlight
-local picking = false
-local pickSubId = nil
-local previewTarget = nil
-
 -- 前置声明：BuildPanel 的脚本闭包引用这些助手与模块表，而本体写在后面 ——
 -- 不先声明就是全局 nil，静态闸门全绿、运行到那一刻才炸（AGENTS「引用了还没声明的 local」）。
 local DevProbe = { name = "DevProbe" }
-local Dig, FindCandidate, StopPick
+local Dig, FindCandidate
 
 -- ---------------------------------------------------------------------------
 -- 安全读值（与 Modules/Tools/DevTools.lua 同一套口径：pcall + CanRead，读不出 = nil）
@@ -235,7 +229,7 @@ local function BuildPanel()
     statusText:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -30)
     statusText:SetWidth(LIST_W)
     statusText:SetWordWrap(false)
-    statusText:SetText("输入 /mui dig，然后用鼠标点选目标窗口")
+    statusText:SetText("指针放到目标窗口上，再输 /mui dig")
 
     scroll = CreateFrame("ScrollFrame", "MonetUIDevProbeList", panel)
     scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 8, -48)
@@ -275,34 +269,6 @@ local function BuildPanel()
     hintText:SetWidth(LIST_W)
     hintText:SetWordWrap(false)
     hintText:SetText("点行选中 · Ctrl+C 复制 · 滚轮翻页")
-
-    -- 点选接住器：全屏、盖在普通窗口之上，左键确认 / 右键取消。
-    catcher = CreateFrame("Frame", "MonetUIDevProbeCatcher", UIParent)
-    catcher:SetAllPoints(UIParent)
-    catcher:SetFrameStrata("FULLSCREEN_DIALOG")
-    catcher:EnableMouse(true)
-    catcher:SetScript("OnMouseDown", function(_, button)
-        if button == "RightButton" then
-            StopPick()
-            statusText:SetText("已取消点选。/mui dig 重新点选")
-            return
-        end
-        local target = previewTarget or FindCandidate()
-        StopPick()
-        if target then
-            Dig(target)
-        else
-            statusText:SetText("没有点中任何框体。/mui dig 重新点选")
-        end
-    end)
-    catcher:Hide()
-
-    -- 预览高亮：只画边框不挡鼠标（EnableMouse(false)），跟着候选框的矩形走。
-    highlight = CreateFrame("Frame", "MonetUIDevProbeHighlight", UIParent, "BackdropTemplate")
-    highlight:SetFrameStrata("FULLSCREEN_DIALOG")
-    highlight:EnableMouse(false)
-    Widget:Theme(highlight, { thickness = 2, bgAlpha = 0, borderAlpha = 1, borderKey = "bright" })
-    highlight:Hide()
 
     panel:Hide()
 end
@@ -406,7 +372,7 @@ function Dig(root)
 end
 
 -- ---------------------------------------------------------------------------
--- 点选（GetMouseFoci 优先；缺席退回 EnumerateFrames + IsMouseOver 全量扫）
+-- 候选（命令当拍取：GetMouseFoci 优先；缺席退回 EnumerateFrames + IsMouseOver 全量扫）
 
 function FindCandidate()
     if type(_G.GetMouseFoci) == "function" then
@@ -445,54 +411,6 @@ function FindCandidate()
     return best
 end
 
-local function PickTick()
-    if not picking then return end
-    local target = FindCandidate()
-    previewTarget = target
-    if not target then
-        highlight:Hide()
-        statusText:SetText("点选目标：鼠标下没有框体（右键取消）")
-        return
-    end
-    local ok, l, b, w, h = pcall(target.GetRect, target)
-    if ok and type(l) == "number" and type(b) == "number"
-        and type(w) == "number" and type(h) == "number"
-        and Secrets.CanRead(l) and Secrets.CanRead(b)
-        and Secrets.CanRead(w) and Secrets.CanRead(h) and w > 0 and h > 0 then
-        highlight:ClearAllPoints()
-        highlight:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", l, b)
-        highlight:SetSize(w, h)
-        highlight:Show()
-    else
-        highlight:Hide()
-    end
-    statusText:SetText(("点选目标：%s（左键确认 · 右键取消）"):format(SafeName(target) or "(匿名)"))
-end
-
-local function StartPick()
-    if picking then return end
-    picking = true
-    previewTarget = nil
-    catcher:Show()
-    statusText:SetText("点选目标：移到目标窗口上，左键确认（右键取消）")
-    if not pickSubId then
-        pickSubId = Scheduler:Every(PICK_MS, PickTick, "DevProbe:点选预览")
-    end
-    ns:Print("点选模式：左键点目标窗口 = 枚举它的元素；右键或再输 /mui dig 取消。")
-end
-
-function StopPick()
-    if not picking then return end
-    picking = false
-    previewTarget = nil
-    if pickSubId then
-        Scheduler:Unregister(pickSubId)
-        pickSubId = nil
-    end
-    if catcher then catcher:Hide() end
-    if highlight then highlight:Hide() end
-end
-
 -- ---------------------------------------------------------------------------
 -- 模块入口（DevProbe 表已在文件头前置声明）
 
@@ -502,7 +420,6 @@ function DevProbe:Open()
 end
 
 function DevProbe:Close()
-    StopPick()
     if panel then panel:Hide() end
 end
 
@@ -518,12 +435,14 @@ end
 function DevProbe:HandleCommand(rest)
     local arg = string.lower(rest or "")
     if arg == "dig" then
+        -- 候选要在开面板**之前**取：面板落点在屏幕中央偏右，可能正好压住指针。
+        local target = FindCandidate()
         self:Open()
-        if picking then
-            StopPick()
-            statusText:SetText("已取消点选。/mui dig 重新点选")
+        if target then
+            Dig(target)
         else
-            StartPick()
+            statusText:SetText("鼠标下没有框体。指针放到目标上，再输 /mui dig")
+            ns:Print("指针下没有可枚举的框体：把鼠标指到目标窗口上，再输 /mui dig。")
         end
         return true
     end
@@ -535,7 +454,7 @@ function DevProbe:HandleCommand(rest)
         self:Close()
         return true
     end
-    ns:Print("用法：/mui dev（开关面板）· /mui dig（鼠标点选目标窗口）")
+    ns:Print("用法：/mui dev（开关面板）· /mui dig（枚举指针下的窗体）")
     return true
 end
 
