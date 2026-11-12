@@ -102,7 +102,12 @@ for (const [name, file] of repoFiles) {
 }
 for (const name of installedFiles.keys()) if (!repoFiles.has(name)) extra.push(name);
 
-const sync = missing.length === 0 && stale.length === 0 && extra.length === 0;
+// 2026-11-12：EXTRA 里只有文档类旧部署残留（CHANGELOG.md / README.md）时不该判
+// OUT OF SYNC —— 客户端不加载它们，且 deploy 的 FILES 清单本就不含它们，跑多少遍
+// deploy 都清不掉。运行时文件（.lua/.xml/.toc/.blp/...）仍算不同步，避免放过幽灵代码。
+const RUNTIME_EXT = /\.(lua|xml|toc|blp|tga|ttf)$/i;
+const actionableExtra = extra.filter((name) => RUNTIME_EXT.test(name));
+const sync = missing.length === 0 && stale.length === 0 && actionableExtra.length === 0;
 
 if (!quiet) {
     const show = (label, list, hint) => {
@@ -114,9 +119,9 @@ if (!quiet) {
     console.log(`installed : ${installed}`);
     show('MISSING in game copy', missing, '-- new files the client will not load');
     show('STALE in game copy', stale, '-- edited here, never deployed');
-    show('EXTRA in game copy', extra, '-- leftovers from an older deploy (harmless, but they are not in this repo)');
+    show('EXTRA in game copy', extra, '-- leftovers from an older deploy (docs-only: ignored; a runtime file here would fail the check)');
     console.log(sync
-        ? '\nin sync: the client loads exactly this repo.'
+        ? '\nin sync: the client loads exactly this repo\'s runtime files.'
         // 脚本名是历史遗留：tools/deploy-retail.ps1 的默认目标就是上面这行 installed（_forever_，16001）。
         : '\nOUT OF SYNC: run  powershell -File tools/deploy-retail.ps1'
             + '   (that name is legacy -- it deploys to the _forever_ path above)'

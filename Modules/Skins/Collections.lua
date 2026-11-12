@@ -75,6 +75,13 @@ local SPELLBOOK_BACKDROP_ATLAS = {
     "spellbook%-list%-backplate", "spellbook%-item%-backplate",
     "talent%-background", "talents%-background",
     "talents%-inner%-frame", "talents%-heroclass%-backplate",
+    -- §8.107（11-12 Aurora 研读 + 实机复扫）：PSF 还剩 11 类可见大装饰，其中这些是
+    -- **窗体边框件**（`!UI-Frame-LeftTile/RightTile` x2、`_UI-Frame-Bot` x2、
+    -- `_UI-Frame-TopTileStreaks`、搜索框的 `common-search-border-middle` x2），旧名单一条都没收。
+    -- 内容类（`Talents-Square-Box-*` 节点框、`talent-background-*` 已单列、Spinner 加载动画）
+    -- 一律不碰；`noAtlas` 那 35 张交给 FadePlainBackdrops 的几何门。
+    "!ui%-frame", "_ui%-frame", "common%-search%-border",
+    "gamepad%-uiframemetal",
 }
 -- 页底（羊皮纸）**不归零**：照 EUI 口径留 0.1 淡纸 —— 全 0 会让整页纯黑、丢掉"书"的感觉。
 local SPELLBOOK_PAGE_ATLAS = { "spellbook%-page" }
@@ -90,9 +97,17 @@ local TALENT_SHADOW_ATLAS = { "talents%-node.-shadow" }
 local function DarkenSpellbookPage()
     local f = Skin:Need("PlayerSpellsFrame")
     if not f then return end
-    Skin:FadeAtlasBackdrop(f, SPELLBOOK_BACKDROP_ATLAS)
+    -- §8.107：三趟全走「每趟都写」通道（显式 alpha；`0` 在 Lua 是真值 ⇒ 走 SetAlpha 不走 Fade）。
+    -- 原来第一趟用 Fade 的"隐藏一次"标记，暴雪 UpdateVisualState / 切页把 alpha 抬回来后
+    -- 标记还在、后续 Apply 直接早退 —— 实机 `talent-background-rogue` 仍是 α1 就是这个原因。
+    Skin:FadeAtlasBackdrop(f, SPELLBOOK_BACKDROP_ATLAS, nil, 0)
     Skin:FadeAtlasBackdrop(f, SPELLBOOK_PAGE_ATLAS, nil, 0.1)
     Skin:FadeAtlasBackdrop(f, TALENT_SHADOW_ATLAS, nil, 0)
+    -- Aurora `HidePagedSpellsBackgrounds` 的两层粒度，但只收认不出名字的数字 fileID 大底板
+    -- （实机 PSF 还剩 35 张）。层门**只约束本函数**：这里只收 BACKGROUND/BORDER 层，
+    -- `FadeAtlasBackdrop` 不分层、只认 atlas 字符串 —— 那张 1216x603 OVERLAY 的
+    -- `Talents-inner-frame-c60` 由上面的名单点名压 α0，复验证明是内框装饰、天赋树完好。
+    Skin:FadePlainBackdrops(f, { depth = 1, minSize = 120 })
     Skin:BrightenDarkText(f)
     -- EUI 口径的字段通道（比按 atlas 认更稳，名字与 `EllesmereUIBlizzardSkin_WindowPacks.lua` 同源）。
     local sb = f.SpellBookFrame
@@ -115,11 +130,9 @@ local function DarkenSpellbookPage()
     -- 无法证明收益、却引入了"图标丢"的嫌疑。按"宁可不换皮，也不动图标"收口。
     -- （`Skin:TabSystemArt` 内部也会跳过任何 `Icon` 有贴图的页签，双保险。）
     Skin:TabSystemArt(f.tabSystem or f.TabSystem)
-    -- 页签：**只做纯文字页签**（专精 / 天赋 / 法术书）。带图标的 `CategoryTabSystem`
-    -- 一律不碰 —— 2026-11-06 实机两次判例：那排图标页签在"收回"布局下与法术网格重叠，
-    -- 且图标/方模式/数组贴图三家并存，任何"换皮"都会把图标压没（`Skin:TabSystemArt`
-    -- 内部也会跳过任何 Icon 有贴图的页签）。
-    Skin:TabSystemArt(f.tabSystem or f.TabSystem)
+    -- 注：这里原本重复调了一次 `Skin:TabSystemArt`（同一实参、同一注释，§8.107 顺手删掉）。
+    -- 带图标的 `CategoryTabSystem` 一律不碰 —— 2026-11-06 实机两次判例：那排图标页签在
+    -- "收回"布局下与法术网格重叠，任何"换皮"都会把图标压没（内部也会跳过带 Icon 的页签）。
     -- 标题：字段通道认不到（挂在匿名子帧上），按几何认领后排成我们的样式 + 一条发丝线。
     local title = Skin:AdoptTopTitle(f)
     if title and not Marked(f, "topTitleRule") and ns.Widget and ns.Widget.HeaderRule then
@@ -146,7 +159,11 @@ local function SkinPlayerSpells()
     DarkenSpellbookPage()
     M:HookShow(Skin:Need("PlayerSpellsFrame"), DarkenSpellbookPage)
     local frame = Skin:Need("PlayerSpellsFrame")
-    if frame then Widget:PollWatch(frame, DarkenSpellbookPage, 2) end
+    -- §8.107：0.5s（原 2s）。Aurora 在法术书上是 OnShow 三次延时补 + 0.5s OnUpdate 常驻，
+    -- 因为「切分类 / 学新法术」会新出生行、且 Backplate 每次 populate 都被抬回；
+    -- 我们不挂 OnUpdate、不 hook，只把已有的 PollWatch 周期对齐到同一量级。
+    -- FadeAtlasBackdrop 本身递归 GetChildren，新行出生后下一拍就会被扫到。
+    if frame then Widget:PollWatch(frame, DarkenSpellbookPage, 0.5) end
 end
 
 local ACHIEVEMENT_TABS = { "AchievementFrameTab1", "AchievementFrameTab2" }

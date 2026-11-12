@@ -576,5 +576,41 @@ check("§8.92 失焦仍显示：再压回 GDM-1",
     ebs[1]:GetFrameLevel() == gdm:GetFrameLevel() - 1, tostring(ebs[1]:GetFrameLevel()))
 db.skins.chatEditBoxAutoHide = false
 
+-- ---------------------------------------------------------------- §8.106 静态防回归
+-- 实机 `/mui skins diagnose` 曾打出 10 条 `ChatFrameNEditBoxEditBox` 死名：Apply 把
+-- CHAT_EDITS（已经是全名）塞给内部还会拼 "EditBox" 的 TrackEditBox，KNOWN_EB 存成错键、
+-- ChatEdit_UpdateHeader 钩子按真名一次都匹配不上 ⇒ §8.90 切频道即时重染从未生效。
+check("§8.106 Apply 用基础名 CHAT_FRAMES 认领输入框",
+    social:find("for _, name in ipairs(CHAT_FRAMES) do ChatBand:TrackEditBox(name) end", 1, true) ~= nil)
+check("§8.106 不再把 CHAT_EDITS 传给 TrackEditBox（双后缀死名）",
+    social:find("for _, name in ipairs(CHAT_EDITS) do ChatBand:TrackEditBox(name) end", 1, true) == nil)
+check("§8.106 头部钩子去掉 EditBox 后缀再查 KNOWN_EB",
+    social:find("KNOWN_EB[base]", 1, true) ~= nil
+    and social:find('nm:match("^(.-)EditBox$")', 1, true) ~= nil)
+check("§8.106 Strip 对容器型 BorderFrame 只压 regions（不整层 Fade）",
+    skinSrc:find('key == "BorderFrame" and type(piece.GetRegions) == "function"', 1, true) ~= nil
+    and skinSrc:find("local regs = { piece:GetRegions() }", 1, true) ~= nil)
+local worldMapSrc = read("Modules/Skins/WorldMap.lua")
+check("§8.106 世界地图不再给 BorderFrame 铺整窗底板（会盖住地图画布）",
+    worldMapSrc:find('M:Dress("WorldMapFrame.BorderFrame", { panel', 1, true) == nil)
+check("§8.106 关闭钮点路径 + 全局名双取法保留",
+    worldMapSrc:find("WorldMapFrame.BorderFrame.CloseButton", 1, true) ~= nil
+    and worldMapSrc:find('Skin:Need("WorldMapFrameCloseButton")', 1, true) ~= nil)
+
+-- ---------------------------------------------------------------- §8.107 静态防回归
+-- 复验（session 22675）实机：角色窗唯一残留是 1330x1044 BACKGROUND 的
+-- `gamepad-uiframemetal-largeportrait-focus` α1.00（最外圈棕金边）。技能页名单早收了
+-- `"gamepad%-uiframemetal"`，角色窗漏了 —— 两窗必须同口径，防止名单再次被删/只补一半。
+local characterSrc = read("Modules/Skins/Character.lua")
+local collectionsSrc = read("Modules/Skins/Collections.lua")
+local fadeChar = slice(characterSrc, "local FADE_CHARACTER_ATLAS = {", "}")
+local fadeSpell = slice(collectionsSrc, "local SPELLBOOK_BACKDROP_ATLAS = {", "}")
+check("§8.107 角色窗 FADE_CHARACTER_ATLAS 收 gamepad-uiframemetal",
+    fadeChar:find('"gamepad%-uiframemetal"', 1, true) ~= nil)
+check("§8.107 技能页 SPELLBOOK_BACKDROP_ATLAS 同条仍在",
+    fadeSpell:find('"gamepad%-uiframemetal"', 1, true) ~= nil)
+check("§8.107 角色窗 fade 走每趟都写的显式 alpha=0 通道",
+    characterSrc:find("Skin:FadeAtlasBackdrop(f, FADE_CHARACTER_ATLAS, nil, 0)", 1, true) ~= nil)
+
 print(failed == 0 and "ALL PASS" or (failed .. " FAILED"))
 os.exit(failed == 0 and 0 or 1)

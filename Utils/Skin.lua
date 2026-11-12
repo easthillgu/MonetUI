@@ -559,6 +559,66 @@ function Skin:FadeAtlasBackdrop(frame, patterns, depth, alpha)
     end
 end
 
+--- §8.107 受控剥「按名字认不出来的大块背景」—— 借鉴 Aurora `HidePaneArt` 的两层粒度，
+--- 但比它保守得多：Aurora 在装饰容器里按 region 类型无差别 `Hide()`，是因为它先 Strip 再自建
+--- backdrop、清楚哪张是自己的；我们的 `Skin:Panel` 是**新建的 Frame**（不是父框的 Texture region），
+--- 但仍不能冒险按类型全 Hide（内容图标 / 职业背景 / 羊皮纸也是 Texture）。
+--- 所以这里只收一类：`ArtIdentity` 返回 nil 的贴图 —— 即 **1.60 的 `GetTexture()` 数字 fileID
+--- 且没有 atlas**。这类既进不了 atlas 名单、也进不了 `file=` 路径名单，是 11-12 实机
+--- 「角色窗口还剩 51 张 / 技能页还剩 35 张大贴图」的主体（全是暴雪 130871 之类的老式底板）。
+---
+--- 四道门，缺一不可：
+---   * 只 BACKGROUND / BORDER 层（ARTWORK / OVERLAY 是内容，OVERLAY 里那张 1216x603 天赋树底不能碰）
+---   * 宽或高 > minSize（图标一般 ≤64，不会被卷进来）
+---   * 不带我们自己的 `art` 标记；整棵 `skinPlate` 子框直接跳过
+---   * 只写 α0，**每趟都写**（不走 Fade 的 hidden 标记）：暴雪换页 / 换布局会把 alpha 抬回来，
+---     已有 hidden 标记的 Fade 会早退，永远纠不回 —— 11-12 世界地图 BorderFrame 3 张贴图实证。
+---
+--- opts = { depth=1, minSize=120, hosts={frame,...} }；hosts 给了就只扫这些具名装饰容器。
+function Skin:FadePlainBackdrops(frame, opts)
+    if not frame or type(frame.GetRegions) ~= "function" then return end
+    opts = opts or {}
+    local maxDepth = opts.depth or 1
+    local minSize  = opts.minSize or 120
+
+    local function sweep(f, depth)
+        if not f or depth > maxDepth then return end
+        -- 我们自己的背板 / 控件整棵跳过：别把 Theme 画在它上面的 regions 当成暴雪残留。
+        if Marked(f, "skinPlate") or Marked(f, "art") then return end
+        local okR, regions = pcall(function() return { f:GetRegions() } end)
+        if okR then
+            for _, reg in ipairs(regions) do
+                local okT, ty = pcall(reg.GetObjectType, reg)
+                if okT and ty == "Texture" and not Marked(reg, "art") then
+                    local okL, layer = pcall(reg.GetDrawLayer, reg)
+                    if okL and (layer == "BACKGROUND" or layer == "BORDER") then
+                        local okW, w = pcall(reg.GetWidth, reg)
+                        local okH, h = pcall(reg.GetHeight, reg)
+                        if (okW and w and w > minSize) or (okH and h and h > minSize) then
+                            -- 有 atlas 或有 file= 路径的交给名单处理，这里只收「认不出名字」的。
+                            if not ArtIdentity(reg) then
+                                pcall(reg.SetAlpha, reg, 0)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        if depth < maxDepth then
+            local okC, kids = pcall(function() return { f:GetChildren() } end)
+            if okC then
+                for _, k in ipairs(kids) do sweep(k, depth + 1) end
+            end
+        end
+    end
+
+    if opts.hosts then
+        for _, host in ipairs(opts.hosts) do sweep(host, 0) end
+    else
+        sweep(frame, 0)
+    end
+end
+
 --- 法术格的美术口径（照 `EllesmereUIBlizzardSkin_WindowPacks.lua:308-330` 的 FadeSpellItem）：
 ---   `item.Backplate` 归零（每次 populate/hover 都会被暴雪抬回来，所以这一趟要反复跑）；
 ---   图标金环 `Button.Border` **整圈归零**（2026-11-06 玩家两次点名后改的口径，原 EUI"留半"作废）：
@@ -792,9 +852,29 @@ function Skin:Strip(frame, opts)
     if opts.backdrops ~= false then
         pcall(function()
             for i = 1, #BACKDROP_PIECES do
-                local piece = frame[BACKDROP_PIECES[i]]
+                local key = BACKDROP_PIECES[i]
+                local piece = frame[key]
                 if piece and type(piece.SetAlpha) == "function" then
-                    self:Fade(piece)
+                    -- §8.106 容器型 BorderFrame **绝不整层 Fade**：WorldMapFrame.BorderFrame 是
+                    -- 1035x534 的全窗 Frame，下面挂着 11 个子控件（含 WorldMapFrameCloseButton）。
+                    -- 整层 α0 会把它们一起吞掉 —— 世界地图关闭 X 看不到的真正根因（换皮其实
+                    -- 一直成功：closeTint 在、顶点色也在）。只压它自己那几张 Texture regions
+                    -- （标题条 / 全窗底 / 发丝线），子控件原样留着。
+                    -- 16 窗扫描只有这一例容器型 BorderFrame，影响面可控；其它窗口的 Bg /
+                    -- Background / Inset 等仍是 Texture 或走既有整件 Fade 路径。
+                    if key == "BorderFrame" and type(piece.GetRegions) == "function" then
+                        pcall(function()
+                            local regs = { piece:GetRegions() }
+                            for j = 1, #regs do
+                                local region = regs[j]
+                                if IsTexture(region) and not IsContentIcon(region) then
+                                    self:Fade(region)
+                                end
+                            end
+                        end)
+                    else
+                        self:Fade(piece)
+                    end
                 end
             end
         end)

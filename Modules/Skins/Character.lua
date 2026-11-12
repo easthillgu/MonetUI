@@ -45,14 +45,22 @@ local SUB_PANEL = { panel = { bgAlpha = 0.96 }, deep = true }
 -- 这里不再自己找 CharacterFramePortrait —— 同一个动作只有一个入口，也不给别的窗口留第二份实现。
 
 -- **角色面板剥背景 + 美化侧页签（11-05 作者指定，复用专业窗那条通用通道）**。
--- layers 实测 CharacterFrame 还剩：`ui-character-info`（信息栏行底图）×32、
--- `common-sidetab`（模式页签 CharacterFrameModeTab1..4 的底/悬停/遮罩）×18；
--- 装备/属性图标是数字文件 ID（GetAtlas 回 nil），不会被这些 atlas 模式误伤。
+-- §8.107（11-12 Aurora 研读 + 实机复扫）订正：1.60 的 `CharacterFrame` 自身 `GetRegions()` = **0**，
+-- 所有装饰都挂在**子帧**上（LeftPaneHost / RightPaneHost / CharacterStatsPaneScrollBox / 模式页签…）。
+-- 实机可见的大贴图还剩 17 类、其中 `noAtlas` 51 张（`GetTexture()` 是数字 fileID 130871 的老式底板）。
+-- 旧名单只认 4 条 atlas、且 `StyleAtlasBackdrop` 走 `Fade` 的"隐藏一次"标记 —— 暴雪换页把 alpha
+-- 抬回来后标记还在、后续 Apply 直接早退，所以一直"压过又回来"。这里把 fade 那趟改成
+-- `FadeAtlasBackdrop(..., 0)` 的**每趟都写**通道（`0` 在 Lua 是真值，走 SetAlpha 不走 Fade）。
 local FADE_CHARACTER_ATLAS = {
-    "ui%-character%-info",
-    "common%-sidetab$",
-    "common%-sidetab%-hover",
-    "common%-sidetab%-mask",
+    "ui%-character%-info",          -- UI-Character-Info-* 全族：General-BG / Stat-BG / ScrollLine×7 / StatTab×4
+    "common%-sidetab$", "common%-sidetab%-hover", "common%-sidetab%-mask",
+    "common%-framedivider",         -- 两栏之间的金色分隔线（Aurora HidePaneArt 第二层点名）
+    "common%-insideframe",          -- 统计框那圈金边
+    "_ui%-frame%-innertoptile", "_ui%-frame%-toptilestreaks",
+    -- §8.107 复验补漏：整窗 1330x1044 的 BACKGROUND 金属大底（最外圈那圈棕金边），
+    -- 复验读数 α1.00，是角色窗唯一残留；技能页名单早收了同一条，这里对齐。
+    -- `FadeAtlasBackdrop` 递归 8 层，挂在哪一层子帧上都扫得到。
+    "gamepad%-uiframemetal",
 }
 local SWAP_CHARACTER_ATLAS = {
     -- 选中页签 → 我们的**矩形** barfill 盒子（通用方法会把它压到图标之下当底色，不糊图标）。
@@ -62,14 +70,39 @@ local SWAP_CHARACTER_ATLAS = {
 local TINT_CHARACTER_ATLAS = {
 }
 
+-- 1.60 实机：20 个装备槽全局名全在，19 个带 `BorderFrame` 装饰子框
+-- （`CharacterAmmoSlot` 是裸 ItemButton，没有 —— 与 Aurora `shared/PaperDollFrame.lua:69,109-110` 一致）。
+-- 这 19 张是槽位的斜角底板，压掉后图标由 `Skin:IconWidget` 那套方边接住；**只压子框，不碰图标**。
+local EQUIPMENT_SLOTS = {
+    "CharacterHeadSlot", "CharacterNeckSlot", "CharacterShoulderSlot", "CharacterBackSlot",
+    "CharacterChestSlot", "CharacterShirtSlot", "CharacterTabardSlot", "CharacterWristSlot",
+    "CharacterHandsSlot", "CharacterWaistSlot", "CharacterLegsSlot", "CharacterFeetSlot",
+    "CharacterFinger0Slot", "CharacterFinger1Slot", "CharacterTrinket0Slot", "CharacterTrinket1Slot",
+    "CharacterMainHandSlot", "CharacterSecondaryHandSlot", "CharacterRangedSlot", "CharacterAmmoSlot",
+}
+
 -- 模块级稳定引用：PollWatch 按引用去重。
 local function StyleCharacterArt()
     local f = Skin:Need("CharacterFrame")
-    if f then Skin:StyleAtlasBackdrop(f, FADE_CHARACTER_ATLAS, SWAP_CHARACTER_ATLAS, TINT_CHARACTER_ATLAS) end
+    if not f then return end
+    -- swap / tint 仍走 StyleAtlasBackdrop（它负责把选中页签换成我们的矩形盒子）；
+    -- fadePatterns 传空表，纯淡出交给下面那趟"每趟都写"的 FadeAtlasBackdrop，两趟职责不重叠。
+    Skin:StyleAtlasBackdrop(f, {}, SWAP_CHARACTER_ATLAS, TINT_CHARACTER_ATLAS)
+    Skin:FadeAtlasBackdrop(f, FADE_CHARACTER_ATLAS, nil, 0)
+    -- Aurora `HidePaneArt` 的两层粒度，但只收「认不出名字」的数字 fileID 大贴图（§8.107 四道门）。
+    Skin:FadePlainBackdrops(f, { depth = 1, minSize = 120 })
+    for i = 1, #EQUIPMENT_SLOTS do
+        local slot = Skin:Need(EQUIPMENT_SLOTS[i])
+        local bf = slot and slot.BorderFrame
+        if bf and type(bf.SetAlpha) == "function" then pcall(bf.SetAlpha, bf, 0) end
+    end
 end
 
 local function SkinCharacter()
     M:Dress("CharacterFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 }, portrait = true })
+    -- `M:SkinWindow` 会在运行期按 `<name>CloseButton` 拼出关闭钮，静态扫描看不到那次查找；
+    -- 显式登记一次（`check-frame-list` 要求 frames 名单里的名字在代码里有取用路径）。
+    Skin:Need("CharacterFrameCloseButton")
     -- 美化后把肖像压成方形，与方形背景协调
     -- 肖像由 M:Dress(CharacterFrame, { window = true … }) 那一步统一处理
     M:Dress(CHARACTER_TAB_WIDGET, { deep = true })
@@ -78,7 +111,9 @@ local function SkinCharacter()
     -- 剥信息栏底图 + 美化侧页签（11-05 作者指定，和专业窗共用 Skin:StyleAtlasBackdrop）。
     StyleCharacterArt()
     local cf = Skin:Need("CharacterFrame")
-    if cf then Widget:PollWatch(cf, StyleCharacterArt, 2) end
+    -- §8.107：1s（原 2s）。装饰贴图会被暴雪换页 / 展开右栏时抬回 alpha，
+    -- 三趟压法都是幂等「每趟都写」，周期短一档才追得上回潮；Aurora 同处是 0.5s OnUpdate。
+    if cf then Widget:PollWatch(cf, StyleCharacterArt, 1) end
 end
 
 local function SkinInspect()

@@ -849,7 +849,11 @@ local function EnsureChannelHeaderHook()
     hooksecurefunc("ChatEdit_UpdateHeader", function(eb)
         if not eb or type(eb.GetName) ~= "function" then return end
         local ok, nm = pcall(eb.GetName, eb)
-        if ok and nm and KNOWN_EB[nm] then
+        -- §8.106 KNOWN_EB 的键是基础名 `ChatFrameN`（TrackEditBox 传进来的），而这里拿到的是
+        -- 输入框真名 `ChatFrameNEditBox`。以前直接 KNOWN_EB[nm] 恒 miss —— 这是双后缀 bug 的
+        -- 另一半：就算把 TrackEditBox 的入参改对，钩子照样一次都不会重染。去掉后缀再认领。
+        local base = (ok and type(nm) == "string") and (nm:match("^(.-)EditBox$") or nm) or nil
+        if base and KNOWN_EB[base] then
             ChatBand:ApplyChannelColor(eb)
         end
     end)
@@ -1091,7 +1095,12 @@ local function SkinChat()
     EnsureChannelHeaderHook()
     -- §8.90 临时聊天窗（>10）动态覆盖钩子。
     EnsureTempWindowHook()
-    for _, name in ipairs(CHAT_EDITS) do ChatBand:TrackEditBox(name) end
+    -- §8.106 这里必须传**基础名**（ChatFrameN）：TrackEditBox / PinEditBox / SyncEditMouse /
+    -- ApplyChannelColorByName 一律在函数内部拼 `name .. "EditBox"`。以前传 CHAT_EDITS
+    -- （已经是 ChatFrameNEditBox 全名），于是账本冒出 10 条 `ChatFrameNEditBoxEditBox` 死名、
+    -- KNOWN_EB 存成错键、头部钩子按真名永远匹配不上 ⇒ §8.90「切频道即时重染」从没生效过。
+    -- `CHAT_EDITS` 只供 M:Dress 与 frames 账本用（那两处要的确实是全名）。
+    for _, name in ipairs(CHAT_FRAMES) do ChatBand:TrackEditBox(name) end
 
     -- 聊天窗"滚回底部"那枚箭头：暴雪逐帧重放它的 alpha 动画 ⇒ 压 α0 顶不住，只能换皮。
     for _, name in ipairs(CHAT_FRAMES) do
