@@ -3,7 +3,7 @@
 --   lua tools/harness/release-dev-gate-probe.lua
 --
 -- 判据（11-10 作者指示）：dev 功能与开发期提示只在本地和仓库保留，发布包里
--- 不注册诊断命令、不打印自检提示、不含 DevTools.lua / Report.lua。
+-- 不注册诊断命令、不打印自检提示、不含 DevTools.lua / Report.lua / DevProbe.lua。
 
 local function read(path)
     local f = assert(io.open(path, "rb"), "missing file: " .. path)
@@ -111,16 +111,18 @@ local devLines = 0
 for line in (xml .. "\n"):gmatch("([^\n]*)\n") do
     if has(line, "<Script") and has(line, "<!-- DEV-ONLY -->") then devLines = devLines + 1 end
 end
-check("Tools.xml 恰好两行 DEV-ONLY Script", devLines == 2, "count=" .. devLines)
-check("DEV-ONLY 标记只挂在两份 dev 文件上",
+check("Tools.xml 恰好三行 DEV-ONLY Script", devLines == 3, "count=" .. devLines)
+check("DEV-ONLY 标记只挂在三份 dev 文件上",
     has(xml, '<Script file="DevTools.lua"/><!-- DEV-ONLY -->')
-    and has(xml, '<Script file="Report.lua"/><!-- DEV-ONLY -->'))
+    and has(xml, '<Script file="Report.lua"/><!-- DEV-ONLY -->')
+    and has(xml, '<Script file="DevProbe.lua"/><!-- DEV-ONLY -->'))
 -- XML 注释里不能再嵌 <!--：否则客户端解析直接失败。
 local commentBody = xml:match("<!%-%-%s*\n%s*加载顺序：(.-)%-%->") or ""
 check("Tools.xml 大注释块存在且没有嵌套 <!--",
     commentBody ~= "" and not has(commentBody, "<!--"), commentBody:sub(1, 80))
-check(".pkgmeta 物理排除两份 dev 文件",
-    has(pkg, "Modules/Tools/DevTools.lua") and has(pkg, "Modules/Tools/Report.lua"))
+check(".pkgmeta 物理排除三份 dev 文件",
+    has(pkg, "Modules/Tools/DevTools.lua") and has(pkg, "Modules/Tools/Report.lua")
+    and has(pkg, "Modules/Tools/DevProbe.lua"))
 check("tools/ 本身不进发布包", has(pkg, "  - tools"))
 local guardAt = wf:find("Guard - TOC version must match the tag", 1, true)
 local selfTestAt = wf:find("strip%-dev%.js %-%-self%-test", 1, false)

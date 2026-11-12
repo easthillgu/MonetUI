@@ -1268,6 +1268,8 @@ local function PrintHelp()
     ns:Print("  |cffffd100/mui skins layers <窗口名> [片段]|r 这个窗口的底有几层、每层谁能碰（region / 字段可剥 / 要点名；全量存 MonetUIDB.layerReport）")
     ns:Print("  |cffffd100/mui skins templates [片段]|r 模板库账本：多少个模板 / 映射到 skinAs / Camelot 覆盖；带片段查「这个控件被认成什么」")
     -- 上线日验收用的只读探针（一个字节都不写，全量都落 SavedVariables）：
+    ns:Print("  |cffffd100/mui dev|r        元素探测面板（256×256）：列出目标窗体包含的框体/贴图，点行复制名字去接线")
+    ns:Print("  |cffffd100/mui dig|r        开始/取消鼠标点选：左键点中的窗体 = 探测目标，右键取消（全量存 MonetUIDB.devProbeReport）")
     ns:Print("  |cffffd100/mui perf [reset|diag]|r 调度器总账：订阅数 / 逐路耗时排序 / 失败计数 + 外部驱动账 + Lua 内存 + 当前被暂停的轮询框；带 reset 先清零再计时，带 diag 打调试能力自检（账本 MonetUIDB.perfReport）")
     ns:Print("  |cffffd100/mui skins closes|r 关闭按钮换皮覆盖面：按图集全量扫，已换皮/仍是暴雪原样/读不出三档（closeReport）")
     ns:Print("  |cffffd100/mui skins inset|r 换皮容器的有效 alpha（父链连乘，不是单点 GetAlpha），α<0.99 全列（insetReport）")
@@ -1423,6 +1425,7 @@ end
 local DEV_COMMANDS = {
     scale = true, blocks = true, restrict = true, colors = true, lost = true,
     compat = true, perf = true, report = true, devtools = true,
+    dev = true, dig = true,
 }
 local DEV_SUBCOMMANDS = {
     skins       = { diagnose=true, diag=true, probe=true, layers=true, templates=true,
@@ -1545,6 +1548,16 @@ local function HandleSlash(message)
             else
                 ns:Print("Compat.Print 不可调用。")
             end
+        end
+
+    elseif command == "dev" or command == "dig" then
+        -- 元素探测面板（仅开发版，见 Modules/Tools/DevProbe.lua）：
+        -- /mui dev 开关面板，/mui dig 鼠标点选目标窗体。
+        local probe = ns:GetModule("DevProbe")
+        if probe and type(probe.HandleCommand) == "function" then
+            probe:HandleCommand(command == "dig" and "dig" or "")
+        else
+            ns:DevPrint("DevProbe 模块没加载：检查 Modules/Tools/Tools.xml 里有没有 DevProbe.lua。")
         end
 
     elseif command == "help" then

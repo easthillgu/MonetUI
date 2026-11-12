@@ -8,10 +8,11 @@
     4. Atmosphere.lua - 氛围暗角层
     5. DevTools.lua - 只读探针（perf / skins closes|inset|arrows）  [仅开发版]
     6. Report.lua - /mui report 诊断包（环境·设置差异·提示历史·美化台账·同机插件；只读）  [仅开发版]
-    带行尾标记的两行由 tools/strip-dev.js 在发版时从这份清单里摘掉，
+    7. DevProbe.lua - /mui dev 元素探测面板 + /mui dig 鼠标点选目标窗体（枚举框体/贴图，点行复制名字）  [仅开发版]
+    带行尾标记的三行由 tools/strip-dev.js 在发版时从这份清单里摘掉，
     文件本身列在 .pkgmeta 的 ignore 里。仓库与本地部署始终保留它们。
-    7. WhatsNew.lua - 版本更新后一次性的"本版要点"提示（/mui whatsnew 可重看）
-    8. Tweaks.lua - 控制台优化（逐条 CVar 开关）
+    8. WhatsNew.lua - 版本更新后一次性的"本版要点"提示（/mui whatsnew 可重看）
+    9. Tweaks.lua - 控制台优化（逐条 CVar 开关）
     
     注意：Atmosphere 必须在 InfoBar 之前加载（见 MonetUI.toc 注释）
 -->
@@ -23,6 +24,7 @@
     <Script file="Atmosphere.lua"/>
     <Script file="DevTools.lua"/><!-- DEV-ONLY -->
     <Script file="Report.lua"/><!-- DEV-ONLY -->
+    <Script file="DevProbe.lua"/><!-- DEV-ONLY -->
     <Script file="WhatsNew.lua"/>
     <Script file="Tweaks.lua"/>
 </Ui>

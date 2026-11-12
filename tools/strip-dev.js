@@ -5,10 +5,10 @@
 //
 // 仓库与本地部署永远是 dev：
 //   * MonetUI.toc 的 `## X-Dev-Build: dev` 让 Core.lua 打开 ns.dev（诊断命令 + 自检提示）；
-//   * Modules/Tools/Tools.xml 里带 DEV-ONLY 行尾标记的两行照常加载 DevTools / Report；
+//   * Modules/Tools/Tools.xml 里带 DEV-ONLY 行尾标记的三行照常加载 DevTools / Report / DevProbe；
 //   * tools/ 本身列在 .pkgmeta 的 ignore 里，这份脚本不会进发布包。
 //
-// 发版时本脚本把 TOC 标记改成 release、从 XML 摘掉那两行；.pkgmeta 再把两个文件
+// 发版时本脚本把 TOC 标记改成 release、从 XML 摘掉那三行；.pkgmeta 再把三个文件
 // 物理排除出 zip。三处合起来 = 发布版看不到、跑不了、也不含 dev 专属文件。
 // 幂等防呆：只允许从 dev 状态剥离，重复执行会报错退出，不会悄悄改坏。
 
@@ -23,7 +23,7 @@ const TOOLS_DIR = path.join(ROOT, 'Modules', 'Tools');
 
 const DEV_FLAG = '## X-Dev-Build: dev';
 const RELEASE_FLAG = '## X-Dev-Build: release';
-const DEV_FILES = ['DevTools.lua', 'Report.lua'];
+const DEV_FILES = ['DevTools.lua', 'Report.lua', 'DevProbe.lua'];
 const DEV_LINE = /<Script\b[^>]*\/?>[\t ]*<!--\s*DEV-ONLY\s*-->/;
 
 function fail(msg) { throw new Error(msg); }
@@ -59,7 +59,7 @@ function stripText(tocSrc, xmlSrc) {
     return { toc: toc, xml: kept.join(nl), dropped: dropped };
 }
 
-// 仓库 / 本地部署必须保持 dev 状态；顺带确认 .pkgmeta 真的排除了两份 dev 文件。
+// 仓库 / 本地部署必须保持 dev 状态；顺带确认 .pkgmeta 真的排除了三份 dev 文件。
 function verifyDevState() {
     const toc = read(TOC);
     const xml = read(XML);
@@ -98,7 +98,7 @@ function selfTest() {
     let guarded = false;
     try { stripText(out.toc, out.xml); } catch (e) { guarded = true; }
     if (!guarded) fail('自检：重复剥离没有防呆');
-    console.log('[strip-dev] SELF TEST OK（dev -> release，2 行摘除，玩家向文件保留，重复剥离被拦）');
+    console.log('[strip-dev] SELF TEST OK（dev -> release，3 行摘除，玩家向文件保留，重复剥离被拦）');
 }
 
 function stripInPlace() {
@@ -108,7 +108,7 @@ function stripInPlace() {
     fs.writeFileSync(XML, out.xml);
     console.log('[strip-dev] MonetUI.toc: X-Dev-Build dev -> release');
     console.log('[strip-dev] Tools.xml: 摘除 ' + out.dropped.length + ' 行 ' + out.dropped.join(' | '));
-    console.log('[strip-dev] .pkgmeta 会把 DevTools.lua / Report.lua 排除出 zip');
+    console.log('[strip-dev] .pkgmeta 会把 DevTools.lua / Report.lua / DevProbe.lua 排除出 zip');
 }
 
 const mode = process.argv[2] || 'strip';

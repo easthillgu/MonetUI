@@ -27,6 +27,7 @@ ignore:
   # Tools.xml 的对应 Script 行由 tools/strip-dev.js 在发版前摘掉，避免 TOC/XML 引用缺失文件。
   - Modules/Tools/DevTools.lua
   - Modules/Tools/Report.lua
+  - Modules/Tools/DevProbe.lua
   - "*.zip"
   - "NVIDIA Corporation"
 
