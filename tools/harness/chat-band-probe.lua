@@ -612,5 +612,19 @@ check("§8.107 技能页 SPELLBOOK_BACKDROP_ATLAS 同条仍在",
 check("§8.107 角色窗 fade 走每趟都写的显式 alpha=0 通道",
     characterSrc:find("Skin:FadeAtlasBackdrop(f, FADE_CHARACTER_ATLAS, nil, 0)", 1, true) ~= nil)
 
+-- ---------------------------------------------------------------- §8.110 静态防回归
+-- 飞行点地图：档只在登录 / Apply 跑一次，且 `Skin:Fade` 是"隐藏一次 + 标记" ⇒ 暴雪开窗重设
+-- alpha 之后纠不回来（§8.107 总结的系统性病的第二处）。四条钉住：事件订阅、每趟写、
+-- 按标记重压、以及 ReassertHidden 本身只认标记不认名字（名字在 1.60 上离线确认不了）。
+check("§8.110 飞行点地图订阅 TAXIMAP_OPENED",
+    worldMapSrc:find('M:OnEvent("TAXIMAP_OPENED"', 1, true) ~= nil)
+check("§8.110 RestyleTaxiFrame 每趟把 InsetBg（航线图本体）抬回 α1",
+    worldMapSrc:find("pcall(mapTex.SetAlpha, mapTex, 1)", 1, true) ~= nil)
+check("§8.110 RestyleTaxiFrame 走 ReassertHidden 重压已隐藏的边框件",
+    worldMapSrc:find("Skin:ReassertHidden(tf, 3)", 1, true) ~= nil)
+check("§8.110 Skin:ReassertHidden 只认 hidden 标记（不按 atlas 名字猜）",
+    skinSrc:find("function Skin:ReassertHidden(frame, depth)", 1, true) ~= nil
+    and skinSrc:find('if Marked(reg, "hidden") then', 1, true) ~= nil)
+
 print(failed == 0 and "ALL PASS" or (failed .. " FAILED"))
 os.exit(failed == 0 and 0 or 1)

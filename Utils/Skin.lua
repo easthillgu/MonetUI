@@ -619,6 +619,38 @@ function Skin:FadePlainBackdrops(frame, opts)
     end
 end
 
+--- 把「我们已经压掉的那些贴图」按旁表 `hidden` 标记重新写回 α0（**每趟都写**，幂等）。
+--- 存在的理由就是 `Skin:Fade` 的形态：它是「隐藏一次 + 标记」，暴雪把同一张贴图的 alpha
+--- 抬回来之后，后续每趟 `Fade` 看见标记就直接早退 —— 永远纠不回来（§8.107 三处实证：
+--- 世界地图 BorderFrame 3 张、角色窗 `UI-Character-Info-ScrollLine`、技能页 `talent-background-rogue`）。
+--- 与 `FadeAtlasBackdrop(..., alpha)` 的分工：那条按 **atlas 名字**点名、不认标记；
+--- 这条按 **标记**点名、不认名字 —— 用在「没有可猜的名字、但确实被我们压过」的窗口
+--- （飞行点地图 `TaxiFrame` 那 19 张边框件就属于这一类）。
+--- 只碰带 `hidden` 标记的 region，自建美术（`art` 标记 / `skinPlate` 子框）天然不在内。
+--- @return 这次真正写了几个（0 = 全都已经是 α0，供探针读）
+function Skin:ReassertHidden(frame, depth)
+    if not frame or type(frame.GetRegions) ~= "function" then return 0 end
+    depth = depth or 0
+    if depth > 8 then return 0 end
+    local writes = 0
+    local okR, regions = pcall(function() return { frame:GetRegions() } end)
+    if okR then
+        for _, reg in ipairs(regions) do
+            if Marked(reg, "hidden") then
+                local okA, a = pcall(reg.GetAlpha, reg)
+                if not okA or a ~= 0 then
+                    if pcall(reg.SetAlpha, reg, 0) then writes = writes + 1 end
+                end
+            end
+        end
+    end
+    local okC, kids = pcall(function() return { frame:GetChildren() } end)
+    if okC then
+        for _, k in ipairs(kids) do writes = writes + self:ReassertHidden(k, depth + 1) end
+    end
+    return writes
+end
+
 --- 法术格的美术口径（照 `EllesmereUIBlizzardSkin_WindowPacks.lua:308-330` 的 FadeSpellItem）：
 ---   `item.Backplate` 归零（每次 populate/hover 都会被暴雪抬回来，所以这一趟要反复跑）；
 ---   图标金环 `Button.Border` **整圈归零**（2026-11-06 玩家两次点名后改的口径，原 EUI"留半"作废）：

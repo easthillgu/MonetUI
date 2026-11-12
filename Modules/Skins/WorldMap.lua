@@ -147,6 +147,32 @@ end)
 -- 实机读数 `InsetBg tex=8033753 alpha=0` ⇒ 整页黑。
 -- 两条动作缺一不可：① `strip.keep` 把那张贴图豁免在剥除之外；② 剥完**显式抬回 α1** ——
 -- 本会话里它已经被上一版剥过、`Skin:Fade` 的"隐藏一次"旁表还挂在上面，光靠豁免不会自己回来。
+--
+-- §8.110（11-13，补 §8.107 留下的两条缺口）：上面那两句只在**登录 / Apply 那一趟**成立，
+-- 而这个窗口是被事件打开的 —— 暴雪在 `TAXIMAP_OPENED` 里 `SetTaxiMap(InsetBg)` 并重设边框
+-- 布局，之后：① 航线图本体可能被压回 α0 / 装饰被抬回 α1；② 我们没有这个事件的订阅，
+-- 全 Skins 只有 `QUEST_LOG_UPDATE` / `WORLD_MAP_UPDATE` / `MERCHANT_SHOW` 三个，
+-- ⇒ flightmap 档一辈子只跑一次，纠不回来（与 §8.107 世界地图 BorderFrame 同一个病）。
+-- 做法照 `RestyleBorderFrame` 的形状：**每趟都写** + 事件延后一帧 + 显示期轮询。
+-- 装饰点名不用 atlas 名单（1.60 的 TaxiFrame 边框件没有我们能离线确认的实名），
+-- 改走 `Skin:ReassertHidden` —— 只重压"我们自己已经压过、带 hidden 标记"的那些，
+-- 内容贴图与自建美术天然不在内。
+local function RestyleTaxiFrame()
+    local tf = Skin:Need("TaxiFrame")
+    if not tf then return end
+    local mapTex = tf.InsetBg
+    if mapTex and type(mapTex.SetAlpha) == "function" then
+        pcall(mapTex.SetAlpha, mapTex, 1)
+    end
+    if type(Skin.ReassertHidden) == "function" then Skin:ReassertHidden(tf, 3) end
+end
+
+local function RestyleTaxiFrameLater()
+    -- 事件在 `TaxiFrame_OnEvent` 顶部发，`SetTaxiMap` / 重锚还在后面 ⇒ 延后一帧才落得住。
+    local after = _G.C_Timer and _G.C_Timer.After
+    if after then pcall(after, 0, RestyleTaxiFrame) else RestyleTaxiFrame() end
+end
+
 local function SkinFlightMap()
     local tf = Skin:Need("TaxiFrame")
     if not tf then return end
@@ -156,9 +182,10 @@ local function SkinFlightMap()
         panel  = { bgAlpha = 0.96 },
         strip  = mapTex and { keep = function(region) return region == mapTex end } or nil,
     })
-    if mapTex and type(mapTex.SetAlpha) == "function" then
-        pcall(mapTex.SetAlpha, mapTex, 1)
-    end
+    RestyleTaxiFrame()
+    -- 显示期兜底：PollWatch 只在窗口显示时可读时才回调，藏着的时候一拍都不跑。
+    if ns.Widget and ns.Widget.PollWatch then ns.Widget:PollWatch(tf, RestyleTaxiFrame, 1) end
+    return true
 end
 
 M:Panel("flightmap", {
@@ -167,3 +194,10 @@ M:Panel("flightmap", {
     apply = SkinFlightMap,
     frames = { "TaxiFrame" },
 })
+
+M:OnEvent("TAXIMAP_OPENED", function()
+    -- 档被玩家关掉时别去碰它的框（`M:Apply` 自己会早退，但后面的纠回是直写的）。
+    if not (M.byKey.flightmap and M:IsEnabled("flightmap")) then return end
+    M:Apply(M.byKey.flightmap)
+    RestyleTaxiFrameLater()
+end)
