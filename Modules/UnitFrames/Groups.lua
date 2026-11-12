@@ -782,6 +782,20 @@ local function Precreate(header, count)
     header:SetAttribute("startingIndex", 1)
 end
 
+--- 受限窗口里名册变过之后的补配：让安全头**重跑一遍** configureChildren。
+--- **战斗中进组的白框就是这条缺口的症状**：头在隐藏时收到 GROUP_ROSTER_UPDATE 会跳过更新
+--- （SecureGroupHeaders.lua:61 只认 IsVisible），驱动把它点亮时那拍还在受限窗口里 ——
+--- configureChildren 对受保护按钮写 `unit` 属性 / SetPoint / Show 全部**静默拒绝**，按钮停在
+--- "隐藏 / unit=nil / 空白"；而名册事件此后不再来，我们的错峰补刷（0.05/0.3/1.0s）也全落在
+--- 受限窗口里，白框就挂到 reload。
+--- 这里不 Show 头（显隐归 state driver），只翻一遍 startingIndex —— 属性变化会触发
+--- OnAttributeChanged → SecureGroupHeader_Update（头可见时），解禁后那一拍写入是允许的。
+local function ReconfigureHeader(header, count)
+    if not header then return end
+    header:SetAttribute("startingIndex", 1 - count)
+    header:SetAttribute("startingIndex", 1)
+end
+
 --- 显隐驱动：开/关都只换这一条，别让"停用后又被驱动点亮"。
 local function SetDriver(header, snippet, on)
     if not header then return end
@@ -1086,6 +1100,32 @@ local function ReparkBlizzardGroups()
     MarkMuteDirty()   -- 刚重扫过一遍整树；LoD/换区后再让 ticker 补一次 LoD 后建的子件
 end
 
+--- 受限窗口（战斗为主）里名册变过 → 解禁后补配。
+--- **战斗中进组的白框**：头隐藏时收到 GROUP_ROSTER_UPDATE 会跳过更新
+--- （SecureGroupHeaders.lua:61 只认 IsVisible），驱动点亮头的那一拍还在受限窗口里，
+--- configureChildren 对受保护按钮写 `unit` / SetPoint / Show 全被静默拒绝；此后名册事件
+--- 不再来，错峰补刷（rosterChanged 的 0.05/0.3/1.0s）也全落在受限窗口里 —— 白框挂到 reload。
+--- 解禁钩子（PLAYER_REGEN_ENABLED / MONETUI_RESTRICTION_CHANGED）跑时**必须再进新 tick**：
+--- 脱战派发当拍原始标志仍是旧值 `true`，当场判 Restricted() 会把自己又排回队列
+--- （AGENTS 判例：要脱两次战才生效）。C_Timer.After(0) 之后标志已翻，判一次才算数。
+local rosterDirty = false
+local function ResyncAfterRestriction()
+    if not rosterDirty then return end
+    if type(C_Timer) ~= "table" or type(C_Timer.After) ~= "function" then return end
+    C_Timer.After(0, function()
+        if Restricted() then return end      -- 仍在别的受限窗口（Map/Chat…）：留脏，等下一次解禁
+        rosterDirty = false
+        ReconfigureHeader(party and party.header, PARTY_UNITS)
+        if raid then
+            for group = 1, RAID_GROUPS do
+                ReconfigureHeader(raid.headers and raid.headers[group], RAID_PER_GROUP)
+            end
+        end
+        M:RefreshAll()
+        ReparkBlizzardGroups()
+    end)
+end
+
 -- ============================================================================
 -- 子框鼠标循环静音（补 LoD 漏网）
 -- ============================================================================
@@ -1313,6 +1353,22 @@ local function Report()
         return string.format("%s -> %s:%s (%s,%s)", tostring(point), tostring(name),
             tostring(rp), tostring(x), tostring(y))
     end
+    --- 头下逐格计数：unit 已挂数 / 显示数（白框诊断用 —— 受限窗口里 configureChildren
+    --- 被静默拒绝时，按钮就是"child 在、unit=nil、不显示"）。unit 只做 nil 测试
+    --- （机密令牌对 nil 比较是安全口径），绝不进 concat。
+    local function buttonCensus(header)
+        if not header then return "-" end
+        local kids = ChildrenOf(header)
+        if not kids then return "-" end
+        local total, assigned, shown = #kids, 0, 0
+        for _, b in ipairs(kids) do
+            local okA, unit = pcall(b.GetAttribute, b, "unit")
+            if okA and unit ~= nil then assigned = assigned + 1 end
+            local okS, s = pcall(b.IsShown, b)
+            if okS and s then shown = shown + 1 end
+        end
+        return string.format("children=%d unit=%d shown=%d", total, assigned, shown)
+    end
 
     local panel = _G.MonetUIMinimapPanel
     local out = {
@@ -1324,11 +1380,13 @@ local function Report()
             { key = "party", rect = rectOf(party and party.anchor),
               shown = shownOf(party and party.anchor),
               point = pointOf(party and party.anchor),
-              headerShown = shownOf(party and party.header) },
+              headerShown = shownOf(party and party.header),
+              buttons = buttonCensus(party and party.header) },
             { key = "raid", rect = rectOf(raid and raid.anchor),
               shown = shownOf(raid and raid.anchor),
               point = pointOf(raid and raid.anchor),
-              headerShown = shownOf(raid and raid.headers and raid.headers[1]) },
+              headerShown = shownOf(raid and raid.headers and raid.headers[1]),
+              buttons = buttonCensus(raid and raid.headers and raid.headers[1]) },
         },
     }
     db.groupReport = out
@@ -1454,6 +1512,9 @@ function M:RegisterEvents()
     -- 直到 reload（PLAYER_ENTERING_WORLD → RefreshAll 才补上）。错峰补刷几拍，
     -- 属性配好后的那一拍会真正填充。
     local rosterChanged = function()
+        -- 受限窗口里名册变更后，安全头的 configureChildren 全被静默拒绝（见
+        -- ResyncAfterRestriction 注释）；记下"欠一次补配"，解禁后由解禁钩子补做。
+        if Restricted() then rosterDirty = true end
         M:RefreshAll()
         ReparkBlizzardGroups()
         for _, delay in ipairs({ 0.05, 0.3, 1.0 }) do
@@ -1475,6 +1536,11 @@ function M:RegisterEvents()
     end)
     -- 脱战：战斗里被跳过的 alpha / 鼠标压制在这里补做（受保护框战斗中写不了）。
     EventBus:Register("PLAYER_REGEN_ENABLED", function() MarkMuteDirty() end)
+    -- 白框补配：受限窗口里名册变过 → 解禁后翻 startingIndex 强制安全头重跑
+    -- configureChildren。PLAYER_REGEN_ENABLED 只管 Combat 这一类；MONETUI_RESTRICTION_CHANGED
+    -- 是六类限制的统一换边事件（Map/Chat 一类解禁也走它），Core 统一派发。
+    EventBus:Register("PLAYER_REGEN_ENABLED", ResyncAfterRestriction)
+    EventBus:Register("MONETUI_RESTRICTION_CHANGED", ResyncAfterRestriction)
 
     -- 选中目标边框：切目标只改四条边的 alpha，战斗里也能立刻跟上
     EventBus:Register("PLAYER_TARGET_CHANGED", function() SyncSelection() end)
@@ -1544,8 +1610,9 @@ function M:HandleCommand(rest)
         if r then
             for i = 1, #r.rows do
                 local row = r.rows[i]
-                ns:Print(string.format("  %s: %s shown=%s header=%s | %s", row.key,
-                    row.rect, tostring(row.shown), tostring(row.headerShown), row.point))
+                ns:Print(string.format("  %s: %s shown=%s header=%s | %s | %s", row.key,
+                    row.rect, tostring(row.shown), tostring(row.headerShown), row.point,
+                    tostring(row.buttons)))
             end
         end
         ns:Print("  账本已写入 MonetUIDB.groupReport")
