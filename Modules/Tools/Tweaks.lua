@@ -8,7 +8,8 @@
 --
 -- 名单来自 2026-11-06 的常用优化截图。`nameplateMaxDistance`（姓名板可视距离）已由姓名板模块
 -- 负责（Core.lua 的 viewDistance），这里不重复。**默认全关**：这些是画质 / 手感取向的改动，
--- 开哪条是玩家的选择，不是缺省。
+-- 开哪条是玩家的选择，不是缺省 —— 例外只有 2026-11-13 作者拍板的两条（见 DEFAULT_SWITCHES）：
+-- 伤害数字 ×0.5、战斗文字只留伤害数字。
 --
 -- 2026-11-08 作者拍板：另加一层「默认画面快照」—— 把当时调好的整套观感 CVar 设为出厂默认，
 -- 每次登录自动对齐。快照只裁决插件不管的 CVar，开着的开关优先级更高（见 AlignVision）。
@@ -23,9 +24,39 @@ ns.Tweaks = M
 
 -- key = 存进 db.tweaks 的开关名；cvar = 客户端控制台变量；value = 打开时写入的目标值（字符串，
 -- 和 CVar 的存储形态一致）；label = 面板 / 探针上给玩家看的一句话。
+-- extra = 同一目标值下**一起**写的一批 CVar 名字（只写名字，值共用本条的 `value`）。
+--   2026-11-13 加：浮动战斗文字是一族二十来个独立的布尔 CVar，一个分类一行开关会在面板上
+--   铺满一屏；「只留伤害数字」是玩家心里的一件事，所以做成一条开关写一整批。
+--   为什么不写 16 行各自带 value：改一处漏五处，而且面板上没人分得清哪行和哪行是一伙的。
 local TWEAKS = {
     { key = "cameraZoom",  cvar = "cameraDistanceMaxZoomFactor",           value = "4", label = "拉远视距（镜头能拉得更高更远）" },
-    { key = "combatText",  cvar = "WorldTextScale_v2",                     value = "2", label = "放大伤害数字（打击感更明显）" },
+    -- 0.5 = 客户端允许的最小值（EllesmereUI 的同一条滑杆 min 0.5 / max 2.5，本客户端实测口径）。
+    { key = "combatText",  cvar = "WorldTextScale_v2",                     value = "0.5", label = "伤害数字 ×0.5（关掉恢复你原来的大小）" },
+    -- 「只留伤害数字」：关掉治疗 / 治疗吸收 / 友方治疗者名字 / 能量 / 周期能量 / 光环 / 声望 /
+    -- 荣誉 / 进出战斗 / 连击点 / 宠物伤害 / 周期性法术 / 反应类 / 低蓝低血提示。
+    -- **保留** `floatingCombatTextCombatDamage_v2`（伤害）、`...DodgeParryMiss_v2`（闪避招架未命中）、
+    -- `...DamageReduction_v2`（减伤）—— 作者 2026-11-13 拍板"战斗信息仍要看得见谁在打我"。
+    -- 名单取自 12.x 的 Blizzard_CombatText（`CombatTextTypeInfo.*.cvar`）+ 本机 Config.wtf 实盘读数；
+    -- 本客户端不存在的名字只会在账本里落一行 ✗（WriteCVar 的 nil 守卫），不影响其余条目。
+    { key = "damageTextOnly", cvar = "floatingCombatTextCombatHealing_v2", value = "0",
+      label = "战斗文字只留伤害（关治疗/能量/光环等）",
+      extra = {
+          "floatingCombatTextCombatHealingAbsorbTarget_v2",
+          "floatingCombatTextCombatHealingAbsorbSelf_v2",
+          "floatingCombatTextFriendlyHealers_v2",
+          "floatingCombatTextEnergyGains_v2",
+          "floatingCombatTextPeriodicEnergyGains_v2",
+          "floatingCombatTextAuras_v2",
+          "floatingCombatTextRepChanges_v2",
+          "floatingCombatTextHonorGains_v2",
+          "floatingCombatTextCombatState_v2",
+          "floatingCombatTextComboPoints_v2",
+          "floatingCombatTextPetMeleeDamage_v2",
+          "floatingCombatTextPetSpellDamage_v2",
+          "floatingCombatTextCombatLogPeriodicSpells_v2",
+          "floatingCombatTextReactives_v2",
+          "floatingCombatTextLowManaHealth_v2",
+      } },
     { key = "questGlow",   cvar = "outlineModeShowLootEffectWhenDisabled", value = "1", label = "任务物品发光（关掉高亮也发光）" },
     { key = "noDeathGray", cvar = "ffxDeath",                              value = "0", label = "复活不灰屏（死亡后屏幕不变灰）" },
     -- 2026-11-07 实测：RenderScale = 1（1:1 像素映射）时这条**完全无效** ——
@@ -43,6 +74,20 @@ local function TweakByKey(key)
         if TWEAKS[i].key == key then return TWEAKS[i] end
     end
     return nil
+end
+
+--- 一条开关管辖的全部 CVar：[{ cvar = 名字, value = 目标值 }, ...]（主 cvar 永远排第一）。
+--- 单 CVar 的条目也走这里，调用点不用分两种情况。
+--- 返回值只读，别往外写（每条 Apply 都现造，成本就是几个小表，登录 / 拨开关时才跑）。
+local function Targets(t)
+    local list = { { cvar = t.cvar, value = t.value } }
+    local extra = t.extra
+    if extra then
+        for i = 1, #extra do
+            list[#list + 1] = { cvar = extra[i], value = t.value }
+        end
+    end
+    return list
 end
 
 -- 出厂默认「画面快照」（2026-11-08 作者拍板：把当时调好的那套设为默认，登录自动对齐）。
@@ -66,8 +111,8 @@ local FACTORY_VISION = {
     weatherDensity        = "3",
 }
 
--- 出厂默认开关组合（同上，来自实盘 MonetUI.lua 的 db.tweaks：5 开 3 关）。
--- 只用于**新存档**（db.tweaks 还不存在时）；老存档已经有玩家显式拨过的开关，一个键都不动。
+-- 出厂默认开关组合（同上，来自实盘 MonetUI.lua 的 db.tweaks 5 开 3 关 + 2026-11-13 新加的一条 ⇒ 6 开 3 关）。
+-- 只用于**新存档**（db.tweaks 还不存在时）；老存档按 SEED_ADDITIONS 只补新增的键，见 Settings()。
 -- 稀疏存：关着的键不写，IsOn 判 nil 就是关，跟 Core 的 StripDefaults 不冲突（这个表不在 DEFAULTS 里）。
 -- 注：`lootRange`（cvar=autoLootRange）已移除 —— 该 CVar 在 Forever 1.60 不存在（§Tweaks），留着只会
 -- 在账本里落一行 ✗ 空转，对面板 / 玩家零价值。
@@ -75,6 +120,21 @@ local DEFAULT_SWITCHES = {
     cameraZoom = true, combatText = true, questGlow = true,
     noDeathGray = true, sharpen = false, noWeather = true,
     fewParticles = false, noFog = false,
+    damageTextOnly = true,
+}
+
+-- 出厂默认的「增量」版本号。新存档铺一遍 DEFAULT_SWITCHES 就记成当前版本；
+-- 老存档只补 `SEED_ADDITIONS[版本]` 里点名的键。
+--
+-- 为什么需要这层（2026-11-13）：db.tweaks 是稀疏存的 —— 键不存在既可能是「从没见过」
+-- （老存档早于这个开关），也可能是「玩家自己关掉了」。两者不能靠 `== nil` 区分，
+-- 所以**新增的默认开条目必须逐版本点名**：只有这里记过的键才允许被补成 true，
+-- 其余一个都不碰（否则玩家亲手关掉的开关会被每次登录重新打开）。
+local SEED_VERSION = 2
+
+local SEED_ADDITIONS = {
+    -- 版本 2（2026-11-13）：浮动战斗文字只留伤害数字。配合 combatText 的目标值 2 → 0.5。
+    [2] = { "damageTextOnly" },
 }
 
 -- 每个 CVar 一行账，`/mui tweaks status` 读的就是它。
@@ -112,6 +172,20 @@ local function CVarInfo(cvar)
     if not ok then return nil end
     return { value = value, default = default, locked = locked,
              secure = secure, readonly = readonly }
+end
+
+--- 两个 CVar 值算不算同一个。
+--- 值比较：两边都能当数字看就按数字比。
+--- 客户端把 default 给成 number 时是 `0.5`，给成 string 时是 `"0.500000"` —— 直接 tostring
+--- 比会把这两个判成「不同」，于是 brightness / contrast / gamma 这类浮点 CVar 永远假报偏离
+--- （2026-11-07：vision 探针在数字型 default 形态下报 9 条，真值 7 条）。
+--- 2026-11-13 起**写后复验也走它**：`WorldTextScale_v2` 的目标值是 `0.5`，本客户端若把它
+--- 存成 `"0.500000"`（`RenderScale` 就是这种形态），逐字节比会误报「写了没生效」。
+local function SameValue(a, b)
+    if a == nil or b == nil then return false end
+    local na, nb = tonumber(tostring(a)), tonumber(tostring(b))
+    if na ~= nil and nb ~= nil then return na == nb end
+    return tostring(a) == tostring(b)
 end
 
 -- 原值账：`origin[cvar]` = 第一次动这个 CVar 之前玩家的原值（关回去时用）。
@@ -169,7 +243,7 @@ local function WriteCVar(cvar, value)
     end
 
     -- 先读后写：常态下值没变就不该落一笔。
-    if type(cur) == "string" and not Secrets.IsSecret(cur) and cur == want then
+    if type(cur) == "string" and not Secrets.IsSecret(cur) and SameValue(cur, want) then
         rec.note = "已是"
         return true
     end
@@ -195,7 +269,7 @@ local function WriteCVar(cvar, value)
         CVarFlag(cvar, "写了复验读不到（值没落地）")
         return false
     end
-    if type(after) == "string" and not Secrets.IsSecret(after) and after ~= want then
+    if type(after) == "string" and not Secrets.IsSecret(after) and not SameValue(after, want) then
         CVarFlag(cvar, "写了没生效（复验仍是 " .. Text(after) .. "）")
         return false
     end
@@ -208,10 +282,27 @@ function M:Settings()
     if type(db) ~= "table" then return {} end
     if type(db.tweaks) ~= "table" then
         db.tweaks = {}
-        -- 新存档铺一遍出厂开关组合；老存档原样保留（玩家自己拨过的不许被默认顶回去）。
+        -- 新存档铺一遍出厂开关组合。
         for k, v in pairs(DEFAULT_SWITCHES) do
             if v then db.tweaks[k] = true end
         end
+        db.tweakSeed = SEED_VERSION
+        return db.tweaks
+    end
+    -- 老存档：只补「这个机制出现之后新增」的默认开条目，玩家自己拨过的一个键都不动。
+    -- 没有 tweakSeed 的（本机制之前的存档）从版本 2 起算 —— 版本 1 那批默认开是既成事实，
+    -- 玩家关掉的就是关掉了，不许再补一遍。
+    local seeded = tonumber(db.tweakSeed)
+    if not seeded or seeded < SEED_VERSION then
+        for version = (seeded or 1) + 1, SEED_VERSION do
+            local keys = SEED_ADDITIONS[version]
+            if keys then
+                for i = 1, #keys do
+                    if db.tweaks[keys[i]] == nil then db.tweaks[keys[i]] = true end
+                end
+            end
+        end
+        db.tweakSeed = SEED_VERSION
     end
     return db.tweaks
 end
@@ -225,31 +316,47 @@ function M:IsOn(key)
     return self:Settings()[key] and true or false
 end
 
---- 还原单条（`set <key> 0` / `restore` / `all 0` 走的就是它）。
+--- 还原单个 CVar（一条开关可能管多个 CVar，见 Targets）。
 --- 两档：有账 → 玩家原值；没账（旧版遗留）→ 只在「当前值 == 我们的目标值、且 ≠ 客户端默认值」
 --- 时推回默认值，绝不碰玩家自己设的值（他设 55，既非目标也非默认，一个字节不动）。
+--- @return string|nil before, string|nil after
+local function RestoreCVar(cvar, want)
+    local origin = OriginStore()
+    local before = ReadCVar(cvar)
+    local back = origin[cvar]
+    if back ~= nil then
+        WriteCVar(cvar, back)
+        origin[cvar] = nil
+    elseif before ~= nil and not Secrets.IsSecret(before) then
+        local def = DefaultOf(cvar)
+        if def ~= nil
+            and SameValue(before, want)
+            and not SameValue(def, want) then
+            WriteCVar(cvar, def)
+        end
+    end
+    return before, ReadCVar(cvar)
+end
+
+--- 还原一条开关（`set <key> 0` / `restore` / `all 0` 走的就是它）。
+--- 多 CVar 的条目逐个还原，报的是**主 CVar** 的写前/写后值 + 实际变了几个。
 ---
 --- **为什么不并进 Apply 的逐条循环**（2026-11-07 判例）：Apply 每次都会遍历所有条目，
 --- 若关着的条目也走「没账就推默认值」这档，玩家自己把 volumefog 设成 0 之后，
 --- 只是去开另一条开关，就会被顺手改成 1 —— 这不是还原，是误伤。
 --- 所以兜底只在**玩家显式关这一条**时发生。
---- @return string|nil before, string|nil after
+--- @return string|nil before, string|nil after, number changed
 local function RestoreOne(t)
-    local origin = OriginStore()
-    local before = ReadCVar(t.cvar)
-    local back = origin[t.cvar]
-    if back ~= nil then
-        WriteCVar(t.cvar, back)
-        origin[t.cvar] = nil
-    elseif before ~= nil and not Secrets.IsSecret(before) then
-        local def = DefaultOf(t.cvar)
-        if def ~= nil
-            and tostring(before) == tostring(t.value)
-            and tostring(def) ~= tostring(t.value) then
-            WriteCVar(t.cvar, def)
+    local list = Targets(t)
+    local firstBefore, firstAfter, changed
+    for i = 1, #list do
+        local before, after = RestoreCVar(list[i].cvar, list[i].value)
+        if i == 1 then firstBefore, firstAfter = before, after end
+        if Text(before) ~= Text(after) then
+            changed = (changed or 0) + 1
         end
     end
-    return before, ReadCVar(t.cvar)
+    return firstBefore, firstAfter, changed or 0
 end
 
 --- 逐条对齐：开的写入目标值（先存原值），关的若之前写过就还原成原值。
@@ -257,21 +364,26 @@ function M:Apply()
     local origin = OriginStore()
     for i = 1, #TWEAKS do
         local t = TWEAKS[i]
-        if self:IsOn(t.key) then
-            if origin[t.cvar] == nil then origin[t.cvar] = ReadCVar(t.cvar) end
-            WriteCVar(t.cvar, t.value)
-        elseif origin[t.cvar] ~= nil then
-            local cur = ReadCVar(t.cvar)
-            if cur == nil then
-                -- 读不到值，这条账没有意义
-                origin[t.cvar] = nil
-            elseif tostring(cur) == tostring(t.value) then
-                -- 值还是我们写进去的 → 还原成玩家的原值
-                WriteCVar(t.cvar, origin[t.cvar])
-                origin[t.cvar] = nil
-            else
-                -- 玩家中途自己改过：不抢他的值，只清账
-                origin[t.cvar] = nil
+        local on = self:IsOn(t.key)
+        local list = Targets(t)
+        for j = 1, #list do
+            local cvar, want = list[j].cvar, list[j].value
+            if on then
+                if origin[cvar] == nil then origin[cvar] = ReadCVar(cvar) end
+                WriteCVar(cvar, want)
+            elseif origin[cvar] ~= nil then
+                local cur = ReadCVar(cvar)
+                if cur == nil then
+                    -- 读不到值，这条账没有意义
+                    origin[cvar] = nil
+                elseif not Secrets.IsSecret(cur) and SameValue(cur, want) then
+                    -- 值还是我们写进去的 → 还原成玩家的原值
+                    WriteCVar(cvar, origin[cvar])
+                    origin[cvar] = nil
+                else
+                    -- 玩家中途自己改过：不抢他的值，只清账
+                    origin[cvar] = nil
+                end
             end
         end
     end
@@ -291,11 +403,14 @@ function M:RestoreToDefault()
     local origin = OriginStore()
     local n = 0
     for i = 1, #TWEAKS do
-        local t = TWEAKS[i]
-        local back = origin[t.cvar] or DefaultOf(t.cvar)
-        if back ~= nil then
-            if WriteCVar(t.cvar, back) then n = n + 1 end
-            origin[t.cvar] = nil
+        local list = Targets(TWEAKS[i])
+        for j = 1, #list do
+            local cvar = list[j].cvar
+            local back = origin[cvar] or DefaultOf(cvar)
+            if back ~= nil then
+                if WriteCVar(cvar, back) then n = n + 1 end
+                origin[cvar] = nil
+            end
         end
     end
     return n
@@ -311,13 +426,19 @@ function M:Initialize()
     local stuck = {}
     for i = 1, #TWEAKS do
         local t = TWEAKS[i]
-        if not self:IsOn(t.key) and origin[t.cvar] == nil then
-            local cur = ReadCVar(t.cvar)
-            local def = DefaultOf(t.cvar)
-            if cur ~= nil and def ~= nil
-                and tostring(cur) == tostring(t.value)
-                and tostring(def) ~= tostring(t.value) then
-                stuck[#stuck + 1] = t.cvar
+        if not self:IsOn(t.key) then
+            local list = Targets(t)
+            for j = 1, #list do
+                local cvar, want = list[j].cvar, list[j].value
+                if origin[cvar] == nil then
+                    local cur = ReadCVar(cvar)
+                    local def = DefaultOf(cvar)
+                    if cur ~= nil and def ~= nil and not Secrets.IsSecret(cur)
+                        and SameValue(cur, want)
+                        and not SameValue(def, want) then
+                        stuck[#stuck + 1] = cvar
+                    end
+                end
             end
         end
     end
@@ -370,16 +491,7 @@ end
 
 --- 画面观感诊断：当前值 vs 客户端默认值，偏离的标出来，并指出哪几条是本插件写的。
 --- 只读，不改任何 CVar（报告命令不许有副作用）。
---- 值比较：两边都能当数字看就按数字比。
---- 客户端把 default 给成 number 时是 `0.5`，给成 string 时是 `"0.500000"` —— 直接 tostring
---- 比会把这两个判成「偏离默认」，于是 brightness / contrast / gamma 这类浮点 CVar 永远
---- 假报偏离（2026-11-07：vision 探针在数字型 default 形态下报 9 条，真值 7 条）。
-local function SameValue(a, b)
-    if a == nil or b == nil then return false end
-    local na, nb = tonumber(tostring(a)), tonumber(tostring(b))
-    if na ~= nil and nb ~= nil then return na == nb end
-    return tostring(a) == tostring(b)
-end
+--- 值比较走文件前面的 `SameValue`（数字型 / 字符串型 default 都能对上，见那里的注释）。
 
 --- 默认画面快照的存档（`db.tweakDefaults`）。
 --- **不进 Core.DEFAULTS**：那样 StripDefaults 会在落盘前把「等于默认值」的键删掉，
@@ -657,9 +769,27 @@ function M:HandleCommand(rest)
         for i = 1, #TWEAKS do
             local t = TWEAKS[i]
             local on = self:IsOn(t.key) and "|cff00ff00开|r" or "|cff808080关|r"
-            local rec = cvarLedger[t.cvar] or {}
-            ns:Print(("  %s %-12s %s｜当前 %s｜%s"):format(
-                on, t.key, t.cvar, Text(rec.got), rec.note or "-"))
+            local list = Targets(t)
+            if #list > 1 then
+                -- 多 CVar 的条目：打「几条已经等于目标值」比打某一个值有用 ——
+                -- 本客户端少几个名字时，这里就直接看得出是哪几条（缺失数单列）。
+                local atTarget, absent = 0, 0
+                for j = 1, #list do
+                    local v = ReadCVar(list[j].cvar)
+                    if v == nil then
+                        absent = absent + 1
+                    elseif not Secrets.IsSecret(v) and tostring(v) == tostring(list[j].value) then
+                        atTarget = atTarget + 1
+                    end
+                end
+                ns:Print(("  %s %-14s %d 条 CVar（%s 起）｜%d 条 = %s%s"):format(
+                    on, t.key, #list, t.cvar, atTarget, t.value,
+                    absent > 0 and ("，%d 条本客户端没有"):format(absent) or ""))
+            else
+                local rec = cvarLedger[t.cvar] or {}
+                ns:Print(("  %s %-14s %s｜当前 %s｜%s"):format(
+                    on, t.key, t.cvar, Text(rec.got), rec.note or "-"))
+            end
         end
         ns:Print("开关：/mui tweaks set <key> 1|0（如 /mui tweaks set noFog 1）")
         ns:Print("画面发灰/发白：/mui tweaks vision（当前值 vs 默认值，只读）")
@@ -675,19 +805,39 @@ function M:HandleCommand(rest)
             return true
         end
         local on = (flag == "1" or flag == "on" or flag == "true")
+        local list = Targets(t)
         local before = ReadCVar(t.cvar)
         self:Settings()[t.key] = on
+        local changed = 0
         if on then
             self:Apply()
         else
             -- 关：先按这一条显式还原（含「旧版遗留、账上没有」的兜底），再跑一遍全量对齐。
-            RestoreOne(t)
+            changed = select(3, RestoreOne(t))
             self:Apply()
         end
         -- 打印**写前 / 写后**的实际值：以前只打「已关」，玩家无从判断到底写没写进去。
         -- 2026-11-07 判例：这一条在账上没记录时 Apply 会整条跳过，命令照样回「已关」，
         -- 画面一点没变 —— 玩家只会以为「这个开关没用」。值一打出来就无处可藏。
         local after = ReadCVar(t.cvar)
+        if #list > 1 then
+            -- 多 CVar 的条目：主 CVar 打 A→B，再报整批的落点（这是判断"客户端认不认这些名字"的唯一入口）。
+            local atTarget = 0
+            for j = 1, #list do
+                local v = ReadCVar(list[j].cvar)
+                if v ~= nil and not Secrets.IsSecret(v) and tostring(v) == tostring(list[j].value) then
+                    atTarget = atTarget + 1
+                end
+            end
+            ns:Print(("%s：%s｜%d 条 CVar　主 %s 值 %s → %s｜%d/%d 条 = %s"):format(
+                t.label, on and "已开" or "已关", #list, t.cvar, Text(before), Text(after),
+                atTarget, #list, t.value))
+            if on and atTarget < #list then
+                ns:Print(("  |cffffa940注意|r：%d 条没到 %s —— 有的是本来就在这个值，有的是这个客户端没有那个名字 / 拒写（/mui tweaks status 看逐条账本）。")
+                    :format(#list - atTarget, t.value))
+            end
+            return true
+        end
         ns:Print(("%s：%s｜%s　值 %s → %s"):format(
             t.label, on and "已开" or "已关", t.cvar, Text(before), Text(after)))
         if Text(before) == Text(after) then
@@ -696,6 +846,8 @@ function M:HandleCommand(rest)
             else
                 ns:Print("  值没变 —— 本来就在你的原值上，这一条没有需要还原的东西。")
             end
+        elseif not on and changed > 1 then
+            ns:Print(("  这一条管 %d 个 CVar，实际改动了 %d 个。"):format(#list, changed))
         end
         return true
     end

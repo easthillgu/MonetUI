@@ -1653,7 +1653,7 @@ function SimpleConfig:Build()
         tweakHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(44))
         tweakHint:SetWidth(328)
         tweakHint:SetJustifyH("LEFT")
-        tweakHint:SetText("逐条开关客户端控制台设置：打开写入、关掉还原成你原来的值。名单来自《无限》服常用优化，个别名字在本客户端可能不存在或被拒写——那样这条会空转，用 /mui tweaks status 看账本。默认全关。")
+        tweakHint:SetText("逐条开关客户端控制台设置：打开写入、关掉还原成你原来的值。名单来自《无限》服常用优化，个别名字在本客户端可能不存在或被拒写——那样这条会空转，用 /mui tweaks status 看账本。默认开着作者调好的那几条（含伤害数字 ×0.5、战斗文字只留伤害），其余全关。")
         sec.bodyHeight = -row.y + 4
     end
 

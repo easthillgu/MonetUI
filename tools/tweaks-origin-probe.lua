@@ -13,7 +13,8 @@
 --   3) 关掉开关：真的还原成玩家原值，账清空
 --   4) 玩家中途自己改过：关掉时不抢他的值，只清账
 --   5) /mui tweaks restore：没记账的用客户端默认值兜底
---   6) /mui tweaks all 0：八条全关并还原（lootRange 已移除）
+--   6) /mui tweaks all 0：九条全关并还原（lootRange 已移除）
+--   9) 一条开关管多个 CVar（damageTextOnly 管 16 个）：写整批、还原整批、命令给汇总
 --
 -- 跑法：lua tools/tweaks-origin-probe.lua    退出码 0 = 全绿
 -- 依赖：lua 5.4（loadfile 三参 env）；无第三方库。
@@ -32,6 +33,39 @@ local CVARS = {
     WorldTextScale_v2     = { value = "1", default = "1" },
     outlineModeShowLootEffectWhenDisabled = { value = "0", default = "0" },
 }
+
+-- 浮动战斗文字一族：一条开关（damageTextOnly）管 16 个 CVar（2026-11-13）。
+-- 这里**全部**给桩件（对照 tweaks-defaults-probe 里故意漏一个的缺失测试）。
+local FCT = {
+    "floatingCombatTextCombatHealing_v2",
+    "floatingCombatTextCombatHealingAbsorbTarget_v2",
+    "floatingCombatTextCombatHealingAbsorbSelf_v2",
+    "floatingCombatTextFriendlyHealers_v2",
+    "floatingCombatTextEnergyGains_v2",
+    "floatingCombatTextPeriodicEnergyGains_v2",
+    "floatingCombatTextAuras_v2",
+    "floatingCombatTextRepChanges_v2",
+    "floatingCombatTextHonorGains_v2",
+    "floatingCombatTextCombatState_v2",
+    "floatingCombatTextComboPoints_v2",
+    "floatingCombatTextPetMeleeDamage_v2",
+    "floatingCombatTextPetSpellDamage_v2",
+    "floatingCombatTextCombatLogPeriodicSpells_v2",
+    "floatingCombatTextReactives_v2",
+    "floatingCombatTextLowManaHealth_v2",
+}
+for i = 1, #FCT do
+    CVARS[FCT[i]] = { value = "1", default = "1" }
+end
+-- 保留项（伤害 / 闪避招架 / 减伤）：作者拍板不许动，这里专门验"没被碰"。
+local KEEP = {
+    "floatingCombatTextCombatDamage_v2",
+    "floatingCombatTextDodgeParryMiss_v2",
+    "floatingCombatTextDamageReduction_v2",
+}
+for i = 1, #KEEP do
+    CVARS[KEEP[i]] = { value = "1", default = "1" }
+end
 
 local function Reset()
     for _, r in pairs(CVARS) do r.value = r.default end
@@ -158,20 +192,26 @@ local M6c = Load()
 M6c:RestoreAll()
 check("玩家的 55 原封不动", CVARS.particleDensity.value == "55", CVARS.particleDensity.value)
 
-print("== 6) all 0：八条全关并还原 ==")
+print("== 6) all 0：九条全关并还原 ==")
 Reset()
 DB.tweaks = { sharpen = true, noFog = true }
 DB.tweakOrigin = nil
+DB.tweakSeed = nil   -- 模拟本机制之前的老存档：版本 2 新增的 damageTextOnly 该被补上
 local M7 = Load()
 M7:Initialize()
 check("sharpen 与 volumefog 都写成目标值",
     CVARS.ResampleAlwaysSharpen.value == "1" and CVARS.volumefog.value == "0",
     CVARS.ResampleAlwaysSharpen.value .. "/" .. CVARS.volumefog.value)
+check("damageTextOnly 也被种子带上（版本 2 新增）",
+    CVARS.floatingCombatTextCombatHealing_v2.value == "0",
+    CVARS.floatingCombatTextCombatHealing_v2.value)
 M7:HandleCommand("all 0")
 check("all 0 之后开关全关", next(DB.tweaks) == nil or (not DB.tweaks.sharpen and not DB.tweaks.noFog))
 check("all 0 之后值全还原",
     CVARS.ResampleAlwaysSharpen.value == "0" and CVARS.volumefog.value == "1",
     CVARS.ResampleAlwaysSharpen.value .. "/" .. CVARS.volumefog.value)
+check("all 0 之后整批战斗文字也还原", CVARS.floatingCombatTextCombatHealing_v2.value == "1",
+    CVARS.floatingCombatTextCombatHealing_v2.value)
 
 print("== 7) set <key> 0 也要能救遗留（账上没有、值还是目标值）==")
 Reset()
@@ -196,6 +236,41 @@ M9:HandleCommand("set fewParticles 0")
 check("玩家的 55 原封不动", CVARS.particleDensity.value == "55", CVARS.particleDensity.value)
 check("命令明确说「值没变」", table.concat(out, "\n"):find("值没变", 1, true) ~= nil,
     table.concat(out, " / "))
+
+print("== 9) 一条开关管 16 个 CVar：写整批 / 还原整批 / 命令给汇总 ==")
+Reset()
+DB.tweaks = { damageTextOnly = true }
+DB.tweakOrigin = nil
+local M10 = Load()
+out = {}
+M10:Initialize()
+local allOff, stillOn = true, ""
+for i = 1, #FCT do
+    if CVARS[FCT[i]].value ~= "0" then
+        allOff = false
+        stillOn = stillOn .. FCT[i] .. " "
+    end
+end
+check("16 条全部写成 0", allOff, stillOn)
+check("保留项一个字节没动（伤害 / 闪避招架 / 减伤）",
+    CVARS[KEEP[1]].value == "1" and CVARS[KEEP[2]].value == "1" and CVARS[KEEP[3]].value == "1",
+    CVARS[KEEP[1]].value .. "/" .. CVARS[KEEP[2]].value .. "/" .. CVARS[KEEP[3]].value)
+check("16 条的原值都进了账", DB.tweakOrigin
+    and DB.tweakOrigin[FCT[1]] == "1" and DB.tweakOrigin[FCT[#FCT]] == "1",
+    DB.tweakOrigin and tostring(DB.tweakOrigin[FCT[1]]))
+
+out = {}
+M10:HandleCommand("set damageTextOnly 0")
+local allBack = true
+for i = 1, #FCT do
+    if CVARS[FCT[i]].value ~= "1" then allBack = false end
+end
+check("set <key> 0 把整批还原成原值", allBack, CVARS[FCT[1]].value)
+check("命令报出条数与落点", table.concat(out, "\n"):find("16 条 CVar", 1, true) ~= nil,
+    table.concat(out, " / "))
+check("还原后账清空（16 条都不留）",
+    DB.tweakOrigin[FCT[1]] == nil and DB.tweakOrigin[FCT[#FCT]] == nil,
+    tostring(DB.tweakOrigin[FCT[1]]))
 
 print(fail == 0 and "\n全部通过" or ("\n失败 " .. fail .. " 项"))
 os.exit(fail == 0 and 0 or 1)

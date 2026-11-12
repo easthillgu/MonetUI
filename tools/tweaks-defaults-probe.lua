@@ -10,14 +10,16 @@
 --
 -- 用桩件加载**真实** Modules/Tools/Tweaks.lua，多个 chunk 实例共享同一份「存档」模拟 reload。
 -- 验证：
---   1) 新存档铺出厂开关组合；老存档一个键都不动
+--   1) 新存档铺出厂开关组合；老存档只补 SEED_ADDITIONS 点名的**新增**键，玩家拨过的键一个不动
 --   2) 出厂快照 seed 进 db.tweakDefaults，auto 默认开
 --   3) Initialize 把非开关管辖的 CVar 拉回快照；开着的开关赢过快照
+--   3b) 「战斗文字只留伤害」这一条写整批 CVar，含一个本客户端不存在的名字也不拖累其余
 --   4) 零写入不刷屏
 --   5) defaults off / on / apply（apply 无视 auto 强制对齐）
 --   6) snapshot 实机重采：补齐未采样项、记开关状态、点名冲突、之后按新快照对齐
 --   7) stuck 诊断不被对齐抹掉
---   8) defaults / status 命令不抛、提示齐全
+--   8) 浮点 CVar 存成 "0.500000" 时不误报「写了没生效」（2026-11-13：新增的 0.5 目标值）
+--   9) defaults / status / restore 命令不抛、提示齐全
 --
 -- 跑法：lua tools/tweaks-defaults-probe.lua    退出码 0 = 全绿
 -- 依赖：lua 5.4（loadfile 三参 env）；无第三方库。
@@ -26,6 +28,7 @@ local env = setmetatable({}, { __index = _G })
 env._G = env
 
 local CVARS = {}
+local FLOAT6 = {}   -- 名单里的 CVar 写入后存成 "0.500000" 形态（客户端差异，见 SetCVar 桩件）
 local function C(name, initial, default)
     CVARS[name] = { value = initial, initial = initial, default = default or initial }
 end
@@ -46,6 +49,32 @@ C("cameraDistanceMaxZoomFactor",       "1", "1")
 C("WorldTextScale_v2",                 "1", "1")
 C("outlineModeShowLootEffectWhenDisabled", "0", "0")
 
+-- 浮动战斗文字一族（2026-11-13「只留伤害数字」管辖），出厂全 1。
+-- 故意**漏掉** floatingCombatTextReactives_v2 —— 模拟"本客户端没有这个 CVar"：
+-- 一条开关里少一个名字时，其余 15 条必须照写（WriteCVar 的 nil 守卫，2026-11-13）。
+local FCT = {
+    "floatingCombatTextCombatHealing_v2",
+    "floatingCombatTextCombatHealingAbsorbTarget_v2",
+    "floatingCombatTextCombatHealingAbsorbSelf_v2",
+    "floatingCombatTextFriendlyHealers_v2",
+    "floatingCombatTextEnergyGains_v2",
+    "floatingCombatTextPeriodicEnergyGains_v2",
+    "floatingCombatTextAuras_v2",
+    "floatingCombatTextRepChanges_v2",
+    "floatingCombatTextHonorGains_v2",
+    "floatingCombatTextCombatState_v2",
+    "floatingCombatTextComboPoints_v2",
+    "floatingCombatTextPetMeleeDamage_v2",
+    "floatingCombatTextPetSpellDamage_v2",
+    "floatingCombatTextCombatLogPeriodicSpells_v2",
+    "floatingCombatTextLowManaHealth_v2",
+}
+for i = 1, #FCT do C(FCT[i], "1", "1") end
+-- 保留项：作者拍板"战斗信息仍要看得见谁在打我"，这三个一个字节都不许动。
+C("floatingCombatTextCombatDamage_v2",      "1", "1")
+C("floatingCombatTextDodgeParryMiss_v2",    "1", "1")
+C("floatingCombatTextDamageReduction_v2",   "1", "1")
+
 local function Reset()
     for _, r in pairs(CVARS) do
         r.value = r.initial
@@ -62,7 +91,8 @@ env.C_CVar = {
     SetCVar = function(n, v)
         local r = CVARS[n]
         if not r then return false end
-        r.value = tostring(v)
+        -- FLOAT6：模拟把浮点 CVar 存成 "0.500000" 的客户端形态（本机 RenderScale 就是这样）。
+        r.value = FLOAT6[n] and string.format("%.6f", tonumber(v) or 0) or tostring(v)
         return true
     end,
 }
@@ -102,30 +132,45 @@ local function check(name, cond, extra)
 end
 local function Text() return table.concat(out, "\n") end
 
--- 实盘里的开关组合：5 开 3 关（lootRange 已移除：autoLootRange 在 Forever 1.60 不存在）
+-- 实盘里的开关组合（lootRange 已移除：autoLootRange 在 Forever 1.60 不存在）。
+-- damageTextOnly 是 2026-11-13 新加的默认开条目（版本 2），老存档由 SEED_ADDITIONS 补。
 local function LiveSwitches()
     return {
         cameraZoom = true, combatText = true, questGlow = true,
         noDeathGray = true, sharpen = false, noWeather = true,
-        fewParticles = false, noFog = false,
+        fewParticles = false, noFog = false, damageTextOnly = true,
     }
 end
 
-print("== 1) 新存档 seed，老存档不动 ==")
+print("== 1) 新存档 seed，老存档只补新增键 ==")
 Reset()
 DB = {}
 local M1 = Load()
 local s1 = M1:Settings()
-check("新存档铺了 5 条默认开关",
-    s1.cameraZoom and s1.combatText and s1.questGlow and s1.noDeathGray and s1.noWeather)
+check("新存档铺了 6 条默认开关",
+    s1.cameraZoom and s1.combatText and s1.questGlow and s1.noDeathGray
+    and s1.noWeather and s1.damageTextOnly)
 check("默认关的 3 条没写进存档",
     not s1.sharpen and not s1.fewParticles and not s1.noFog)
+check("新存档记下种子版本", DB.tweakSeed == 2, tostring(DB.tweakSeed))
 
-DB = { tweaks = { sharpen = true } }
+-- 老存档 = 本机制之前就在的那批。稀疏存里「键不存在」既可能是「关掉」也可能是「没见过」，
+-- 所以只有 SEED_ADDITIONS 点过名的新键才允许补；玩家拨过的（combatText = false）绝不回滚。
+DB = { tweaks = { sharpen = true, combatText = false } }
 local M2 = Load()
 local s2 = M2:Settings()
-check("老存档不被出厂默认顶回去", s2.sharpen == true and s2.cameraZoom == nil,
-    tostring(s2.cameraZoom))
+check("老存档不顶掉玩家拨过的键", s2.sharpen == true and s2.combatText == false,
+    tostring(s2.sharpen) .. "/" .. tostring(s2.combatText))
+check("老存档没见过的旧键不补（cameraZoom 仍是 nil）", s2.cameraZoom == nil, tostring(s2.cameraZoom))
+check("老存档补上本版新增的 damageTextOnly", s2.damageTextOnly == true, tostring(s2.damageTextOnly))
+check("老存档也记下种子版本", DB.tweakSeed == 2, tostring(DB.tweakSeed))
+
+-- 种子标记已是最新时不许再补：否则玩家关掉它之后，每次登录都会被自己开回来。
+s2.damageTextOnly = nil
+local M2b = Load()
+local s2b = M2b:Settings()
+check("种子已最新时不再补（玩家关掉后不会自己开回来）", s2b.damageTextOnly == nil,
+    tostring(s2b.damageTextOnly))
 
 print("== 2) 出厂快照 seed + Initialize 自动对齐 ==")
 Reset()
@@ -153,6 +198,29 @@ check("ResampleAlwaysSharpen 拉回 1（开关关）", CVARS.ResampleAlwaysSharp
 check("weatherDensity 由 noWeather 写成 0，没被快照的 3 抢走",
     CVARS.weatherDensity.value == "0", CVARS.weatherDensity.value)
 check("ffxDeath 由 noDeathGray 写成 0", CVARS.ffxDeath.value == "0", CVARS.ffxDeath.value)
+
+-- 2026-11-13 作者拍板的两条默认：伤害数字 ×0.5、「只留伤害数字」关掉整族战斗文字。
+-- 一条开关写多个 CVar 时最怕「只写了主 cvar」或「一个名字不认就整条放弃」，这两项专测那个。
+check("WorldTextScale_v2 写成 0.5（伤害数字缩小一半）", CVARS.WorldTextScale_v2.value == "0.5",
+    CVARS.WorldTextScale_v2.value)
+local allOff, stillOn = true, ""
+for i = 1, #FCT do
+    if CVARS[FCT[i]].value ~= "0" then
+        allOff = false
+        stillOn = stillOn .. FCT[i] .. " "
+    end
+end
+check("15 条战斗文字分类全部关掉（治疗 / 吸收 / 能量 / 光环 …）", allOff, stillOn)
+check("本客户端不存在的名字（Reactives）不拖累其余 15 条",
+    CVARS.floatingCombatTextCombatHealing_v2.value == "0"
+    and CVARS.floatingCombatTextLowManaHealth_v2.value == "0")
+check("保留项一个字节没动：伤害 / 闪避招架 / 减伤",
+    CVARS.floatingCombatTextCombatDamage_v2.value == "1"
+    and CVARS.floatingCombatTextDodgeParryMiss_v2.value == "1"
+    and CVARS.floatingCombatTextDamageReduction_v2.value == "1",
+    CVARS.floatingCombatTextCombatDamage_v2.value .. "/"
+    .. CVARS.floatingCombatTextDodgeParryMiss_v2.value .. "/"
+    .. CVARS.floatingCombatTextDamageReduction_v2.value)
 check("ResampleQuality 未采样 → 跳过，保持 1", CVARS.ResampleQuality.value == "1",
     CVARS.ResampleQuality.value)
 check("出厂快照 seed 进 db.tweakDefaults",
@@ -232,6 +300,29 @@ out = {}
 local okS, errS = pcall(M9.HandleCommand, M9, "status")
 check("status 不抛", okS, errS)
 check("status 提示了 snapshot", Text():find("/mui tweaks snapshot", 1, true) ~= nil)
+check("status 点名了本客户端没有的名字条数", Text():find("条本客户端没有", 1, true) ~= nil,
+    Text():gsub("\n", " / "))
+check("status 把多 CVar 条目合成一行（不铺 16 行）",
+    Text():find("damageTextOnly", 1, true) ~= nil and Text():find("条 CVar", 1, true) ~= nil)
+
+print("== 8) 浮点 CVar 存成 0.500000 也不误报「写了没生效」==")
+Reset()
+FLOAT6.WorldTextScale_v2 = true
+CVARS.WorldTextScale_v2.value = "1.000000"
+DB = { tweaks = LiveSwitches() }
+out = {}
+local M10 = Load()
+M10:Initialize()
+check("0.5 写进去了（按数字比，不是逐字节比）",
+    tonumber(CVARS.WorldTextScale_v2.value) == 0.5, CVARS.WorldTextScale_v2.value)
+check("没有误报「写了没生效」", Text():find("写了没生效", 1, true) == nil,
+    Text():gsub("\n", " / "))
+out = {}
+M10:HandleCommand("status")
+check("再看账本仍以数字形态展示", Text():find("damageTextOnly", 1, true) ~= nil)
+FLOAT6.WorldTextScale_v2 = nil
+
+print("== 9) restore 命令不抛、提示齐全 ==")
 out = {}
 local okR, errR = pcall(M9.HandleCommand, M9, "restore")
 check("restore 不抛（多了自动对齐提示）", okR, errR)
