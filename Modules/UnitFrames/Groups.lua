@@ -1126,6 +1126,19 @@ local function ResyncAfterRestriction()
     end)
 end
 
+--- 战斗中进组时打一句**一次性**提示：延迟不是坏了，是客户端禁止在受限窗口里
+--- 配置受保护的队伍按钮（见上 ResyncAfterRestriction 注释），脱战瞬间自动填充 ——
+--- 不提示的话"进组后框是白的"看起来就像报障（2026-11-12 作者实测后第一反应即是如此）。
+--- 一次会话只提一次，不刷屏（AGENTS：警告一次性 print）。
+local restrictedRosterNotified = false
+local function NotifyRestrictedRoster()
+    if restrictedRosterNotified then return end
+    restrictedRosterNotified = true
+    if type(ns.Print) == "function" then
+        ns:Print("战斗中进组：队伍框将在脱战后自动填充（客户端禁止战斗中配置受保护按钮）。")
+    end
+end
+
 -- ============================================================================
 -- 子框鼠标循环静音（补 LoD 漏网）
 -- ============================================================================
@@ -1514,7 +1527,10 @@ function M:RegisterEvents()
     local rosterChanged = function()
         -- 受限窗口里名册变更后，安全头的 configureChildren 全被静默拒绝（见
         -- ResyncAfterRestriction 注释）；记下"欠一次补配"，解禁后由解禁钩子补做。
-        if Restricted() then rosterDirty = true end
+        if Restricted() then
+            rosterDirty = true
+            NotifyRestrictedRoster()
+        end
         M:RefreshAll()
         ReparkBlizzardGroups()
         for _, delay in ipairs({ 0.05, 0.3, 1.0 }) do
