@@ -778,7 +778,7 @@ function M:HandleCommand(rest)
                     local v = ReadCVar(list[j].cvar)
                     if v == nil then
                         absent = absent + 1
-                    elseif not Secrets.IsSecret(v) and tostring(v) == tostring(list[j].value) then
+                    elseif not Secrets.IsSecret(v) and SameValue(v, list[j].value) then
                         atTarget = atTarget + 1
                     end
                 end
@@ -825,7 +825,7 @@ function M:HandleCommand(rest)
             local atTarget = 0
             for j = 1, #list do
                 local v = ReadCVar(list[j].cvar)
-                if v ~= nil and not Secrets.IsSecret(v) and tostring(v) == tostring(list[j].value) then
+                if v ~= nil and not Secrets.IsSecret(v) and SameValue(v, list[j].value) then
                     atTarget = atTarget + 1
                 end
             end
@@ -840,7 +840,16 @@ function M:HandleCommand(rest)
         end
         ns:Print(("%s：%s｜%s　值 %s → %s"):format(
             t.label, on and "已开" or "已关", t.cvar, Text(before), Text(after)))
-        if Text(before) == Text(after) then
+        -- 「值没变」这条判据不能拿 Text() 比：机密值会被 Text 拍成同一个 "机密" 字样。
+        local unchanged
+        if before == nil or after == nil then
+            unchanged = (before == nil and after == nil)
+        elseif Secrets.IsSecret(before) or Secrets.IsSecret(after) then
+            unchanged = false   -- 读不出来就别断言"没变"
+        else
+            unchanged = SameValue(before, after)
+        end
+        if unchanged then
             if on then
                 ns:Print("  值没变 —— 本来就是这个值，或者写入被客户端拒了（/mui tweaks status 看账本）。")
             else
