@@ -227,6 +227,11 @@ check("出厂快照 seed 进 db.tweakDefaults",
     DB.tweakDefaults and DB.tweakDefaults.vision.brightness == "55")
 check("auto 默认开（作者拍板）", DB.tweakDefaults.auto == true)
 check("对齐汇总打印了一次", Text():find("默认画面对齐", 1, true) ~= nil)
+out = {}
+M3:HandleCommand("status")
+local scaleLine = Text():match("[^\n]*WorldTextScale_v2[^\n]*") or ""
+check("status 打实时值，不是记账前读到的旧值（实机判例：显示 2 而实际 0.5）",
+    scaleLine:find("当前 0.5", 1, true) ~= nil, scaleLine)
 
 print("== 3) 零写入不刷屏 ==")
 out = {}

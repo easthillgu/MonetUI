@@ -786,9 +786,11 @@ function M:HandleCommand(rest)
                     on, t.key, #list, t.cvar, atTarget, t.value,
                     absent > 0 and ("，%d 条本客户端没有"):format(absent) or ""))
             else
+                -- 这里读**实时值**，不用账本里的 rec.got：那个是「写入之前读到的值」，
+                -- 写过之后它就旧了 —— 实机就出过「当前 2｜已写」，而实际早就是 0.5。
                 local rec = cvarLedger[t.cvar] or {}
                 ns:Print(("  %s %-14s %s｜当前 %s｜%s"):format(
-                    on, t.key, t.cvar, Text(rec.got), rec.note or "-"))
+                    on, t.key, t.cvar, Text(ReadCVar(t.cvar)), rec.note or "-"))
             end
         end
         ns:Print("开关：/mui tweaks set <key> 1|0（如 /mui tweaks set noFog 1）")
