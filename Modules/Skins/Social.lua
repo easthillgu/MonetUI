@@ -18,6 +18,7 @@ local Marked = function(o, k) return ns:Marked(o, k) end
 local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
 local Color  = ns.Color
 local Media  = ns.Media
+local Secrets = ns.Secrets   -- 表头发丝线要按位置取两端，比较之前必须过 CanRead
 
 -- **1.60 实测（开服日 11-05，`/mui compat find Friends` 走 19805 个框，只返回这 18 个实名）**：
 -- 编号页签只有 **1 / 3 / 4**，`FriendsFrameTab2`、`FriendsFrameTab5` 与
@@ -151,6 +152,21 @@ local function ShapeOf(obj)
     local okW, w = pcall(obj.GetWidth, obj)
     local okH, h = pcall(obj.GetHeight, obj)
     if okW and okH and type(w) == "number" and type(h) == "number" then return w, h end
+    return nil
+end
+
+--- 屏幕左右缘。`GetLeft/GetRight` 给的已经是 UIParent 坐标，不要再乘一次缩放。
+--- 这两个值要拿来**比较大小**，所以先过 `Secrets.CanRead`：机密数字的 `type()` 照样是
+--- "number"，只判类型会在受限窗口里抛（AGENTS 的数字/字符串判例）。读不出来返回 nil，
+--- 调用方这一趟不画线、下一趟再来。
+local function EdgeOf(obj)
+    if not obj or type(obj.GetLeft) ~= "function" or type(obj.GetRight) ~= "function" then return nil end
+    local okL, l = pcall(obj.GetLeft, obj)
+    local okR, r = pcall(obj.GetRight, obj)
+    if okL and okR and type(l) == "number" and type(r) == "number"
+        and Secrets.CanRead(l) and Secrets.CanRead(r) then
+        return l, r
+    end
     return nil
 end
 
@@ -317,7 +333,10 @@ end
 --- 表头：6 个排序按钮的列底（(宽-9)×24 的 BACKGROUND）与高亮都压掉，只留文字，
 --- 再在按钮下沿拉一条发丝线（分栏靠线，不靠色块）。
 local function SkinRosterHeader(header)
-    if Marked(header, "cfHeader") then return end
+    -- 线没画出来就不算做完：以前只认 `cfHeader`，而它落在函数开头 ⇒ 那一拍若读不到位置
+    -- （还没排版 / 受限）就早退，标记却已落下，发丝线**永远补不回来**。
+    -- 压图那几步各自幂等（`Skin:Fade` / `FadeWideArt` 有自己的标记），重跑只是一次表查询。
+    if Marked(header, "cfHeader") and Marked(header, "cfRule") then return end
     Mark(header, "cfHeader", true)
     -- 表头**自己**那层大图：617×60 的列底 + `_UI-Frame-TopTileStreaks` 43 高 + 一圈
     -- `UI-Frame-Inner*` 3px 内框（3×309 那条靠高度判）。不压掉它，分栏线画在一条羊皮纸带上。
@@ -338,7 +357,16 @@ local function SkinRosterHeader(header)
         end
     end
     if #cells == 0 then return end
-    local left, right = cells[1], cells[#cells]
+    -- **创建序 ≠ 视觉序**（11-13 实机：六颗排序钮视觉左起是 3,5,2,1,6，`cells[1]` 在 L=843
+    -- 而最左那颗在 L=664）⇒ 拿首尾当两端会让发丝线只盖住右半段（实测 183 / 应 362）。
+    -- 按实际位置取最左与最右；锚在它们身上，之后列宽变化线也跟着走。
+    local left, right, minL, maxR
+    for _, cell in ipairs(cells) do
+        local l, r = EdgeOf(cell)
+        if l and (not minL or l < minL) then minL, left = l, cell end
+        if r and (not maxR or r > maxR) then maxR, right = r, cell end
+    end
+    if not left or not right then return end
     local tex = header:CreateTexture(nil, "ARTWORK")
     tex:SetTexture(Media.texture["monet_hairline"])
     tex:SetPoint("TOPLEFT", left, "BOTTOMLEFT", 0, -1)

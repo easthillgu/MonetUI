@@ -425,5 +425,38 @@ check('FadeWideArt 宿主宽 0 时不压（保住职业图标 / 公会旗）',
 check('FadeWideArt 仍跳过我们自己的美术（art 标记）',
       !!fadeWide && /not Marked\(reg, "art"\)/.test(fadeWide[1]));
 
+console.log('\n[18] 表头发丝线按位置取两端（2026-11-13 §8.112 实机判例）');
+// 六颗排序钮的**创建序 ≠ 视觉序**（实测视觉左起 3,5,2,1,6）。以前拿 cells[1] / cells[#cells]
+// 当两端 ⇒ 线只盖住右半段（实测 183px，应 362px）。同族第二条：cfHeader 标记落在函数开头，
+// 那一拍读不到位置就早退、标记却已落下 ⇒ 线永远补不回来。
+check('Social 引入 Secrets（位置比较前要过 CanRead）', /local Secrets = ns\.Secrets/.test(social));
+const edgeOf = /local function EdgeOf\(obj\)([\s\S]*?)\nend/.exec(social);
+check('EdgeOf 已定义', !!edgeOf);
+if (edgeOf) {
+  const b = edgeOf[1];
+  check('EdgeOf 读 GetLeft/GetRight 各自 pcall', /pcall\(obj\.GetLeft, obj\)/.test(b) && /pcall\(obj\.GetRight, obj\)/.test(b));
+  check('EdgeOf 比较前过 Secrets.CanRead（机密数字 type 也是 number）',
+        /Secrets\.CanRead\(l\)/.test(b) && /Secrets\.CanRead\(r\)/.test(b));
+  check('EdgeOf 读不出来返回 nil（不返回 0 假装读到）', /return nil/.test(b));
+}
+const hdrFn = /local function SkinRosterHeader\(header\)([\s\S]*?)\nend/.exec(social);
+check('SkinRosterHeader 已定义', !!hdrFn);
+if (hdrFn) {
+  const b = hdrFn[1];
+  check('不再拿创建序首尾当两端', !/local left, right = cells\[1\], cells\[#cells\]/.test(b));
+  check('按 EdgeOf 取最左 / 最右', /local l, r = EdgeOf\(cell\)/.test(b)
+        && /l < minL/.test(b) && /r > maxR/.test(b));
+  check('两端读不到时这一趟不画线', /if not left or not right then return end/.test(b));
+  check('守卫要求线也落地（cfRule），否则下一趟重试',
+        /if Marked\(header, "cfHeader"\) and Marked\(header, "cfRule"\) then return end/.test(b));
+  check('线仍锚在两端按钮上（列宽变化跟着走）',
+        /tex:SetPoint\("TOPLEFT", left, "BOTTOMLEFT", 0, -1\)/.test(b)
+        && /tex:SetPoint\("TOPRIGHT", right, "BOTTOMRIGHT", 0, -1\)/.test(b));
+}
+// 回归护栏：本轮一次误编辑把 IsButton 的 nil 守卫删掉了（KindOf 自己挡 nil，
+// 但紧随其后的 type(obj.IsObjectType) 不挡）。静态闸门当时全绿，只有实机才抛。
+const isBtn = /local function IsButton\(obj\)([\s\S]*?)\nend/.exec(social);
+check('IsButton 的 nil 守卫在位', !!isBtn && /if not obj then return false end/.test(isBtn[1]));
+
 console.log('\n' + (bad === 0 ? '全部通过' : bad + ' 项未通过'));
 process.exit(bad === 0 ? 0 : 1);
