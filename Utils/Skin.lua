@@ -2060,6 +2060,13 @@ end
 --- 下一趟扫到就自然跳过；`Skin:SwapArt` 自己也对已换的贴图早退。
 function Skin:CloseButtonByArt(button)
     if not button then return false end
+    -- 已经换上我们的 ✕：atlas 判据必然落空（SwapArt 走 SetTexture），但钮外面那层装饰框
+    -- 会被暴雪抬回 α0.80 ⇒ 每趟补扫都要再压一次，不能跟着签名一起早退。
+    -- （11-13 实机：SocialUIFrame / CommunitiesFrame 的 9 张 `hidden=Y` 而 α=0.80。）
+    if Marked(button, "closeArt") then
+        self:FadeChildBoxArt(button)
+        return true
+    end
     local tex = self:TexOf(button, "GetNormalTexture")
     if not tex then return false end
     local ok, atlas = pcall(tex.GetAtlas, tex)
@@ -2218,7 +2225,18 @@ function Skin:MaximizeMinimizeByArt(button)
     return self:MaximizeMinimize(button)
 end
 
+--- 稳定引用：容器每次显示再扫一遍（`Widget:ShowWatch` 按函数身份去重，不能现造闭包）。
+local function MaximizeMinimizeFrameOnShow(host)
+    Skin:MaximizeMinimizeFrame(host)
+end
+
 --- 一个 `MaximizeMinimizeFrame` 里全是方向钮（CommunitiesFrame 实测两颗 28×28）。
+---
+--- **必须给容器登记显示轮询**：世界地图 / 试衣间那两颗在登录那一拍是 **0x0**（窗口还藏着，
+--- 模板没给尺寸），`MaximizeMinimizeKind` 的尺寸门直接判 nil；而 `MaximizeMinimizeSweep`
+--- 从窗口根只走 2 层，够不到 `WorldMapFrame → BorderFrame → MaximizeMinimizeFrame → 按钮`
+--- 这第 3 层 ⇒ 少了这一条，这两颗永远是暴雪红钮（11-13 实机：atlas 仍是
+--- `RedButton-Expand` / `RedButton-Condense`、尺寸 0x0）。显示那一拍尺寸落地，重扫即命中。
 function Skin:MaximizeMinimizeFrame(host)
     if not host then return 0 end
     local ok, kids = pcall(function() return { host:GetChildren() } end)
@@ -2226,6 +2244,10 @@ function Skin:MaximizeMinimizeFrame(host)
     local n = 0
     for _, btn in ipairs(kids) do
         if self:MaximizeMinimizeByArt(btn) then n = n + 1 end
+    end
+    if not Marked(host, "mmFrameWatch") then
+        Mark(host, "mmFrameWatch", true)
+        if Widget and Widget.ShowWatch then Widget:ShowWatch(host, MaximizeMinimizeFrameOnShow) end
     end
     return n
 end
@@ -2631,6 +2653,8 @@ function Skin:CloseButton(button)
             end)
         end
     end
+    -- 补扫认钮只靠这个标记：换过图之后 atlas 签名就没了（见 CloseButtonByArt）。
+    Mark(button, "closeArt", true)
     return button
 end
 

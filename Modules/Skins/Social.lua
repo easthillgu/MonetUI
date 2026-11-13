@@ -169,7 +169,9 @@ end
 --- 这个判据是"压掉窗体装饰、留住内容图标"唯一可行的分界线。
 local function FadeWideArt(host, ratio)
     local w0 = ShapeOf(host)
-    if not w0 then return 0 end
+    -- 宽 0（还没排版）时门槛会塌成 0 ⇒ 连 16×16 职业图标都算"宽贴图"被压掉。
+    -- 这一趟不压，下一趟尺寸落地再来（与 EachWideButton 同一条口径）。
+    if not w0 or w0 <= 0 then return 0 end
     local floor = w0 * (ratio or 0.8)
     local n = 0
     for _, reg in ipairs(RegionsOf(host)) do
@@ -217,10 +219,18 @@ end
 
 --- 遍历子树里**整宽**的 Button（宽度 ≥ 根宽度的 90%，高度在 [minH, maxH] 之间）。
 --- 深度上限 5：名册行是 `Button <- Frame(内容) <- Frame(滚动区) <- Frame <- MemberList` 四层。
-local function EachWideButton(root, depth, minH, maxH, fn)
+local function EachWideButton(root, depth, minH, maxH, fn, floor)
     if not root or depth > 5 then return 0 end
-    local w0 = ShapeOf(root)
-    local floor = (w0 or 0) * 0.9
+    -- 门槛只按**原始根**算一次，往下递归时原样传下去。以前每层都拿当前节点重算：
+    -- 一进 8px 宽的滚动轨，门槛就塌成 7.2 ⇒ 轨里的把手（8×23）与两颗步进钮（17×11）
+    -- 全被当成名册行压掉图 + 挂悬停平板（11-13 实机：三颗都带 cfRow=Y cfPlate=Y）。
+    if not floor then
+        local w0 = ShapeOf(root)
+        -- 还没排版（宽 0 / 读不出）时门槛会塌成 0，等于"整棵子树的钮都算行" ⇒ 这一趟不认件，
+        -- 结构件本来就是每趟重找的，下一趟尺寸落地再来。
+        if not w0 or w0 <= 0 then return 0 end
+        floor = w0 * 0.9
+    end
     local n = 0
     for _, child in ipairs(ChildrenOf(root)) do
         if IsButton(child) then
@@ -230,7 +240,7 @@ local function EachWideButton(root, depth, minH, maxH, fn)
                 n = n + 1
             end
         else
-            n = n + EachWideButton(child, depth + 1, minH, maxH, fn)
+            n = n + EachWideButton(child, depth + 1, minH, maxH, fn, floor)
         end
     end
     return n

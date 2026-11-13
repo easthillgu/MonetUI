@@ -359,5 +359,71 @@ has(colorSrc, /primary\s*=\s*\{\s*r = 0\.809,\s*g = 0\.653,\s*b = 0\.763,\s*a = 
 has(colorSrc, /health\s*=\s*\{\s*r = 0\.20,\s*g = 0\.80,\s*b = 0\.20,\s*a = 1\.00\s*\}/,
     'FALLBACK.health 功能色不 Monet 化（不跟环境换）');
 
+// ---------------------------------------------------------------- 16
+console.log('\n[16] 窗口件「压过又回来 / 登录那拍还没出生」（2026-11-13 §8.112 实机判例）');
+// 两条实机缺陷：① 世界地图 / 试衣间的 ↗↙ 在登录那拍是 0x0（窗口藏着，模板没给尺寸），
+// 尺寸门判 nil，而容器没有显示轮询 ⇒ 永远是暴雪红钮（实测 atlas 仍 RedButton-Expand/Condense）；
+// ② close 外面那层 8 条 1px 装饰框被暴雪抬回 α0.80（hidden=Y 而 α≠0），而 CloseButtonByArt
+// 换过图之后跟着 atlas 签名一起早退 ⇒ 全局补扫永不复检。
+const mmFrameBody = /function Skin:MaximizeMinimizeFrame\(host\)([\s\S]*?)\nend/.exec(skin);
+check('MaximizeMinimizeFrame 已定义', !!mmFrameBody);
+check('方向钮容器登记显示轮询（0x0 的钮等显示那拍尺寸落地再认）',
+      !!mmFrameBody && /Marked\(host, "mmFrameWatch"\)/.test(mmFrameBody[1])
+        && /Widget:ShowWatch\(host, MaximizeMinimizeFrameOnShow\)/.test(mmFrameBody[1]));
+has(skin, /local function MaximizeMinimizeFrameOnShow\(host\)/,
+    '显示回调是稳定引用（ShowWatch 按函数身份去重）');
+
+const closeByArt = /function Skin:CloseButtonByArt\(button\)([\s\S]*?)\nend/.exec(skin);
+check('CloseButtonByArt 已定义', !!closeByArt);
+if (closeByArt) {
+  const b = closeByArt[1];
+  const iMark = b.indexOf('Marked(button, "closeArt")');
+  const iAtlas = b.indexOf('GetNormalTexture');
+  check('已换皮的 close 每趟补压装饰框，且排在 atlas 判据之前',
+        iMark >= 0 && iAtlas >= 0 && iMark < iAtlas && /FadeChildBoxArt\(button\)/.test(b));
+}
+const closeBody = /function Skin:CloseButton\(button\)([\s\S]*?)\nend/.exec(skin);
+check('CloseButton 已定义', !!closeBody);
+if (closeBody) {
+  const b = closeBody[1];
+  check('装饰框压在最前（换过图后签名判据必然落空）',
+        b.indexOf('FadeChildBoxArt(button)') >= 0
+          && b.indexOf('FadeChildBoxArt(button)') < b.indexOf('SwapArt'));
+  check('换皮后记 closeArt 标记（补扫靠它认钮）', /Mark\(button, "closeArt", true\)/.test(b));
+}
+// 肖像一律剥（作者口径「各个界面的 portrait 都要剥除掉」），三种放法都认；
+// 按钮身上的小 Portrait（微菜单的脸）不许误伤。
+has(skins, /if opts\.portrait ~= false then Skin:HidePortraits\(frame\) end/,
+    'SkinWindow 默认剥肖像（不再逐窗口 opt-in）');
+has(skin, /local PORTRAIT_FIELDS = \{ "Portrait", "PortraitContainer", "PortraitOverlay" \}/,
+    '肖像三种放法都认');
+has(skin, /key == "Portrait" and IsButtonObject\(host\)/,
+    '按钮身上的 Portrait 不算窗口肖像（CharacterMicroButton 判例）');
+// LoD 包：显示那一拍补齐滚动条 / 肖像 / 方向钮，且 Blizzard_* 包加载后重扫匿名美术。
+has(skins, /local function WindowShowPass\(frame\)/, 'WindowShowPass 已定义');
+has(skins, /Widget:ShowWatch\(frame, WindowShowPass\)/, 'SkinWindow 登记显示期补扫');
+has(skins, /addonName:sub\(1, 9\) == "Blizzard_"/, 'Blizzard_* 包加载后重扫匿名美术');
+
+// ---------------------------------------------------------------- 17
+console.log('\n[17] 形状认件的宽度门槛不许塌（2026-11-13 §8.112 实机判例）');
+// 社区窗名册：EachWideButton 以前每层递归都拿**当前节点**重算门槛 —— 一进 8px 宽的滚动轨，
+// 门槛塌成 7.2，轨里的把手（8×23）与两颗步进钮（17×11）全被当成名册行（实测 cfRow=Y cfPlate=Y）。
+// 同族第二条：宿主宽 0（还没排版）时门槛塌成 0，FadeWideArt 会把 16×16 职业图标一起压掉。
+const social = srcOf('Modules/Skins/Social.lua');
+const eachBody = /local function EachWideButton\(root, depth, minH, maxH, fn, floor\)([\s\S]*?)\nend/.exec(social);
+check('EachWideButton 把门槛当参数传（不再每层重算）', !!eachBody);
+if (eachBody) {
+  const b = eachBody[1];
+  check('递归原样传 floor', /EachWideButton\(child, depth \+ 1, minH, maxH, fn, floor\)/.test(b));
+  check('只在顶层算一次门槛', /if not floor then/.test(b) && !/local floor = \(w0 or 0\)/.test(b));
+  check('根宽 0 / 读不出时这一趟不认件', /if not w0 or w0 <= 0 then return 0 end/.test(b));
+}
+const fadeWide = /local function FadeWideArt\(host, ratio\)([\s\S]*?)\nend/.exec(social);
+check('FadeWideArt 已定义', !!fadeWide);
+check('FadeWideArt 宿主宽 0 时不压（保住职业图标 / 公会旗）',
+      !!fadeWide && /if not w0 or w0 <= 0 then return 0 end/.test(fadeWide[1]));
+check('FadeWideArt 仍跳过我们自己的美术（art 标记）',
+      !!fadeWide && /not Marked\(reg, "art"\)/.test(fadeWide[1]));
+
 console.log('\n' + (bad === 0 ? '全部通过' : bad + ' 项未通过'));
 process.exit(bad === 0 ? 0 : 1);
