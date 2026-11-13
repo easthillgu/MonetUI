@@ -15,6 +15,9 @@ local Widget = ns.Widget   -- 置顶那条要用 Widget:PollWatch；本文件以
 -- self 被当成 object、键名被当成 key → 恒返回 nil，输入框背板永远取不到，
 -- 表现就是"输入框背景色一直在、频道色不生效"（2026-11-11 实机截图 + 枚举定位）。
 local Marked = function(o, k) return ns:Marked(o, k) end
+local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
+local Color  = ns.Color
+local Media  = ns.Media
 
 -- **1.60 实测（开服日 11-05，`/mui compat find Friends` 走 19805 个框，只返回这 18 个实名）**：
 -- 编号页签只有 **1 / 3 / 4**，`FriendsFrameTab2`、`FriendsFrameTab5` 与
@@ -106,13 +109,507 @@ local COMMUNITIES_DIALOGS = {
     "CommunitiesAvatarPickerDialog",
 }
 
+-- ===== 社区 / 公会窗的**内部**（1.60 实机结构，2026-11-13）=====
+--
+-- **为什么内部件全部"按字段 + 按形状"取**：本客户端的 `CommunitiesFrame:GetChildren()`
+-- 返回**空表**（同一次实测 `GetNumChildren()` = 51，`GetRegions()` 也返回 0）⇒ 挂在窗口本体上的
+-- `deep = true` 一趟子控件都扫不到，所以这扇窗以前只有窗壳 + 凹槽是我们的。
+-- 内部件只能从字段进（`.MemberList` / `.CommunitiesList` / `.RosterTab` …）；再往里
+-- （名册行、俱乐部条目）`GetChildren()` 正常，但它们是 ScrollBox **回收复用**的、下标随时变
+-- ⇒ 认件一律看形状：整宽且薄（≤ 26）的是名册行，整宽且高 40–96 的是俱乐部条目。
+--
+-- 美术纪律（11-05 商人窗「铁槌图标被抹掉」判例的同一课）：这些控件里同时挂着 16×16 职业图标、
+-- 52×51 公会旗 / 徽记、30×30 功能图标 —— **只压宽贴图**（宽度 ≥ 宿主宽度的 80%），
+-- 绝不整框 `Skin:Strip(..., { regions = true })`。
+
+--- 读字段（受限框上裸取字段会抛，统一裹住）。
+local function Field(host, key)
+    if not host then return nil end
+    local ok, v = pcall(function() return host[key] end)
+    if ok then return v end
+    return nil
+end
+
+--- `GetChildren` / `GetRegions` 返回**多返回值**，必须用 `{ }` 包成表再遍历。
+local function ListOf(host, getter)
+    if not host or type(host[getter]) ~= "function" then return {} end
+    local ok, list = pcall(function() return { host[getter](host) } end)
+    if ok and type(list) == "table" then return list end
+    return {}
+end
+local function ChildrenOf(host) return ListOf(host, "GetChildren") end
+local function RegionsOf(host) return ListOf(host, "GetRegions") end
+
+local function KindOf(obj)
+    if not obj or type(obj.GetObjectType) ~= "function" then return nil end
+    local ok, kind = pcall(obj.GetObjectType, obj)
+    return ok and kind or nil
+end
+
+local function ShapeOf(obj)
+    if not obj or type(obj.GetWidth) ~= "function" or type(obj.GetHeight) ~= "function" then return nil end
+    local okW, w = pcall(obj.GetWidth, obj)
+    local okH, h = pcall(obj.GetHeight, obj)
+    if okW and okH and type(w) == "number" and type(h) == "number" then return w, h end
+    return nil
+end
+
+local function IsButton(obj)
+    if not obj then return false end
+    if KindOf(obj) == "Button" then return true end
+    if type(obj.IsObjectType) == "function" then
+        local ok, v = pcall(obj.IsObjectType, obj, "Button")
+        return (ok and v) and true or false
+    end
+    return false
+end
+
+--- 只压**宽贴图**（宽度 ≥ 宿主宽度的 ratio，默认 0.8）。
+--- 名册行里除了整宽的底图还挂着 16×16 职业图标，俱乐部条目里有公会旗 / 徽记 / 功能图标 ——
+--- 这个判据是"压掉窗体装饰、留住内容图标"唯一可行的分界线。
+local function FadeWideArt(host, ratio)
+    local w0 = ShapeOf(host)
+    if not w0 then return 0 end
+    local floor = w0 * (ratio or 0.8)
+    local n = 0
+    for _, reg in ipairs(RegionsOf(host)) do
+        if KindOf(reg) == "Texture" and not Marked(reg, "art") then
+            local w = ShapeOf(reg)
+            if w and w >= floor then
+                Skin:Fade(reg)
+                n = n + 1
+            end
+        end
+    end
+    return n
+end
+
+--- 我们自己的一块平板（行 / 条目 / 页签的选中圈都用它）。
+--- 挂宿主下一层（`level - 1`），所以画在宿主的贴图**后面**；关鼠标，绝不吃点击。
+local function NewPlate(host, opts)
+    if not host then return nil end
+    local ok, plate = pcall(CreateFrame, "Frame", nil, host, "BackdropTemplate")
+    if not ok or not plate then return nil end
+    pcall(plate.SetAllPoints, plate, host)
+    local level = (type(host.GetFrameLevel) == "function" and host:GetFrameLevel() or 1) - 1
+    pcall(plate.SetFrameLevel, plate, math.max(0, level))
+    pcall(plate.EnableMouse, plate, false)
+    opts = opts or {}
+    opts.thickness = opts.thickness or 1
+    Widget:Theme(plate, opts)
+    return plate
+end
+
+--- 悬停才出现的平板：平时 `Hide()`，鼠标进来才 `Show()`。
+--- **不走 HookScript**（那会往暴雪按钮的脚本槽里写我们的函数、把整个按钮标脏），
+--- 走 `Widget:HoverWatch` 轮询 —— 和 `Skin:HoverHighlight` 同一条路。
+local function HoverPlate(host, alpha)
+    if not host then return nil end
+    local plate = Marked(host, "cfPlate")
+    if plate then return plate end
+    plate = NewPlate(host, { bgAlpha = alpha or 0.45, bgSurface = "hover", borderAlpha = 0 })
+    if not plate then return nil end
+    Mark(host, "cfPlate", plate)
+    plate:Hide()
+    Widget:HoverWatch(host, function() plate:Show() end, function() plate:Hide() end)
+    return plate
+end
+
+--- 遍历子树里**整宽**的 Button（宽度 ≥ 根宽度的 90%，高度在 [minH, maxH] 之间）。
+--- 深度上限 5：名册行是 `Button <- Frame(内容) <- Frame(滚动区) <- Frame <- MemberList` 四层。
+local function EachWideButton(root, depth, minH, maxH, fn)
+    if not root or depth > 5 then return 0 end
+    local w0 = ShapeOf(root)
+    local floor = (w0 or 0) * 0.9
+    local n = 0
+    for _, child in ipairs(ChildrenOf(root)) do
+        if IsButton(child) then
+            local w, h = ShapeOf(child)
+            if w and h and w >= floor and h >= minH and h <= maxH then
+                fn(child)
+                n = n + 1
+            end
+        else
+            n = n + EachWideButton(child, depth + 1, minH, maxH, fn)
+        end
+    end
+    return n
+end
+
+--- ScrollBox 的自绘滚动条：无名 Frame + 8px 把手 + 两个 17×11 步进钮，
+--- 没有 `ScrollUpButton` 这类字段 ⇒ 按形状认（窄而高 = 把手，矮而窄 = 步进钮）。
+--- 步进钮只认 atlas（`Skin:ScrollArrowButton` 认得出来才动它）—— 认不出来就保持暴雪原样，
+--- 压掉图却不补 V 形就是"箭头不见了"。
+--- 11-13 实测结构是 **三段**：`8x290 轨 → 8x252 槽 → 8x59 把手 Button`（Club 那条同构），
+--- 把手不在轨的直接子件里 ⇒ 必须递归。深度 3 是"轨 → 槽 → 把手"正好落地的一层。
+local function SkinScrollRail(root)
+    local function walk(node, d)
+        if d > 3 then return end
+        for _, kid in ipairs(ChildrenOf(node)) do
+            if IsButton(kid) then
+                local w, h = ShapeOf(kid)
+                if w and h then
+                    if w <= 16 and h >= 24 then
+                        pcall(Skin.ScrollThumb, Skin, kid)
+                    elseif h <= 14 and w <= 24 then
+                        pcall(Skin.ScrollArrowButton, Skin, kid)
+                    end
+                end
+            else
+                walk(kid, d + 1)
+            end
+        end
+    end
+    walk(root, 1)
+end
+
+--- 把一个字段（可能是 Frame，也可能**本身就是 Texture**：`TopFiligree` 就是）里的贴图逐张压掉，
+--- 需要时向子件递归。只写 Texture regions，**绝不碰子件以外的东西** —— 这些字段里有的是装饰边框
+--- （`FilligreeOverlay` 8 张：4 个 64×64 角 + 2 条 43×247 竖边 + 2 个 34×43），
+--- 有的是整窗覆盖层（`PortraitOverlay` 里有 4 张 60×60 徽记）。
+local function FadeTreeArt(host, depth)
+    if not host then return 0 end
+    local n = 0
+    if KindOf(host) == "Texture" then
+        -- `FadeHold` 而不是 `Fade`：这几件都是**整窗覆盖层**，暴雪每趟刷新会把 α 抬回来
+        -- （`PortraitOverlay` 第 4 张 64×64 徽记就是 `hidden=true` 却 α=1.00），
+        -- 而 `Fade` 见到标记就早退、永远纠不回来。
+        Skin:FadeHold(host)
+        return 1
+    end
+    depth = depth or 0
+    if depth > 3 then return 0 end
+    for _, reg in ipairs(RegionsOf(host)) do
+        if KindOf(reg) == "Texture" and not Marked(reg, "cfRule") then
+            Skin:FadeHold(reg)
+            n = n + 1
+        end
+    end
+    for _, kid in ipairs(ChildrenOf(host)) do
+        n = n + FadeTreeArt(kid, depth + 1)
+    end
+    return n
+end
+
+-- --- 名册页 -------------------------------------------------------------
+
+--- 名册行（592×20 的 Button）：压掉整宽的 ARTWORK 底图与 HIGHLIGHT（暴雪鼠标高亮），
+--- 悬停反馈换成我们自己的平板。16×16 职业图标与名字由 `FadeWideArt` 的宽度判据保住。
+--- 选中行目前**没有**可靠判据（暴雪把"选中/离线/交替"都画在同一张 ARTWORK 上、α 全是 1），
+--- 待实机量过贴图 fileID 再补；此刻选中信息仍由右侧成员详情接住。
+local function SkinRosterRow(row)
+    if Marked(row, "cfRow") then return end
+    Mark(row, "cfRow", true)
+    FadeWideArt(row)
+    HoverPlate(row, 0.45)
+end
+
+--- 表头：6 个排序按钮的列底（(宽-9)×24 的 BACKGROUND）与高亮都压掉，只留文字，
+--- 再在按钮下沿拉一条发丝线（分栏靠线，不靠色块）。
+local function SkinRosterHeader(header)
+    if Marked(header, "cfHeader") then return end
+    Mark(header, "cfHeader", true)
+    -- 表头**自己**那层大图：617×60 的列底 + `_UI-Frame-TopTileStreaks` 43 高 + 一圈
+    -- `UI-Frame-Inner*` 3px 内框（3×309 那条靠高度判）。不压掉它，分栏线画在一条羊皮纸带上。
+    for _, reg in ipairs(RegionsOf(header)) do
+        if KindOf(reg) == "Texture" and not Marked(reg, "cfRule") then
+            local w, h = ShapeOf(reg)
+            if w and h and (w >= 200 or h >= 100) then Skin:Fade(reg) end
+        end
+    end
+    local cells = {}
+    for _, child in ipairs(ChildrenOf(header)) do
+        if IsButton(child) then
+            local w, h = ShapeOf(child)
+            if w and h and h <= 30 and w >= 20 then
+                FadeWideArt(child)
+                cells[#cells + 1] = child
+            end
+        end
+    end
+    if #cells == 0 then return end
+    local left, right = cells[1], cells[#cells]
+    local tex = header:CreateTexture(nil, "ARTWORK")
+    tex:SetTexture(Media.texture["monet_hairline"])
+    tex:SetPoint("TOPLEFT", left, "BOTTOMLEFT", 0, -1)
+    tex:SetPoint("TOPRIGHT", right, "BOTTOMRIGHT", 0, -1)
+    tex:SetHeight(Media:SnapUnit(1))
+    local r, g, b = Color:GetEdge()
+    tex:SetVertexColor(r, g, b, 0.55)
+    Mark(header, "cfRule", tex)
+end
+
+--- 表头那一行是 `MemberList` 里**唯一**挂着 ≥3 个矮按钮的 Frame（617×60）。
+local function FindHeaderRow(list)
+    for _, child in ipairs(ChildrenOf(list)) do
+        if KindOf(child) == "Frame" then
+            local count = 0
+            for _, kid in ipairs(ChildrenOf(child)) do
+                if IsButton(kid) then
+                    local w, h = ShapeOf(kid)
+                    if w and h and h <= 30 and w >= 20 then count = count + 1 end
+                end
+            end
+            if count >= 3 then return child end
+        end
+    end
+    return nil
+end
+
+--- 勾选框的勾：暴雪那张 checked 贴图是 32×32、铺满整格 32px 的框，和 12px 的标签并排读起来
+--- 就是"一块色斑"。缩到框的 62% 居中；图本身仍由 `Skin:CheckButton` 换成 `monet_check`。
+--- 幂等（`cfCheckFit` 标记），所以每趟调用只是一次表查询。
+local function FitCheckMark(check)
+    local ok, tex = pcall(function() return check.GetCheckedTexture and check:GetCheckedTexture() end)
+    if not ok or not tex then return end
+    if Marked(tex, "cfCheckFit") then return end
+    Mark(tex, "cfCheckFit", true)
+    local w = ShapeOf(check) or 24
+    local size = math.max(8, math.floor(w * 0.62))
+    pcall(tex.ClearAllPoints, tex)
+    pcall(tex.SetPoint, tex, "CENTER", check, "CENTER", 0, 0)
+    pcall(tex.SetSize, tex, size, size)
+end
+
+local function SkinRoster(frame)
+    local list = Field(frame, "MemberList")
+    if not list or not Skin:IsScriptObject(list) then return end
+
+    -- ⚠ 结构件（表头 / 勾选框 / 滚动轨 / 行）**只在窗口第一次显示、且停在这一页时**才存在：
+    -- 登录那一趟 Apply 里 `MemberList` 还是空的。所以「一次性标记」只能盖住**静态美术**
+    -- （列表外框那几张大贴图），结构件每一趟都要重新找 —— 找到才留引用，找不到下一趟再来。
+    if not Marked(list, "cfArt") then
+        Mark(list, "cfArt", true)
+        for _, child in ipairs(ChildrenOf(list)) do
+            for _, reg in ipairs(RegionsOf(child)) do
+                local w, h = ShapeOf(reg)
+                if KindOf(reg) == "Texture" and w and h and w >= 200 and h >= 100 then Skin:Fade(reg) end
+            end
+        end
+    end
+
+    SkinScrollRail(list)
+
+    local header = Marked(list, "cfHeaderRef") or FindHeaderRow(list)
+    if header then
+        Mark(list, "cfHeaderRef", header)
+        SkinRosterHeader(header)
+    end
+    if not Marked(list, "cfCheck") then
+        for _, child in ipairs(ChildrenOf(list)) do
+            if KindOf(child) == "CheckButton" and type(child.GetChecked) == "function" then
+                Mark(list, "cfCheck", true)
+                pcall(Skin.CheckButton, Skin, child)
+                FitCheckMark(child)
+            end
+        end
+    end
+
+    EachWideButton(list, 0, 0, 26, SkinRosterRow)
+end
+
+-- --- 左栏俱乐部列表 -----------------------------------------------------
+
+--- 俱乐部条目（171×68）：压掉整宽的底图三层（normal / pressed / 悬停高亮），
+--- 公会旗、徽记、加号图标全部留下。
+--- 选中标志：暴雪选中的那一条会把 `communities-nav-button-green-pressed` 挂回同一张 region
+--- （只动 atlas、α 一直是 1）⇒ 我们压掉它的显示，另画一条左缘竖线，按"那张图上还有没有 atlas"
+--- 判断当前条目是不是选中项。
+local function SkinClubEntry(entry)
+    if Marked(entry, "cfEntry") then return end
+    Mark(entry, "cfEntry", true)
+    FadeWideArt(entry)
+    HoverPlate(entry, 0.4)
+
+    local sel
+    for _, reg in ipairs(RegionsOf(entry)) do
+        if KindOf(reg) == "Texture" and type(reg.GetAtlas) == "function" then
+            local ok, atlas = pcall(reg.GetAtlas, reg)
+            if ok and type(atlas) == "string" and atlas:find("pressed", 1, true) then sel = reg break end
+        end
+    end
+    if sel then Mark(entry, "cfSel", sel) end
+
+    local accent = entry:CreateTexture(nil, "OVERLAY")
+    accent:SetTexture(Media.texture.blank)
+    accent:SetPoint("TOPLEFT", entry, "TOPLEFT", 0, 0)
+    accent:SetPoint("BOTTOMLEFT", entry, "BOTTOMLEFT", 0, 0)
+    accent:SetWidth(Media:SnapUnit(3))
+    local r, g, b = Color:GetPrimary()
+    accent:SetVertexColor(r, g, b, 0.9)
+    accent:Hide()
+    Mark(entry, "cfAccent", accent)
+end
+
+local function TouchClubEntry(entry)
+    SkinClubEntry(entry)
+    local accent, sel = Marked(entry, "cfAccent"), Marked(entry, "cfSel")
+    if not accent or not sel then return end
+    local on = false
+    local ok, atlas = pcall(sel.GetAtlas, sel)
+    if ok and type(atlas) == "string" and atlas ~= "" then on = true end
+    accent:SetShown(on)
+end
+
+--- 左栏那几个装饰字段（羊皮纸花边）：`TopFiligree` / `BottomFiligree` **本身就是 Texture**，
+--- `InsetFrame` 里的子件是 3px 内框线，`FilligreeOverlay` 是 4 个 64×64 角 + 2 条 43×247 竖边。
+--- 它们都不是条目容器（条目在 `CommunitiesList` 的第 1 个子件里），整棵压掉是安全的。
+local CLUB_ART_FIELDS = { "TopFiligree", "BottomFiligree", "FilligreeOverlay", "InsetFrame" }
+
+local function SkinClubList(frame)
+    local rail = Field(frame, "CommunitiesList")
+    if not rail or not Skin:IsScriptObject(rail) then return end
+
+    if not Marked(rail, "cfArt") then
+        Mark(rail, "cfArt", true)
+        -- 左栏底图（166×373 / 168×378 的暴雪羊皮纸）与 rail 自己的三张整栏贴图：压掉。
+        local hosts = { rail }
+        for _, child in ipairs(ChildrenOf(rail)) do hosts[#hosts + 1] = child end
+        for _, host in ipairs(hosts) do
+            for _, reg in ipairs(RegionsOf(host)) do
+                local w, h = ShapeOf(reg)
+                if KindOf(reg) == "Texture" and w and h and w >= 100 and h >= 100 then Skin:Fade(reg) end
+            end
+        end
+    end
+
+    -- 花边字段每趟复检（暴雪切页会把这些框重新 `Show` 并抬回 α1；`Skin:Fade` 幂等）。
+    for _, key in ipairs(CLUB_ART_FIELDS) do
+        FadeTreeArt(Field(rail, key), 1)
+    end
+
+    -- 滚动轨与条目同理：只在窗口显示后才建出来，每趟重找（两个 helper 自己带幂等标记）。
+    SkinScrollRail(rail)
+    EachWideButton(rail, 0, 40, 96, TouchClubEntry)
+end
+
+-- --- 右侧图标页签 -------------------------------------------------------
+
+--- 图标页签（32×32 CheckButton，Roster / Chat / 公会信息 / 福利 / 出团设置）：
+--- 暴雪底板是一张 **64×64** 的 BORDER 贴图（比按钮大一圈），图标是 30×30 的 ARTWORK
+--- ⇒ 底板与 32×32 的选中标志压掉，图标留着；选中态由我们自己的一圈 1px 边表达（方向无关）。
+local COMMUNITY_TABS = {
+    "RosterTab", "ChatTab", "GuildInfoTab", "GuildBenefitsTab", "GuildPreferredPlaySettingsTab",
+}
+
+local function SkinIconTab(tab)
+    if not tab or Marked(tab, "cfTab") or not Skin:IsScriptObject(tab) then return end
+    Mark(tab, "cfTab", true)
+
+    local icon
+    for _, reg in ipairs(RegionsOf(tab)) do
+        if KindOf(reg) == "Texture" then
+            local w = ShapeOf(reg)
+            if w then
+                if w >= 48 then
+                    Skin:Fade(reg)                      -- 64×64 暴雪页签底板
+                elseif w >= 31 and w <= 40 then
+                    Skin:Fade(reg)                      -- 32×32 选中标志 / 高光
+                elseif w >= 24 and w <= 30 and not icon then
+                    local ok, tex = pcall(function() return reg.GetTexture and reg:GetTexture() end)
+                    if ok and tex ~= nil then icon = reg end
+                end
+            end
+        end
+    end
+    if icon then Mark(tab, "cfIcon", icon) end
+    local ring = NewPlate(tab, { bgAlpha = 0, borderAlpha = 0 })
+    if ring then Mark(tab, "cfRing", ring) end
+end
+
+local function SyncIconTabs(frame)
+    for _, key in ipairs(COMMUNITY_TABS) do
+        local tab = Field(frame, key)
+        if tab and Skin:IsScriptObject(tab) then
+            SkinIconTab(tab)
+            local ring, icon = Marked(tab, "cfRing"), Marked(tab, "cfIcon")
+            local checked = false
+            if type(tab.GetChecked) == "function" then
+                local ok, v = pcall(tab.GetChecked, tab)
+                checked = (ok and v) and true or false
+            end
+            if icon then pcall(icon.SetAlpha, icon, checked and 1 or 0.55) end
+            if ring and type(ring.SetBackdropBorderColor) == "function" then
+                local r, g, b = Color:GetHighlight()
+                pcall(ring.SetBackdropBorderColor, ring, r, g, b, checked and 0.95 or 0)
+            end
+        end
+    end
+end
+
+-- --- 动作钮与筛选下拉 ---------------------------------------------------
+
+--- 窗口自带的文字钮与三个筛选下拉。图标钮（`AddToChatButton` / `CommunitiesCalendarButton`）
+--- 不在这里：它们的"这是干什么"全靠那张 30×30 图标，走通用档有把图标压成 α0 的风险，
+--- 等实机确认 region 结构再决定。
+local COMMUNITY_CONTROLS = {
+    "InviteButton", "GuildLogButton",
+    "CommunitiesListDropdown", "CommunityMemberListDropdown", "GuildMemberListDropdown",
+}
+
+local function SkinCommunityControls(frame)
+    for _, key in ipairs(COMMUNITY_CONTROLS) do
+        local obj = Field(frame, key)
+        if obj and not Marked(obj, "cfControl") and Skin:IsScriptObject(obj) then
+            Mark(obj, "cfControl", true)
+            pcall(Skin.Button, Skin, obj, { size = 12 })
+        end
+    end
+end
+
+--- 窗口本体的装饰件：`CommunitiesFrame:GetRegions()` 返回 **0 张**，但**字段**能拿到整窗那一层。
+--- `PortraitOverlay`（814×426）里挂着 4 张 60×60 徽记 —— 截图里那几团最显眼的残留就是它；
+--- `PortraitContainer`（1×1 的宿主框）里挂着一张 62×62 的公会徽记 —— 左上角那团；
+--- 两者的区别只在宿主尺寸，**画出来的都是肖像**，按作者既定口径（肖像一律隐藏）一起压掉。
+--- `TitleContainer` / `CommunitiesControlFrame` 目前没有可见贴图，留着每趟复检（花不了什么）。
+--- ⚠ 这几件都是**整窗**覆盖层，里面没有功能图标（页签、按钮、列表都是别的子件）⇒ 整棵压掉。
+local COMMUNITY_WINDOW_ART = { "PortraitOverlay", "PortraitContainer", "TitleContainer", "CommunitiesControlFrame" }
+
+local function SkinWindowArt(frame)
+    for _, key in ipairs(COMMUNITY_WINDOW_ART) do
+        FadeTreeArt(Field(frame, key), 1)
+    end
+end
+
+--- 一整趟内部补扫：首次应用与轮询共用**同一个**稳定函数
+--- （`Widget:PollWatch` 按函数身份去重，在 Apply 里现造闭包会每触发一次多挂一条）。
+local function CommunitiesBodyPass()
+    local frame = _G.CommunitiesFrame
+    if not frame or not Skin:IsScriptObject(frame) then return end
+    if not Widget:Readable(frame) then return end
+
+    SkinWindowArt(frame)
+    SkinRoster(frame)
+    SkinClubList(frame)
+    SyncIconTabs(frame)
+    SkinCommunityControls(frame)
+
+    -- 暴雪切页 / 刷新会把压过的贴图 alpha 抬回来（§8.107 判例）⇒ 每趟写回一次 α0。
+    -- 只对两个内容区递归：窗口本体那一层的 `GetChildren()` 是空的，够不到里面。
+    local list = Field(frame, "MemberList")
+    if list then Skin:ReassertHidden(list, 0) end
+    local rail = Field(frame, "CommunitiesList")
+    if rail then Skin:ReassertHidden(rail, 0) end
+end
+
 local function SkinCommunities()
+    -- **窗口本体不开 `deep`**：这一层 `GetChildren()` 返回空表（见上面那段注释），
+    -- 那一趟轮询一次真控件都碰不到。内部件由 `CommunitiesBodyPass` 按结构接管。
     M:Dress("CommunitiesFrame", {
-        window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true,
+        window = true, inset = true, panel = { bgAlpha = 0.96 },
     })
     M:Dress(COMMUNITIES_DIALOGS, {
         window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true,
     })
+
+    CommunitiesBodyPass()
+
+    local frame = _G.CommunitiesFrame
+    if frame and not Marked(frame, "cfPoll") then
+        Mark(frame, "cfPoll", true)
+        -- 1 秒一趟：行与条目是 ScrollBox 回收复用的，翻页 / 换公会 / 滚动时才需要补。
+        Widget:PollWatch(frame, CommunitiesBodyPass, 1)
+    end
 end
 
 -- 1.60 的公会/好友/社区合并进 `SocialUIFrame`（见 A 批）；`GuildFrame` 是零售 12.x 的名字，
