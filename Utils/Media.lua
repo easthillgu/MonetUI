@@ -266,6 +266,13 @@ Media.texture = {
     ["monet_close_push"]    = ASSET .. "Textures\\monet_close_push",
     ["monet_win_minimize"]  = ASSET .. "Textures\\monet_win_minimize",
     ["monet_win_maximize"]  = ASSET .. "Textures\\monet_win_maximize",
+    -- 窗口右上角的**斜箭头**（2026-11-13）：与 close 三态同一口径（64px 画布、字形跨度 0.75、
+    -- 笔画 0.125、圆头端帽），三颗钮并排时粗细与留白对得上。maximize = 指向右上
+    -- （暴雪 `RedButton-Expand*`），minimize = 指向左下（`RedButton-Condense*`）；
+    -- 纯白模具，颜色由运行期 SetVertexColor 染主题边框色（悬停抬到 highlight 档）。
+    -- ⚠ 和上面那两张 `monet_win_*` 不是一回事：那两张是标题栏装饰，这两张是按钮字形。
+    ["monet_maximize_arrow"] = ASSET .. "Textures\\monet_maximize_arrow",
+    ["monet_minimize_arrow"] = ASSET .. "Textures\\monet_minimize_arrow",
 
     ["monet_check"]         = ASSET .. "Textures\\monet_check",
     ["monet_radio"]         = ASSET .. "Textures\\monet_radio",

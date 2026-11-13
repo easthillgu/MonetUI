@@ -139,6 +139,10 @@ local function DarkenSpellbookPage()
         Widget:HeaderRule(f, title, { pad = 8, gap = 3 }) -- TAINT-OK: 只读标题矩形，线是我们自己的
         Mark(f, "topTitleRule", true)
     end
+    -- 右上角那颗 ↗ / ↙（法术书**没有** `MaximizeMinimizeFrame` 容器，两颗直接挂在窗口下，
+    -- 而且是这个 LoD 包打开时才建出来的）。浅层扫 + 登记显示时机，幂等 —— 放这里是因为
+    -- 这个函数本来就是"每 0.5 秒补齐一次切页新生控件"的那一趟。
+    Skin:WatchMaximizeMinimize(f)
 end
 
 local function SkinPlayerSpells()

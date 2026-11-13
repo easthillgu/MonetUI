@@ -383,6 +383,25 @@ function Skin:Fade(region)
     return region
 end
 
+--- `Skin:Fade` 的**每趟复检**版：第一次压 + 记 `hidden` 标记，之后每趟补写一次 α0（幂等）。
+---
+--- 存在的理由 = `Fade` 的形态本身：它「隐藏一次 + 标记」，而暴雪**会把同一张贴图的 alpha 抬回来**
+--- （§8.107 世界地图三处、角色窗滚动线、技能页底图）。抬回来之后再调 `Fade`，看见标记直接早退，
+--- 于是永远纠不回去，画面上就是"我们压过的美术又活了"（11-13 名册窗 `PortraitOverlay` 第 4 张
+--- 64×64 徽记就是这样：`hidden=true` 而 α 回到 1.00）。
+--- ⇒ **凡是在轮询 / 反复 Apply 的路径里压图，一律用这个**；只压一次的地方继续用 `Fade`
+--- （不必每趟多读一次 GetAlpha）。语义与 `Fade` 完全一致（同一本 `hidden` 标记、同样的 rollback）。
+function Skin:FadeHold(region)
+    if not region or type(region.SetAlpha) ~= "function" then return region end
+    if Marked(region, "hidden") then
+        -- 已经压过：不重复 `Fade`（那会早退），只把被抬回来的 α 写回去。
+        local okA, a = pcall(region.GetAlpha, region)
+        if not okA or a ~= 0 then pcall(region.SetAlpha, region, 0) end
+        return region
+    end
+    return self:Fade(region)
+end
+
 --- 一张贴图的"身份串"，供各分类器做前缀 / 片段判据：**atlas 名优先，其次是 SetTexture 的文件路径**。
 --- 两者都小写、路径分隔符统一成反斜杠（`Interface/Icons/…` 与 `Interface\Icons\…` 同判）。
 --- **数字文件 ID 返回 nil**：我们自己的 BLP（`Media:Texture`）与一部分暴雪图标走数字 ID，
@@ -1616,69 +1635,123 @@ function Skin:Stepper(button)
     return true
 end
 
---- Restyle a scroll bar (track + arrows + thumb).
---- 隐藏暴雪肖像（2026-11-05 作者定的口径："把 portrait 隐藏掉"）。
----
---- 两条实测前提，写下来免得下次又照椭圆去改遮罩：
----   ① `QuestFramePortrait` / `SocialUIFramePortrait` / `CharacterFramePortrait` 都是**贴图不是框**，
----      所以 `/mui compat find`（只枚举框）看不见它们，取用只能靠 `<窗口名>Portrait` 全局名或
----      `frame.Portrait` 成员；
----   ② 圆图本体是 atlas `RTPortrait1`（62×62），图集里的圆没占满画布，四角透明 ——
----      裁成方形后仍看着圆（上一轮 C 方案已验证），所以直接隐藏。
---- 越界才重锚：只有当贴图左/上沿跑到窗口外面（暴雪那圈金属边本来就往框外溢）才按窗口左上角收回来，
---- 正常位置一律不动它 —— 免得把已经排好的窗口搞成第二次布局。
-function Skin:SquarePortrait(frame)
-    if not frame then return false end
-    local okN, name = pcall(frame.GetName, frame)
-    local por = frame.Portrait
-    -- 取用仍走 `Skin:Need` 这唯一漏斗（不是直接查 `_G`）：名字不存在时必须是账本里的一行 ✗，
-    -- 不是静默跳过（AGENTS「确认对象存在只有一个漏斗」）。
-    if por == nil and okN and name then por = self:Need(name .. "Portrait") end
-    if type(por) ~= "table" or type(por.SetTexCoord) ~= "function" then return false end
+--- 窗口肖像的候选件（字段优先，字段都没有再看同名全局）。
+--- 1.60 里肖像有三种放法，只认 `frame.Portrait` 会漏一半：
+---   ① `PortraitFrameTemplate` 一族 —— `frame.Portrait` + `<窗口名>Portrait` 全局；
+---   ② `PortraitContainer`（社会窗 / 世界地图 `BorderFrame` 上那个 1×1 宿主框，
+---      里面挂 62×62 徽记贴图）—— **没有** `.Portrait` 成员，只能靠字段名认；
+---   ③ `PortraitOverlay`（社会窗那层 814×426 覆盖层，里面 4 张 60×60 徽记）。
+local PORTRAIT_FIELDS = { "Portrait", "PortraitContainer", "PortraitOverlay" }
 
-    -- ⚠ 一次性换肤在这里**不够**（11-05 实测）：ApplyAll 时我们裁好了（`Marked(por,'portraitSquared')=true`），
-    -- 但窗口一 Show，暴雪自己的 `SetPortraitTexture` 那类会把 texcoord 重置回 0..1、锚点也摆回越界位置。
-    -- ⇒ 和箭头/滚动条同一族："会被暴雪重设的东西"必须每次显示重涂（`Widget:ShowWatch`，引擎自带幂等）。
-    -- 闭包按对象存进旁表复用：ShowWatch 按引用去重，每次 Apply 现造闭包就会越挂越多。
-    local function applyOnce()
-        -- 隐藏肖像贴图（Texture 没有 Hide，用 SetShown(false)）
-        pcall(por.SetShown, por, false)
-
-        -- 同时隐藏 CircleMask（如果存在）
-        local parent = por.GetParent and por:GetParent()
-        if type(parent) == "table" then
-            local mask = parent.CircleMask
-            if type(mask) == "table" and type(mask.SetShown) == "function" then
-                pcall(mask.SetShown, mask, false)
-            end
-        end
-
-        -- GetRect 返回 left, bottom, width, height（不是四个角：11-04 记过这个口径）
-        local okF, fl, fb, fw, fh = pcall(frame.GetRect, frame)
-        local okP, pl, pb, pw, ph = pcall(por.GetRect, por)
-        if okF and okP and type(fl) == "number" and type(pl) == "number" then
-            local dx = pl - fl
-            local dy = (fb + (fh or 0)) - (pb + (ph or 0))
-            if dx < 2 or dy < 2 then
-                dx = math.max(dx, 4)
-                dy = math.max(dy, 4)
-                pcall(por.ClearAllPoints, por)
-                pcall(por.SetPoint, por, "TOPLEFT", frame, "TOPLEFT", dx, -dy)
-            end
-        end
-    end
-
-    local fn = Marked(por, "portraitApply")
-    if not fn then
-        fn = applyOnce
-        Mark(por, "portraitApply", fn)
-        Mark(por, "portraitSquared", true)
-    end
-    applyOnce()
-    if Widget and Widget.ShowWatch then Widget:ShowWatch(frame, fn) end
-    return true
+local function IsButtonObject(obj)
+    if type(obj) ~= "table" or type(obj.IsObjectType) ~= "function" then return false end
+    local ok, v = pcall(obj.IsObjectType, obj, "Button")
+    return (ok and v) or false
 end
 
+local function PortraitHosts(frame)
+    local out = {}
+    local hosts = { frame }
+    local border = frame.BorderFrame
+    if type(border) == "table" then hosts[#hosts + 1] = border end
+    for _, host in ipairs(hosts) do
+        for _, key in ipairs(PORTRAIT_FIELDS) do
+            local obj = host[key]
+            -- **按钮身上的 `Portrait` 不是肖像**：1.60 实测 `CharacterMicroButton.Portrait`
+            -- 是颗 18×26 的 `RTPortrait1` 小图，那其实是微菜单按钮的脸（压掉就成了空白按钮）。
+            -- 窗口肖像都挂在窗口 / BorderFrame 这类普通框上，所以按"宿主是不是按钮"就能分开。
+            if type(obj) == "table" and key == "Portrait" and IsButtonObject(host) then obj = nil end
+            if type(obj) == "table" then out[#out + 1] = obj end
+        end
+    end
+    local okN, name = pcall(frame.GetName, frame)
+    if okN and type(name) == "string" then
+        local g = rawget(_G, name .. "Portrait")
+        if type(g) == "table" then out[#out + 1] = g end
+    end
+    return out
+end
+
+--- 把一个肖像件压掉：贴图 → α0 + `SetShown(false)`；宿主框 → 递归它的贴图（深度 2）。
+--- **3D 模型一律不碰**（`PlayerModel` / `DressUpModel`）：有些窗口的"肖像"是角色模型，
+--- 那不是暴雪贴上去的美术，压不掉也不该压（角色窗 / 试衣间的模型要留着）。
+local function HidePortraitTree(self, host, depth)
+    if type(host) ~= "table" then return 0 end
+    local okK, kind = pcall(host.GetObjectType, host)
+    if not okK or type(kind) ~= "string" then return 0 end
+    if kind == "Texture" then
+        -- 直挂的"肖像"必须真有肖像那么大（窗口肖像 60–64px）。18×26 那类小图是按钮图标，
+        -- 不进这层判据就会被当肖像压掉（`CharacterMicroButton` 判例）。
+        if depth == 0 then
+            local okW, w = pcall(host.GetWidth, host)
+            local okH, h = pcall(host.GetHeight, host)
+            if okW and okH and type(w) == "number" and type(h) == "number"
+                and (w < 30 or h < 30) then
+                return 0
+            end
+        end
+        self:FadeHold(host)
+        pcall(host.SetShown, host, false)
+        return 1
+    end
+    if (kind ~= "Frame" and kind ~= "Button") or depth > 2 then return 0 end
+    local n = 0
+    local okR, regs = pcall(function() return { host:GetRegions() } end)
+    if okR then
+        for _, reg in ipairs(regs) do
+            local okT, t = pcall(reg.GetObjectType, reg)
+            if okT and t == "Texture" then
+                self:FadeHold(reg)
+                pcall(reg.SetShown, reg, false)
+                n = n + 1
+            end
+        end
+    end
+    -- 子件也收（`CircleMask` 圆形遮罩 / 肖像外那圈金属边都在这一层）。
+    local okC, kids = pcall(function() return { host:GetChildren() } end)
+    if okC then
+        for _, kid in ipairs(kids) do n = n + HidePortraitTree(self, kid, depth + 1) end
+    end
+    return n
+end
+
+--- 剥掉一个窗口的肖像（2026-11-13 作者口径："各个界面的 portrait 都要剥除掉"）。
+---
+--- 以前是逐窗口 opt-in（`opts.portrait`），于是没写这个开关的窗口各留一张圆肖像。
+--- 一律**压 α0 + `SetShown(false)`**，不 `Hide()`：暴雪一 `Show` 就顶回来（§8.107 同族判例）；
+--- 并且每次显示补一刀（`Widget:ShowWatch`，闭包按框缓存；`FadeHold` 顺便把被抬回 α1 的纠回来）。
+---
+--- 全局那一路直接 `rawget(_G, …)`、**不走 `Skin:Need`**：这是对每个美化窗口都跑的通用扫描，
+--- 绝大多数窗口根本没有肖像 —— 走 Need 会给账本塞上百条"预期中的缺失"，把真缺失淹掉
+--- （`Skins.lua` 里关闭按钮名字三路全空时的最后一路兜底也是这么写的）。
+--- @return 这次压掉的贴图数（0 = 这个窗口没有肖像）
+function Skin:HidePortraits(frame)
+    if not frame or type(frame.GetRegions) ~= "function" then return 0 end
+    local hosts = PortraitHosts(frame)
+    local function pass()
+        local n = 0
+        for _, obj in ipairs(PortraitHosts(frame)) do
+            n = n + HidePortraitTree(Skin, obj, 0)
+        end
+        return n
+    end
+    local n = pass()
+    -- 没有肖像件的框**不挂轮询**：`M:Dress` 会给每个美化过的控件都调这里（窗口里成百颗按钮 / 行 / 格子），
+    -- 每个都进 ShowWatch 表纯属浪费。LoD 窗口里"显示时才建出肖像"的情况由 `WindowShowPass` 每趟补，
+    -- 那时 `PortraitHosts` 已经能认到，再挂也不迟。
+    if #hosts > 0 and not Marked(frame, "portraitApply") then
+        Mark(frame, "portraitApply", pass)
+        if Widget and Widget.ShowWatch then Widget:ShowWatch(frame, pass) end
+    end
+    return n
+end
+
+--- 旧名（历史调用点仍用）：语义已并入 `Skin:HidePortraits`（以前叫"压成方形"，实为隐藏）。
+function Skin:SquarePortrait(frame)
+    return self:HidePortraits(frame) > 0
+end
+
+--- Restyle a scroll bar (track + arrows + thumb).
 function Skin:ScrollBar(scrollbar)
     if not scrollbar then return scrollbar end
 
@@ -1901,6 +1974,9 @@ local function ScanArrowFrame(self, frame)
             -- 12.1.5 实测 53 只里 32 只还是暴雪原样（历史证据，5bc814e 正文）；
             -- 1.60 上这个数要重数才算，待 1.60 复验。见 Skin:CloseButtonByArt。
             self:CloseButtonByArt(frame)
+            -- 右上角的两颗斜箭头（`RedButton-Expand*` / `RedButton-Condense*`）同一条口径：
+            -- 它们也是匿名按钮、也铺在没被点名美化的窗口上（世界地图 / 公会 / 日历 / 转服提示…）。
+            self:MaximizeMinimizeByArt(frame)
         end
         -- 滑条兜底：deep 窗口的滑条由 SweepDeep → SkinSlidersIn 接住，但懒建 / 没美化过的
         -- 窗口里的滑条（设置面板子页、编辑模式对话框这类）会漏 —— 与关闭按钮同一条口径
@@ -1991,6 +2067,212 @@ function Skin:CloseButtonByArt(button)
     if not atlas:lower():find("redbutton%-exit") then return false end
     self:CloseButton(button)
     return true
+end
+
+--- 窗口右上角"最大化 / 最小化"的**方向判据**：1.60 实测这两族是 24–28px 的圆钮，每颗挂 4 张
+--- 同尺寸 region（normal / pressed / disabled / `RedButton-Highlight` 红环）—— **形状和尺寸都一样**，
+--- 只有 atlas 名分得开：`RedButton-Expand*` = 右上箭头（最大化），`RedButton-Condense*` = 左下箭头。
+--- ⚠ **`RedButton-MiniCondense` 一定要排除**：那是"收起 / 隐藏"的 20px 小圆钮（ReadyStatus 那种），
+--- 名字里含 `Condense`，误中就把"收起"画成了"最小化"。
+--- @return "max" | "min" | nil
+function Skin:MaximizeMinimizeKind(button)
+    local tex = self:TexOf(button, "GetNormalTexture")
+    if not tex then return nil end
+    -- **尺寸与族名是两道硬门**，缺一条就会误伤：
+    --   ① 这批钮都是 24–28px 的方形圆钮；`Options_ListExpand_Left`（344×22 的行内展开条）、
+    --      `BagSlotFrame_Expanded_Default`（37×37 的背包格）名字里也带 Expand，靠尺寸挡掉；
+    --   ② 只认 `RedButton-` 前缀（暴雪标题栏那族），别的 atlas 里带 expand/condense 一律不碰。
+    local w, h = 0, 0
+    if type(button.GetWidth) == "function" then
+        local okW, ww = pcall(button.GetWidth, button)
+        if okW and type(ww) == "number" then w = ww end
+    end
+    if type(button.GetHeight) == "function" then
+        local okH, hh = pcall(button.GetHeight, button)
+        if okH and type(hh) == "number" then h = hh end
+    end
+    if w == 0 or h == 0 or w > 40 or h > 40 then return nil end
+    local ok, atlas = pcall(tex.GetAtlas, tex)
+    if not ok or type(atlas) ~= "string" then return nil end
+    local low = atlas:lower()
+    if not low:find("^redbutton%-") then return nil end
+    if low:find("minicondense", 1, true) then return nil end
+    if low:find("expand", 1, true) then return "max" end
+    if low:find("condense", 1, true) or low:find("minimize", 1, true) then return "min" end
+    return nil
+end
+
+--- 稳定引用的"一次 Show 就补一刀"回调（`Widget:ShowWatch` 按函数身份去重，不能现造闭包）。
+local function FadeChildBoxOnShow(button)
+    Skin:FadeChildBoxArt(button)
+end
+
+--- 暴雪窗口标题栏那族按钮（✕ / ↗ / ↙）下面都垫着一层装饰框：
+--- **8 条 1px `UI-Frame-Inner*` 边线（α0.80）+ 一张 α0 底**，在 28×28 的钮外面画出一个方框。
+--- 它不是 ARTWORK（我们的字形就在 ARTWORK 层），所以按层压：只压 BORDER / BACKGROUND，
+--- 留 ARTWORK / HIGHLIGHT。✕ 那颗挂在 30×31 的子帧上，↗ / ↙ 挂在 31×31 上 —— 判据只看层、不看尺寸。
+---
+--- **必须每趟都跑，且不能排在"认没认出来"的早退之后**：`SwapArt` 已经把 normal 的 atlas 换成
+--- 我们的贴图，重入时认图判据必然返回 nil —— 排在它后面，边线就永远压不掉（11-13 实机判例：
+--- 手调 `MaximizeMinimize(mm2)` 得 `res=false`，8 条线原样 α0.80，画面上每颗箭头外面套一个方框；
+--- ✕ 那颗同理，作者报的就是"close 的框也还在"）。
+---
+--- 还有两个**只在实机才看得见**的时序，合起来就是"为什么第一次没压掉"（11-13 全服扫描实测）：
+--- ① 这批按钮的子帧是**显示时才建**的（皮肤在登录、窗口还藏着的时候跑一遍，`GetChildren()` 是空的）；
+--- ② 有一部分窗口的边线会在 `OnShow` 之后被模板自己抬回 α0.80（`EditModeSystemSettingsDialog`
+---    那一族实测 `marked=9` 却 `α=0.8`）。
+--- ⇒ 每次压完再登记一次 `Widget:ShowWatch`：**下一次显示的那一拍补一刀**。走轮询，不写脚本槽。
+--- @return 这次真正走过的 region 数（0 = 这颗钮身上没有那层装饰框）
+function Skin:FadeChildBoxArt(button)
+    if not button then return 0 end
+    local okKids, kids = pcall(function() return { button:GetChildren() } end)
+    if not okKids then return 0 end
+    local n = 0
+    for _, kid in ipairs(kids) do
+        local okR, regs = pcall(function() return { kid:GetRegions() } end)
+        if okR then
+            for _, reg in ipairs(regs) do
+                local layer = select(2, pcall(reg.GetDrawLayer, reg))
+                if layer == "BORDER" or layer == "BACKGROUND" then
+                    self:FadeHold(reg)
+                    n = n + 1
+                end
+            end
+        end
+    end
+    -- 只有"真走过装饰框"或"这会儿还没有子帧（可能是显示时才建的）"才挂 ShowWatch ——
+    -- 我们自建的按钮（Widget:CloseButton 工厂）身上没有这层，没必要进显示轮询表。
+    if (n > 0 or #kids == 0) and Widget and Widget.ShowWatch and not Marked(button, "boxWatch") then
+        Mark(button, "boxWatch", true)
+        Widget:ShowWatch(button, FadeChildBoxOnShow)
+    end
+    -- 第三种时序：皮肤跑的那一拍**窗口已经显示着**（LoD 包一打开就建、建完就是 shown），
+    -- `ShowWatch` 的初值直接记成"显示着"、不会再触发一次 —— 法术书的 ✕ 就是这么漏掉的
+    -- （11-13 实测：`PlayerSpellsFrameCloseButton` 装饰框 `vis=9/9` 原样）。
+    -- ⇒ 补一次**一次性**延迟复检。`boxRetry` 标记保证每个钮最多补一刀（自建按钮没有子帧也不会无限链）。
+    if #kids == 0 and C_Timer and C_Timer.After and not Marked(button, "boxRetry") then
+        Mark(button, "boxRetry", true)
+        C_Timer.After(1, function() Skin:FadeChildBoxArt(button) end)
+    end
+    return n
+end
+
+--- 把一颗暴雪圆钮换成我们的斜箭头（`monet_maximize_arrow` / `monet_minimize_arrow`）。
+--- 四张 region 全换：normal / pushed / disabled 用同一张字形（状态靠染色分档），
+--- `RedButton-Highlight` 是**红色圆环**，留着就在箭头外面套一圈红 ⇒ 压掉，悬停改由轮询把箭头
+--- 从边框色抬到 highlight 色（和 close 用 hover 图表达悬停同一个用意）。
+--- 幂等且**可重入**：方向认过之后记在旁表 `mmKind` 上（atlas 已被换掉，第二次再也读不出来）。
+function Skin:MaximizeMinimize(button, kind)
+    if not button then return false end
+
+    self:FadeChildBoxArt(button)
+
+    kind = kind or Marked(button, "mmKind") or self:MaximizeMinimizeKind(button)
+    if not kind then return false end
+    Mark(button, "mmKind", kind)
+
+    local key = (kind == "max") and "monet_maximize_arrow" or "monet_minimize_arrow"
+
+    local normal   = self:SwapArt(self:TexOf(button, "GetNormalTexture"), key)
+    local pushed   = self:SwapArt(self:TexOf(button, "GetPushedTexture"), key)
+    local disabled = self:SwapArt(self:TexOf(button, "GetDisabledTexture"), key)
+    self:FadeHold(self:TexOf(button, "GetHighlightTexture"))
+
+    local function tint(r, g, b)
+        if normal and normal.SetVertexColor then pcall(normal.SetVertexColor, normal, r, g, b) end
+        if pushed and pushed.SetVertexColor then pcall(pushed.SetVertexColor, pushed, r, g, b) end
+    end
+
+    -- 染色 / 主题钩子 / 悬停只登记一次：重入时再写一次基础色会把正悬停的箭头压回边框色。
+    if not Marked(button, "mmTint") then
+        Mark(button, "mmTint", true)
+        local br, bg, bb = Color:GetBorder()
+        tint(br, bg, bb)
+        if disabled and disabled.SetVertexColor then
+            -- 禁用档：同一张字形压暗一档（不跟主题走 —— 禁用就该比常态退后一步）。
+            pcall(disabled.SetVertexColor, disabled, 0.60, 0.60, 0.60)
+        end
+        self:OnTheme(function()
+            local nr, ng, nb = Color:GetBorder()
+            tint(nr, ng, nb)
+        end)
+        -- 悬停：箭头抬到 highlight 档（轮询，不写暴雪脚本槽）。
+        Widget:HoverWatch(button, function()
+            local hr, hg, hb = Color:GetHighlight()
+            tint(hr, hg, hb)
+        end, function()
+            local nr, ng, nb = Color:GetBorder()
+            tint(nr, ng, nb)
+        end)
+    end
+    return true
+end
+
+--- 按美术签名兜底（配合 `Skin:ScanScrollArrows` 的全量扫描，覆盖没被点名美化的窗口）。
+function Skin:MaximizeMinimizeByArt(button)
+    if not button then return false end
+    -- 全量扫描会拿上万颗按钮来问：先走便宜的旁表 / atlas 判据，不是方向钮就直接走人
+    -- （否则每颗按钮都要 GetChildren + GetRegions 扫一遍，纯浪费）。
+    if not Marked(button, "mmKind") and not self:MaximizeMinimizeKind(button) then return false end
+    -- 直接交给 `MaximizeMinimize`：它认旁表里的 `mmKind`，重入（atlas 已换）也照样把子件补齐。
+    return self:MaximizeMinimize(button)
+end
+
+--- 一个 `MaximizeMinimizeFrame` 里全是方向钮（CommunitiesFrame 实测两颗 28×28）。
+function Skin:MaximizeMinimizeFrame(host)
+    if not host then return 0 end
+    local ok, kids = pcall(function() return { host:GetChildren() } end)
+    if not ok then return 0 end
+    local n = 0
+    for _, btn in ipairs(kids) do
+        if self:MaximizeMinimizeByArt(btn) then n = n + 1 end
+    end
+    return n
+end
+
+--- 方向钮的"浅层扫"：不是每个窗口都把 ↗ / ↙ 放进 `MaximizeMinimizeFrame`。
+--- 1.60 实测**法术书 `PlayerSpellsFrame` 的两颗直接挂在窗口下**（没有那个容器字段），
+--- 而且它们是 `Blizzard_PlayerSpells` 这个 LoD 包**打开时才建**的 —— 登录后的全局扫描（`ScanScrollArrows`）
+--- 那会儿根本扫不到，所以作者看到的是"法术书的 max/min 没处理"。
+--- 做法：从窗口往下走 `depth` 层（窗口 → 标题容器 → 按钮 就够），每颗按钮仍交给
+--- `MaximizeMinimizeByArt` 认 atlas 签名（尺寸 + `RedButton-` 前缀两道门），认不出的一律不碰。
+function Skin:MaximizeMinimizeSweep(root, depth)
+    if not root then return 0 end
+    depth = depth or 2
+    local self_ref = self
+    local n = 0
+    local function walk(host, d)
+        local ok, kids = pcall(function() return { host:GetChildren() } end)
+        if not ok then return end
+        for _, kid in ipairs(kids) do
+            local isBtn = false
+            if type(kid.IsObjectType) == "function" then
+                local okB, v = pcall(kid.IsObjectType, kid, "Button")
+                isBtn = (okB and v) or false
+            end
+            if isBtn then
+                if self_ref:MaximizeMinimizeByArt(kid) then n = n + 1 end
+            elseif d < depth then
+                walk(kid, d + 1)
+            end
+        end
+    end
+    walk(root, 1)
+    return n
+end
+
+--- 稳定引用：`Widget:ShowWatch` 按函数身份去重，不能现造闭包。
+local function MaximizeMinimizeOnShow(frame)
+    Skin:MaximizeMinimizeSweep(frame, 2)
+end
+
+--- 给一个窗口登记"每次显示扫一遍方向钮"（幂等：旁表标记只挂一次）。
+function Skin:WatchMaximizeMinimize(frame)
+    if not frame then return end
+    self:MaximizeMinimizeSweep(frame, 2)
+    if Marked(frame, "mmSweep") then return end
+    Mark(frame, "mmSweep", true)
+    if Widget and Widget.ShowWatch then Widget:ShowWatch(frame, MaximizeMinimizeOnShow) end
 end
 
 --- 翻页按钮的左右箭头（商人 / 邮件 / 拾取 / 任务文本）：换 Normal/Pushed 贴图 + 主题色。
@@ -2320,6 +2602,11 @@ end
 -- The highlight is left white -- an additive tint would go invisible on the darker border colours.
 function Skin:CloseButton(button)
     if not button then return button end
+
+    -- 先压掉钮外面那层 1px 装饰方框（8 条 `UI-Frame-Inner*`，α0.80）。**放在最前面**：
+    -- 这步与"这张图是不是暴雪的 ✕"无关，重入时 atlas 早已被换掉、上面的签名判据必然落空，
+    -- 排在判据后面就永远压不掉（11-13 作者实测："close 的框也还在"）。
+    self:FadeChildBoxArt(button)
 
     -- 取图一律走 `Skin:TexOf`（带 self + pcall）：点调用会抛错或静默返回 nil，见 TexOf 的头注。
     -- 四张都要换：disabled 不换就是"多一个方框"（模板的 `RedButton-Exit-Disabled` 是实心方板）。

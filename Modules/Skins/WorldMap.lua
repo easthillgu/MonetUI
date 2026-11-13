@@ -66,6 +66,11 @@ local function RestyleBorderFrame()
             end
         end
     end
+    -- 肖像：挂在 `BorderFrame.PortraitContainer` 上（不在 BorderFrame 自己的 region 里），
+    -- 最大化 / 最小化换边框布局时暴雪会把它重新铺回来。`FadeHold` 每趟重写 α0，所以放进这趟轮询；
+    -- 标记已存在，重复调用不会再挂一条 ShowWatch。
+    local wm = _G.WorldMapFrame
+    if wm then pcall(Skin.HidePortraits, Skin, wm) end
 end
 
 local borderEventsHooked = false
@@ -109,6 +114,17 @@ local function SkinWorldMap()
         or Skin:Need("WorldMapFrameCloseButton")
     Skin:CloseButton(close)
 
+    -- 右上角的两颗斜箭头（maximize / minimize）：**在 BorderFrame 上**，不在 WorldMapFrame 上
+    -- （§8.107 已实测这条；1.60 它们带 `RedButton-Expand*` / `RedButton-Condense*` 签名）。
+    Skin:MaximizeMinimizeFrame(Skin:Need("WorldMapFrame.BorderFrame.MaximizeMinimizeFrame"))
+
+    -- 肖像：世界地图的肖像**不在 `WorldMapFrame` 上**，而在 `BorderFrame.PortraitContainer`
+    -- （1×1 宿主框 + 62×62 徽记 + 58×58 遮罩；11-13 实测 α1、原样可见）。
+    -- 它既不是 BorderFrame 自己的 region（`RestyleBorderFrame` 那趟压不到），地图又没走 window 档
+    -- （走 window 会把地图画布整块剥掉）⇒ 必须在这里显式剥一次。`HidePortraits` 内部会读
+    -- `frame.BorderFrame`，并在窗口每次显示时补一刀。
+    Skin:HidePortraits(wm)
+
     SkinQuestMap()
 
     -- §8.107：纠回那 3 张被暴雪抬回 α1 的边框贴图。PollWatch 兜住没发事件的时刻，
@@ -125,6 +141,7 @@ M:Panel("worldmap", {
     frames = {
         "WorldMapFrame", "WorldMapFrame.BorderFrame",
         "WorldMapFrame.BorderFrame.CloseButton", "WorldMapFrameHomeButton", "WorldMapFrameOverflowButton",
+        "WorldMapFrame.BorderFrame.MaximizeMinimizeFrame",
         "QuestMapFrame", "QuestMapFrame.DetailsFrame", "QuestScrollFrame", "MapLegendScrollFrame",
     },
 })

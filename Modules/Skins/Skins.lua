@@ -172,6 +172,19 @@ function M:Debounce(fn)
     end
 end
 
+--- 窗口**每次显示**补的一趟（LoD 包的救场，稳定引用：`Widget:ShowWatch` 按函数身份去重）。
+--- 补三样"显示时才出生 / 会被暴雪重设"的东西：
+---   ① 滚动条（`SkinScrollsIn`：ScrollFrame / ScrollBox 细把手 / 上下箭头）；
+---   ② 肖像（`Skin:HidePortraits`：三种放法一并压掉）；
+---   ③ 方向钮（`Skin:WatchMaximizeMinimize`：sweep 一遍 + 自己登记 ShowWatch）。
+--- 关闭按钮不在这里：它自己的 `FadeChildBoxArt` 已经按显示时机补过。
+local function WindowShowPass(frame)
+    if not M.active or not frame then return end
+    pcall(M.SkinScrollsIn, M, frame)
+    pcall(Skin.HidePortraits, Skin, frame)
+    pcall(Skin.WatchMaximizeMinimize, Skin, frame)
+end
+
 --- The common window treatment: fade the frame's *own* chrome (not its children, so icons stay intact), hang a Monet backplate under it, restyle title and close button.
 -- @param opts { layer, inset, panel = Widget:Theme opts, titleSize, noTitle = true, noClose = true, inset = true|{opts} }
 function M:SkinWindow(frame, opts)
@@ -197,10 +210,11 @@ function M:SkinWindow(frame, opts)
         end
     end
 
-    -- 肖像：带 `Portrait` 的窗口（PortraitFrameTemplate 那一族：角色 / 任务 / 社交 / 观察 / 交易…）
-    -- 统一在窗口档里压成方形并收进外框以内（判据与裁法见 Skin:SquarePortrait）。
-    -- 单一入口 = 这里，各皮肤文件不要再自己去找 `<窗口名>Portrait`。
-    if opts.portrait then Skin:SquarePortrait(frame) end
+    -- 肖像：**一律剥掉**（2026-11-13 作者口径："各个界面的 portrait 都要剥除掉"）。
+    -- 以前是逐窗口 opt-in（`opts.portrait`），没写这个开关的窗口各留一张圆肖像；
+    -- 取法三种（`.Portrait` / `PortraitContainer` / `PortraitOverlay`）见 `Skin:HidePortraits`。
+    -- `portrait = false` 仍可单独豁免（给"那个位置其实不是肖像"的窗口留口子）。
+    if opts.portrait ~= false then Skin:HidePortraits(frame) end
 
     -- 标题字串和关闭按钮的位置各家不同：新框架挂在 TitleContainer 里，老框架直接挂在框上，
     -- 还有一批（WorldMapFrame 这类）两者都在 BorderFrame 那一层。
@@ -239,6 +253,23 @@ function M:SkinWindow(frame, opts)
         -- Button，LootFrame 实测如此；见 Skin:FindAnonClose）。
         if not close then close = Skin:FindAnonClose(frame) end
         if close then Skin:CloseButton(close) end
+    end
+
+    -- 右上角的"最大化 / 最小化"斜箭头。宿主位置不统一：`CommunitiesFrame` 挂在窗口本身，
+    -- `WorldMapFrame` 挂在 `BorderFrame` 上（§8.107 实测），**法术书的两颗直接挂在窗口下、没有容器字段**
+    -- —— 所以容器字段走一遍之后再来一次浅层扫（认 atlas 签名），并且登记"每次显示再扫一遍"：
+    -- 那两颗是 LoD 包打开时才建出来的，登录时这一层还是空的（11-13 作者实测：法术书的 max/min 没处理）。
+    local maxFrame = frame.MaximizeMinimizeFrame or (border and border.MaximizeMinimizeFrame)
+    if maxFrame then Skin:MaximizeMinimizeFrame(maxFrame) end
+    Skin:WatchMaximizeMinimize(frame)
+
+    -- LoD 包的"显示那一拍补齐"：这些包（法术书 / 专业 / 日历 / 收藏 / 地下城手册…）里的
+    -- 滚动条、肖像、方向钮**往往是窗口第一次显示时才建出来的** —— 登录时 `M:Dress` 跑到的是空壳，
+    -- 于是作者看到的是"LoD 包的 close / maxmin / scroll 没处理"。关闭按钮本身由
+    -- `Skin:CloseButton → FadeChildBoxArt` 的 ShowWatch 自补；这里把另外三样一起补上。
+    if not Marked(frame, "winShowPass") then
+        Mark(frame, "winShowPass", true)
+        if Widget and Widget.ShowWatch then Widget:ShowWatch(frame, WindowShowPass) end
     end
 
     return frame
@@ -853,15 +884,31 @@ local function InstallHooks()
         end
     end)
 
+    -- LoD 包里的**匿名美术**（✕ / ↗↙ / 滚动条细把手）只有等这个包加载之后才存在于世界里：
+    -- 登录那几趟全局扫描（+1/+3/+6/+10 秒）全都扫不到它们，于是一批 LoD 窗口的按钮一直是原样。
+    -- ⇒ 每有 Blizzard UI 包加载就推迟 1 秒补扫一趟。`Async` 切片 + 重触发先取消，连扫几趟不会叠着跑；
+    -- 1 秒的窗口把"同一个包拆成好几次 ADDON_LOADED"的突发合并成一趟（`C_Timer.After` 只排一条）。
+    local rescanPending = false
+    local function ArtRescan()
+        if rescanPending then return end
+        rescanPending = true
+        C_Timer.After(1, function()
+            rescanPending = false
+            if M.active and Skin.ScanScrollArrows then Skin:ScanScrollArrows() end
+        end)
+    end
+
     EventBus:Register("ADDON_LOADED", function(_, addonName)
         if not M.active then return end
-        if addonName then
+        if type(addonName) == "string" then
             for i = 1, #M.registry do
                 local entry = M.registry[i]
                 if entry.addons and entry.addons[addonName] then
                     M:Apply(entry)
                 end
             end
+            -- Blizzard UI 包（`Blizzard_*`）：新窗口里的匿名按钮 / 滚动条要重扫才会被认出来。
+            if addonName:sub(1, 9) == "Blizzard_" then ArtRescan() end
         end
         loosePass()
     end)

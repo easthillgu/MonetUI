@@ -368,6 +368,36 @@ function drawCloseX(ctx, size, color) {
     ctx.stroke();
 }
 
+// 窗口右上角的**斜向箭头**（maximize = 指向右上、minimize = 指向左下），2026-11-13 作者要求。
+// 与关闭钮**完全同口径**：同一 `CLOSE_GLYPH_SPAN`（字形 bbox 0.75 画布）与 `CLOSE_GLYPH_STROKE`
+// （笔画 0.125 画布）、圆头端帽。三颗钮并排时笔画粗细与留白对得上，不会一个细一个粗。
+// 刀的几何：杆从对角一端到另一端；箭头两臂从尖端沿**水平**与**竖直**各回退 `HEAD_SPAN` 字形跨度
+// —— 那正是 ↗ / ↙ 的经典头形（两个直角臂）。尖端向外多出 t/2 的圆头，所以扣掉一笔后正好落在
+// `span` 边界内（与 close X 的 `(span - t) / 2` 同一算法）。
+const WIN_ARROW_HEAD_SPAN = 0.42;   // 箭头两臂长度 / 字形跨度
+
+function drawWinArrow(ctx, size, color, upRight) {
+    const c = size / 2;
+    const t = size * CLOSE_GLYPH_STROKE;
+    const s = (size * CLOSE_GLYPH_SPAN - t) / 2;
+    const head = size * CLOSE_GLYPH_SPAN * WIN_ARROW_HEAD_SPAN;
+    const dx = upRight ? 1 : -1;
+    const dy = upRight ? -1 : 1;
+    const x0 = c - dx * s, y0 = c - dy * s;   // 尾
+    const x1 = c + dx * s, y1 = c + dy * s;   // 尖
+    ctx.strokeStyle = color;
+    ctx.lineWidth = t;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.moveTo(x1 - dx * head, y1);
+    ctx.lineTo(x1, y1);
+    ctx.lineTo(x1, y1 - dy * head);
+    ctx.stroke();
+}
+
 function drawCircleBorder(ctx, cx, cy, r, color) {
   ctx.strokeStyle = color;
   ctx.lineWidth = LINE_WIDTH.icon;
@@ -915,6 +945,9 @@ const generators = {
   'monet_close_normal':  (ctx, w, h) => drawCloseX(ctx, Math.min(w, h), CLOSE.normal),
   'monet_close_hover':   (ctx, w, h) => drawCloseX(ctx, Math.min(w, h), CLOSE.hover),
   'monet_close_push':    (ctx, w, h) => drawCloseX(ctx, Math.min(w, h), CLOSE.push),
+  // 窗口右上角的两颗斜箭头（与 close 同一口径；颜色同 normal = 纯白模具，运行期染色）。
+  'monet_maximize_arrow': (ctx, w, h) => drawWinArrow(ctx, Math.min(w, h), CLOSE.normal, true),
+  'monet_minimize_arrow': (ctx, w, h) => drawWinArrow(ctx, Math.min(w, h), CLOSE.normal, false),
   'monet_corner':        (ctx, w, h) => drawCorner(ctx, w),
   'monet_hairline':      (ctx, w, h) => drawHairline(ctx, w, h),
   'monet_radio':         (ctx, w, h) => drawRadio(ctx, w/2, h/2, Math.min(w,h), 20),
