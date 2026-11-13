@@ -458,5 +458,77 @@ if (hdrFn) {
 const isBtn = /local function IsButton\(obj\)([\s\S]*?)\nend/.exec(social);
 check('IsButton 的 nil 守卫在位', !!isBtn && /if not obj then return false end/.test(isBtn[1]));
 
+// ---------------------------------------------------------------- 19
+console.log('\n[19] LoD 图标裁切不许失效（2026-11-13 作者报「特别是 lod 类型的图标裁切会失效」）');
+// 四条根因，前三条都是「标记 / 一次性动作落在门之前」那一类：
+// ① IconWidgetsIn 先落 iconFlat 再判方形门 —— LoD 包登录那拍格子还没排版（w/h=0），
+//    门判 false 而标记已落 ⇒ 这个格子被永久排除，之后补扫进来只读到 iconFlat=Y；
+// ② Skin:Icon 先落 icon 再判 atlas 门 —— 占位 atlas / 还没贴图的那拍同样永久排除；
+// ③ 非 deep+lazy 的窗口登录后**再没有图标补扫路径**（WindowShowPass 只补滚动条/肖像/方向钮）；
+// ④ 裁切驱动用 stripped[icon] 只摘一次遮罩，与它自己的注释相反 —— 模板把遮罩挂回来后
+//    SetTexCoord 被客户端拒（"Cannot set tex coords when texture has mask"），裁剪永久失效。
+const iconWidgets = /function M:IconWidgetsIn\(frame, depth, withInfo\)([\s\S]*?)\nend/.exec(skins);
+check('IconWidgetsIn 已定义', !!iconWidgets);
+if (iconWidgets) {
+  const b = iconWidgets[1];
+  const iGuard = b.indexOf('if not Marked(child, "iconFlat") then');
+  const iMark = b.indexOf('Mark(child, "iconFlat", true)');
+  const iSized = b.indexOf('local sized');
+  check('iconFlat 标记不再紧跟守卫（落在门之后）',
+        iGuard >= 0 && iMark > iGuard && iSized > iGuard && iMark > iSized);
+  check('尺寸落地与方形判定分开记（sized / isSlot）',
+        /local sized = /.test(b) && /local isSlot = false/.test(b) && /if sized then/.test(b));
+  check('宽高比较前过 Secrets.CanRead（机密数字 type 也是 number）',
+        /Secrets\.CanRead\(w\)/.test(b) && /Secrets\.CanRead\(h\)/.test(b));
+  check('做事的那一档才落标记', /if sized and isSlot and not hasAtlas then\s*\n\s*Mark\(child, "iconFlat", true\)/.test(b));
+  check('按设计跳过（非方形 / atlas）也落标记，免每趟重复读',
+        /elseif sized then[\s\S]{0,200}?Mark\(child, "iconFlat", true\)/.test(b));
+  check('尺寸没落地的那一档不落标记（留给显示期补扫）',
+        !/if not sized then[\s\S]{0,120}?Mark\(child, "iconFlat", true\)/.test(b));
+}
+const skinIcon = /function Skin:Icon\(icon, border\)([\s\S]*?)\nend/.exec(skin);
+check('Skin:Icon 已定义', !!skinIcon);
+if (skinIcon) {
+  const b = skinIcon[1];
+  const iAtlas = b.indexOf('GetAtlas');
+  const iMark = b.indexOf('Mark(icon, "icon", true)');
+  check('icon 标记落在 atlas 门之后', iAtlas >= 0 && iMark > iAtlas);
+  check('atlas 门没过就早退且不落标记', /if okAtlas and type\(atlas\) == "string" then return icon end/.test(b));
+}
+// ③ 显示期补扫：一个稳定引用，ShowWatch 与 PollWatch 共用。
+const iconPass = /local function IconPass\(frame\)([\s\S]*?)\nend/.exec(skins);
+check('IconPass 是模块级稳定引用（轮询按函数身份去重）', !!iconPass);
+if (iconPass) {
+  check('IconPass 透传本档 slotInfo', /fd\.iconInfo/.test(iconPass[1])
+        && /M\.IconWidgetsIn, M, frame, nil, fd\.iconInfo/.test(iconPass[1]));
+}
+const winShow = /local function WindowShowPass\(frame\)([\s\S]*?)\nend/.exec(skins);
+check('WindowShowPass 也补图标', !!winShow && /IconPass\(frame\)/.test(winShow[1]));
+has(skins, /fd\.iconPass = true/, 'Dress 登记本档要图标补扫');
+has(skins, /Widget:PollWatch\(frame, IconPass, 1\)/, 'Dress 登记可见期每秒补扫（LoD 格子开窗后才出生）');
+has(skins, /Widget:Readable\(frame\)/, '补扫登记前先过 Readable（forbidden 框不挂轮询）');
+// ④ 遮罩每拍补摘，且回滚清单累积（共用一个入口）。
+check('stripped 一次性旁表已删（它就是把补摘变成只摘一次的那道门）',
+      !/local stripped = setmetatable/.test(codeOnly(skin)) && !/stripped\[icon\]/.test(codeOnly(skin)));
+const masksOff = /local function CropMasksOff\(icon\)([\s\S]*?)\nend/.exec(skin);
+check('CropMasksOff 已定义（CropIcon 与驱动共用）', !!masksOff);
+if (masksOff) {
+  const b = masksOff[1];
+  check('已有清单就追加（回滚才还得起后来摘的那批）',
+        /local list = Marked\(icon, "cropMasks"\)/.test(b) && /list\[#list \+ 1\] = removed\[i\]/.test(b));
+  check('undo 只登记一次', /Skin:Record\(function\(\)/.test(b) && /Mark\(icon, "cropMasks", nil\)/.test(b));
+}
+const cropDriver = /local function EnsureCropDriver\(\)([\s\S]*?)\nend/.exec(skin);
+check('EnsureCropDriver 已定义', !!cropDriver);
+if (cropDriver) {
+  const b = cropDriver[1];
+  check('每拍读遮罩数，>0 就补摘（不再只摘第一次）',
+        /GetNumMaskTextures/.test(b) && /n > 0 then CropMasksOff\(icon\)/.test(b));
+  check('补摘排在 SetTexCoord 之前', b.indexOf('CropMasksOff(icon)') < b.indexOf('icon.SetTexCoord, icon, c[1]'));
+}
+const cropIcon = /function Skin:CropIcon\(icon, x0, x1, y0, y1\)([\s\S]*?)\nend/.exec(skin);
+check('CropIcon 走同一个摘遮罩入口', !!cropIcon && /CropMasksOff\(icon\)/.test(cropIcon[1])
+      && !/Skin:StripMasks\(icon\)/.test(cropIcon[1]));
+
 console.log('\n' + (bad === 0 ? '全部通过' : bad + ' 项未通过'));
 process.exit(bad === 0 ? 0 : 1);

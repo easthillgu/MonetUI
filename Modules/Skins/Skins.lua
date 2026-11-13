@@ -8,6 +8,7 @@ local Skin     = ns.Skin
 local Media    = ns.Media
 local EventBus = ns.EventBus
 local Widget   = ns.Widget
+local Secrets  = ns.Secrets
 
 
 -- 旁表标记：**绝不往暴雪的框体 / 贴图 / 字体串上写字段**。
@@ -172,17 +173,30 @@ function M:Debounce(fn)
     end
 end
 
+--- 物品图标的"显示期补扫"（稳定引用，ShowWatch 与 PollWatch 共用同一个函数）。
+--- **LoD 图标裁切失效的主因就是缺这一条**：`M:Dress` 的 Apply 只在登录那拍扫一次图标，
+--- 而 LoD 包的格子那时还没出生 / 还没排版；只有 `deep + lazy` 的窗口有 `SweepDeep` 轮询兜着，
+--- 其余窗口此后再没人进来看一眼。这里按"可见期每秒一趟"补，窗口藏着时驱动自己停。
+local function IconPass(frame)
+    if not M.active or not frame then return end
+    local fd = GetFFD(frame)
+    if not fd.iconPass then return end
+    pcall(M.IconWidgetsIn, M, frame, nil, fd.iconInfo)
+end
+
 --- 窗口**每次显示**补的一趟（LoD 包的救场，稳定引用：`Widget:ShowWatch` 按函数身份去重）。
---- 补三样"显示时才出生 / 会被暴雪重设"的东西：
+--- 补四样"显示时才出生 / 会被暴雪重设"的东西：
 ---   ① 滚动条（`SkinScrollsIn`：ScrollFrame / ScrollBox 细把手 / 上下箭头）；
 ---   ② 肖像（`Skin:HidePortraits`：三种放法一并压掉）；
----   ③ 方向钮（`Skin:WatchMaximizeMinimize`：sweep 一遍 + 自己登记 ShowWatch）。
+---   ③ 方向钮（`Skin:WatchMaximizeMinimize`：sweep 一遍 + 自己登记 ShowWatch）；
+---   ④ 物品图标（`IconPass`，与 Dress 登记的可见期轮询同一个函数）。
 --- 关闭按钮不在这里：它自己的 `FadeChildBoxArt` 已经按显示时机补过。
 local function WindowShowPass(frame)
     if not M.active or not frame then return end
     pcall(M.SkinScrollsIn, M, frame)
     pcall(Skin.HidePortraits, Skin, frame)
     pcall(Skin.WatchMaximizeMinimize, Skin, frame)
+    IconPass(frame)
 end
 
 --- The common window treatment: fade the frame's *own* chrome (not its children, so icons stay intact), hang a Monet backplate under it, restyle title and close button.
@@ -525,7 +539,15 @@ function M:Dress(spec, opts)
                 -- 这条只管它们；deep+lazy 的窗口由 SweepDeep 的轮询补扫追新格子，
                 -- 非 lazy 的窗口建格时机覆盖不了的（如运行期才建的列表）单独点名 `icons = true` 再补一遍。
                 if opts.icons ~= false then
+                    -- 登记"可见期补扫"：LoD 包的格子是开窗之后才建出来 / 才排版的，
+                    -- 登录这一趟扫到的是空壳。fd 记下本档的 slotInfo，补扫时原样透传。
+                    local fd = GetFFD(frame)
+                    fd.iconPass = true
+                    fd.iconInfo = opts.slotInfo
                     M:IconWidgetsIn(frame, nil, opts.slotInfo)
+                    if Widget and Widget.PollWatch and Widget:Readable(frame) then
+                        Widget:PollWatch(frame, IconPass, 1)
+                    end
                 end
             end)
         end
@@ -665,7 +687,6 @@ function M:IconWidgetsIn(frame, depth, withInfo)
         if okKind then
             if kind == "Button" then
                 if not Marked(child, "iconFlat") then
-                    Mark(child, "iconFlat", true)
                     -- `.itemButton / .ItemButton` 指纹：真正的格子按钮挂在字段上（容器框包一格）。
                     local target = child
                     for _, key in ipairs({ "itemButton", "ItemButton" }) do
@@ -679,13 +700,16 @@ function M:IconWidgetsIn(frame, depth, withInfo)
                     -- **方形门**：铺平档只认近似方形的按钮——`.icon` 字段不是物品格专属，
                     -- 训练师的技能列表行（ClassTrainerFrameSkillStepButton 316x40、滚动行
                     -- 301x47）也带 `.icon`，误铺平会把图标 SetAllPoints 拉满整行（2026-11-02
-                    -- 实机判例：训练师列表全拉花）。物品格语义 = 宽高比在 1.5 以内；读不出
-                    -- 尺寸的按钮保守起见也跳过（不铺平最多留原生圆角，铺错却是拉花）。
+                    -- 实机判例：训练师列表全拉花）。物品格语义 = 宽高比在 1.5 以内。
+                    -- `sized` 与 `isSlot` 分开记：**尺寸还没落地**（LoD 包那拍 w/h = 0，或受限
+                    -- 窗口读出来是机密值）不是"按设计跳过"，不能落标记 —— 落了就等于把这个格子
+                    -- 永久排除，之后补扫进来也只读到 iconFlat=Y（与表头发丝线同一类缺陷）。
                     local okW, w = pcall(target.GetWidth, target)
                     local okH, h = pcall(target.GetHeight, target)
+                    local sized = okW and okH and type(w) == "number" and type(h) == "number"
+                        and Secrets.CanRead(w) and Secrets.CanRead(h) and w > 0 and h > 0
                     local isSlot = false
-                    if okW and okH and type(w) == "number" and type(h) == "number"
-                        and w > 0 and h > 0 then
+                    if sized then
                         local ratio = w / h
                         if ratio < 1 then ratio = 1 / ratio end
                         isSlot = ratio <= 1.5
@@ -706,7 +730,10 @@ function M:IconWidgetsIn(frame, depth, withInfo)
                             end
                         end
                     end
-                    if isSlot and not hasAtlas then
+                    -- **标记落在门之后**：只有"这一趟真做了事"或"按设计确定跳过"才落 iconFlat。
+                    -- 尺寸没落地的那一档不落标记，留给显示期补扫（IconPass）下一趟再来。
+                    if sized and isSlot and not hasAtlas then
+                    Mark(child, "iconFlat", true)
                     pcall(Skin.FlattenSlotArt, Skin, target)
                     for _, key in ipairs({ "icon", "Icon", "iconTexture", "IconTexture" }) do
                         local okIcon, tex = pcall(function() return target[key] end)
@@ -730,7 +757,11 @@ function M:IconWidgetsIn(frame, depth, withInfo)
                         pcall(count.ClearAllPoints, count)
                         pcall(count.SetPoint, count, "BOTTOMRIGHT", target, "BOTTOMRIGHT", -2, 2)
                     end
-                    end -- isSlot and not hasAtlas
+                    elseif sized then
+                        -- 尺寸读出来了但不是物品格（非方形 / atlas 图标）：按设计跳过，
+                        -- 落标记免得每趟重复读一遍宽高与 atlas。
+                        Mark(child, "iconFlat", true)
+                    end -- sized and isSlot and not hasAtlas
                 end
             elseif kind == "Frame" then
                 M:IconWidgetsIn(child, depth + 1, withInfo)

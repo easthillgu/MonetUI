@@ -2706,18 +2706,40 @@ function Skin:StripMasks(tex)
     return removed
 end
 
---- 裁剪时摘下的遮罩（弱键），驱动帧每拍先补摘一次再上裁剪 —— 有些模板会在贴图更新时
---- 把遮罩挂回来，只摘一次会被顶掉。
-local stripped = setmetatable({}, { __mode = "k" })
+--- 摘遮罩 + 记账：**CropIcon 与裁切驱动共用这一个入口**。
+--- 摘下的遮罩累积进同一个旁表清单（`cropMasks`），关掉美化时倒序挂回去；undo 只登记一次。
+--- 为什么要共用：驱动每拍补摘时如果另起一份清单，回滚就只还第一次摘的那批，
+--- 后来被模板挂回、又被我们摘掉的遮罩永久丢失。
+local function CropMasksOff(icon)
+    local removed = Skin:StripMasks(icon)
+    if #removed == 0 then return end
+    local list = Marked(icon, "cropMasks")
+    if type(list) == "table" then
+        -- list 与 undo 闭包捕获的是同一张表，追加即进回滚清单。
+        for i = 1, #removed do list[#list + 1] = removed[i] end
+        return
+    end
+    Mark(icon, "cropMasks", removed)
+    Skin:Record(function()
+        if type(icon.AddMaskTexture) == "function" then
+            for i = #removed, 1, -1 do pcall(icon.AddMaskTexture, icon, removed[i]) end
+        end
+        Mark(icon, "cropMasks", nil)
+    end)
+end
 
 local function EnsureCropDriver()
     if cropId then return end
     cropId = Scheduler:Every(500, function()
         for icon, c in pairs(cropped) do
             if type(icon.SetTexCoord) == "function" then
-                if stripped[icon] == nil then
-                    stripped[icon] = true
-                    Skin:StripMasks(icon)
+                -- **每拍都要看遮罩有没有被挂回来**：有些模板在贴图更新时重新 AddMaskTexture，
+                -- 而带遮罩的贴图 SetTexCoord 会被客户端直接拒（"Cannot set tex coords when
+                -- texture has mask"）。以前这里用 `stripped[icon]` 只摘第一次，之后遮罩一回来
+                -- 裁剪就永久失效 —— 这正是"LoD 图标裁切失效"的第二条根因。
+                if type(icon.GetNumMaskTextures) == "function" then
+                    local okN, n = pcall(icon.GetNumMaskTextures, icon)
+                    if okN and type(n) == "number" and n > 0 then CropMasksOff(icon) end
                 end
                 pcall(icon.SetTexCoord, icon, c[1], c[2], c[3], c[4])
             end
@@ -2731,18 +2753,7 @@ function Skin:CropIcon(icon, x0, x1, y0, y1)
     y0, y1 = y0 or 0, y1 or 1
 
     -- **先摘遮罩再裁剪**（顺序反了 SetTexCoord 会被拒）。摘下的留着，关掉美化时挂回去。
-    local removed = Skin:StripMasks(icon)
-    if #removed > 0 and not Marked(icon, "cropMasks") then
-        Mark(icon, "cropMasks", removed)
-        self:Record(function()
-            if type(icon.AddMaskTexture) == "function" then
-                for i = #removed, 1, -1 do pcall(icon.AddMaskTexture, icon, removed[i]) end
-            end
-            Mark(icon, "cropMasks", nil)
-            stripped[icon] = nil
-        end)
-    end
-    stripped[icon] = true
+    CropMasksOff(icon)
 
     cropped[icon] = { x0, x1, y0, y1 }
     EnsureCropDriver()
@@ -3203,10 +3214,13 @@ end
 --- atlas 图标原样保留。
 function Skin:Icon(icon, border)
     if not icon or Marked(icon, "icon") then return icon end
-    Mark(icon, "icon", true)
 
     local okAtlas, atlas = pcall(icon.GetAtlas, icon)
     if okAtlas and type(atlas) == "string" then return icon end
+    -- **标记落在 atlas 门之后**：LoD 包的图标在登录那拍可能还挂着占位 atlas（或根本还没
+    -- 贴图），先落标记就等于把它永久排除 —— 之后补扫进来只读到 icon=Y，裁切再也不会做。
+    -- 门没过就不标记，下一趟贴图落地了再来（与 IconWidgetsIn 的 iconFlat 同一条口径）。
+    Mark(icon, "icon", true)
     self:CropIcon(icon, 0.08, 0.92, 0.08, 0.92)
     if border and icon.GetObjectType and icon:GetObjectType() == "Texture" then
         local bg = NewBackdropFrame(icon:GetParent(), 1)
