@@ -432,23 +432,38 @@ function Mover:SetLocked(group, locked)
     else
         cfg.locks[group] = locked and true or false
     end
+    -- 锁回去的那一刻把「正在拖」的记账作废：这一趟不该再落到 Store 里写位置。
+    -- 只清受影响的组；框本身不动（不碰受保护框），松手照常由 OnDragStop 收尾。
+    if locked then
+        for _, entry in pairs(entries) do
+            if group == nil or entry.group == group then entry.moving = false end
+        end
+    end
 end
 
 --- 拖动：受保护的框战斗里不能动，直接不响应（锁本身不碰框，所以解锁随时有效）。
+--- 2026-11-15（§8.124）：默认锁上之后，OnDragStart 被锁门拦掉，但框仍注册着拖拽。
+--- 客户端偶尔也会派发一次 OnDragStop（按下→挪一点→松手，StartMoving 从没调过），
+--- 旧写法会无条件 Store → ClearAllPoints + SetPoint：**锁着还能把位置写回存档**，
+--- 对受保护的单位框更是凭空多一次战斗外的 SetPoint。用 entry.moving 记「这次真的
+--- StartMoving 过」，没开始的松手只清状态，不写位置、不重贴组。
 local function InstallDrag(entry)
     local frame = entry.frame
     if not frame or type(frame.SetMovable) ~= "function" then return end
 
+    entry.moving = false
     frame:SetMovable(true)
     frame:SetClampedToScreen(true)
     frame:RegisterForDrag("LeftButton")
 
     frame:SetScript("OnDragStart", function(self)
+        entry.moving = false
         if Mover:IsLocked(entry.group) then return end
         if self.IsProtected and self:IsProtected() and InCombat() then
             return
         end
         self:StartMoving()
+        entry.moving = true
         -- 和别人的编辑模式浮层互相让路（LibEditMode 的约定，装了才触发）
         if type(EventRegistry) == "table" and type(EventRegistry.TriggerEvent) == "function" then
             pcall(EventRegistry.TriggerEvent, "EditModeExternal.hideDialog")
@@ -456,7 +471,11 @@ local function InstallDrag(entry)
     end)
 
     frame:SetScript("OnDragStop", function(self)
+        local moved = entry.moving
+        entry.moving = false
+        -- 不管有没有真的拖过都收尾，免得框留在 moving 状态；但下面两步只有真拖过才做。
         self:StopMovingOrSizing()
+        if not moved then return end
         Mover:Store(entry.key)
         Mover:ApplyGroup(entry.group)
     end)

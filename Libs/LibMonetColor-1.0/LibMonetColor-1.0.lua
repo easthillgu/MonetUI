@@ -1,5 +1,5 @@
 -- LibMonetColor-1.0.lua
--- Monet Color Engine v1.2.1
+-- Monet Color Engine v1.3.0
 -- A WoW dynamic environment color computation engine based on Impressionist color rules.
 -- Provides adaptive "5+3" theme colors for UI plugins.
 --
@@ -7,9 +7,9 @@
 -- Optional: CallbackHandler-1.0 (a built-in registry is used when absent)
 -- Optional data: MonetColorMapData-1.0 (mapID -> environment color table)
 -- License: MIT
--- Version: MAJOR = "LibMonetColor-1.0", MINOR = 10003
+-- Version: MAJOR = "LibMonetColor-1.0", MINOR = 10005
 
-local MAJOR, MINOR = "LibMonetColor-1.0", 10004
+local MAJOR, MINOR = "LibMonetColor-1.0", 10005
 
 -- Only a real LibStub (a table exposing NewLibrary) counts. A bare function
 -- under _G.LibStub is our own standalone shim from a previous load, and must

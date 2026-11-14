@@ -1119,7 +1119,14 @@ function M:RegisterEvents()
     -- 2026-10-25 实机判例：**不重建引擎容器**。重建后那批按钮被我们碰过，引擎在战斗里
     -- 再写它们就被记成 MonetUI → ADDON_ACTION_BLOCKED UNKNOWN()（×11）。代价：目标/焦点
     -- 光环的边框颜色保持创建时那一套，/reload 后跟新主题。见 BuffFrame 同款注释。
-    M:UpdateAll()
+    --
+    -- 2026-11-15（§8.125）：这里必须走 `M:Apply()`，不能只 `M:UpdateAll()`。
+    -- UpdateAll → RefreshUnit → UpdateHealth/UpdatePower → UpdateDesaturation，只刷数值、
+    -- 去饱和与织纹浓度；血条填充 / 空槽 / 能量条的颜色是建框时 UpdateBarLook 一次性涂的
+    -- （见本文件 1016 行注释）。主题换了缓存却没人重涂，条子就一直停在登录那张地图的
+    -- 配色 —— 玩家看到的就是「换地图单位框架配色不变」。Apply 末尾自带 UpdateAll，
+    -- 数值刷新不会丢；ApplyPetHover 是幂等重设 alpha，不改变显隐。
+    M:Apply()
 end)
 end
 

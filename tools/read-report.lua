@@ -81,6 +81,31 @@ local function showColor(r)
             return string.format("%-10s %s", k, tostring(v))
         end):gsub("\n", "\n  "))
     end
+    -- §8.123：逐组判定行 + 纠偏记录。聊天框里那几行一定被顶掉，WTF 账本必须能独立还原
+    -- 「这一区到底改了什么、控制值是多少、哪一行没过线」。
+    if type(r.rows) == "table" and #r.rows > 0 then
+        print("  逐组判定：")
+        for i = 1, #r.rows do
+            local row = r.rows[i]
+            if type(row) == "table" then
+                local cr = type(row.cr) == "number" and string.format("%.2f", row.cr) or "?"
+                local lim = row.min
+                    and string.format("线 %.1f  %s", row.min, row.ok and "OK" or "FAIL")
+                    or (tostring(row.note or "豁免"))
+                print(string.format("    %-12s %s  %s", tostring(row.label or "?"), cr, lim))
+            end
+        end
+    end
+    if type(r.adjust) == "table" then
+        local a = r.adjust
+        print(string.format("  纠偏 %s | 控制值 %s | 补色回避 %s | 填充 L*%s→%s | 文字 L*%s→%s",
+            a.applied and "已触发" or "未触发", tostring(a.minContrast or "?"),
+            a.fillHue and "Y" or "N",
+            a.fillFrom and string.format("%.0f", a.fillFrom) or "-",
+            a.fillTo and string.format("%.0f", a.fillTo) or "-",
+            a.textFrom and string.format("%.0f", a.textFrom) or "-",
+            a.textTo and string.format("%.0f", a.textTo) or "-"))
+    end
     if type(r.colors) == "table" then
         print("  " .. sortedKeys(r.colors, function(k, c)
             return string.format("%-6s r=%.3f g=%.3f b=%.3f  L*=%s",

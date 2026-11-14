@@ -2,7 +2,7 @@
 -- Colour access layer: LibMonetColor-1.0 integration with a graceful fallback.
 -- "5 + 3" model (see MonetUI.md): functional 5 (primary / health / resource / danger / neutral) + signature 3 (edge glow / ambient tint / highlight wash).
 -- Only the signature colours (plus the Monet neutral) come from the engine; health / resource / danger stay UI-managed on purpose (they must never be "Monetised").
--- On top of the 5+3 sits the **surface ladder** (GetSurface): five CIE L* levels -- panel / hover / lost / weave / fill -- recomputed once per theme refresh. The engine gives hue, the ladder gives separation; bar contrast is the consumer's job (see docs/HANDOFF.md 8.14.3).
+-- On top of the 5+3 sits the **surface ladder** (GetSurface): five CIE L* levels -- panel / hover / lost / weave / fill -- recomputed once per theme refresh. The engine gives hue, the ladder gives separation (docs/HANDOFF.md 8.14.3). Since §8.123 a **contrast contract** sits above both: it composites the semi-transparent plate over the zone's world colour and enforces a per-pair minimum CR, so bar / text contrast is the palette's job, not the consumer's.
 
 local ADDON_NAME, ns = ...
 
@@ -150,14 +150,308 @@ local function computeSurface(t)
     end
     s.cr.panelLost = contrastOf(s.panel, s.lost)
     -- **只是记账，不进闸门**：hover 只比 panel 高 3 个 L*（悬停态靠"贴得近才看得出的那点差"），
-    -- 折算对比度 ≈1.07，天然低于 Core.lua 的 COLOR_CR_MIN 1.4 那条"相邻两档要分得开"的门。
-    -- 别把它加进 CR_PAIRS 去"修红" —— 那一改等于把 D +3 推回 +6 以上，正文对比度先撑不住。
+    -- 折算对比度 ≈1.07，天然低于本文件的 CR_STEP_MIN 1.4 那条"相邻两档要分得开"的门。
+    -- 别把它加进 CONTRACT_ROWS 的判定行去"修红" —— 那一改等于把 D +3 推回 +6 以上，
+    -- 正文对比度先撑不住；所以那一行的 min 是 nil（豁免），只在账本里显示数值。
     s.cr.panelHover = contrastOf(s.panel, s.hover)
     s.cr.lostWeave = contrastOf(s.lost, s.weave)
     s.cr.lostFill = contrastOf(s.lost, s.fill)
     s.cr.panelFill = contrastOf(s.panel, s.fill)
 
     return s
+end
+
+-- ------------------------------------------------------------------ 对比度契约（§8.123）
+-- 旧的 Core.COLOR_CR_MIN 1.4 只是 `/mui colors` 的**记账线**，配色本身从不看它。
+-- 2026-11-15 塔纳利斯（1446）离线复算：血条填充 #7e6a4b 对沙漠 #997846 只有 CR 1.27、
+-- 色相差 36°；正文 #92908d 压 35% 半透明底板（底下透出亮沙）只有 CR 2.13 —— 账本四组
+-- 却全过线，因为它只算不透明 RGB 两两比，没算「压在游戏世界上」的那一层。
+--
+-- 这一层把对比度变成**控制值**：低于线才自动纠偏，达标就一个字节不动。
+-- 河林（默认配色）与 Atlas 17 区里达标的地图因此观感完全不变。
+-- minContrast = 玩家可调的「血条填充 ↔ 背景（世界 / 空槽）」最小 CR，既是触发后的纠偏
+-- 目标、也是被修过的区域在账本里的判定线。阶梯相邻档 / 正文 / 边框按用途固定，
+-- 不跟着玩家那条滑 —— 否则把文字线调到 2.0 就成了假达标。
+local CR_DEFAULT     = 1.8    -- 默认偏克制：再高会把 fill 推到发白，压住血条上的数字（见 textFill 行）
+local CR_MAX         = 3.0    -- 上限：再高会超出高饱和色相的可达亮度（AtLightness out-of-gamut）
+local CR_STEP_MIN    = 1.4    -- 阶梯相邻档（panelHover 是设计上的例外，见 computeSurface）
+local CR_BARENV      = 1.5    -- fill↔世界环境的撞色线：低于它才触发补色回避
+local CR_TEXT        = 4.5    -- 正文↔实际合成底板（WCAG AA 正文）
+local CR_TEXT_LOST   = 3.0    -- 正文↔凹槽（lost）稍宽，凹槽不是主阅读面
+local CR_EDGE        = 3.0    -- 边框↔底板（1px 发丝线）
+local CR_PLATE_ALPHA = 0.35   -- 最透的常见底板（聊天 / 输入区）；按最坏情况算文字
+local CR_L_LO, CR_L_HI = 2, 96
+
+--- 玩家可调的最小对比控制值。DB 没这一项 / 值出界就回默认，绝不把 nil 传进算术。
+function Color:MinContrast()
+    local db = ns.DB and ns:DB()
+    local v = db and db.theme and db.theme.minContrast
+    if type(v) == "number" and v >= CR_STEP_MIN and v <= CR_MAX then return v end
+    return CR_DEFAULT
+end
+
+--- 当前区域的环境色（游戏世界的平均色）：RGB + 色相。拿不到就回 nil 让纠偏整层跳过 ——
+-- 宁可沿用旧观感，也不要拿一个猜出来的世界色去改全屏配色。
+-- GetZoneInfo 里的 mapID 已经过 Secrets.Number；h/s/l 来自我们自己的数据表，不是机密值。
+function Color:Environment()
+    if not (LMC and type(LMC.HSLToRGB) == "function") then return nil end
+    local _, _, _, h, s, l = self:GetZoneInfo()
+    if type(h) ~= "number" or type(s) ~= "number" or type(l) ~= "number" then return nil end
+    local ok, r, g, b = pcall(LMC.HSLToRGB, h, s, l)
+    if not ok or type(r) ~= "number" or type(g) ~= "number" or type(b) ~= "number" then return nil end
+    return { r = clamp01(r) or 0, g = clamp01(g) or 0, b = clamp01(b) or 0, h = h }
+end
+
+local function atL(c, L)
+    local r, g, b = optionalLMC("AtLightness", c.r, c.g, c.b, L)
+    if not (r and g and b) then return nil end
+    return { r = clamp01(r) or 0, g = clamp01(g) or 0, b = clamp01(b) or 0 }
+end
+
+local function crOf(a, b)
+    local v = contrastOf(a, b)
+    return type(v) == "number" and v or 1
+end
+
+--- CIE L* -> 相对亮度 Y（RGBToXYZ 的 Y 就是 WCAG 要的那个；见 LMC.ContrastRatio 注释）。
+local function lumY(c)
+    local L = lightnessOf(c)    -- RGBToLab 返回 L,a,b；这里只取第一个
+    if type(L) ~= "number" then return nil end
+    if L > 8 then return ((L + 16) / 116) ^ 3 end
+    return L / 903.3
+end
+
+local function lFromY(Y)
+    if Y <= 0 then return 0 end
+    if Y > 0.008856 then return 116 * (Y ^ (1 / 3)) - 16 end
+    return 903.3 * Y
+end
+
+--- WCAG CR=(Y亮+0.05)/(Y暗+0.05) 的反解：要让一档颜色对 against 至少 k，
+-- 需要落在哪个 L*。bright=true 放到比 against 亮的一侧。解析解，不做逐档迭代。
+local function requiredL(against, k, bright)
+    local y2 = lumY(against)
+    if not y2 then return nil end
+    local y1 = bright and (k * (y2 + 0.05) - 0.05) or ((y2 + 0.05) / k - 0.05)
+    if y1 < 0 or y1 > 1 then return nil end
+    return lFromY(y1)
+end
+
+--- 从解析解出发，沿 L* 轴逐档找第一个**同时**满足所有 tests 的落点。
+-- 为什么还要逐档：AtLightness 在高饱和色相上会 out-of-gamut，只能给「最接近可达色」，
+-- 解析解那个 L* 未必真能落上去。tests = { { against = <color>, min = <CR> }, ... }。
+local function solveCR(c, tests, bright, loL, hiL)
+    local start
+    for i = 1, #tests do
+        local L = requiredL(tests[i].against, tests[i].min, bright)
+        if L then
+            if start == nil then start = L
+            elseif bright then start = math.max(start, L)
+            else start = math.min(start, L) end
+        end
+    end
+    if not start then return nil end
+    local dir = bright and 1 or -1
+    local L = math.max(loL, math.min(hiL, start))
+    for _ = 1, 60 do
+        local out = atL(c, L)
+        if not out then return nil end
+        local pass = true
+        for i = 1, #tests do
+            if crOf(out, tests[i].against) < tests[i].min then
+                pass = false
+                break
+            end
+        end
+        if pass then return out, L end
+        L = L + dir
+        if L < loL or L > hiL then break end
+    end
+    return nil
+end
+
+--- fg 以 alpha 叠在 bg 上。底板是半透明的，只有把游戏世界合成进来才是玩家看到的颜色。
+local function composite(fg, alpha, bg)
+    return { r = fg.r * alpha + bg.r * (1 - alpha),
+             g = fg.g * alpha + bg.g * (1 - alpha),
+             b = fg.b * alpha + bg.b * (1 - alpha) }
+end
+
+--- 补色回避：把一档颜色的色相转到环境色的补色侧，CIE L* 与饱和度都不动。
+-- 招牌「反色血条」本来就该是环境补色；edge 的 RGB 反相在土黄系环境里会绕回暖棕，
+-- 正好和沙漠撞色（塔纳利斯 fill 色相 36° vs env 36°）——这里把它掰回补色。
+local function complementHue(c, envH)
+    if not (LMC and type(LMC.RGBToHSL) == "function" and type(LMC.HSLToRGB) == "function") then return nil end
+    local ok, _, s, l = pcall(LMC.RGBToHSL, c.r, c.g, c.b)
+    if not ok or type(s) ~= "number" or type(l) ~= "number" then return nil end
+    local srcL = lightnessOf(c)
+    local ok2, r, g, b = pcall(LMC.HSLToRGB, (envH + 180) % 360, s, l)
+    if not ok2 or type(r) ~= "number" or type(g) ~= "number" or type(b) ~= "number" then return nil end
+    return atL({ r = r, g = g, b = b }, type(srcL) == "number" and srcL or SURFACE_STEPS.fill)
+end
+
+--- 逐组判定行：key / 中文标签 / 各自的线。判定与数值全在配色库这一层算，
+-- Core 的 /mui colors 只负责打印与落盘，两边不会再各写一份阈值而漂移。
+local CONTRACT_ROWS = {
+    { key = "panelLost",  label = "面板↔空槽", min = CR_STEP_MIN },
+    { key = "lostWeave",  label = "空槽↔织纹", min = CR_STEP_MIN },
+    { key = "lostFill",   label = "血↔掉血",   min = CR_STEP_MIN },
+    -- 这一行的线就是玩家的最小对比控制值（只对被纠偏过的区域生效）。
+    { key = "fillEnv",    label = "血↔背景",   min = "dynamic" },
+    { key = "textPlate",  label = "正文↔底板", min = CR_TEXT },
+    { key = "textLost",   label = "正文↔凹槽", min = CR_TEXT_LOST },
+    { key = "edgePanel",  label = "边框↔底板", min = CR_EDGE },
+    -- hover 只比 panel 高 3 L*（CR≈1.07），是「贴得近才看得出」的刻意设计，
+    -- 不进判定、也不进闸门 —— 见 computeSurface 里那段解释。
+    { key = "panelHover", label = "悬停↔常态", min = nil, note = "刻意贴近，豁免" },
+    -- 纠偏把 fill 抬亮后，压在填充上的血量数字会变糊。全局 neutral 不可能同时适配
+    -- 「暗底板」和「亮血条」，所以这一组只如实报数、不判红绿：团队 / 首领框的名字与数值
+    -- 另有黑描边（Groups.lua:271），玩家框想改善就把控制值往下调。
+    { key = "textFill",  label = "文字↔血条", min = nil, note = "权衡项：调低控制值可改善" },
+}
+
+--- 让整本主题过线。只在低于线时动手；达标就原样返回。
+-- @param s computeSurface 的结果（就地修改）
+-- @param t theme 表（就地改 neutral / edge 的 RGB；必须是副本，不能是 FALLBACK 常量）
+-- @param env Color:Environment() 的环境色，nil 表示拿不到
+local function enforceContrast(s, t, env, minCR)
+    local adj = { applied = false, minContrast = minCR, fillHue = false, barFixed = false }
+
+    -- 老 vendored 副本没有 1.2.0 工具函数：整层静默跳过，回到升级前观感（同 surfaceColor 的降级）。
+    local toolsReady = LMC
+        and type(LMC.ContrastRatio) == "function"
+        and type(LMC.AtLightness) == "function"
+        and type(LMC.RGBToLab) == "function"
+
+    if toolsReady and env then
+        -- ① 血条：**触发式**。只有填充与世界撞色（CR < CR_BARENV）才修 —— 河林 1.55 ≥ 1.5
+        --    整支不进，默认配色一个字节不动。修的时候先转补色回避，再做亮度兜底：
+        --    fill 对背景（env）要过玩家的控制值 minCR，对空槽（lost）要过阶梯线；
+        --    两个约束都往亮侧，loL 卡在 weave 之上保住 panel < hover < lost < weave < fill。
+        --    控制值设得过高、亮环境里够不到那个 L* 时，退回保底线 CR_BARENV 再解一次，
+        --    宁可少拉一点也不能整支不修（账本会如实把那一行报红）。
+        local fill = s.fill
+        if crOf(fill, env) < CR_BARENV then
+            local comp = complementHue(fill, env.h or 0)
+            if comp then
+                fill = comp
+                adj.fillHue = true
+            end
+            local loL = SURFACE_STEPS.weave + 2
+            local bar = solveCR(fill, {
+                { against = env,   min = minCR },
+                { against = s.lost, min = CR_STEP_MIN },
+            }, true, loL, CR_L_HI)
+            if not bar then
+                bar = solveCR(fill, {
+                    { against = env,   min = CR_BARENV },
+                    { against = s.lost, min = CR_STEP_MIN },
+                }, true, loL, CR_L_HI)
+            end
+            if bar then
+                adj.fillFrom = lightnessOf(s.fill)
+                s.fill = bar
+                adj.fillTo = lightnessOf(s.fill)
+                adj.barFixed = true
+                adj.applied = true
+            end
+        end
+
+        -- ② 正文：亮环境里引擎把 neutral 压暗（neutralL = 1 - envL），半透明底板却被亮世界
+        --    抬亮，两边相向而行 —— 这就是塔纳利斯 2.13 的成因。同样只在低于线时修：
+        --    按**合成后**底板的明暗决定把文字推亮还是推暗，凹槽（lost）一并进约束集。
+        local plate = composite(s.panel, CR_PLATE_ALPHA, env)
+        local neu = { r = t.neutral.r, g = t.neutral.g, b = t.neutral.b }
+        if crOf(neu, plate) < CR_TEXT or crOf(neu, s.lost) < CR_TEXT_LOST then
+            local plateL = lightnessOf(plate)
+            local bright = type(plateL) ~= "number" or plateL < 50
+            local txt = solveCR(neu, {
+                { against = plate,  min = CR_TEXT },
+                { against = s.lost, min = CR_TEXT_LOST },
+            }, bright, CR_L_LO, CR_L_HI)
+            if txt then
+                adj.textFrom = lightnessOf(neu)
+                t.neutral.r, t.neutral.g, t.neutral.b = txt.r, txt.g, txt.b
+                adj.textTo = lightnessOf(t.neutral)
+                adj.applied = true
+            end
+        end
+        -- **注意顺序**：computeSurface 已经用旧的 theme.neutral 算过 lost / weave 两档。
+        -- 这里只改文字色，不重算凹槽底色 —— 凹槽保持原样、文字提亮，正文/凹槽的对比反而更好。
+
+        -- ④ 边框：Atlas 17 区实测 4.86–8.11 全过线；只有 envL 极高的合成场景才掉到 3 以下。
+        --    真掉下去时只推 edge 的 L*（保色相/饱和），不动「边框 = 环境反色」这条色相准则。
+        local edge = { r = t.edge.r, g = t.edge.g, b = t.edge.b }
+        if crOf(edge, s.panel) < CR_EDGE then
+            local fixed = solveCR(edge, { { against = s.panel, min = CR_EDGE } },
+                                  (lightnessOf(s.panel) or 0) < 50, CR_L_LO, CR_L_HI)
+            if fixed then
+                adj.edgeFrom = lightnessOf(edge)
+                t.edge.r, t.edge.g, t.edge.b = fixed.r, fixed.g, fixed.b
+                if t.primary then
+                    t.primary.r, t.primary.g, t.primary.b = fixed.r, fixed.g, fixed.b
+                end
+                adj.edgeTo = lightnessOf(t.edge)
+                adj.applied = true
+            end
+        end
+    end
+
+    -- 账本：把纠偏后的数值重算一遍（lostFill 会因 fill 改动而变化），并补上环境相关的四组。
+    s.cr.panelLost  = contrastOf(s.panel, s.lost)
+    s.cr.lostWeave  = contrastOf(s.lost, s.weave)
+    s.cr.lostFill   = contrastOf(s.lost, s.fill)
+    s.cr.panelFill  = contrastOf(s.panel, s.fill)
+    s.cr.panelHover = contrastOf(s.panel, s.hover)
+    s.cr.fillEnv    = env and contrastOf(s.fill, env) or nil
+    s.cr.textPlate  = env and contrastOf(t.neutral, composite(s.panel, CR_PLATE_ALPHA, env)) or nil
+    s.cr.textLost   = contrastOf(t.neutral, s.lost)
+    s.cr.textFill   = contrastOf(t.neutral, s.fill)
+    s.cr.edgePanel  = contrastOf(t.edge, s.panel)
+    if s.levels then s.levels.fill = lightnessOf(s.fill) end
+
+    s.minContrast = minCR
+    s.environment = env and { r = env.r, g = env.g, b = env.b, h = env.h } or nil
+    s.toolsReady  = toolsReady and true or false
+    s.adjust      = adj
+
+    s.rows = {}
+    for i = 1, #CONTRACT_ROWS do
+        local def = CONTRACT_ROWS[i]
+        -- 血↔背景：没触发纠偏的地图按撞色线 1.5 判（河林 1.55 天然过线）；被修过的
+        -- 地图按玩家的控制值判 —— 账本里能一眼看出"这区是修过的、线更严"，
+        -- 玩家调下拉时这一行的分母也跟着变，控制值不是装饰。
+        local limit, note = def.min, def.note
+        if def.min == "dynamic" then
+            limit = adj.barFixed and minCR or CR_BARENV
+            note = adj.barFixed and (string.format("控制值 %.1f", minCR)) or "撞色线"
+        end
+        local cr = s.cr[def.key]
+        s.rows[i] = {
+            key = def.key, label = def.label, cr = cr, min = limit,
+            ok = limit ~= nil and type(cr) == "number" and cr >= limit or false,
+            note = note,
+        }
+    end
+    s.crMin = {}
+    for i = 1, #s.rows do
+        if s.rows[i].min then s.crMin[s.rows[i].key] = s.rows[i].min end
+    end
+    return s
+end
+
+--- FALLBACK 是模块级常量表：engine-off 时 theme 直接指它会让纠偏写 neutral 时污染常量，
+-- 下一次 Refresh 拿到的是上一次被改过的颜色。两条路径都走副本。
+local function copyTheme(src)
+    local out = {}
+    for k, v in pairs(src) do
+        if type(v) == "table" then
+            out[k] = { r = v.r, g = v.g, b = v.b, a = v.a }
+        else
+            out[k] = v
+        end
+    end
+    return out
 end
 
 function Color:HasMonetColor()
@@ -204,8 +498,8 @@ function Color:Refresh()
     end
 
     if not (LMC and useMonetColor) then
-        theme = FALLBACK
-        surface = computeSurface(theme)
+        theme = copyTheme(FALLBACK)
+        surface = enforceContrast(computeSurface(theme), theme, self:Environment(), self:MinContrast())
         return theme
     end
 
@@ -226,7 +520,7 @@ function Color:Refresh()
         primary   = { r = er or FALLBACK.primary.r, g = eg or FALLBACK.primary.g, b = eb or FALLBACK.primary.b, a = 1 },
     }
 
-    surface = computeSurface(theme)
+    surface = enforceContrast(computeSurface(theme), theme, self:Environment(), self:MinContrast())
     return theme
 end
 
@@ -261,7 +555,9 @@ function Color:GetSurface(key)
     return c.r, c.g, c.b
 end
 
---- 整本阶梯，含每档实测 L*（levels）与四组两两对比度（cr）；/mui colors 的账本读这个。
+--- 整本阶梯，含每档实测 L*（levels）、全部两两对比度（cr）、逐组判定行（rows，
+-- 每组自带 min）、生效的最小对比控制值（minContrast）与纠偏记录（adjust）。
+-- /mui colors 的账本直接读这些，不在 Core 里另写一份阈值。
 function Color:Surface()
     if not surface then
         self:Refresh()

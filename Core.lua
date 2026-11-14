@@ -58,8 +58,13 @@ local DEFAULTS = {
     },
     -- 位置服务（Utils/Mover.lua）：全 addon 的框共用一套拖拽 / 吸附 / 锁。locked 是全局锁，locks 按组覆盖；
     -- grid 是网格步长（物理像素，0 = 关），snap / snapRange 是框与框互相吸附的开关与范围（物理像素）。
+    -- 2026-11-15（§8.124）：**默认锁定**。原来 locked=false，player 框常驻可见，左键一点一拖就把
+    -- 单位框架挪走（战斗外 SetPoint 一定成功），玩家没打算摆位置却把布局弄乱。要摆位置时用
+    -- `/mui unlock` 或配置面板的「锁定所有可移动框」临时解锁，摆完 `/mui lock`。
+    -- 老存档兼容靠稀疏落盘（StripDefaults）：旧默认 false 的键在登出时已被剥掉，MergeDefaults
+    -- 会补上新默认 true；只有玩家显式改过锁的存档才保留他自己的选择。
     mover = {
-        locked    = false,
+        locked    = true,
         locks     = {},
         grid      = 8,
         snap      = true,
@@ -67,6 +72,11 @@ local DEFAULTS = {
     },
     theme = {
         useMonetColor  = true,
+        -- 最小对比控制值（§8.123）：血条「填充↔背景（世界 / 空槽）」的最小 CR，
+        -- 既是撞色区域纠偏的目标、也是那些区域在 /mui colors 账本里的判定线。
+        -- 达标的区域（含河林默认）保持引擎原色。文字(4.5) / 边框(3.0) 另有固定可读线，
+        -- 不跟这一条滑，避免把可读线调低成假达标。
+        minContrast    = 1.8,
         -- Which engine slot borders are drawn from (see Color:GetBorderKey); one dropdown re-tints every border in the addon.
         borderKey      = "edge",
         -- Who owns the UI scale: "auto" pins it to the resolution (Utils/Media.lua scalePresets, so
@@ -927,8 +937,18 @@ local function RefreshTheme(reason)
 end
 ns.RefreshTheme = RefreshTheme
 
---- Opt into the engine's own "colours changed" notification, so a profile switch or an engine-side refresh re-tints every border / bar straight away instead of waiting for the next zone change.
--- LibMonetColor ships with or without CallbackHandler-1.0 and the two expose the registration differently, so the shape is detected rather than assumed and both are pcall'd.  Either way the handler is handed the event name first, which is why it ignores its arguments.  No engine, or no notification, leaves the zone handlers below as the baseline.
+--- Opt into the engine's "a recompute happened" notification, so a profile switch or an
+--- engine-side refresh re-tints every border / bar straight away instead of waiting for
+--- the next zone change.
+---
+--- 2026-11-15（§8.125）：**订阅 OnThemeRefreshed，不是 OnThemeColorsChanged**。后者按 DeltaE
+--- 去抖，而 LMC 的 `shouldFireEvent` 比的是 `colorCache[mapID]` 的旧值与**同一张地图**的重算值
+--- —— 地图数据表不变时 DeltaE 恒为 0，只有首次进入某地图（oldEntry = nil）才会派发。
+--- 玩家回到去过的地图时整条重涂链不跑，表现成「换地图配色不变」；Core 又因为这个回调注册
+--- 成功而跳过了下面的 zone 兜底，于是连兜底都没有。OnThemeRefreshed 每趟重算都发，
+--- 且与 zone 兜底互斥（hasMonetColorCallback），不会双重重涂。
+---
+--- LibMonetColor ships with or without CallbackHandler-1.0 and the two expose the registration differently, so the shape is detected rather than assumed and both are pcall'd.  Either way the handler is handed the event name first, which is why it ignores its arguments.  No engine, or no notification, leaves the zone handlers below as the baseline.
 local function ReserveMonetColorCallback()
     if not LMC then return false end
 
@@ -936,7 +956,7 @@ local function ReserveMonetColorCallback()
 
     -- CallbackHandler style: the method is embedded on the library itself.
     if type(LMC.RegisterCallback) == "function" then
-        if pcall(LMC.RegisterCallback, LMC, "OnThemeColorsChanged", handler) then
+        if pcall(LMC.RegisterCallback, LMC, "OnThemeRefreshed", handler) then
             return true
         end
     end
@@ -1112,39 +1132,34 @@ end
 
 --- 亮度阶梯自查（`/mui colors`）。HANDOFF 8.14.3 的实测：面板（ambient×0.35）和掉血空槽
 --- （neutral×0.32）在 14 个区域里对比度只有 1.00–1.19 —— 不是色相选错，是两档亮度重合。
---- 现在这两档都由 Utils/Color.lua 的阶梯按 CIE L* 定死，所以验收只看一个数：CR。
---- 为什么要账本：一行只装得下四档 hex，CR 的四组 + 每组的判定是十几行，聊天框一定被顶掉；
+--- 现在这两档都由 Utils/Color.lua 的阶梯按 CIE L* 定死，验收只看 CR。
+--- §8.123 起判定行与各自的线**全部来自配色库**（Color:Surface().rows）：Core 不再另写一份
+--- 阈值，否则两边必然漂移；这里只组数据、打印、落盘，还多记一份「这一区纠偏了什么」。
+--- 为什么要账本：一行只装得下四档 hex，逐组 CR + 判定是十几行，聊天框一定被顶掉；
 --- 读法同 compatReport —— <游戏目录>/WTF/Account/<账号>/SavedVariables/MonetUI.lua 里的
 --- colorReport，而且落盘比 /reload 晚 1–2 分钟。
-local COLOR_CR_MIN = 1.4
-local COLOR_CR_PAIRS = {
-    { key = "panelLost", label = "面板↔空槽" },
-    { key = "lostWeave", label = "空槽↔织纹" },
-    { key = "lostFill",  label = "空槽↔填充" },
-    { key = "panelFill", label = "面板↔填充" },
-}
 
 --- 组一份亮度阶梯账本（`/mui colors` 的数据相）：四档色卡、逐组 CR 判定、区域与来源。
---- 只读 Color，不碰 DB、不 print —— 实机第一次跑就是"4/4 过线 + 账本没落成"，
+--- 只读 Color，不碰 DB、不 print —— 实机第一次跑就是"全过线 + 账本没落成"，
 --- 只报"读不到"查不下去，所以组数据和落盘分开，落盘的失败原因要能单独归因。
 local function BuildColorReport(su)
     local source, profile = ns.Color:GetSource()
     local mapID, zoneName, envSource = ns.Color:GetZoneInfo()
 
-    -- CR 逐个判定；工具函数缺失时四个数都是 nil，那就直说"退回固定乘数"，不要印 0。
+    -- 副本而非 su 本身：账本要进 SavedVariables，不许和运行期阶梯表共用引用。
     local checked, passed, rows = 0, 0, {}
-    for i = 1, #COLOR_CR_PAIRS do
-        local pair = COLOR_CR_PAIRS[i]
-        local cr = su.cr and su.cr[pair.key]
-        local ok = type(cr) == "number" and cr >= COLOR_CR_MIN
-        if type(cr) == "number" then
+    for i = 1, #(su.rows or {}) do
+        local src = su.rows[i]
+        local entry = { key = src.key, label = src.label, cr = src.cr,
+                        min = src.min, ok = src.ok, note = src.note }
+        rows[#rows + 1] = entry
+        -- 豁免行（min = nil）只显示数值、不计入过线数；CR 为 nil 的是"工具函数没拿到"。
+        if entry.min and type(entry.cr) == "number" then
             checked = checked + 1
-            if ok then passed = passed + 1 end
+            if entry.cr >= entry.min then passed = passed + 1 end
         end
-        rows[#rows + 1] = { label = pair.label, cr = cr, ok = ok and true or false }
     end
 
-    -- 副本而非 su 本身：账本要进 SavedVariables，不许和运行期阶梯表共用引用。
     local colors = {}
     for i = 1, #su.keys do
         local c = su[su.keys[i]]
@@ -1164,8 +1179,12 @@ local function BuildColorReport(su)
         levels = su.levels,
         colors = colors,
         cr = su.cr,
+        crMin = su.crMin,
+        environment = su.environment,
+        adjust = su.adjust,
+        toolsReady = su.toolsReady,
         rows = rows,
-        min = COLOR_CR_MIN,
+        min = su.minContrast,
         passed = passed,
         checked = checked,
     }
@@ -1215,8 +1234,14 @@ local function PrintColorLadder()
     for i = 1, #report.rows do
         local row = report.rows[i]
         if type(row.cr) == "number" then
-            ns:Print(string.format("  %s %s%.2f（阈值 %.1f）|r", row.label,
-                row.ok and "|cff88ff88" or "|cffff6b6b", row.cr, COLOR_CR_MIN))
+            if row.min then
+                ns:Print(string.format("  %s %s%.2f（线 %.1f）|r%s", row.label,
+                    row.ok and "|cff88ff88" or "|cffff6b6b", row.cr, row.min,
+                    row.note and (" · " .. row.note) or ""))
+            else
+                -- 悬停态那一行是刻意贴近期，只报数值不判红绿。
+                ns:Print(string.format("  %s %.2f · %s", row.label, row.cr, row.note or "豁免"))
+            end
         end
     end
 
@@ -1228,8 +1253,22 @@ local function PrintColorLadder()
         return
     end
 
-    ns:Print(string.format("|cffffd100配色阶梯|r：%d/%d 组过线（阈值 %.1f）%s",
-        report.passed, report.checked, COLOR_CR_MIN,
+    -- 这一区到底动没动配色：达标地图必须明确显示「未触发」，否则玩家没法判断
+    -- 颜色变化是环境色换了、还是对比度契约在纠偏。
+    local adj = su.adjust
+    if adj and adj.applied then
+        local bits = {}
+        if adj.fillHue then bits[#bits + 1] = "血条转环境补色" end
+        if adj.fillTo then bits[#bits + 1] = string.format("填充 L*%.0f→%.0f", adj.fillFrom or 0, adj.fillTo) end
+        if adj.textTo then bits[#bits + 1] = string.format("文字 L*%.0f→%.0f", adj.textFrom or 0, adj.textTo) end
+        if adj.edgeTo then bits[#bits + 1] = string.format("边框 L*%.0f→%.0f", adj.edgeFrom or 0, adj.edgeTo) end
+        ns:Print("  自动纠偏：" .. table.concat(bits, " / "))
+    else
+        ns:Print("  自动纠偏：未触发（这一区各配对本来就过线，配色保持引擎原色）")
+    end
+
+    ns:Print(string.format("|cffffd100配色阶梯|r：%d/%d 组过线（最小对比控制值 %.1f）%s",
+        report.passed, report.checked, report.min or 0,
         saved and "；全量已存 MonetUIDB.colorReport（WTF 里可直接读）"
             or ("；|cffff6b6b账本没落成 —— " .. tostring(why) .. "|r")))
 end
@@ -1240,6 +1279,7 @@ local function PrintHelp()
     ns:Print("命令：")
     ns:Print("  |cffffd100/mui|r            打开配置面板")
     ns:Print("  |cffffd100/mui status|r     显示模块与主题状态")
+    ns:Print("  |cffffd100/mui unlock / lock|r  临时解锁 / 锁定框架位置（默认锁着，防止左键误拖；摆完记得锁回去）")
     ns:Print("  |cffffd100/mui init status|r  启动前置设置：基线 / 聊天框与动作条底边 / 布局状态")
     ns:Print("  |cffffd100/mui init run|r     强制重跑一次聊天框对齐（会另存编辑模式布局）")
     ns:Print("  |cffffd100/mui theme|r      重算当前区域配色并重涂（mapID 查表，不采像素）")
@@ -1259,7 +1299,7 @@ local function PrintHelp()
     ns:Print("  |cffffd100/mui scale|r      像素网格 / 缩放自检（改完 UI 缩放后再跑一次对比）")
     ns:Print("  |cffffd100/mui blocks|r     机密布尔被拦的调用栈账本（`UNKNOWN()` 归因，加 full 看完整栈）")
     ns:Print("  |cffffd100/mui restrict|r   六类受限窗口自查（战斗只是其中一类）+ 可读性前置是否可用")
-    ns:Print("  |cffffd100/mui colors|r     配色四级亮度阶梯（面板/空槽/织纹/填充）+ 逐组对比度，账本 MonetUIDB.colorReport")
+    ns:Print("  |cffffd100/mui colors|r     配色亮度阶梯 + 逐组对比度判定（含最小对比控制值与纠偏记录），账本 MonetUIDB.colorReport")
     ns:Print("  |cffffd100/mui lost|r       血条「损失部分」配色自查：样式有没有落地、织纹有没有把颜色盖住")
     ns:Print("  |cffffd100/mui compat|r     客户端能力自查：换客户端第一趟跑它（bad 只看与假设不符的，tmpl 连模板一起探，find <片段> 扫暴雪帧真名）")
     ns:Print("  |cffffd100/mui skins diagnose|r 对象名可达性账本（全仓一本账：skins / nameplates / infobar / minimap）")
@@ -1462,6 +1502,25 @@ local function HandleSlash(message)
 
     elseif command == "status" then
         PrintStatus()
+
+    elseif command == "unlock" or command == "lock" then
+        -- 位置锁（§8.124）：默认锁着，防止左键点着常驻的 player 框把它拖走。两条命令与
+        -- 配置面板那枚复选框写的是同一个键（mover.locked）。单组覆盖 mover.locks.* 优先级
+        -- 更高，所以状态读 IsLocked("unitframes") 的**实际结果**，别报一个看着锁了其实能拖的值。
+        local wantLocked = command == "lock"
+        if type(ns.Mover) ~= "table" or type(ns.Mover.SetLocked) ~= "function" then
+            ns:Print("位置服务没加载，改不了锁。")
+        else
+            ns.Mover:SetLocked(nil, wantLocked)
+            local locked = ns.Mover:IsLocked("unitframes")
+            if locked then
+                ns:Print(wantLocked and "框架位置已锁定：左键拖动不再挪动单位框架 / 小队团队框。"
+                    or "全局锁已关，但单位框架这一组仍被单独锁着。")
+            else
+                ns:Print("框架位置已解锁：左键拖动框架即可摆位，松手吸附并记住；"
+                    .. "摆完输入 |cffffd100/mui lock|r 锁回去。战斗中受保护框仍不能拖。")
+            end
+        end
 
     elseif command == "init" then
         if not (ns.Init and ns.Init.Status) then
@@ -1667,6 +1726,29 @@ ns.EventBus:Register("PLAYER_LOGIN", function()
         loginThemeReported = true
         ns:Print("主题刷新失败（已继续启动模块）：" .. tostring(themeErr))
     end
+
+    -- §8.126：状态染色层（LibMonetColor-Anim-1.0）原本直接读引擎缓存里的 slot 色，
+    -- 绕过了 Utils/Color.lua 的亮度阶梯与 §8.123 对比度纠偏 —— 结果换地图时
+    -- Widget:Theme 画的边框会跟着变，单位框那几条动态边框却不动。库 1.3.0 起
+    -- 支持注入成品色板，这里把 Color:GetTheme() 交给它：provider 每次重绘都会
+    -- 被重新调用，所以主题刷新后不需要重新注册。读不到色 / 库是旧副本（没有
+    -- 这个 API）时静默跳过，行为与升级前完全一致。
+    do
+        local Anim = ns:GetAnim()
+        if Anim and type(Anim.SetBaseColorProvider) == "function" then
+            pcall(Anim.SetBaseColorProvider, Anim, function(key)
+                if not ns.Color then return nil end
+                local theme = ns.Color:GetTheme()
+                local c = theme and theme[key]
+                if not c or type(c.r) ~= "number" then return nil end
+                -- 库原本对 highlight / neutral 补 alpha 1（引擎只给 RGB），
+                -- edge / ambient 用各自色自带的 alpha；沿用同一口径，只换 RGB。
+                local a = (key == "highlight" or key == "neutral") and 1 or (c.a or 1)
+                return c.r, c.g, c.b, a
+            end)
+        end
+    end
+
     -- 启动前置层（Init.lua）在放行模块之前把需要的设置统一调整好：静态基线已在
     -- 文件加载期固定，这里等编辑模式布局数据就绪、一次性对齐聊天框，然后才
     -- StartModules —— 各模块拿到的第一份几何就是最终值，不需要运行期反复重贴。

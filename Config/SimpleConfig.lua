@@ -619,6 +619,32 @@ function SimpleConfig:Build()
             ns.RefreshTheme("config")
         end)
 
+    -- 最小对比控制值（§8.123）：数值 = 血条「填充↔背景」的最小 CR。
+    -- 只在撞色的区域触发补色回避 + 亮度兜底；文字(4.5) / 边框(3.0) 另有固定可读线，
+    -- 不跟着这一条滑 —— 否则把文字线调到 2.0 就成了"假达标"。
+    -- 上限 3.0：再高会超出高饱和色相可达的亮度（AtLightness out-of-gamut）。
+    local CONTRAST_ITEMS = {
+        { value = 1.4, text = "1.4 · 最宽松" },
+        { value = 1.8, text = "1.8 · 标准（默认）" },
+        { value = 2.1, text = "2.1 · 偏强" },
+        { value = 2.4, text = "2.4 · 分明" },
+        { value = 2.7, text = "2.7 · 很强" },
+        { value = 3.0, text = "3.0 · 最强" },
+    }
+    MakeDropdown(content, row(28), "最小对比度", CONTRAST_ITEMS,
+        function() return Color:MinContrast() end,
+        function(value)
+            ns:DB().theme.minContrast = value
+            ns.RefreshTheme("config")
+        end)
+
+    local contrastHint = Widget:Font(content, 10, "pixel", "neutral", "LEFT")
+    contrastHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(22))
+    contrastHint:SetWidth(328)
+    contrastHint:SetJustifyH("LEFT")
+    contrastHint:SetWordWrap(false)
+    contrastHint:SetText("低于线才纠偏血条 / 文字；已过线的区域保持引擎原色。")
+
     -- UI scale: the addon's sizes are authored in UI units, so the scale decides whether
     -- they land on whole physical pixels.  "auto" pins it per resolution (see
     -- Utils/Media.lua scalePresets); "game" leaves it to the client's own setting.
@@ -1090,12 +1116,24 @@ function SimpleConfig:Build()
             RefreshGroups()
         end)
 
-    MakeCheckbox(content, "锁定所有可移动框（网格吸附与拖动）", row(30),
+    -- §8.124：默认锁定。以前这一项默认不勾，player 框常驻可见，左键一点一拖就把布局挪乱。
+    -- 写锁统一走 Mover:SetLocked（和 `/mui lock` / `/mui unlock` 同一个键），别在两处各写各的。
+    MakeCheckbox(content, "锁定框架位置（默认开，取消后可拖动）", row(30),
         function() return ns:DB().mover.locked end,
         function(value)
-            ns:DB().mover.locked = value
+            if type(ns.Mover) == "table" and type(ns.Mover.SetLocked) == "function" then
+                ns.Mover:SetLocked(nil, value)
+            else
+                ns:DB().mover.locked = value
+            end
             -- 锁是即时判断的（拖动时才读），不需要重贴：下一帧拖动就按新状态走
         end)
+
+    local lockHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
+    lockHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(38))
+    lockHint:SetWidth(328)
+    lockHint:SetJustifyH("LEFT")
+    lockHint:SetText("默认锁着，避免左键点着玩家框架误拖。要摆位置：取消勾选，或 /mui unlock；摆完 /mui lock。")
 
     sec.bodyHeight = -row.y + 4
 
