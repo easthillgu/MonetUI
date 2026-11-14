@@ -969,6 +969,35 @@ function Skin:Strip(frame, opts)
     return frame
 end
 
+--- 文字层级：设计语言 §4 的四档字号 + §3 的颜色角色，收成**一个入口**。
+---
+--- 作者口径 11-14：「不够精细」的一半来自**层级被压平** —— 标题 / 分区头 / 正文 / 小字
+--- 全是 12px，眼睛没有落点。§4 早就定了四档（10 小字 / 12 正文与标题 / 15 分区大字 /
+--- 24 面板大标题），但代码里 99% 都写 12 ⇒ 这层等于没人用。
+---
+--- 颜色按 §3 的纪律分配（不是审美偏好）：
+---   * 标题用 `edge`（结构线 / 标题字那一档；**`neutral` 明确禁止当标题**）；
+---   * 正文用 `neutral`（正文灰）；
+---   * 大字（主菜单那种深底大按钮）用 `bright`（neutral 在白字上会读成"禁用"）；
+---   * `ambient` 是环境底色，**不许当文字**（§3 明写）。
+Skin.TEXT = {
+    -- 窗口标题：结构线的签名色 + 15px（§4 的"分区大字"档）
+    title   = { size = 15, color = "edge" },
+    -- 分区头（列表上方的"队伍 / 俱乐部"这类）：同色但小一档，避免和标题抢
+    section = { size = 12, color = "edge" },
+    -- 正文 / 行 / 按钮字
+    body    = { size = 12, color = "neutral" },
+    -- 小字：等级 / 计时 / 计数 / 次要说明
+    caption = { size = 10, color = "neutral" },
+}
+
+--- 按层级设字体。`size` 可覆盖（个别窄窗的标题要塞回 12）。
+function Skin:TextTier(fs, tier, size)
+    if not fs then return fs end
+    local t = self.TEXT[tier or "body"] or self.TEXT.body
+    return self:Font(fs, size or t.size, "pixel", nil, t.color)
+end
+
 --- Restyle a FontString with one of the addon fonts and (optionally) a theme colour.  Records the old font so a rollback restores it.
 function Skin:Font(fs, size, key, flags, colorKey)
     if not fs or type(fs.SetFont) ~= "function" then return fs end

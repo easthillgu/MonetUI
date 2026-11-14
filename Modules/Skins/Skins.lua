@@ -258,7 +258,10 @@ function M:SkinWindow(frame, opts)
             or frame.TitleText or frame.Title
             or (border and (border.TitleText or border.Title))
         if title then
-            Skin:Font(title, opts.titleSize or 12, "pixel", nil, "edge")
+            -- 标题走层级入口（§4 的 15px + §3 的 `edge`）：以前这里是 12px，和正文同一档，
+            -- 窗口里就没有"眼睛的落点"（作者 11-14：「不够精细」）。
+            -- 窄窗可用 `titleSize` 塞回 12。
+            Skin:TextTier(title, "title", opts.titleSize)
             -- 标题下一条发丝线：**默认关**，逐窗口 opt-in（rule = true）。
             -- 为什么默认关：皮肤是在窗口隐藏时跑的，线的位置要等它第一次显示才算得出来
             -- （Widget:HeaderRule 内部用 ShowWatch 补），没在实机上确认过位置的窗口先别开，
