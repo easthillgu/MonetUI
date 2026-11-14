@@ -42,6 +42,29 @@ local HOVER_VIS_TTL = 0.3
 --- 驱动循环遇到暂停中的框时用它替下监听表：状态照常推进，但一个回调都不跑。
 local idleList = {}
 
+--- 订阅表的**快照**：回调里可能自己 `Widget:Unwatch`（例如"凹槽显示时补铺"那种一次性的），
+--- 那会 `table.remove` 掉**正在遍历**的那张表 —— 后面 `list[i]` 就成了 nil
+--- （11-14 实机：`Widget.lua:449 attempt to index local 'cb' (a nil value)`）。
+--- 做法：遍历前拍一份快照，被摘掉的条目在 `Unwatch` 里打 `dead` 标记，遍历时跳过。
+local function Snapshot(list)
+    local out = {}
+    for i = 1, #list do out[i] = list[i] end
+    return out
+end
+local function Live(e)
+    if e == nil then return false end
+    if type(e) ~= "table" then return true end   -- ShowWatch 的列表存的是**函数**，没有 dead 标记
+    return not e.dead
+end
+
+--- 驱动循环用的键快照：回调里 `Widget:Unwatch` 可能把**当前这个键**从表里删掉，
+--- 而 `pairs` 在删除后继续 `next()` 会抛 "invalid key to 'next'"（Lua 5.1）。
+local function Keys(map)
+    local out = {}
+    for k in pairs(map) do out[#out + 1] = k end
+    return out
+end
+
 --- 读一个框的可见性。本客户端里有**forbidden 对象**（被接管的安全框、战斗里的受保护框等）：
 --- 对它们调 `IsVisible` 会抛 "Attempt to access forbidden object from code tainted by an AddOn"，
 --- 而三个轮询驱动（hover 0.1s / show 0.2s / poll 0.2s）每拍都要读一次 —— 实机一个框就刷了 2087 条。
@@ -259,7 +282,9 @@ local function EnsureHoverDriver()
     hoverId = Scheduler:Every(100, function()
         local down = _G.IsMouseButtonDown and _G.IsMouseButtonDown("LeftButton")
         local now = GetTime()
-        for frame, st in pairs(hoverWatch) do
+        for _, frame in ipairs(Keys(hoverWatch)) do
+            local st = hoverWatch[frame]
+            if st then
             -- 可见性缓存 0.3 秒（实机这一路每次 1.07ms，几乎全是 VisibilityOf 的两次 pcall）。
             -- 缓存不改变判定：框藏起来时 `IsMouseOver` 本来就返回 false，`inside` 照样会翻成
             -- false、leave 照样立刻跑；唯一的代价是"框在光标底下凭空出现"这种情形最多晚
@@ -274,50 +299,53 @@ local function EnsureHoverDriver()
             -- 暂停中的框：shown=false → inside=false，状态照常推进但 list 是空的，
             -- 一个回调都不跑（那些回调全是往这个框写东西，跑了也只是多一条拦截）。
             -- 复检到可读时按真实悬停重来一次 enter。
-            local list = readable and st.list or idleList
+            -- **快照**：回调里可能自己 Unwatch（同一族坑，见 `Snapshot` 的注释）。
+            local list = Snapshot(readable and st.list or idleList)
             local inside = shown and MouseOver(frame)
             if inside ~= st.inside then
                 st.inside = inside
                 if inside then
                     for i = 1, #list do
                         local e = list[i]
-                        if e.enter then pcall(e.enter, frame) end
+                        if Live(e) and e.enter then pcall(e.enter, frame) end
                     end
                 else
                     if st.pressed then
                         st.pressed = false
                         for i = 1, #list do
                             local e = list[i]
-                            if e.up then pcall(e.up, frame) end
+                            if Live(e) and e.up then pcall(e.up, frame) end
                         end
                     end
                     for i = 1, #list do
                         local e = list[i]
-                        if e.leave then pcall(e.leave, frame) end
+                        if Live(e) and e.leave then pcall(e.leave, frame) end
                     end
                 end
             end
             if inside then
                 local wantsDown = false
                 for i = 1, #list do
-                    if list[i].down then wantsDown = true break end
+                    local e = list[i]
+                    if Live(e) and e.down then wantsDown = true break end
                 end
                 if wantsDown then
                     if down and not st.pressed then
                         st.pressed = true
                         for i = 1, #list do
                             local e = list[i]
-                            if e.down then pcall(e.down, frame) end
+                            if Live(e) and e.down then pcall(e.down, frame) end
                         end
                     elseif not down and st.pressed then
                         st.pressed = false
                         for i = 1, #list do
                             local e = list[i]
-                            if e.up then pcall(e.up, frame) end
+                            if Live(e) and e.up then pcall(e.up, frame) end
                         end
                     end
                 end
             end
+            end -- if st
         end
     end, "控件:悬停轮询")
 end
@@ -355,14 +383,21 @@ local showWatch, showId = setmetatable({}, { __mode = "k" }), nil
 local function EnsureShowDriver()
     if showId then return end
     showId = Scheduler:Every(200, function()
-        for frame, st in pairs(showWatch) do
+        for _, frame in ipairs(Keys(showWatch)) do
+            local st = showWatch[frame]
+            if st then
             local shown, readable = VisibilityOf(frame, "show")
             if readable then
                 if shown and not st.shown then
-                    for i = 1, #st.list do pcall(st.list[i], frame) end
+                    -- 快照：回调里可能自己 Unwatch（见 `Snapshot` 的注释）
+                    local snap = Snapshot(st.list)
+                    for i = 1, #snap do
+                        if Live(snap[i]) then pcall(snap[i], frame) end
+                    end
                 end
                 st.shown = shown
             end
+            end -- if st
         end
     end, "控件:显示轮询")
 end
@@ -431,7 +466,10 @@ function Widget:PollWatch(frame, fn, interval)
     if pollId then return entry end
     pollId = Scheduler:Every(POLL_TICK * 1000, function()
         local now = GetTime()
-        for f, cbs in pairs(pollWatch) do
+        for _, f in ipairs(Keys(pollWatch)) do
+            local cbs = pollWatch[f]
+            -- 回调里可能把这一整个框的订阅都摘掉（`Unwatch(f)` 不带 fn）⇒ 下一拍再说。
+            if cbs then
             -- 先问"这一拍有没有到期的回调"：没到期就连可见性都不读。
             -- 2026-11-07 实机（`/mui perf` 已带标签）：这一路每次 0.97ms、每 0.1 秒一次，
             -- 而回调最快也只 0.2 秒跑一次、多数登记写的是 2 秒 —— 以前的写法是每拍对
@@ -444,9 +482,13 @@ function Widget:PollWatch(frame, fn, interval)
             if due then
                 local shown, readable
                 if type(f) == "table" and f.IsVisible then shown, readable = VisibilityOf(f, "poll") end
-                for i = 1, #cbs do
-                    local cb = cbs[i]
-                    if now >= cb.due then
+                -- **快照**：回调里可能自己 `Widget:Unwatch`（"凹槽显示时补铺"就是这种一次性回调），
+                -- 那会 `table.remove` 掉正在遍历的 `cbs` —— 后面 `cbs[i]` 直接是 nil
+                -- （11-14 实机：`Widget.lua:449 attempt to index local 'cb' (a nil value)`）。
+                local snap = Snapshot(cbs)
+                for i = 1, #snap do
+                    local cb = snap[i]
+                    if Live(cb) and now >= cb.due then
                         if shown and readable then
                             cb.due = now + cb.interval
                             pcall(cb.fn, f)
@@ -459,6 +501,7 @@ function Widget:PollWatch(frame, fn, interval)
                     end
                 end
             end
+            end -- if cbs
         end
     end, "控件:自定轮询")
     return entry
@@ -468,16 +511,21 @@ end
 ---   * 省略 fn 时注销该框的全部回调；
 ---   * 给了 fn：HoverWatch 的监听按"任一回调等于 fn"匹配整条摘掉，ShowWatch / PollWatch 按值匹配。
 --- 框体没有回调了就整条移除（驱动帧自己留着，开销只是一次空循环）。
+--- 遍历安全见文件头部 `Snapshot` / `Live` 的注释。
 function Widget:Unwatch(frame, fn)
     if not frame then return end
 
     local list = pollWatch[frame]
     if list then
         if not fn then
+            for i = 1, #list do list[i].dead = true end
             pollWatch[frame] = nil
         else
             for i = #list, 1, -1 do
-                if list[i].fn == fn then table.remove(list, i) end
+                if list[i].fn == fn then
+                    list[i].dead = true
+                    table.remove(list, i)
+                end
             end
             if #list == 0 then pollWatch[frame] = nil end
         end
@@ -489,6 +537,8 @@ function Widget:Unwatch(frame, fn)
             showWatch[frame] = nil
         else
             for i = #show.list, 1, -1 do
+                -- 这一条存的是**函数**（不是带 dead 标记的条目表）：摘掉即可；
+                -- 驱动那边的快照可能还会把它跑一次 —— 那批回调都是幂等的重涂。
                 if show.list[i] == fn then table.remove(show.list, i) end
             end
             if #show.list == 0 then showWatch[frame] = nil end
@@ -498,11 +548,13 @@ function Widget:Unwatch(frame, fn)
     local hover = hoverWatch[frame]
     if hover then
         if not fn then
+            for i = 1, #hover.list do hover.list[i].dead = true end
             hoverWatch[frame] = nil
         else
             for i = #hover.list, 1, -1 do
                 local e = hover.list[i]
                 if e.enter == fn or e.leave == fn or e.down == fn or e.up == fn then
+                    e.dead = true
                     table.remove(hover.list, i)
                 end
             end
