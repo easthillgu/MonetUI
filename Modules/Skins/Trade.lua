@@ -386,6 +386,8 @@ local function DressProfessionsWells()
         if not Skin:AtlasMatch(atlases, PROF_WELL_ATLAS) then return end
         pcall(Skin.Panel, Skin, frame, {
             bgSurface = "lost", bgAlpha = 0.96, borderAlpha = 1, thickness = 1,
+            -- 留白：板往里退 2，相邻卡片之间就出现缝（见 DESIGN「留白」）。
+            inset = 4,
         })
         return "stop"
     end)

@@ -1315,6 +1315,9 @@ function Skin:Well(frame, region, opts)
         borderKey   = opts.borderKey,
         borderAlpha = opts.borderAlpha,
         thickness   = opts.thickness or 1,
+        -- **留白**（作者口径 11-14）：凹槽的板往里退 2 —— 内容区与窗框之间留一条缝，
+        -- 面板才有"呼吸"。只退我们自己的板，暴雪的布局一动不动。
+        inset       = opts.inset or 4,
     })
 end
 
@@ -1327,7 +1330,15 @@ function Skin:ControlBg(frame, opts)
     if not bg then
         bg = NewBackdropFrame(frame, -1)
         if not bg then return nil end
-        pcall(bg.SetAllPoints, bg, frame)
+        -- **留白**：`opts.inset > 0` 时板往里退这么多（相邻的行 / 手牌之间就出现缝）；
+        -- 默认 0 = 贴满（小控件贴满才像"按钮"，退缝会显碎）。
+        local pad = opts.inset
+        if pad and pad > 0 then
+            pcall(bg.SetPoint, bg, "TOPLEFT", frame, "TOPLEFT", pad, -pad)
+            pcall(bg.SetPoint, bg, "BOTTOMRIGHT", frame, "BOTTOMRIGHT", -pad, pad)
+        else
+            pcall(bg.SetAllPoints, bg, frame)
+        end
         Widget:Theme(bg, {
             thickness   = opts.thickness or 1,
             bgAlpha     = opts.bgAlpha or 0.9,
@@ -1529,6 +1540,8 @@ function Skin:Button(button, opts)
         bgAlpha     = opts.bgAlpha or 0.9,
         borderAlpha = opts.borderAlpha,
         borderKey   = opts.borderKey,
+        -- 透传"留白"：`Skin:Button(..., { inset = 1 })` 让列表行之间出现缝（默认 0 = 贴满）。
+        inset       = opts.inset,
     })
 
     local text = self:GetText(button)

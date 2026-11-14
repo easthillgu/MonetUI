@@ -202,7 +202,11 @@ local function OwnPlate(host, key, opts)
     if plate then return plate end
     local ok, f = pcall(CreateFrame, "Frame", nil, host, "BackdropTemplate")
     if not ok or not f then return nil end
-    pcall(f.SetAllPoints, f, host)
+    -- **留白**：板往里退 2，相邻条目之间就出现一条缝（板贴满时整列会连成一整块灰）。
+    -- 只退我们自己的板，暴雪的锚点一个都不动。
+    local pad = (opts and opts.inset) or 4
+    pcall(f.SetPoint, f, "TOPLEFT", host, "TOPLEFT", pad, -pad)
+    pcall(f.SetPoint, f, "BOTTOMRIGHT", host, "BOTTOMRIGHT", -pad, pad)
     pcall(f.EnableMouse, f, false)
     Widget:Theme(f, opts)
     Mark(host, key, f)

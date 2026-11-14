@@ -65,7 +65,7 @@ local function StyleQuestPane()
                 if nt then okA, a = pcall(nt.GetAtlas, nt) end
                 if okA and type(a) == "string"
                     and a:lower():find("common%-button%-list%-collapseexpand", 1, true) then
-                    pcall(Skin.Button, Skin, frame, { bgAlpha = 0.5 })
+                    pcall(Skin.Button, Skin, frame, { bgAlpha = 0.5, inset = 2 })
                 end
             end
         end)
