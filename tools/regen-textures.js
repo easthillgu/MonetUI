@@ -634,6 +634,73 @@ function drawRoleDps(ctx, cx, cy, size) {
   });
 }
 
+// 向导 / 队长（2026-11-14 补）：复古组队窗里有两处用到 ——
+//   `UI-LFG-RoleIcon-Leader`（「新手友好」钮）与 `groupfinder-icon-leader`（浏览行 ×5）。
+// 现有三颗是盾 / 十字 / 双匕首，都偏「下宽上尖」或对称十字；王冠选**宽底 + 三峰**，
+// 8px 下靠那条实心底带保住辨识度，不会和盾（平顶尖底）混成一团。
+function drawRoleLeader(ctx, cx, cy, size) {
+  const s = size / 2;
+  roleIcon(ctx, cx, cy, size, (c, x, y) => {
+    c.moveTo(x - s * 0.82, y + s * 0.62);   // 底带左下
+    c.lineTo(x + s * 0.82, y + s * 0.62);   // 底带右下
+    c.lineTo(x + s * 0.82, y - s * 0.06);   // 底带右上
+    c.lineTo(x + s * 0.58, y - s * 0.46);   // 右侧峰
+    c.lineTo(x + s * 0.29, y + s * 0.02);   // 右谷
+    c.lineTo(x,             y - s * 0.88);  // 中峰（最高）
+    c.lineTo(x - s * 0.29, y + s * 0.02);   // 左谷
+    c.lineTo(x - s * 0.58, y - s * 0.46);   // 左侧峰
+    c.lineTo(x - s * 0.82, y - s * 0.06);   // 底带左上
+    c.closePath();
+  });
+}
+
+// 复古组队窗两颗小功能钮（11-14）：刷新（循环箭头）与选项（三条滑杆）。
+// 早先 `M:Dress(LFG_BUTTONS, {as="button"})` 的 Strip 把它们的原图标一起压成 α0，
+// 画面上只剩两个空方框（AGENTS：功能图标不能顺手剥掉）。补自绘的纯白描边模具，
+// 运行期由 SetVertexColor 染主题色 —— 不引任何外部贴图。
+function drawRefresh(ctx, cx, cy, size) {
+  const s = size / 2, r = s * 0.60, lw = gStroke(16);
+  ctx.strokeStyle = PALETTE.stencil;
+  ctx.lineWidth = lw;
+  ctx.lineCap = 'round';
+  const a0 = -Math.PI * 0.15, a1 = Math.PI * 1.55;   // 右上留缺口
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, a0, a1);
+  ctx.stroke();
+  // 弧线末端的箭头：沿切线方向摆一个三角。
+  const ax = cx + r * Math.cos(a1), ay = cy + r * Math.sin(a1);
+  ctx.save();
+  ctx.translate(ax, ay);
+  ctx.rotate(a1 + Math.PI / 2);
+  ctx.fillStyle = PALETTE.stencil;
+  ctx.beginPath();
+  ctx.moveTo(lw * 0.95, 0);
+  ctx.lineTo(-lw * 0.70, -lw * 0.85);
+  ctx.lineTo(-lw * 0.70, lw * 0.85);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawOptions(ctx, cx, cy, size) {
+  const s = size / 2, lw = gStroke(16);
+  ctx.strokeStyle = PALETTE.stencil;
+  ctx.lineWidth = lw;
+  ctx.lineCap = 'round';
+  ctx.fillStyle = PALETTE.stencil;
+  const ys = [-0.46, 0, 0.46], knobs = [0.28, -0.30, 0.10];
+  for (let i = 0; i < 3; i++) {
+    const y = cy + ys[i] * s;
+    ctx.beginPath();
+    ctx.moveTo(cx - s * 0.72, y);
+    ctx.lineTo(cx + s * 0.72, y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx + knobs[i] * s, y, lw * 0.62, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
 function drawBarFill(ctx, w, h) {
   // 状态条/滑块的"基材"，刻意画成**平的**：明暗不烘进纹理，由运行期 SetGradient 按条轴算。
   // 这是参考插件 EllesmereUI 的思路（EllesmereUIUnitFrames.lua:1337 ApplyBarGradient）：
@@ -951,8 +1018,11 @@ const generators = {
   'monet_corner':        (ctx, w, h) => drawCorner(ctx, w),
   'monet_hairline':      (ctx, w, h) => drawHairline(ctx, w, h),
   'monet_radio':         (ctx, w, h) => drawRadio(ctx, w/2, h/2, Math.min(w,h), 20),
+  'monet_refresh':       (ctx, w, h) => drawRefresh(ctx, w/2, h/2, Math.min(w,h)),
+  'monet_options':       (ctx, w, h) => drawOptions(ctx, w/2, h/2, Math.min(w,h)),
   'monet_role_dps':      (ctx, w, h) => drawRoleDps(ctx, w/2, h/2, Math.min(w,h)),
   'monet_role_heal':     (ctx, w, h) => drawRoleHeal(ctx, w/2, h/2, Math.min(w,h)),
+  'monet_role_leader':   (ctx, w, h) => drawRoleLeader(ctx, w/2, h/2, Math.min(w,h)),
   'monet_role_tank':     (ctx, w, h) => drawRoleTank(ctx, w/2, h/2, Math.min(w,h)),
   'monet_scrollbar_track': (ctx, w, h) => glyphScrollTrack(ctx, w, h),
   'monet_scrollbar_thumb': (ctx, w, h) => glyphScrollThumb(ctx, w, h),

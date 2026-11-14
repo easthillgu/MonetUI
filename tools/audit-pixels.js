@@ -135,12 +135,13 @@ const STENCIL = new Set([
   'monet_close_normal', 'monet_close_push',
   'monet_win_minimize',   // WorldMap 的还原/minimize 按钮：中性白，跟主题染色
   'monet_check', 'monet_radio',
+  'monet_refresh', 'monet_options',
   'monet_chevron_up',
   // 窗口右上角的 maximize / minimize 斜箭头：与 close 同一口径，纯白模具，运行期染主题边框色。
   'monet_maximize_arrow', 'monet_minimize_arrow',
   // 施法条火花 / 经验线三角：整张图只提供 alpha，颜色全交给 SetVertexColor（红 / 中性 / 经验色）。
   'monet_spark_up', 'monet_spark_down',
-  'monet_role_tank', 'monet_role_heal', 'monet_role_dps',
+  'monet_role_tank', 'monet_role_heal', 'monet_role_dps', 'monet_role_leader',
   // 地图内的三个 4:3 徽章：运行期用 SetVertexColor 染成主题色 / 副本难度色，
   // 所以底色必须中性灰、描边必须纯白（它们的底与描边都在贴图里）。
   'monet_map_tracking', 'monet_map_compartment', 'monet_map_difficulty',

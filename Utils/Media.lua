@@ -297,10 +297,15 @@ Media.texture = {
     -- role icons: the art is DELIBERATELY GREYSCALE (every pixel R==G==B), so all hue comes from
     -- SetVertexColor at the call site.  Color:RoleTint() is the only place that decides it: a leader /
     -- assistant is tinted with the highlight slot, everyone else stays a single colour.  Do not bake a
-    -- semantic colour into these three -- that would force one file per state for no gain.
+    -- semantic colour into these four -- that would force one file per state for no gain.
     ["monet_role_tank"]     = ASSET .. "Textures\\monet_role_tank",
     ["monet_role_heal"]     = ASSET .. "Textures\\monet_role_heal",
     ["monet_role_dps"]      = ASSET .. "Textures\\monet_role_dps",
+    -- 2026-11-14：复古组队窗的向导 / 队长（UI-LFG-RoleIcon-Leader / groupfinder-icon-leader）。
+    ["monet_role_leader"]   = ASSET .. "Textures\\monet_role_leader",
+    -- 复古组队窗 browse 页两颗小功能钮（原图标被 Strip 压掉后的自绘补件）。
+    ["monet_refresh"]       = ASSET .. "Textures\\monet_refresh",
+    ["monet_options"]       = ASSET .. "Textures\\monet_options",
 
     ["monet_brush_stroke"]  = ASSET .. "Textures\\monet_brush_stroke",
     ["monet_corner"]        = ASSET .. "Textures\\monet_corner",

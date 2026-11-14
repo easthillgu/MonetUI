@@ -4,8 +4,13 @@
 
 local ADDON_NAME, ns = ...
 
-local M    = ns.Skins
-local Skin = ns.Skin
+local M       = ns.Skins
+local Skin    = ns.Skin
+local Widget  = ns.Widget
+local Secrets = ns.Secrets
+local Color   = ns.Color
+local Mark    = function(o, k, v) return ns:Mark(o, k, v) end
+local Marked  = function(o, k) return ns:Marked(o, k) end
 
 --- 战斗中为真。**优先问 Core 的 `ns:InCombat()`**：本客户端先派发 PLAYER_REGEN_*、之后才翻
 --- `InCombatLockdown()`，而 `ns:AfterCombat` 的排空就跑在那次派发里（微按钮换皮就是排队的）。
@@ -64,6 +69,20 @@ local ROLE_ATLASES = {
     ["groupfinder-icon-role-micro-tank"] = "monet_role_tank",
     ["groupfinder-icon-role-micro-heal"] = "monet_role_heal",
     ["groupfinder-icon-role-micro-dps"]  = "monet_role_dps",
+    -- 复古组队窗**列表自己**那三颗圆形职责钮：glyph 画在 85×85 的 `UI-LFG-RoleIcon-*`
+    -- 图集里（64×64 那两张是通用光泽/底，没有 atlas），金圈则是同族的 `-Background`。
+    -- 换成我们自己的职责剪影；换完标 `art`，后面的美术褪色遍历就不会再压掉它。
+    ["UI-LFG-RoleIcon-Tank"]   = "monet_role_tank",
+    ["UI-LFG-RoleIcon-Healer"] = "monet_role_heal",
+    ["UI-LFG-RoleIcon-DPS"]    = "monet_role_dps",
+    -- 向导 / 队长：`UI-LFG-RoleIcon-Leader` 是「新手友好」钮那颗 84×84，
+    -- `groupfinder-icon-leader` 是浏览行里每支队伍前面的小队长徽记（实机 ×5）。
+    ["UI-LFG-RoleIcon-Leader"] = "monet_role_leader",
+    ["groupfinder-icon-leader"] = "monet_role_leader",
+}
+local ROLE_GLYPH_ATLAS = {
+    ["UI-LFG-RoleIcon-Tank"] = true, ["UI-LFG-RoleIcon-Healer"] = true,
+    ["UI-LFG-RoleIcon-DPS"] = true, ["UI-LFG-RoleIcon-Leader"] = true,
 }
 
 -- 深度上限：LFGParentFrame → LFGBrowseFrame → ScrollBox → row → DataDisplay → Enumerate → IconN
@@ -85,14 +104,23 @@ local function SwapRoleAtlas(tex)
     -- 暴雪复用行、重新 SetAtlas 之后我们才再换一次。
     if pcall(tex.SetTexture, tex, path) then
         if type(tex.SetTexCoord) == "function" then pcall(tex.SetTexCoord, tex, 0, 1, 0, 1) end
+        -- 换上去的就是我们的图：标 `art` 让 `Skin:Fade` / `Strip` / 下面那趟美术褪色
+        -- 一律跳过（否则 85×85 的职责图标会被当成"暴雪美术"压掉）。
+        Mark(tex, "art", true)
+        if ROLE_GLYPH_ATLAS[atlas] then
+            pcall(tex.SetSize, tex, 52, 52)
+            local r, g, b = Color:GetBorder()
+            pcall(tex.SetVertexColor, tex, r, g, b)
+        end
     end
 end
 
 local function WalkSwapRole(frame, depth)
     if not frame or depth > LFG_WALK_MAX_DEPTH then return end
     -- 不可见 / 读不出可见性 = forbidden 对象，整棵子树放手。
+    -- `IsVisible()` 在本客户端可能回**机密布尔**，裸真值测试会被拦成 UNKNOWN() ⇒ 一律过 Secrets.Bool。
     local okV, visible = pcall(function() return frame:IsVisible() end)
-    if not okV or not visible then return end
+    if not okV or not Secrets.Bool(visible, false) then return end
 
     if type(frame.GetRegions) == "function" then
         local okR, regions = pcall(function() return { frame:GetRegions() } end)
@@ -108,13 +136,302 @@ local function WalkSwapRole(frame, depth)
     end
 end
 
--- 稳定引用 —— PollWatch 用它去重，闭包每次新建 = 每一拍都多挂一条轮询（AGENTS 明写）。
-local function RefreshLfgRoleAtlas()
+-- --- 复古组队窗的内部件（11-14 实机补）---------------------------------------
+-- 作者报「只美化到了 close 按钮」：账本 24 个名字全部命中、面板确实 Apply 过，
+-- 但可见的暴雪美术全挂在**孙级匿名子框**里 —— `LFGParentFrame` 自己 regs=0，
+-- `LFGListingFrame` 自己那 2 张 region 压掉了，它下面 18 个子帧（458×535 金属窗框、
+-- 454×102 职责条底、450×414 内容底、4 行 418×67 分类按钮…）一张都没被碰过。
+-- 根因：`Skin:Strip` 只压宿主自己的 region，`M:SkinButtonsIn` 默认 depth=1。
+--
+-- 口径参照只读参考件 `EllesmereUIBlizzardSkin_GroupFinderForever.lua`（`LFG_FADE` /
+-- `BorderContent`）：分类行的 `groupfinder-button-dungeons` 等**横幅是内容图，留着**，
+-- 要剥的是同族三层 `groupfinder-button-cover*` 金框 + 金属窗框 + 内容底 + 侧页签金圈。
+-- 做法与 `Social.lua` 名册窗同族：**轮询 + 自建子框体**，不 HookScript / hooksecurefunc、
+-- 不往暴雪对象写字段；`FadeHold` 每趟复写 α0（暴雪会把贴图抬回来）。
+local LFG_ART = {
+    "^groupfinder%-button%-cover",
+    "^groupfinder%-background", "^groupfinder%-roles%-background", "^groupfinder%-stat%-stonebg",
+    "^common%-insideframe", "^common%-framedivider", "^common%-sidetab%-",
+    "^common%-button%-", "^common%-dropdown%-",
+    "^ui%-frame%-", "^_ui%-frame%-", "^!ui%-frame%-",
+    "^gamepad%-uiframemetal", "^toptilestreaks",
+    "^ui%-lfg%-roleicon%-",
+}
+local function IsLfgArt(atlas)
+    if type(atlas) ~= "string" then return false end
+    local low = atlas:lower()
+    for i = 1, #LFG_ART do
+        if low:find(LFG_ART[i]) then return true end
+    end
+    return false
+end
+
+local function Num(obj, method, fallback)
+    if not obj or type(obj[method]) ~= "function" then return fallback or 0 end
+    local ok, v = pcall(obj[method], obj)
+    if ok and type(v) == "number" then return v end
+    return fallback or 0
+end
+local function RegionsOf(obj)
+    if not obj or type(obj.GetRegions) ~= "function" then return nil end
+    local ok, r = pcall(function() return { obj:GetRegions() } end)
+    return (ok and type(r) == "table") and r or nil
+end
+local function ChildrenOf(obj)
+    if not obj or type(obj.GetChildren) ~= "function" then return nil end
+    local ok, r = pcall(function() return { obj:GetChildren() } end)
+    return (ok and type(r) == "table") and r or nil
+end
+local function VisibleOf(obj)
+    if not obj or not Widget:Readable(obj) then return false end
+    local ok, v = pcall(obj.IsVisible, obj)
+    return ok and Secrets.Bool(v, false)
+end
+
+--- 我们自己的一块板（`BackdropTemplate` 子框体），按 key 幂等挂在宿主上。
+--- 关鼠标 —— 绝不吃掉分类行 / 侧页签的点击。
+local function OwnPlate(host, key, opts)
+    local plate = Marked(host, key)
+    if plate then return plate end
+    local ok, f = pcall(CreateFrame, "Frame", nil, host, "BackdropTemplate")
+    if not ok or not f then return nil end
+    pcall(f.SetAllPoints, f, host)
+    pcall(f.EnableMouse, f, false)
+    Widget:Theme(f, opts)
+    Mark(host, key, f)
+    return f
+end
+
+--- 分类行（418×67 匿名 Button）：横幅留着，只补 1px 方边 + hover 抬亮。
+--- 板标成 `controlBg`，`Skin:HoverHighlight` 就认得出它（内部走 Widget:SetHoverLift，
+--- 只写我们自己的板，不碰暴雪的 region）。
+local function DressLfgRow(btn)
+    if not btn or Marked(btn, "lfgRow") then return end
+    Mark(btn, "lfgRow", true)
+    OwnPlate(btn, "controlBg", { thickness = 1, bgAlpha = 0.16, borderAlpha = 0.75 })
+    pcall(Skin.HoverHighlight, Skin, btn)
+end
+
+--- 圆形职责钮：glyph 已由 `SwapRoleAtlas` 换成我们的（并标 art），这里补方边 + hover。
+local function DressLfgRoleButton(btn)
+    if not btn or Marked(btn, "lfgRole") then return end
+    Mark(btn, "lfgRole", true)
+    OwnPlate(btn, "controlBg", { thickness = 1, bgAlpha = 0.20, borderAlpha = 0.75 })
+    pcall(Skin.HoverHighlight, Skin, btn)
+end
+
+local function LfgArtWalk(host, depth, roleBranch, force)
+    if not host or depth > 5 then return end
+    if Marked(host, "skinPlate") or not Widget:Readable(host) then return end
+    -- `force` = 静态美术那一趟：三个页可能都还藏着，但它们的窗框 / 底板此刻已经建好，
+    -- 先压掉，切页时就不会闪一下暴雪原样。轮询那趟仍按可见性走，省掉隐藏页的开销。
+    if not force and not VisibleOf(host) then return end
+    local kind = select(2, pcall(host.GetObjectType, host)) or "?"
+    local okN, name = pcall(host.GetName, host)
+    local isRole = roleBranch or (okN and type(name) == "string" and name:find("RoleButton", 1, true))
+
+    for _, reg in ipairs(RegionsOf(host) or {}) do
+        local okK, rk = pcall(reg.GetObjectType, reg)
+        if okK and rk == "Texture" and not Marked(reg, "art") then
+            local okA, atlas = pcall(reg.GetAtlas, reg)
+            local hasAtlas = okA and type(atlas) == "string"
+            local fade = hasAtlas and IsLfgArt(atlas)
+            -- 职责钮上那两张 64×64 通用光泽 / 底没有 atlas，是这个按钮专属的暴雪装饰。
+            -- 只在"职责钮子树"里按尺寸收，别把别处无 atlas 的功能图标顺手压掉。
+            if not fade and not hasAtlas and isRole and Num(reg, "GetWidth", 0) >= 60 then
+                fade = true
+            end
+            if fade then Skin:FadeHold(reg) end
+        end
+    end
+
+    -- 分类行 / 职责钮补板；职责钮里那颗 24×24 复选框**不**走 Skin:CheckButton ——
+    -- 那会给每颗都铺一块方板，实机多出三个小方框（11-14 截图判例）。
+    if kind == "Button" and not isRole then
+        local w, h = Num(host, "GetWidth", 0), Num(host, "GetHeight", 0)
+        if w >= 250 and h >= 24 and h <= 110 then DressLfgRow(host) end
+    elseif kind == "Button" and isRole then
+        DressLfgRoleButton(host)
+    end
+
+    for _, kid in ipairs(ChildrenOf(host) or {}) do
+        -- 我们自己的底板 / 窗口背衬：整棵跳过，别把自己的 1px 边当暴雪美术压掉。
+        if Marked(host, "controlBg") == kid or Marked(host, "skinBg") == kid
+            or Marked(kid, "skinPlate") then
+            -- ours
+        else
+            LfgArtWalk(kid, depth + 1, isRole, force)
+        end
+    end
+end
+
+-- --- 搜索 / 过滤 / 下拉 / 滚动（11-14 实机补）---------------------------------
+-- `WhoFrameEditBox` 已由 `M:SweepTemplates` 接走（放大镜留着）；两个具名下拉由
+-- `M:Dress(LFG_DROPDOWNS)` 接走 —— 但 `Skin:Dropdown` 只是 `Skin:Button` 的别名，
+-- `Strip` 把 `common-dropdown-a-button`（小箭头）一起压成 α0，下拉看着像普通按钮。
+-- 另有三颗没点名：`GroupRoleButtonsRoleDropdown` / `VoiceChatDropdown` /
+-- `ActivityView.PlayStyleDropdown`（最后一颗**没有全局名**，只能走字段路径），
+-- 以及 WhoList 里两颗匿名按钮（36×36 搜索、110×18 过滤）。
+-- ⇒ 两件事：① 给所有下拉补我们自己的 V 形；② 按 atlas 结构认出没点名的那些。
+local LFG_DROPDOWN_PATHS = {
+    "LFGBrowseFrameCategoryDropdown",
+    "LFGBrowseFrameActivityDropdown",
+    "LFGListingFrameGroupRoleButtonsRoleDropdown",
+    "LFGListingFrameActivityViewVoiceChatDropdown",
+    "LFGListingFrameActivityView.PlayStyleDropdown",
+}
+local function ResolveLfgPath(path)
+    local node = _G
+    for part in path:gmatch("[^%.]+") do
+        if type(node) ~= "table" and type(node) ~= "userdata" then return nil end
+        local ok, child = pcall(function() return node[part] end)
+        if not ok then return nil end
+        node = child
+        if node == nil then return nil end
+    end
+    return node
+end
+
+--- 下拉的小 V 形：`Strip` 压掉了暴雪那颗，补我们自己的。
+--- 与 `Skin:Stepper` 同一套口径（自建 Texture + `art` 标记 + 主题边框色）。
+local function LfgDropdownArrow(btn)
+    if not btn or Marked(btn, "lfgArrow") then return end
+    local ok, tex = pcall(btn.CreateTexture, btn, nil, "OVERLAY", nil, 7)
+    if not ok or not tex then return end
+    Mark(btn, "lfgArrow", true)
+    pcall(tex.SetSize, tex, 12, 12)
+    pcall(tex.SetPoint, tex, "RIGHT", btn, "RIGHT", -6, 0)
+    pcall(tex.SetTexture, tex, ns.Media:Texture("monet_chevron_up"))
+    pcall(Widget.Arrow, Widget, tex, "down")
+    Mark(tex, "art", true)
+    local r, g, b = Color:GetBorder()
+    if r then pcall(tex.SetVertexColor, tex, r, g, b) end
+end
+
+local function LfgDressDropdown(btn)
+    if not btn then return end
+    -- 已接过 `Skin:Button` 的下拉（controlBg 在）不必重跑，箭头照样补。
+    if not Marked(btn, "controlBg") then pcall(Skin.Dropdown, Skin, btn) end
+    LfgDropdownArrow(btn)
+end
+
+--- 匿名控件的结构认脸：**只认 atlas**，不猜名字（AGENTS：帧名永不凭记忆）。
+local function LfgControlWalk(host, depth)
+    if not host or depth > 4 or not Widget:Readable(host) then return end
+    if Marked(host, "skinPlate") or Marked(host, "controlBg")
+        or Marked(host, "lfgRow") or Marked(host, "lfgRole") or Marked(host, "lfgCtl") then return end
+    local kind = select(2, pcall(host.GetObjectType, host)) or "?"
+    if kind == "Button" then
+        local isDropdown, isSearch = false, false
+        for _, r in ipairs(RegionsOf(host) or {}) do
+            local okA, a = pcall(r.GetAtlas, r)
+            if okA and type(a) == "string" then
+                local low = a:lower()
+                if low:find("^common%-dropdown%-") then isDropdown = true end
+                if low:find("icon%-search", 1, true) then isSearch = true end
+            end
+        end
+        if isDropdown then
+            Mark(host, "lfgCtl", true)
+            LfgDressDropdown(host)
+        elseif isSearch then
+            -- 放大镜是功能图标：**不走** `Skin:Button`（它的 Strip 会把放大镜一起压掉）。
+            -- 只铺板 + hover；`LfgArtWalk` 已经把 `common-button-*` 那三张框压掉了。
+            Mark(host, "lfgCtl", true)
+            pcall(Skin.ControlBg, Skin, host, { thickness = 1, bgAlpha = 0.35 })
+            pcall(Skin.HoverHighlight, Skin, host)
+        end
+        return
+    end
+    for _, kid in ipairs(ChildrenOf(host) or {}) do
+        LfgControlWalk(kid, depth + 1)
+    end
+end
+
+--- 浏览页两颗小功能钮：原图标被 `Skin:Button` 的 Strip 压掉，补我们自己的。
+--- 与 `LfgDropdownArrow` 同一套（自建 Texture + `art` 标记 + 主题边框色）。
+local LFG_TINY_ICONS = {
+    { name = "LFGBrowseFrameRefreshButton", key = "monet_refresh", size = 18 },
+    { name = "LFGBrowseFrameOptionsButton", key = "monet_options", size = 12 },
+}
+local function LfgTinyIcons()
+    for i = 1, #LFG_TINY_ICONS do
+        local info = LFG_TINY_ICONS[i]
+        local btn = rawget(_G, info.name)
+        if btn and not Marked(btn, "lfgTiny") then
+            local ok, tex = pcall(btn.CreateTexture, btn, nil, "OVERLAY", nil, 7)
+            if ok and tex then
+                Mark(btn, "lfgTiny", true)
+                pcall(tex.SetSize, tex, info.size, info.size)
+                pcall(tex.SetPoint, tex, "CENTER")
+                pcall(tex.SetTexture, tex, ns.Media:Texture(info.key))
+                Mark(tex, "art", true)
+                local r, g, b = Color:GetBorder()
+                if r then pcall(tex.SetVertexColor, tex, r, g, b) end
+            end
+        end
+    end
+end
+
+local function LfgControlsPass(parent)
+    for i = 1, #LFG_DROPDOWN_PATHS do
+        LfgDressDropdown(ResolveLfgPath(LFG_DROPDOWN_PATHS[i]))
+    end
+    LfgControlWalk(parent, 0)
+    LfgTinyIcons()
+    -- ScrollBox / 细把手 / 上下步进钮：三个页都会懒建，每趟补一次（各换肤器自带幂等标记）。
+    pcall(M.SkinScrollsIn, M, parent)
+end
+
+local LFG_SIDE = {
+    { key = "ListingTab",    view = "LFGListingFrame" },
+    { key = "BrowsingTab",   view = "LFGBrowseFrame" },
+    { key = "WhoListingTab", view = "LFGWhoListFrame" },
+}
+local function LfgSideTabPass(parent)
+    for i = 1, #LFG_SIDE do
+        local info = LFG_SIDE[i]
+        local tab = parent[info.key]
+        if tab then
+            local base = OwnPlate(tab, "lfgBase", { thickness = 1, bgAlpha = 0.10, borderAlpha = 0.55 })
+            local ring = OwnPlate(tab, "lfgRing", { thickness = 1, bgAlpha = 0, borderAlpha = 1 })
+            if base and not Marked(tab, "lfgHoverWatch") then
+                Mark(tab, "lfgHoverWatch", true)
+                Widget:HoverWatch(tab,
+                    function() pcall(function() Widget:SetHoverLift(base, true) end) end,
+                    function() pcall(function() Widget:SetHoverLift(base, false) end) end)
+            end
+            local view = rawget(_G, info.view)
+            local selected = view and VisibleOf(view)
+            if ring then
+                if selected then pcall(ring.Show, ring) else pcall(ring.Hide, ring) end
+            end
+            local icon = tab.Icon
+            if icon and type(icon.SetAlpha) == "function" then
+                pcall(icon.SetAlpha, icon, selected and 1 or 0.55)
+            end
+        end
+    end
+end
+
+-- 稳定引用 —— PollWatch / ShowWatch 按函数身份去重，闭包每次新建 = 每一拍都多挂一条轮询。
+local function LfgRepaint()
     if not M.active then return end
     -- 轮询不在任何面板 Apply 的作用域里，自己套一层 Skin.With，账本才记在 "lfg" 名下。
     Skin.With("lfg", function()
         local parent = Skin:Need("LFGParentFrame")
-        if parent then WalkSwapRole(parent, 0) end
+        if not parent then return end
+        -- 轮询里的抛错不在任何 Apply 的 pcall 保护下，而且每 2 秒一次：自己吞，并借
+        -- WarnOnce 把名字报出来（受限框读 GetChildren 就会被拒）。
+        local ok, err = pcall(function()
+            WalkSwapRole(parent, 0)        -- 先换职责图集（并标 art），再褪色
+            LfgArtWalk(parent, 0, false, true)
+            LfgSideTabPass(parent)
+            LfgControlsPass(parent)
+        end)
+        if not ok then
+            Skin:WarnOnce("lfgRepaint", ("复古组队窗复涂失败: %s"):format(tostring(err)))
+        end
     end)
 end
 
@@ -146,12 +463,14 @@ local function SkinLFG()
     end
     SideTabs("LFGParentFrame", LFG_SIDE_TABS)
 
-    -- Atlas 换图：进面板就先扫一次；之后靠 PollWatch 每 2 秒复检（ScrollBox 复用行 = 暴雪
-    -- 会重新贴 atlas，我们这一遍再把图换回来）。回调稳定引用；PollWatch 内部会去重。
-    RefreshLfgRoleAtlas()
+    -- 内部件复涂：进面板先扫一次，之后 PollWatch 每 2 秒复检（暴雪会重贴 atlas / 抬回
+    -- alpha / 切页时懒建行），ShowWatch 让"刚打开窗口"那一拍不必等满 2 秒。
+    -- 两个驱动都按这个稳定引用去重；回调里所有写入都只落我们自己的板或 Texture 的 alpha。
+    LfgRepaint()
     local parent = Skin:Need("LFGParentFrame")
-    if parent and ns.Widget and ns.Widget.PollWatch and ns.Widget:Readable(parent) then
-        ns.Widget:PollWatch(parent, RefreshLfgRoleAtlas, 2)
+    if parent and Widget:Readable(parent) then
+        Widget:PollWatch(parent, LfgRepaint, 2)
+        Widget:ShowWatch(parent, LfgRepaint)
     end
 end
 
