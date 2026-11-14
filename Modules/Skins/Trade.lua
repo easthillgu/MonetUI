@@ -310,6 +310,24 @@ local FADE_PROF_ATLAS = {
     --   只写复数会漏掉详情面板的职业插画水印（`Profession-background-card-Cooking`）与 Template2 底图。
     "profession%-background%-card%-",
     "profession%-background%-template",
+    -- 11-14 实机补：总览页的职业卡片底图**真名里没有 background 段** ——
+    -- 是 `Profession-overview-Card` / `Profession-overview-card-generic-*`，
+    -- 原来那条 `profession-background-card-*` 一张都没命中，于是卡片还是暴雪的棕底插画。
+    "profession%-overview%-card",
+    -- 11-14 实机补（配方页）：右详情面板的边框 `common-insideframe`，
+    -- 以及两块内容区里的 9-slice 内框（`UI-Frame-Inner*`）与金属边（`UI-Frame-Metal*`）。
+    -- 这些原名单里一条都没有 ⇒ 两块内容区还挂着暴雪的框，凹槽补不齐。
+    "common%-insideframe",
+    "ui%-frame%-",
+    "gamepad%-uiframemetal",
+    -- 11-14 实机补（真名与名单对不上的又两处）：
+    -- 总览页大卡片底图 `Profession-Background-Overview`（我们认的是 `-overview-card`）；
+    -- 空槽底 `Professions-Slot-bg`（我们认的是 `-slot-frame`）；
+    -- 装备分隔线 `Professions-Equipment-Divider`；配方行的减号钮 `common-button-list-minus`。
+    "profession%-background%-overview",
+    "professions%-slot%-bg",
+    "professions%-equipment%-divider",
+    "common%-button%-list%-minus",
     "professions%-background%-summarylist",
     "professions%-qualitywindow%-background",
     "professions%-qualitypane%-bg",
@@ -327,24 +345,149 @@ local FADE_PROF_ATLAS = {
     "professions%-choicereagent%-frame",
     "professions%-recrafting%-frame%-item",
     "professions%-qualitypane%-divider",
-    -- 配方行背景（common-button-list 本体）→ 剥掉，行变透明坐在我们的深色上；
-    -- 选中行仍由 SWAP 的 recipe-active 给高亮，不会没有选中反馈。
+    -- 配方行背景（common-button-list 本体）→ 剥掉，行变透明坐在我们的深色上。
     "common%-button%-list$",
+    -- 行底的 `HighlightOverlay`（`Professions_Recipe_Hover`，**每行常亮**、α0.5）——
+    -- 它不是选中信号（选中信号是 `SelectedOverlay` 的显示/隐藏）⇒ 褪掉，行就平了。
+    -- 真名用下划线分隔 ⇒ 两种分隔都认（`[-_]?`）。
+    "professions[-_]?recipe[-_]?hover",
 }
+-- ⚠ 配方行的选中/悬停条（`Professions_Recipe_Active` / `_Hover`，真名用**下划线**分隔）
+-- **故意不进褪色名单**：那两张贴图是暴雪用 alpha 当开关的（选中行 α1、其余 α0），
+-- 褪掉就没有选中信号了（作者实测"看不出选中行"）；而直接换成我们的实心盒子又会因为
+-- `SwapArt` 默认把 alpha 复位到 1，把 13 行全点亮（"行条都混成一片了"）。
+-- ⇒ 单独一趟：**换图 + 保留 alpha**（见 `DressRecipeRows` 与 `Skin:SwapArt` 的 `keepAlpha`）。
 local SWAP_PROF_ATLAS = {
-    -- 金色选中/悬停**行条** + 侧页签选中态 → 换成我们的矩形 barfill（通用方法把盒子压到内容之下，不糊图标）
-    "professions%-recipe%-active",
-    "professions%-recipe%-hover",
+    -- 侧页签选中态 → 换成我们的矩形 barfill（通用方法把盒子压到内容之下，不糊图标）
     "common%-sidetab%-selected",
 }
 local TINT_PROF_ATLAS = {
 }
 
+--- 专业窗的三块**内容区凹槽**（11-14 作者口径："专业面板的凹槽没做全"）。
+---
+--- 三处内容区都**点不到名字**（专业窗是 LoD 包，卡片 / 列表 / 详情都是运行期建的匿名子帧），
+--- 只能按**图集**认脸：
+---   ① 总览页的职业卡片 —— `Profession-overview-Card` / `Profession-overview-card-generic-*`；
+---   ② 配方页左边的配方列表 —— `Professions-background-summarylist`（304×517）；
+---   ③ 配方页右边的详情面板 —— `Profession-background-card-*`（同层还挂着 `common-insideframe`）。
+--- 认出来之后：暴雪的底图交给 `FADE_PROF_ATLAS` 褪掉，我们给每块铺一档**凹槽**
+--- （lost 底 + 1px 边，`Skin:Panel` 的板画在宿主**之下**，不吃点击；幂等，不会越挂越多）。
+local PROF_WELL_ATLAS = {
+    "^profession%-overview%-card",
+    "professions%-background%-summarylist",
+    "profession%-background%-card",
+}
+local function DressProfessionsWells()
+    local f = Skin:Need("ProfessionsFrame")
+    if not f then return end
+    local function walk(h, d)
+        if d > 4 then return end
+        local okKids, kids = pcall(function() return { h:GetChildren() } end)
+        if not okKids or type(kids) ~= "table" then return end
+        for _, k in ipairs(kids) do
+            local isWell = false
+            local okR, regs = pcall(function() return { k:GetRegions() } end)
+            if okR and type(regs) == "table" then
+                for _, r in ipairs(regs) do
+                    local okA, a = pcall(r.GetAtlas, r)
+                    if okA and type(a) == "string" then
+                        local low = a:lower()
+                        for i = 1, #PROF_WELL_ATLAS do
+                            if low:find(PROF_WELL_ATLAS[i]) then isWell = true break end
+                        end
+                    end
+                    if isWell then break end
+                end
+            end
+            if isWell then
+                pcall(Skin.Panel, Skin, k, {
+                    bgSurface = "lost", bgAlpha = 0.96, borderAlpha = 1, thickness = 1,
+                })
+            else
+                walk(k, d + 1)
+            end
+        end
+    end
+    walk(f, 0)
+end
+
+--- 配方行的**选中态**（11-14 作者口径四轮："行条都混成一片了" → "看不出选中行"
+--- → "把选中行改成斜纹" → "样子不对"）。
+---
+--- **暴雪的机制**（自己的 XML：`Blizzard_ProfessionsRecipeList.xml`）：
+---   <Texture parentKey="SelectedOverlay"  atlas="Professions_Recipe_Active" hidden="true">
+---   <Texture parentKey="HighlightOverlay" atlas="Professions_Recipe_Hover"   alpha="0.5">
+--- ⇒ **选中开关是「显示/隐藏」**（`SelectedOverlay` 默认藏起来，选中才 Show），
+---   **不是 alpha**。前几轮按 alpha 玩必然全错：
+---   · 褪掉它 ⇒ 选中信号没了（"看不出选中行"）；
+---   · 换成实心盒子 ⇒ `SwapArt` 把 alpha 复位到 1，13 行全点亮（"行条都混成一片了"）；
+---   · 按 alpha 给它染色 ⇒ 本客户端 `SetVertexColor(r,g,b,a)` 与 `GetAlpha()` **共享同一份存储**
+---     （AGENTS 记过），一染色就把暴雪的 alpha 覆盖掉（"样子不对"）。
+--- ⇒ 正确做法：认 `SelectedOverlay` **字段**（parentKey，不是按图集猜），
+---   换我们的**斜纹**材质（`monet_stripe_weave`，45°、带半像素过渡），
+---   **不碰它的 alpha、也不碰它的显示/隐藏** —— 暴雪说"这行被选中"时它自己 Show。
+---   平铺口径与 `Widget:BarWeave` 一致（`REPEAT` + 按 `Media:Mult()` 算重复数 ⇒ 45° 不歪）。
+---   画在 `BACKGROUND/-6`（文字之下）；顶点色**只给 r/g/b**（带 a 会覆盖 alpha）。
+---
+--- 行底的 `HighlightOverlay`（每行常亮、α0.5）不是选中信号 ⇒ 交给 `FADE_PROF_ATLAS` 褪掉，
+--- 行就平了（坐在我们的深色底板上），只有选中的那一行带斜纹。
+local PROF_WEAVE_SIZE = 64      -- 与 Widget.lua 的 WEAVE_SIZE 同值（贴图 64×64）
+local function DressRecipeRows()
+    local f = Skin:Need("ProfessionsFrame")
+    if not f then return end
+    local Media = ns.Media
+    local function weave(tex)
+        if not tex then return end
+        local swapped = Skin:SwapArt(tex, "monet_stripe_weave", { keepAlpha = true })
+        if not swapped then return end
+        -- SwapArt 换完给的是 0..1 贴图坐标；斜纹要**平铺**，所以按 `Widget:BarWeave` 的
+        -- 口径重算：REPEAT + 重复数 = 宽 /(mult × 64)，纵向从 1/64 起、连续不取整
+        -- （取整会让横纵采样密度不同，斜纹就歪了）。
+        pcall(swapped.SetTexture, swapped, Media:Texture("monet_stripe_weave"), "REPEAT", "REPEAT")
+        local mult = Media:Mult()
+        local width = tex:GetWidth() or 1
+        local height = tex:GetHeight() or 2
+        local cols = math.max(0, width / (mult * PROF_WEAVE_SIZE))
+        local v0 = 1 / PROF_WEAVE_SIZE
+        local v1 = v0 + height / (mult * PROF_WEAVE_SIZE)
+        pcall(swapped.SetTexCoord, swapped, 0, cols, v0, v1)
+        -- 顶点色**只给 r/g/b**：带 a 会写进与 `GetAlpha()` 共享的那份存储，
+        -- 把暴雪的 alpha 覆盖掉（选中 = 显示/隐藏的机制就废了）。
+        local wr, wg, wb = Color:GetSurface("weave")
+        if wr then pcall(swapped.SetVertexColor, swapped, wr, wg, wb) end
+        pcall(swapped.SetDrawLayer, swapped, "BACKGROUND", -6)
+    end
+    local function walk(h, d)
+        if d > 6 then return end
+        local okKids, kids = pcall(function() return { h:GetChildren() } end)
+        if not okKids or type(kids) ~= "table" then return end
+        for _, k in ipairs(kids) do
+            -- 认 parentKey 字段（暴雪的 XML 里就叫 SelectedOverlay），不按图集猜。
+            local sel = select(2, pcall(function() return k.SelectedOverlay end))
+            if type(sel) == "table" then
+                weave(sel)
+            else
+                walk(k, d + 1)
+            end
+        end
+    end
+    walk(f, 0)
+end
+
 -- 模块级稳定引用：PollWatch 按引用去重，在 Apply 里现造闭包会每开一次窗多挂一条。
--- 走通用 Skin:StyleAtlasBackdrop（fade 装饰底图 + swap 实心行条 + tint 选中框），角色窗共用同一条。
+-- 走通用 Skin:StyleAtlasBackdrop（swap 实心行条 + tint 选中框），角色窗共用同一条。
+-- **两趟分开、换在前褪在后**（同 §8.114.3）：swap 档会把 alpha 复位到 1，
+-- 褪色档走「每趟写 α0」通道（`FadeAtlasBackdrop(..., alpha=0)`）——
+-- 暴雪换页 / 换职业会把装饰贴图的 alpha 抬回来，只压一次的话凹槽一会儿就"压过又回来"。
 local function StyleProfessionsArt()
     local f = Skin:Need("ProfessionsFrame")
-    if f then Skin:StyleAtlasBackdrop(f, FADE_PROF_ATLAS, SWAP_PROF_ATLAS, TINT_PROF_ATLAS) end
+    if f then
+        Skin:StyleAtlasBackdrop(f, {}, SWAP_PROF_ATLAS, TINT_PROF_ATLAS)
+        Skin:FadeAtlasBackdrop(f, FADE_PROF_ATLAS, nil, 0)
+    end
+    DressProfessionsWells()
+    DressRecipeRows()
 end
 
 local function SkinProfessions()

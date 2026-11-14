@@ -2657,7 +2657,12 @@ end
 
 --- Swap a texture's art for one of ours and remember how to put the original back (atlas name or path, texcoords and alpha, all recorded for Skin:Rollback).
 -- The texture carries the side-table mark "art" so Skin:Fade leaves it alone.  Idempotent: a texture already carrying our art is returned as is.  @return the same texture, or nil when it cannot be swapped
-function Skin:SwapArt(tex, key)
+--- 换一张贴图的内容，成我们的材质（记回滚）。
+--- @param opts { keepAlpha = true } —— **不动这张贴图当前的 alpha**。
+---   默认换完把 alpha 复位到 1；有些图集是"暴雪用 alpha 当开关"的（选中行才 α1，
+---   其余 α0），复位到 1 会把每一行都点亮（11-14 专业窗配方行判例：13 行全被填满、
+---   一片糊）。那种图要 `keepAlpha = true`：换图不动 alpha，选中信号仍由暴雪控制。
+function Skin:SwapArt(tex, key, opts)
     if not tex or type(tex.SetTexture) ~= "function" then return nil end
     if Marked(tex, "art") then return tex end
 
@@ -2678,7 +2683,9 @@ function Skin:SwapArt(tex, key)
     Mark(tex, "art", true)
     pcall(tex.SetTexture, tex, Media:Texture(key))
     if tex.SetTexCoord then pcall(tex.SetTexCoord, tex, 0, 1, 0, 1) end
-    if tex.SetAlpha then pcall(tex.SetAlpha, tex, 1) end
+    if not (opts and opts.keepAlpha) then
+        if tex.SetAlpha then pcall(tex.SetAlpha, tex, 1) end
+    end
     return tex
 end
 
