@@ -17,6 +17,78 @@ local Skin = ns.Skin
 -- 别把「WorldMapFrame 没这个字段」读成「1.60 整个地图没有这些控件」。
 local MAP_BUTTONS = { "WorldMapFrameHomeButton", "WorldMapFrameOverflowButton" }
 
+--- 「地图 + 任务」合并窗（1.60）右侧任务栏的**内部件**（11-14 作者："美化还需要进一步处理"）。
+---
+--- 实机结构（QuestMapFrame 330×506）：
+---   · **3 颗匿名 55×55 侧页签**（任务 / 事件 / 图例，`common-sidetab*`）；
+---   · `QuestScrollFrame` 308×468（列表）：搜索 EditBox + `QuestLogCount` + 任务行
+---     （**289×22 Button，底图就是整行的 `common-button-list-collapseExpand`**）+ 细滚动条；
+---   · 详情页 `QuestMapDetailsScrollFrame`；图例页 `MapLegendScrollFrame`。
+---
+--- 以前只给 QuestMapFrame / 列表 / 详情挂了底板 ⇒ 行还是暴雪整行底图、侧页签还是金框、
+--- `QuestLogCount` 还挂着搜索框那圈边。这里按**同一套语言**补齐（与组队窗 / 角色窗一致）：
+---   ① 任务栏 chrome 族 → 每趟写 α0（换页会把 alpha 抬回来）；
+---   ② 侧页签 → `Skin:SideTabArt`（金框褪掉、选中态换我们的矩形盒子）；
+---   ③ 任务行 → `Skin:Button`（剥掉整行底图 + 我们的底板 + 悬停抬亮；老行会被列表回收，幂等）；
+---   ④ 搜索框 → `Skin:EditBox`（放大镜保留）。
+local QUEST_ART = {
+    "quest%-log%-frame", "quest%-log%-main%-background", "quest%-log%-gradient",
+    "quest%-log%-frame%-devider", "quest%-details%-backgrounds",
+    "campaign%-quest%-log%-lorebackground", "quest%-sharing%-quest%-log%-",
+    "storyheader%-", "common%-search%-border%-",
+}
+
+--- 稳定引用（`Widget:PollWatch` 按函数身份去重）。
+local function StyleQuestPane()
+    if not M.active then return end
+    Skin.With("worldmap", function()
+        local qm = Skin:Need("QuestMapFrame")
+        if not qm then return end
+        Skin:FadeAtlasBackdrop(qm, QUEST_ART, nil, 0)   -- ① chrome 族，每趟写 α0
+        local function walk(h, d)
+            if d > 4 then return end
+            local okKids, kids = pcall(function() return { h:GetChildren() } end)
+            if not okKids or type(kids) ~= "table" then return end
+            for _, k in ipairs(kids) do
+                local okK, kind = pcall(k.GetObjectType, k)
+                if not okK then
+                    -- 读不出来就整棵放手（forbidden 对象）
+                else
+                    -- ② 侧页签：匿名件，按 `common-sidetab` 认脸
+                    local isTab = false
+                    local okR, regs = pcall(function() return { k:GetRegions() } end)
+                    if okR and type(regs) == "table" then
+                        for _, r in ipairs(regs) do
+                            local okA, a = pcall(r.GetAtlas, r)
+                            if okA and type(a) == "string" and a:lower():find("^common%-sidetab$") then
+                                isTab = true
+                                break
+                            end
+                        end
+                    end
+                    if isTab then
+                        pcall(Skin.SideTabArt, Skin, k, 1)
+                    elseif kind == "EditBox" then
+                        -- ④ 搜索框
+                        pcall(Skin.EditBox, Skin, k)
+                    elseif kind == "Button" then
+                        -- ③ 任务行：底图（NormalTexture）就是整行的 collapseExpand
+                        local nt = Skin:TexOf(k, "GetNormalTexture")
+                        local okA, a = false, nil
+                        if nt then okA, a = pcall(nt.GetAtlas, nt) end
+                        if okA and type(a) == "string"
+                            and a:lower():find("common%-button%-list%-collapseexpand", 1, true) then
+                            pcall(Skin.Button, Skin, k, { bgAlpha = 0.5 })
+                        end
+                    end
+                end
+                walk(k, d + 1)
+            end
+        end
+        walk(qm, 0)
+    end)
+end
+
 local function SkinQuestMap()
     M:Dress("QuestMapFrame", { panel = { bgAlpha = 0.96 } })
 
@@ -35,6 +107,13 @@ local function SkinQuestMap()
     -- 图例列表：与任务列表同族的具名全局，只有滚动条要收。
     local legend = Skin:Need("MapLegendScrollFrame")
     if legend then M:SkinScrollsIn(legend) end
+
+    -- 任务栏内部件（侧页签 / 任务行 / 搜索框 / chrome 族）：立刻来一趟 + 2 秒复检。
+    StyleQuestPane()
+    local qm = Skin:Need("QuestMapFrame")
+    if qm and ns.Widget and ns.Widget.PollWatch and ns.Widget:Readable(qm) then
+        ns.Widget:PollWatch(qm, StyleQuestPane, 2)
+    end
 end
 
 -- §8.107（11-12 Aurora 研读 + 实机复扫）：边框层「压过又回来」的纠回。
