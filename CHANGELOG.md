@@ -3,6 +3,18 @@
 This file is used verbatim as the CurseForge release changelog (see `.pkgmeta`).
 Update the top section before tagging a new release.
 
+## 0.13.9 (2026-11-15)
+
+- Colour readability: a configurable minimum-contrast control (default 1.8) lifts
+  health-bar fill and plate separation on bright zones such as Tanaris; the River-forest
+  default palette is left untouched.
+- Unit frames: positions are locked by default (`/mui unlock` or the options checkbox
+  to move them), and zone changes repaint health / resource / empty-slot colours instead
+  of only refreshing numbers.
+- Group finder: the LFG eye and the minimap queue status share one animated glyph badge.
+- Library sync: vendored LibMonetColor 1.3.0 lets the state layer consume the
+  contrast-adjusted palette, so dynamic borders match static frame borders.
+
 ## 0.13.8 (2026-11-14)
 
 - Look & feel: panels are noticeably more see-through (window fill 0.96 -> ~0.58,

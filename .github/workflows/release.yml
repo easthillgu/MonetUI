@@ -45,7 +45,11 @@ jobs:
       - name: Package, create GitHub Release, upload to CurseForge
         uses: BigWigsMods/packager@v2
         with:
-          # -p  project id (also in the TOC as X-Curse-Project-ID)
+          # -p  project id (also in the TOC as X-Curse-Project-ID).
+          #     This repo publishes MonetUI only; the standalone library goes
+          #     to CF project 1801984 from easthillgu/monetcolors. The vendored
+          #     copies under Libs/ ship inside this zip and must be kept in
+          #     sync with the library release (see docs/HANDOFF.md 8.127).
           # -g  pin the Forever game version 1.60.1 -> gameVersionTypeID 88568
           # -n  "<zip name>:<CurseForge display name>"
           args: '-p 1791156 -g 1.60.1 -n "{package-name}-{project-version}-forever:{project-version}"'
