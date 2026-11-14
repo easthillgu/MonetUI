@@ -381,35 +381,14 @@ local PROF_WELL_ATLAS = {
 local function DressProfessionsWells()
     local f = Skin:Need("ProfessionsFrame")
     if not f then return end
-    local function walk(h, d)
-        if d > 4 then return end
-        local okKids, kids = pcall(function() return { h:GetChildren() } end)
-        if not okKids or type(kids) ~= "table" then return end
-        for _, k in ipairs(kids) do
-            local isWell = false
-            local okR, regs = pcall(function() return { k:GetRegions() } end)
-            if okR and type(regs) == "table" then
-                for _, r in ipairs(regs) do
-                    local okA, a = pcall(r.GetAtlas, r)
-                    if okA and type(a) == "string" then
-                        local low = a:lower()
-                        for i = 1, #PROF_WELL_ATLAS do
-                            if low:find(PROF_WELL_ATLAS[i]) then isWell = true break end
-                        end
-                    end
-                    if isWell then break end
-                end
-            end
-            if isWell then
-                pcall(Skin.Panel, Skin, k, {
-                    bgSurface = "lost", bgAlpha = 0.96, borderAlpha = 1, thickness = 1,
-                })
-            else
-                walk(k, d + 1)
-            end
-        end
-    end
-    walk(f, 0)
+    -- 公共遍历（`Skin:WalkFrames`）：认出"这是一整块内容区"就 `stop`，不再往里钻。
+    Skin:WalkFrames(f, { depth = 4 }, function(frame, atlases)
+        if not Skin:AtlasMatch(atlases, PROF_WELL_ATLAS) then return end
+        pcall(Skin.Panel, Skin, frame, {
+            bgSurface = "lost", bgAlpha = 0.96, borderAlpha = 1, thickness = 1,
+        })
+        return "stop"
+    end)
 end
 
 --- 配方行的**选中态**（11-14 作者口径四轮："行条都混成一片了" → "看不出选中行"
@@ -458,21 +437,14 @@ local function DressRecipeRows()
         if wr then pcall(swapped.SetVertexColor, swapped, wr, wg, wb) end
         pcall(swapped.SetDrawLayer, swapped, "BACKGROUND", -6)
     end
-    local function walk(h, d)
-        if d > 6 then return end
-        local okKids, kids = pcall(function() return { h:GetChildren() } end)
-        if not okKids or type(kids) ~= "table" then return end
-        for _, k in ipairs(kids) do
-            -- 认 parentKey 字段（暴雪的 XML 里就叫 SelectedOverlay），不按图集猜。
-            local sel = select(2, pcall(function() return k.SelectedOverlay end))
-            if type(sel) == "table" then
-                weave(sel)
-            else
-                walk(k, d + 1)
-            end
-        end
-    end
-    walk(f, 0)
+    -- 公共遍历（`Skin:WalkFrames`）：认 parentKey 字段（暴雪的 XML 里就叫 SelectedOverlay），
+    -- 不按图集猜；认出就换斜纹，不必再往下钻。
+    Skin:WalkFrames(f, { depth = 6 }, function(k)
+        local sel = select(2, pcall(function() return k.SelectedOverlay end))
+        if type(sel) ~= "table" then return end
+        weave(sel)
+        return "stop"
+    end)
 end
 
 -- 模块级稳定引用：PollWatch 按引用去重，在 Apply 里现造闭包会每开一次窗多挂一条。

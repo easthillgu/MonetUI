@@ -1958,6 +1958,80 @@ function Skin:FadeChrome(frame, opts)
     return n
 end
 
+--- 子树遍历：把"深度受限 / 只走可读的框 / 逐帧收集 region 的 atlas"收成一个公共件。
+---
+--- 11-14 三个窗口各抄过一遍同样的事（组队窗 `LfgArtWalk`、专业窗 `DressProfessionsWells`、
+--- 地图任务栏 `StyleQuestPane`）—— 第三次重复之后抽出来。**只做遍历与收集，
+--- 判断留在回调里**（每个窗口的名单和规则都不一样）。
+---
+--- 回调签名 `fn(frame, atlases, name, carry)`：
+---   * `atlases` = 该帧 region 上的 atlas 名（**小写**、已去重）；
+---   * `name`    = 帧名（匿名件为 nil）；
+---   * `carry`   = 从父帧继承下来的状态（回调上一次的返回值）。
+--- 返回值：
+---   * `"stop"` → 不再钻进这一帧的子件（例如已经认出"这是一整块内容区"）；
+---   * 其它非 nil 值 → 作为 `carry` 传给子件（"这一支是职责钮子树"这类分支状态靠它传）；
+---   * `nil`    → 子件沿用父帧的 `carry`。
+--- @param opts { depth = 4, visibleOnly = false }
+--- @return 访问过的帧数
+function Skin:WalkFrames(root, opts, fn)
+    if not root or type(root.GetRegions) ~= "function" then return 0 end
+    opts = opts or {}
+    local maxDepth = opts.depth or 4
+    local visibleOnly = opts.visibleOnly
+    local visited = 0
+    local function walk(h, d, carry)
+        if d > maxDepth then return end
+        if not Widget:Readable(h) then return end
+        if visibleOnly then
+            -- 可见性可能是**机密布尔**，真值测试会被拦成 UNKNOWN() ⇒ 过 Secrets.Bool。
+            -- ⚠ 本文件加载期早于 Utils/Secrets.lua，所以这里**调用时**取（不能缓存）。
+            local okV, v = pcall(h.IsVisible, h)
+            local secrets = ns.Secrets
+            local vis = false
+            if okV and secrets and secrets.Bool then vis = secrets.Bool(v, false) end
+            if not vis then return end
+        end
+        visited = visited + 1
+        local atlases, seen = {}, {}
+        local okR, regs = pcall(function() return { h:GetRegions() } end)
+        if okR and type(regs) == "table" then
+            for _, r in ipairs(regs) do
+                local okA, a = pcall(r.GetAtlas, r)
+                if okA and type(a) == "string" and a ~= "" then
+                    local low = a:lower()
+                    if not seen[low] then
+                        seen[low] = true
+                        atlases[#atlases + 1] = low
+                    end
+                end
+            end
+        end
+        local okName, name = pcall(h.GetName, h)
+        if not okName or type(name) ~= "string" or name == "" then name = nil end
+        local nextCarry = fn and fn(h, atlases, name, carry)
+        if nextCarry == "stop" then return end
+        if nextCarry == nil then nextCarry = carry end
+        local okC, kids = pcall(function() return { h:GetChildren() } end)
+        if not okC or type(kids) ~= "table" then return end
+        for _, k in ipairs(kids) do walk(k, d + 1, nextCarry) end
+    end
+    walk(root, 0, nil)
+    return visited
+end
+
+--- atlas 集合里有没有命中任一模式（Lua 模式）。命中返回 true + 那个 atlas。
+function Skin:AtlasMatch(atlases, patterns)
+    if not atlases or not patterns then return false end
+    for i = 1, #atlases do
+        local low = atlases[i]
+        for j = 1, #patterns do
+            if low:find(patterns[j]) then return true, low end
+        end
+    end
+    return false
+end
+
 --- Restyle a scroll bar (track + arrows + thumb).
 function Skin:ScrollBar(scrollbar)
     if not scrollbar then return scrollbar end

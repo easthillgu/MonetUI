@@ -45,47 +45,30 @@ local function StyleQuestPane()
         local qm = Skin:Need("QuestMapFrame")
         if not qm then return end
         Skin:FadeAtlasBackdrop(qm, QUEST_ART, nil, 0)   -- ① chrome 族，每趟写 α0
-        local function walk(h, d)
-            if d > 4 then return end
-            local okKids, kids = pcall(function() return { h:GetChildren() } end)
-            if not okKids or type(kids) ~= "table" then return end
-            for _, k in ipairs(kids) do
-                local okK, kind = pcall(k.GetObjectType, k)
-                if not okK then
-                    -- 读不出来就整棵放手（forbidden 对象）
-                else
-                    -- ② 侧页签：匿名件，按 `common-sidetab` 认脸
-                    local isTab = false
-                    local okR, regs = pcall(function() return { k:GetRegions() } end)
-                    if okR and type(regs) == "table" then
-                        for _, r in ipairs(regs) do
-                            local okA, a = pcall(r.GetAtlas, r)
-                            if okA and type(a) == "string" and a:lower():find("^common%-sidetab$") then
-                                isTab = true
-                                break
-                            end
-                        end
-                    end
-                    if isTab then
-                        pcall(Skin.SideTabArt, Skin, k, 1)
-                    elseif kind == "EditBox" then
-                        -- ④ 搜索框
-                        pcall(Skin.EditBox, Skin, k)
-                    elseif kind == "Button" then
-                        -- ③ 任务行：底图（NormalTexture）就是整行的 collapseExpand
-                        local nt = Skin:TexOf(k, "GetNormalTexture")
-                        local okA, a = false, nil
-                        if nt then okA, a = pcall(nt.GetAtlas, nt) end
-                        if okA and type(a) == "string"
-                            and a:lower():find("common%-button%-list%-collapseexpand", 1, true) then
-                            pcall(Skin.Button, Skin, k, { bgAlpha = 0.5 })
-                        end
-                    end
-                end
-                walk(k, d + 1)
+        -- 公共遍历（`Skin:WalkFrames`）：每帧拿到自己的 atlas 集合与类型，按件分派。
+        Skin:WalkFrames(qm, { depth = 4 }, function(frame, atlases)
+            local kind = select(2, pcall(frame.GetObjectType, frame))
+            -- ② 侧页签：匿名件，按 `common-sidetab` 认脸
+            if Skin:AtlasMatch(atlases, { "^common%-sidetab$" }) then
+                pcall(Skin.SideTabArt, Skin, frame, 1)
+                return "stop"
             end
-        end
-        walk(qm, 0)
+            if kind == "EditBox" then
+                -- ④ 搜索框
+                pcall(Skin.EditBox, Skin, frame)
+                return "stop"
+            end
+            if kind == "Button" then
+                -- ③ 任务行：底图（NormalTexture）就是整行的 collapseExpand
+                local nt = Skin:TexOf(frame, "GetNormalTexture")
+                local okA, a = false, nil
+                if nt then okA, a = pcall(nt.GetAtlas, nt) end
+                if okA and type(a) == "string"
+                    and a:lower():find("common%-button%-list%-collapseexpand", 1, true) then
+                    pcall(Skin.Button, Skin, frame, { bgAlpha = 0.5 })
+                end
+            end
+        end)
     end)
 end
 

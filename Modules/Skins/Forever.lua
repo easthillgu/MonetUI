@@ -194,11 +194,6 @@ local function ChildrenOf(obj)
     local ok, r = pcall(function() return { obj:GetChildren() } end)
     return (ok and type(r) == "table") and r or nil
 end
-local function VisibleOf(obj)
-    if not obj or not Widget:Readable(obj) then return false end
-    local ok, v = pcall(obj.IsVisible, obj)
-    return ok and Secrets.Bool(v, false)
-end
 
 --- 我们自己的一块板（`BackdropTemplate` 子框体），按 key 幂等挂在宿主上。
 --- 关鼠标 —— 绝不吃掉分类行 / 侧页签的点击。
@@ -211,6 +206,9 @@ local function OwnPlate(host, key, opts)
     pcall(f.EnableMouse, f, false)
     Widget:Theme(f, opts)
     Mark(host, key, f)
+    -- 板**自己也带标记**：公共遍历（`Skin:WalkFrames`）走到它时直接 `stop`，
+    -- 不必再靠"父帧的引用"去认（那样每层都要多查两次旁表）。
+    Mark(f, "ownPlate", true)
     return f
 end
 
@@ -232,49 +230,43 @@ local function DressLfgRoleButton(btn)
     pcall(Skin.HoverHighlight, Skin, btn)
 end
 
-local function LfgArtWalk(host, depth, roleBranch, force)
-    if not host or depth > 5 then return end
-    if Marked(host, "skinPlate") or not Widget:Readable(host) then return end
-    -- `force` = 静态美术那一趟：三个页可能都还藏着，但它们的窗框 / 底板此刻已经建好，
-    -- 先压掉，切页时就不会闪一下暴雪原样。轮询那趟仍按可见性走，省掉隐藏页的开销。
-    if not force and not VisibleOf(host) then return end
-    local kind = select(2, pcall(host.GetObjectType, host)) or "?"
-    local okN, name = pcall(host.GetName, host)
-    local isRole = roleBranch or (okN and type(name) == "string" and name:find("RoleButton", 1, true))
+--- 组队窗整棵子树的补涂（公共遍历 `Skin:WalkFrames`）。
+--- `force` = 静态美术那一趟：三个页可能都还藏着，但它们的窗框 / 底板此刻已经建好，
+--- 先压掉，切页时就不会闪一下暴雪原样。轮询那趟仍按可见性走，省掉隐藏页的开销。
+--- `carry` 承担"职责钮子树"这个分支状态（那颗 67×67 的装饰子帧是匿名的，只能靠继承认）。
+local function LfgArtWalk(root, force)
+    Skin:WalkFrames(root, { depth = 5, visibleOnly = not force }, function(host, atlases, name, carry)
+        -- 我们自己的板（`OwnPlate` 的 `ownPlate` / `Skin:Panel` 的 `skinPlate`）：整棵跳过，
+        -- 别把自己的 1px 边当暴雪美术压掉。
+        if Marked(host, "skinPlate") or Marked(host, "ownPlate") then return "stop" end
+        local isRole = carry or (name and name:find("RoleButton", 1, true)) or nil
+        local kind = select(2, pcall(host.GetObjectType, host)) or "?"
 
-    for _, reg in ipairs(RegionsOf(host) or {}) do
-        local okK, rk = pcall(reg.GetObjectType, reg)
-        if okK and rk == "Texture" and not Marked(reg, "art") then
-            local okA, atlas = pcall(reg.GetAtlas, reg)
-            local hasAtlas = okA and type(atlas) == "string"
-            local fade = hasAtlas and IsLfgArt(atlas)
-            -- 职责钮上那两张 64×64 通用光泽 / 底没有 atlas，是这个按钮专属的暴雪装饰。
-            -- 只在"职责钮子树"里按尺寸收，别把别处无 atlas 的功能图标顺手压掉。
-            if not fade and not hasAtlas and isRole and Num(reg, "GetWidth", 0) >= 60 then
-                fade = true
+        -- 逐张 region 处理（`FadeHold` 要贴图对象本身）：atlas 命中名单的，
+        -- 或者职责钮子树里那两张**无 atlas** 的 64×64 装饰（只按尺寸收，别处不误伤）。
+        for _, reg in ipairs(RegionsOf(host) or {}) do
+            local okK, rk = pcall(reg.GetObjectType, reg)
+            if okK and rk == "Texture" and not Marked(reg, "art") then
+                local okA, atlas = pcall(reg.GetAtlas, reg)
+                local hasAtlas = okA and type(atlas) == "string"
+                local fade = hasAtlas and IsLfgArt(atlas)
+                if not fade and not hasAtlas and isRole and Num(reg, "GetWidth", 0) >= 60 then
+                    fade = true
+                end
+                if fade then Skin:FadeHold(reg) end
             end
-            if fade then Skin:FadeHold(reg) end
         end
-    end
 
-    -- 分类行 / 职责钮补板；职责钮里那颗 24×24 复选框**不**走 Skin:CheckButton ——
-    -- 那会给每颗都铺一块方板，实机多出三个小方框（11-14 截图判例）。
-    if kind == "Button" and not isRole then
-        local w, h = Num(host, "GetWidth", 0), Num(host, "GetHeight", 0)
-        if w >= 250 and h >= 24 and h <= 110 then DressLfgRow(host) end
-    elseif kind == "Button" and isRole then
-        DressLfgRoleButton(host)
-    end
-
-    for _, kid in ipairs(ChildrenOf(host) or {}) do
-        -- 我们自己的底板 / 窗口背衬：整棵跳过，别把自己的 1px 边当暴雪美术压掉。
-        if Marked(host, "controlBg") == kid or Marked(host, "skinBg") == kid
-            or Marked(kid, "skinPlate") then
-            -- ours
-        else
-            LfgArtWalk(kid, depth + 1, isRole, force)
+        -- 分类行 / 职责钮补板；职责钮里那颗 24×24 复选框**不**走 Skin:CheckButton ——
+        -- 那会给每颗都铺一块方板，实机多出三个小方框（11-14 截图判例）。
+        if kind == "Button" and not isRole then
+            local w, h = Num(host, "GetWidth", 0), Num(host, "GetHeight", 0)
+            if w >= 250 and h >= 24 and h <= 110 then DressLfgRow(host) end
+        elseif kind == "Button" and isRole then
+            DressLfgRoleButton(host)
         end
-    end
+        return isRole
+    end)
 end
 
 -- --- 搜索 / 过滤 / 下拉 / 滚动（11-14 实机补）---------------------------------
@@ -419,7 +411,7 @@ local function LfgRepaint()
         -- WarnOnce 把名字报出来（受限框读 GetChildren 就会被拒）。
         local ok, err = pcall(function()
             WalkSwapRole(parent, 0)        -- 先换职责图集（并标 art），再褪色
-            LfgArtWalk(parent, 0, false, true)
+            LfgArtWalk(parent, true)
             LfgSideTabPass(parent)
             LfgControlsPass(parent)
         end)
