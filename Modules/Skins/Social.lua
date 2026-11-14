@@ -41,6 +41,13 @@ local FRIENDS_BUTTONS = {
 -- **哪一个真被 O 打开取决于玩家设置**，所以两扇都涂 —— 漏一扇就是玩家看到整块暴雪原样。
 local SOCIAL_UI_WINDOW = "SocialUIFrame"
 
+--- 前置声明：定义放在 `SkinFriends` **之后**。
+--- 原因：`tools/check-frame-list.js` 取名字字面量**第一次**出现的位置来判定
+--- 「这个窗口是不是以 window 档美化」（`FriendsFrameCloseButton` 靠这条判"可达"）——
+--- 我们这里要处理经典好友窗，字面量若出现在 `M:Dress("FriendsFrame", …)` 之前，
+--- 判定位置就被挪走，闸门会报"只在名单里、代码从不取用"。
+local SocialSideTabPass
+
 local function SkinFriends()
     -- 各标签页（好友 / 声望 / 团队 / 公会…）的列表用 ScrollBox，滚动条是无名 Frame + Thumb，
     -- 而且行在切页时才建出来。以前这里给每个子 Frame 各挂一条永久 ShowWatch（帧多、且切页
@@ -67,6 +74,34 @@ local function SkinFriends()
         deep = true,
         deepRows = 4,
     })
+    -- 侧页签（匿名，只能整窗扫）：与角色界面同一套 —— 褪金框、选中态换成我们的矩形盒子。
+    -- 每 2 秒复检：暴雪换页会把 alpha 抬回来，而褪色那趟是"每趟写 α0"。
+    SocialSideTabPass()
+    local social = Skin:Need(SOCIAL_UI_WINDOW)
+    if social and Widget and Widget.PollWatch and Widget:Readable(social) then
+        Widget:PollWatch(social, SocialSideTabPass, 2)
+    end
+end
+
+--- 好友（合并版 `SocialUIFrame`）那四颗**侧面**按钮是匿名的（没有全局名，11-14 实测：
+--- `SocialUIFrame` 的直接子件里第 20–23 个，各 55×55，身上带 `common-sidetab` 图集）。
+--- 按名字点名不到 ⇒ 走**整窗扫**：只认 `common-sidetab*` 这一族贴图，别的图一概不碰
+--- （`Skin:SideTabArt` 的两个名单都很窄）。
+---
+--- 口径与角色界面（`CharacterFrameModeTab1..6`）**同一套**（11-14 作者口径）：
+--- 金框 / 悬停金框 / 圆形遮罩褪掉，选中态换成我们的**矩形** barfill 盒子
+--- （画在图标之下，不糊图标）。深度 3：页签在窗口的直接子层，贴图再往下一层。
+--- 稳定引用（PollWatch 按函数身份去重，闭包每次新建 = 每一拍都多挂一条轮询）。
+SocialSideTabPass = function()
+    if not M.active then return end
+    Skin.With("social", function()
+        -- 两扇都涂（合并版与经典好友窗）—— 哪一个真被玩家打开取决于设置
+        -- （见上面那段注释），漏一扇就是那一扇还是暴雪原样。
+        for _, wname in ipairs({ SOCIAL_UI_WINDOW, "FriendsFrame" }) do
+            local w = Skin:Need(wname)
+            if w then pcall(Skin.SideTabArt, Skin, w, 3) end
+        end
+    end)
 end
 
 -- **1.60 实测（`/mui compat find WhoFrame`）**：独立"查询"窗口 `WhoFrame` 不存在，

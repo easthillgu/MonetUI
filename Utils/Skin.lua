@@ -18,6 +18,7 @@ local Media    = ns.Media
 local Widget   = ns.Widget
 local EventBus = ns.EventBus
 local Scheduler = ns.Scheduler
+local Secrets  = ns.Secrets
 
 local Skin = {}
 ns.Skin = Skin
@@ -1136,6 +1137,33 @@ function Skin:FindRegion(frame, suffix)
     return nil
 end
 
+--- 这个内容区是不是真的**在窗口里面**？
+--- @return true=在里面 / false=在外面 / nil=读不出来（还没排版）
+---
+--- 1.60 实机反例：合并社交窗 `SocialUIFrame` 的 `.Inset`（全局 `SocialUIFrameInset`）
+--- 是一只 340×256 的框 —— 它挂在窗口下、却摆在**窗口外面**（L=499，而窗口只有 16..426）。
+--- `Skin:InsetWell` 照着它铺底衬 ⇒ 屏幕中间浮出一块 340×256 的灰板
+--- （11-14 作者报"好友窗一打开就有那块灰矩形，不知道是什么"）。
+--- ⇒ 铺之前先问一句"它在不在窗口里"。
+---
+--- 读几何可能拿到**机密数字**（比较会抛 `attempt to compare … secret number`）⇒ 一律 CanRead 之后再比；
+--- 读不到 / 宽 0（还没排版）⇒ 回 nil（**未知**，别当在里面，也别当在外面）。
+local function RegionInsideWindow(region, frame)
+    local function read(obj, m)
+        if not obj or type(obj[m]) ~= "function" then return nil end
+        local ok, v = pcall(obj[m], obj)
+        if not ok or type(v) ~= "number" then return nil end
+        local secrets = ns.Secrets
+        if secrets and secrets.IsSecret and secrets.IsSecret(v) then return nil end
+        return v
+    end
+    local rl, rr = read(region, "GetLeft"), read(region, "GetRight")
+    local fl, fr = read(frame, "GetLeft"), read(frame, "GetRight")
+    if not rl or not rr or not fl or not fr then return nil end
+    if rl >= rr or fl >= fr then return nil end          -- 没排版（宽 0）⇒ 未知
+    return not (rr < fl or rl > fr)
+end
+
 --- 正文凹槽那一档（insetFrame.bg）—— 泛化版见 Skin:Well；这里是主凹槽的便捷入口。
 function Skin:InsetWell(frame, opts)
     local inset = self:FindInset(frame)
@@ -1177,6 +1205,44 @@ function Skin:Well(frame, region, opts)
         end
     end
     if not region or not self:IsScriptObject(region) then return nil end
+    -- 内容区不在窗口里 ⇒ 不铺底衬（1.60：合并社交窗的 `SocialUIFrameInset` 摆在窗口外面，
+    -- 铺了就会在屏幕中间浮出一块灰板 —— 见 `RegionInsideWindow` 的判例）。
+    -- **已经铺过的要收掉**：Apply 时窗口还没排版（宽 0 ⇒ 当时判成"在里面"），窗口打开后
+    -- 这块内容区才挪到窗外 —— 板会留在那儿（11-14 实机：好友窗一打开就有那块灰板）。
+    local inside = RegionInsideWindow(region, frame)
+    if inside == false then
+        local bg = Marked(region, "skinBg")
+        if bg then
+            pcall(bg.Hide, bg)
+            Mark(region, "skinBg", nil)
+        end
+        return nil
+    end
+    if inside == nil then
+        -- 几何还读不出来（窗口没排版）⇒ 先不铺，等它显示时补一趟。
+        -- 与上面那段"后缀解析不到"的兜底同一套写法：PollWatch 0.5 秒找到即自注销。
+        if opts.lazy ~= false and Widget and Widget.PollWatch and Widget.Unwatch then
+            if not Marked(region, "wellPending") then
+                Mark(region, "wellPending", true)
+                local fn
+                fn = function(f)
+                    if not Marked(region, "wellPending") then return end
+                    local v = RegionInsideWindow(region, f)
+                    if v == true then
+                        Widget:Unwatch(f, fn)
+                        Mark(region, "wellPending", nil)
+                        self:Well(f, region, opts)
+                    elseif v == false then
+                        -- 确定在窗口外面 ⇒ 不用再等了（自注销，别挂一条永远失败的轮询）
+                        Widget:Unwatch(f, fn)
+                        Mark(region, "wellPending", nil)
+                    end
+                end
+                Widget:PollWatch(frame, fn, 0.5)
+            end
+        end
+        return nil
+    end
     self:Strip(region)
     local okA, a = pcall(region.GetAlpha, region)
     if okA and a and a <= 0.001 then
@@ -1749,6 +1815,31 @@ end
 --- 旧名（历史调用点仍用）：语义已并入 `Skin:HidePortraits`（以前叫"压成方形"，实为隐藏）。
 function Skin:SquarePortrait(frame)
     return self:HidePortraits(frame) > 0
+end
+
+--- 侧页签统一档（2026-11-14 作者口径："寻求组队 / 好友的侧面按钮都统一成角色界面那种样式"）。
+---
+--- 角色界面那边（`CharacterFrameModeTab1..6`）的口径是：
+---   ① 选中态那张 `common-sidetab-selected` → 换成我们自己的**矩形** barfill 盒子
+---      （`StyleAtlasBackdrop` 的 swap 档：α0.6、画在 `BACKGROUND/-6` ⇒ 盒子在图标**之下**、
+---        不糊图标；暴雪那个选中态是斜角框，tint 保留它仍是斜的，换矩形才方正）；
+---   ② 金框 / 悬停金框 / 圆形遮罩 → 褪掉。
+--- 这两档抽成一个入口，找组队（`LFGParentFrame` 的三颗）与好友（`SocialUIFrame` 的四颗）都用它，
+--- 免得每个窗口各做各的（上一轮找组队就做成了"自建方板 + 选中环 + 图标明暗"，和角色界面不是一套）。
+---
+--- **换在前、褪在后**：`SwapArt` 会把 alpha 复位到 1，而褪色那趟是"每趟写 α0"；
+--- 顺序反了的话选中盒子刚换上就被压成 α0（与 §8.114.2 职责图标同一族的坑）。
+--- @param frame 页签框体，或装着页签的窗口（depth 够深就能扫到里面的页签）
+--- @param depth 递归深度（页签自己的贴图在 depth 0~1；隔着窗口扫就调大）
+function Skin:SideTabArt(frame, depth)
+    if not frame then return end
+    depth = depth or 1
+    -- ① 选中态 → 我们的矩形盒子
+    self:StyleAtlasBackdrop(frame, {}, { "common%-sidetab%-selected" }, {}, depth)
+    -- ② 金框 / 悬停金框 / 圆形遮罩 → 每趟写 α0（暴雪换页会把 alpha 抬回来）
+    self:FadeAtlasBackdrop(frame, {
+        "common%-sidetab$", "common%-sidetab%-hover", "common%-sidetab%-mask",
+    }, depth, 0)
 end
 
 --- Restyle a scroll bar (track + arrows + thumb).

@@ -159,7 +159,7 @@ end
 local LFG_ART = {
     "^groupfinder%-button%-cover",
     "^groupfinder%-background", "^groupfinder%-roles%-background", "^groupfinder%-stat%-stonebg",
-    "^common%-insideframe", "^common%-framedivider", "^common%-sidetab%-",
+    "^common%-insideframe", "^common%-framedivider",
     "^common%-button%-", "^common%-dropdown%-",
     "^ui%-frame%-", "^_ui%-frame%-", "^!ui%-frame%-",
     "^gamepad%-uiframemetal", "^toptilestreaks",
@@ -395,34 +395,16 @@ local function LfgControlsPass(parent)
     pcall(M.SkinScrollsIn, M, parent)
 end
 
-local LFG_SIDE = {
-    { key = "ListingTab",    view = "LFGListingFrame" },
-    { key = "BrowsingTab",   view = "LFGBrowseFrame" },
-    { key = "WhoListingTab", view = "LFGWhoListFrame" },
-}
+--- 侧页签：与角色界面（`CharacterFrameModeTab*`）**同一套**（11-14 作者口径）。
+--- 上一版是"自建方板 + 选中环 + 图标明暗"，那是我们自己发明的样式；现在统一走
+--- `Skin:SideTabArt`：金框 / 悬停金框 / 圆形遮罩褪掉，选中态换成我们的**矩形** barfill 盒子
+--- （画在图标之下，不糊图标）。图标本身保持暴雪原样 —— 角色界面那边也是这样。
+--- 选中态由暴雪自己切（`common-sidetab-selected` 那张纹理本来就是"选中才画"），
+--- 所以这里**不需要**再用 view 可见性去推选中态（上一版那套也一并撤掉）。
 local function LfgSideTabPass(parent)
-    for i = 1, #LFG_SIDE do
-        local info = LFG_SIDE[i]
-        local tab = parent[info.key]
-        if tab then
-            local base = OwnPlate(tab, "lfgBase", { thickness = 1, bgAlpha = 0.10, borderAlpha = 0.55 })
-            local ring = OwnPlate(tab, "lfgRing", { thickness = 1, bgAlpha = 0, borderAlpha = 1 })
-            if base and not Marked(tab, "lfgHoverWatch") then
-                Mark(tab, "lfgHoverWatch", true)
-                Widget:HoverWatch(tab,
-                    function() pcall(function() Widget:SetHoverLift(base, true) end) end,
-                    function() pcall(function() Widget:SetHoverLift(base, false) end) end)
-            end
-            local view = rawget(_G, info.view)
-            local selected = view and VisibleOf(view)
-            if ring then
-                if selected then pcall(ring.Show, ring) else pcall(ring.Hide, ring) end
-            end
-            local icon = tab.Icon
-            if icon and type(icon.SetAlpha) == "function" then
-                pcall(icon.SetAlpha, icon, selected and 1 or 0.55)
-            end
-        end
+    for i = 1, #LFG_SIDE_TABS do
+        local tab = parent[LFG_SIDE_TABS[i]]
+        if tab then pcall(Skin.SideTabArt, Skin, tab, 1) end
     end
 end
 
