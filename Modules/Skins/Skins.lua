@@ -199,6 +199,25 @@ local function WindowShowPass(frame)
     IconPass(frame)
 end
 
+--- chrome 褪色：每棵窗子树里那套通用的金属框 / 内框 / 分隔线（共享名单见 `Skin.CHROME_ATLAS`）。
+--- 稳定引用（PollWatch 按函数身份去重，闭包每次新建 = 每一拍都多挂一条轮询）。
+local function ChromePass(frame)
+    if not M.active then return end
+    pcall(Skin.FadeChrome, Skin, frame)
+end
+
+--- 给一扇窗登记 chrome 褪色（2 秒一趟，只在窗口可见时跑）。
+function M:SweepChrome(frame)
+    if not frame then return end
+    local fd = GetFFD(frame)
+    if fd.chromeSweep then return end
+    fd.chromeSweep = true
+    ChromePass(frame)
+    if Widget and Widget.PollWatch and Widget:Readable(frame) then
+        Widget:PollWatch(frame, ChromePass, 2)
+    end
+end
+
 --- The common window treatment: fade the frame's *own* chrome (not its children, so icons stay intact), hang a Monet backplate under it, restyle title and close button.
 -- @param opts { layer, inset, panel = Widget:Theme opts, titleSize, noTitle = true, noClose = true, inset = true|{opts} }
 function M:SkinWindow(frame, opts)
@@ -285,6 +304,11 @@ function M:SkinWindow(frame, opts)
         Mark(frame, "winShowPass", true)
         if Widget and Widget.ShowWatch then Widget:ShowWatch(frame, WindowShowPass) end
     end
+
+    -- 通用 chrome（金属框 / 内框 / 分隔线 …）：**每个窗的子帧上都带同一整套**，
+    -- 逐窗写的名单只覆盖了一部分 ⇒ 每个窗都留着一圈暴雪金框（11-14 全量普查的结论）。
+    -- 共享名单在 `Skin.CHROME_ATLAS`；2 秒一趟、只在窗口可见时跑。
+    M:SweepChrome(frame)
 
     return frame
 end
@@ -532,6 +556,10 @@ function M:Dress(spec, opts)
                     -- 都安全，不必像 `deep` 那样逐个确认。deep 里已经包含它，别重复登记。
                     M:SweepTemplates(frame, opts.control)
                 end
+
+                -- 非窗口档（子面板 / 内容区）也吃同一套 chrome 褪色：
+                -- 这些区里的金属框同样是暴雪那套族，逐窗名单覆盖不全（见 Skin.CHROME_ATLAS）。
+                M:SweepChrome(frame)
 
                 -- 物品图标铺平 + 裁切（**默认开**，`icons = false` 才关）：子树里带 .icon 指纹的
                 -- 按钮压掉圆角遮罩 / 原生槽框，图标 8% 裁切 + 品质色方边（素底兜底）——

@@ -1842,6 +1842,66 @@ function Skin:SideTabArt(frame, depth)
     }, depth, 0)
 end
 
+--- 通用 **chrome** 图集族（金属框 / 内框 / 顶栏流光 / 分隔线 / 里面板框 / 手柄提示 …）。
+---
+--- 11-14 全量普查（47 个面板、逐窗枚举子帧图集）得到的系统性结论：
+--- **几乎每个窗的子帧上都带着同一整套** `!UI-Frame-Inner*` / `UI-Frame-Metal-*` / `_UI-Frame-*` /
+--- `common-insideframe` / `common-framedivider` …，而我们**逐窗写的名单只覆盖了其中一部分**
+--- ⇒ 每个窗都留着一圈暴雪金框（作者反复报的"没做全"就是这一类）。
+--- 收成一份共享名单，由 `Skin:FadeChrome` 统一褪掉 —— 只认这些族，别的图一概不碰。
+---
+--- ⚠ 刻意**不含** `Tooltip-NineSlice-*`（工具提示的框）与 `minimal-scrollbar-*`
+--- （滚动条有专门那套：把手 / 步进钮要换图而不是压掉）。
+Skin.CHROME_ATLAS = {
+    "ui%-frame%-inner",
+    "ui%-frame%-metal",
+    "ui%-frame%-portraitmetal",
+    "ui%-frame%-diamondmetal",
+    "ui%-frame%-toptilestreaks",
+    "common%-insideframe",
+    "common%-framedivider",
+    "common%-stat%-bar%-bg",
+    "gamepad%-uiframemetal",
+    "gamepad%-press&hold",
+}
+
+--- 褪掉一棵子树里的 chrome 美术（每趟写 alpha 0：暴雪换页会把 alpha 抬回来）。
+--- @param opts { depth = 4, alpha = 0 }
+--- @return 这次压掉的贴图数
+function Skin:FadeChrome(frame, opts)
+    if not frame or type(frame.GetRegions) ~= "function" then return 0 end
+    opts = opts or {}
+    local maxDepth = opts.depth or 4
+    local alpha = opts.alpha or 0
+    local list = self.CHROME_ATLAS
+    local n = 0
+    local function walk(h, d)
+        if d > maxDepth then return end
+        local okR, regs = pcall(function() return { h:GetRegions() } end)
+        if okR and type(regs) == "table" then
+            for _, reg in ipairs(regs) do
+                local okA, atlas = pcall(reg.GetAtlas, reg)
+                if okA and type(atlas) == "string" then
+                    local low = atlas:lower()
+                    for i = 1, #list do
+                        if low:find(list[i]) then
+                            pcall(reg.SetAlpha, reg, alpha)
+                            n = n + 1
+                            break
+                        end
+                    end
+                end
+            end
+        end
+        local okC, kids = pcall(function() return { h:GetChildren() } end)
+        if okC and type(kids) == "table" then
+            for _, k in ipairs(kids) do walk(k, d + 1) end
+        end
+    end
+    walk(frame, 0)
+    return n
+end
+
 --- Restyle a scroll bar (track + arrows + thumb).
 function Skin:ScrollBar(scrollbar)
     if not scrollbar then return scrollbar end
