@@ -42,6 +42,21 @@ local HOVER_VIS_TTL = 0.3
 --- 驱动循环遇到暂停中的框时用它替下监听表：状态照常推进，但一个回调都不跑。
 local idleList = {}
 
+--- 底衬"通透度"：按 `bgSurface` 档位乘在调用点 alpha 上（只作用于底衬，不碰条填充/织纹/文字）。
+--- 作者口径 11-14：「很多大块的灰色，不够通透」—— 大面积面不再接近全不透明。
+---   panel  0.60 → 窗底 0.96 落地 ≈0.58
+---   lost   0.42 → 正文凹槽 0.96 落地 ≈0.40（**大块灰的主源**）
+---   hover  0.55 → 悬停底：比常态亮一档，但不比常态更实
+local SURFACE_FILL = {
+    panel = 0.60,
+    lost  = 0.42,
+    hover = 0.55,
+}
+
+--- 边框 alpha 的收细系数：1px 全不透明是"实心盒子"感的另一半来源。
+--- 只乘 alpha，不改色相；显式 `borderAlpha = 0` 仍是 0（那些是"不要边"的调用点）。
+local SURFACE_BORDER = 0.65
+
 --- 订阅表的**快照**：回调里可能自己 `Widget:Unwatch`（例如"凹槽显示时补铺"那种一次性的），
 --- 那会 `table.remove` 掉**正在遍历**的那张表 —— 后面 `list[i]` 就成了 nil
 --- （11-14 实机：`Widget.lua:449 attempt to index local 'cb' (a nil value)`）。
@@ -1459,7 +1474,15 @@ function Widget:Refresh(frame, opts)
         local base = opts.bgSurface or "panel"
         local hovered = opts.hovered and true or false
         local pr, pg, pb = Color:GetSurface(hovered and base == "panel" and "hover" or base)
-        frame:SetBackdropColor(pr, pg, pb, opts.bgAlpha or 0.85)
+        -- **通透度**（作者口径 11-14："很多大块的灰色，不够通透"）：乘在调用点 alpha 上的
+        -- 按档位系数。只作用于**底衬**（SetBackdropColor），不碰条填充 / 织纹 / 文字 / 边框。
+        -- 为什么只在这一处能改干净：`bgAlpha = 0.96` 散在 ~40 个调用点上，逐点改既漏又难回退；
+        -- 而在"表面阶梯"这一层收口，全窗口一次到位，数值也只在一处可调。
+        --   panel（窗底）     0.96 → ≈0.77
+        --   lost（正文凹槽）  0.96 → ≈0.60  ← **大块灰的主源**，降得最多
+        --   hover（悬停底）   比常态亮一点，但不能比常态更实
+        local fill = (opts.bgAlpha or 0.85) * (SURFACE_FILL[base] or 1)
+        frame:SetBackdropColor(pr, pg, pb, fill)
 
         local state = opts.borderState
         if state then
@@ -1477,7 +1500,10 @@ function Widget:Refresh(frame, opts)
                 -- §7-a：悬停那一拍边框换成 highlight（只亮不跳），alpha 保持这一块板自己的。
                 r, g, b = Color:GetHighlight()
             end
-            frame:SetBackdropBorderColor(r, g, b, opts.borderAlpha or a or 1)
+            -- 边框也收细（`SURFACE_BORDER`）：显式 0 仍是 0，其余一律乘系数。
+            local ba = opts.borderAlpha or a or 1
+            if ba ~= 0 then ba = ba * SURFACE_BORDER end
+            frame:SetBackdropBorderColor(r, g, b, ba)
         end
     end
 end

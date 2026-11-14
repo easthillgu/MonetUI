@@ -1070,6 +1070,7 @@ function Skin:Panel(frame, opts)
             borderKey   = opts.borderKey,
             bgSurface   = opts.bgSurface,
         })
+        self:PanelSheen(bg)
         Mark(bg, "skinPlate", true)
         Mark(bg, "panelTopExtend", topExtend)
         Mark(frame, "skinBg", bg)
@@ -1162,6 +1163,32 @@ local function RegionInsideWindow(region, frame)
     if not rl or not rr or not fl or not fr then return nil end
     if rl >= rr or fl >= fr then return nil end          -- 没排版（宽 0）⇒ 未知
     return not (rr < fl or rl > fr)
+end
+
+--- **玻璃边**：给一大块底衬加"内侧顶部 1px 极淡亮线 + 底部 1px 极淡暗线"。
+---
+--- 作者口径 11-14：「很多大块的灰色，不够通透 / 不够精细」。通透靠填充 alpha（见 Widget 的
+--- `SURFACE_FILL`）；**精细**靠这两条 1px —— 纯平涂的矩形永远像一块灰板，加上"上亮下暗"的
+--- 内沿就成了有厚度的一块玻璃。只加**我们自己的**贴图到我们自己的背板上，不碰暴雪对象。
+--- 幂等（`sheen` 标记）；只给 `Skin:Panel` 那种大面积底衬用，小控件不铺（会显脏）。
+function Skin:PanelSheen(bg)
+    if not bg or Marked(bg, "sheen") then return end
+    Mark(bg, "sheen", true)
+    local top = bg:CreateTexture(nil, "BORDER")
+    if not top then return end
+    top:SetColorTexture(1, 1, 1, 0.05)
+    top:SetPoint("TOPLEFT", bg, "TOPLEFT", 1, -1)
+    top:SetPoint("TOPRIGHT", bg, "TOPRIGHT", -1, -1)
+    top:SetHeight(1)
+    Mark(top, "art", true)
+    local bot = bg:CreateTexture(nil, "BORDER")
+    if bot then
+        bot:SetColorTexture(0, 0, 0, 0.16)
+        bot:SetPoint("BOTTOMLEFT", bg, "BOTTOMLEFT", 1, 1)
+        bot:SetPoint("BOTTOMRIGHT", bg, "BOTTOMRIGHT", -1, 1)
+        bot:SetHeight(1)
+        Mark(bot, "art", true)
+    end
 end
 
 --- 正文凹槽那一档（insetFrame.bg）—— 泛化版见 Skin:Well；这里是主凹槽的便捷入口。
