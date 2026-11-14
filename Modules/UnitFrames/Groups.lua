@@ -292,6 +292,22 @@ local function StyleRoleIcon(button, small)
     end
 end
 
+--- 队长王冠（2026-11-14 接上 `monet_role_leader`）。
+---
+--- 原来队长的信号只有**颜色**：`Color:RoleTint` 把队长 / 助理 / 指挥统统染成 highlight 档，
+--- 三个身份挤在同一个"亮色"里，形状上完全看不出"这是队长"。这里给**队长本人**补一枚王冠，
+--- 贴在职责图标左边 —— 助理与指挥不戴（那两个是"职务"，队长才是"身份"）。
+--- 尺寸比职责图标小一档（7 / 8px）：名字盒右边只留了 10–12px，王冠再大一点就压到名字尾巴。
+local function StyleLeaderIcon(button, small)
+    if not button.leader then
+        button.leader = button.overlay:CreateTexture(nil, "OVERLAY")
+        button.leader:SetTexture(Media:Texture("monet_role_leader"))
+        button.leader:SetSize(small and 7 or 8, small and 7 or 8)
+        button.leader:SetPoint("RIGHT", button.role, "LEFT", -1, 0)
+        button.leader:Hide()
+    end
+end
+
 --- 建（或重贴）一个单位按钮的外观。可重复调用：只改尺寸和锚点，不重建 region。
 --- 本函数只做"顺序 + 组合"，各段实现在上面五个 helper 里。
 local function StyleButton(button, cfg, small)
@@ -314,6 +330,7 @@ local function StyleButton(button, cfg, small)
     StylePowerBar(button, inner, powerHeight)
     StyleTexts(button, cfg, small, inner)
     StyleRoleIcon(button, small)
+    StyleLeaderIcon(button, small)
     -- 选中目标边框：四条边常驻、平时 alpha 0，成为当前目标时才点亮（SyncSelection）。
     -- **必须显式初始化 alpha**：BuildEdges 建出来的贴图默认是白色 alpha 1，不主动压掉的话
     -- 每格都像"被选中"（2026-10-25 实机：队伍框开局满屏高亮）。
@@ -436,6 +453,22 @@ local function UpdateRole(button)
 
     local r, g, b = Color:RoleTint(unit)
     button.role:SetVertexColor(r, g, b)
+
+    -- 队长王冠：`UnitIsGroupLeader` 在受限上下文里可能回**机密布尔**，
+    -- 真值测试会被客户端拦成 UNKNOWN() ⇒ 一律走 Secrets.Bool（值级前置）。
+    local leader = false
+    local okL, isLeader = pcall(UnitIsGroupLeader, unit)
+    if okL then leader = Secrets.Bool(isLeader, false) end
+    if button.leader then
+        if leader then
+            button.leader:Show()
+            -- 与职责图标同一套语言：队长 = highlight 档。
+            local hr, hg, hb = Color:GetHighlight()
+            button.leader:SetVertexColor(hr, hg, hb)
+        else
+            button.leader:Hide()
+        end
+    end
 end
 
 --- 存活 / 离线 / 主题色：一条事件（UNIT_HEALTH、UNIT_FLAGS、UNIT_CONNECTION）就能全刷。
