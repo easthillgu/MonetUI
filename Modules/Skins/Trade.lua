@@ -514,7 +514,9 @@ local function SkinProfessions()
 end
 
 local function SkinBank()
-    M:Dress({ "BankFrame", "WarbandBankFrame" }, {
+    -- 11-14 实机核对：`WarbandBankFrame` 在本客户端**不存在**（1.60 没有战团银行）⇒ 摘掉；
+    -- 银行还是 `BankFrame` 那一扇。
+    M:Dress("BankFrame", {
         window = true, inset = true, panel = { bgAlpha = 0.96 },
         -- 现代框架的包裹格挂在 BankPanel（PanelTemplate）名下 —— 同一套凹槽语言收它
         -- （Strip 含 NineSlice）。实机核对后再定去留。
@@ -552,7 +554,7 @@ M:Panel("professions", { label = "专业 / 制造", group = "交易", apply = Sk
     frames = { "ProfessionsFrame" } })
 
 M:Panel("bank", { label = "银行", group = "交易", apply = SkinBank,
-    frames = { "BankFrame", "WarbandBankFrame" } })
+    frames = { "BankFrame" } })
 
 -- 宝石镶嵌：无 game-type 门控（wow-ui-source forever 分支），本客户端存在。
 -- 宝石格子是带图标的槽位，SkinButtonsIn 会自动跳过。

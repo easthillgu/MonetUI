@@ -269,7 +269,10 @@ M:Panel("objectivetracker", {
     label = "目标追踪",
     group = "任务",
     apply = SkinObjectiveTracker,
-    frames = { "ObjectiveTrackerFrame", TRACKER_HEADERS },
+    -- 11-14 实机核对：`ObjectiveTrackerHeader` / `QuestLogObjectiveHeader` 在本客户端都不存在
+    -- （追踪框的标题是匿名 FontString）⇒ 不进名单；上面的 `M:Controls` 保留 ——
+    -- 将来客户端真给了这两个具名件，字体那一步照样生效，只是不再常年挂 ✗。
+    frames = { "ObjectiveTrackerFrame" },
 })
 
 M:Panel("questlog", {

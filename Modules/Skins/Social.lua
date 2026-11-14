@@ -685,9 +685,10 @@ local function SkinCommunities()
     end
 end
 
--- 1.60 的公会/好友/社区合并进 `SocialUIFrame`（见 A 批）；`GuildFrame` 是零售 12.x 的名字，
--- 这台机器上没有 ⇒ 在 1.60 的台账里那一行 ✗ 属**预期**（两客户端共用一份名单，不为一个客户端删另一个的名字）。
-local GUILD_FRAMES = { "GuildFrame", "GuildControlUI", "GuildRegistrarFrame", "GuildInviteFrame" }
+-- 1.60 的公会/好友/社区合并进 `SocialUIFrame`（见 A 批）。
+-- 11-14 实机核对：`GuildFrame`（零售 12.x 的名字）在本客户端**不存在** ⇒ 摘掉，
+-- 别再让它常年挂在 `/mui skins diagnose` 的缺失名单里。
+local GUILD_FRAMES = { "GuildControlUI", "GuildRegistrarFrame", "GuildInviteFrame" }
 
 local function SkinGuild()
     M:Dress(GUILD_FRAMES, { window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true })

@@ -266,9 +266,11 @@ local function SkinDressUp()
         inset = true, -- DressUpFrameInset（实机 2026-11-02 枚举确认）
         panel = { bgAlpha = 0.96 },
         rule = true,
+        -- 11-14 实机核对：`DressUpFrame.ToggleOutfitDetailsButton` 在本客户端不存在
+        -- （试衣间没有"显示/隐藏详情"那颗）⇒ 摘掉。
         buttons = {
             "DressUpFrameResetButton", "DressUpFrameCancelButton",
-            "DressUpFrame.LinkButton", "DressUpFrame.ToggleOutfitDetailsButton",
+            "DressUpFrame.LinkButton",
         },
     })
 end
@@ -280,6 +282,6 @@ M:Panel("dressup", {
     frames = {
         "DressUpFrame", "DressUpFrameCloseButton",
         "DressUpFrameResetButton", "DressUpFrameCancelButton",
-        "DressUpFrame.LinkButton", "DressUpFrame.ToggleOutfitDetailsButton",
+        "DressUpFrame.LinkButton",
     },
 })

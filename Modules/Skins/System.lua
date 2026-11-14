@@ -28,7 +28,8 @@ local function SkinLoot()
     M:Dress("GroupLootHistoryFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true })
 end
 
-local POPUP_FRAMES = { "LFGListInviteDialog", "LFGInvitePopup" }
+-- 11-14 实机核对：`LFGListInviteDialog` 在本客户端不存在（只剩 `LFGInvitePopup`）⇒ 摘掉。
+local POPUP_FRAMES = { "LFGInvitePopup" }
 local READYCHECK_FRAMES = { "ReadyCheckFrame", "ReadyCheckListenerFrame" }
 local NOTICE_FRAMES = { "QueueStatusFrame", "BNToastFrame" }
 
@@ -631,7 +632,9 @@ end
 -- 闸门 tools/check-frame-list.js 会把表名解析回具体字符串再核对取用路径。
 M:Panel("loot", { label = "拾取 / 掷骰", group = "系统", apply = SkinLoot,
     frames = {
-        "LootFrame", "LootFrameCloseButton",
+        -- 11-14 实机核对：`LootFrameCloseButton` 本客户端不存在（关闭钮是匿名件，
+        -- 由 `Skin:FindAnonClose` 按 RedButton-Exit 签名认脸）⇒ 摘掉。
+        "LootFrame",
         GROUP_LOOT_FRAMES, "GroupLootHistoryFrame",
     } })
 
@@ -733,25 +736,22 @@ M:Panel("help", { label = "帮助", group = "系统", apply = SkinHelp,
     addons = { Blizzard_HelpFrame = true },
     frames = { "HelpFrame", "HelpFrame.CloseButton" } })
 
--- 拾色器：设置面板等处弹出，无门控。按钮名三套并存是刻意的 ——
--- `ColorPickerFrame.Footer.*`（正式服 Footer 成员）、`ColorPickerFrameOkay/Cancel`（12.1.5 实机取到过
--- 的全局名）、`ColorPickerOkayButton/CancelButton`（1.60 FrameXML 声明的全局名，
--- 由 `tools/frame-name-existence.js` 对撞得出）。够不到的那套只是不落美化，不会抛。
+-- 拾色器：设置面板等处弹出，无门控。
+-- 11-14 实机核对：`ColorPickerFrameOkay/Cancel`、`ColorPickerOkayButton/CancelButton`
+-- **四套全局名在本客户端全都不存在**（只剩 `ColorPickerFrame.Footer.*` 那一套）⇒ 摘掉，
+-- 别再让 `/mui skins diagnose` 为它们常年挂 ✗。按钮走 Footer 成员。
 local function SkinColorPicker()
     M:Dress("ColorPickerFrame", {
         window = true,
         panel = { bgAlpha = 0.96 },
         buttons = {
-            "ColorPickerFrameOkay", "ColorPickerFrameCancel",
-            "ColorPickerOkayButton", "ColorPickerCancelButton",
             "ColorPickerFrame.Footer.OkayButton", "ColorPickerFrame.Footer.CancelButton",
         },
     })
 end
 
 M:Panel("colorpicker", { label = "拾色器", group = "系统", apply = SkinColorPicker,
-    frames = { "ColorPickerFrame", "ColorPickerFrameOkay", "ColorPickerFrameCancel",
-        "ColorPickerOkayButton", "ColorPickerCancelButton",
+    frames = { "ColorPickerFrame",
         "ColorPickerFrame.Footer.OkayButton", "ColorPickerFrame.Footer.CancelButton" } })
 
 -- 呼吸 / 疲劳 / 溺水条：暴雪自建的三条（MirrorTimerContainer.mirrorTimers[1..3]），
