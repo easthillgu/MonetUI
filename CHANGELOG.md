@@ -3,6 +3,35 @@
 This file is used verbatim as the CurseForge release changelog (see `.pkgmeta`).
 Update the top section before tagging a new release.
 
+## 0.13.8 (2026-11-14)
+
+- Look & feel: panels are noticeably more see-through (window fill 0.96 -> ~0.58,
+  content wells -> ~0.40) and the border hairlines are finer. Large surfaces get a
+  subtle glass edge (1px top highlight + 1px bottom shadow) instead of reading as
+  flat grey slabs.
+- Text hierarchy: window titles are one step larger and use the theme's signature
+  colour; body text and secondary/caption text now sit on distinct tiers.
+- Spacing: our content plates are inset (2-4px) so panels, cards and list rows get
+  a visible gutter instead of merging into one block. Blizzard layouts are not moved.
+- Vanilla group finder (Looking For Group): interior art, category rows, role
+  buttons, side tabs, dropdown chevrons, search/filter buttons and scroll bars are
+  skinned; the leader/guide role got its own icon.
+- Professions: content wells for the overview cards, the recipe list and the detail
+  pane; the selected recipe row is marked with the diagonal weave; side tabs follow
+  the character window.
+- World map + quest log (merged window): the quest pane interior is skinned --
+  side tabs, quest rows, search box and the remaining log backgrounds.
+- Friends / social window: side tabs unified with the character window, the stray
+  plate that floated outside the window removed, recruitment and card decorations
+  cleared.
+- Character window: azerite and enchant glows, the PvP side bar and the transfer
+  log backgrounds are cleared.
+- All windows: one shared list now clears the generic metal-frame / inner-frame /
+  divider family, which previously survived on every window.
+- Fixes: a crash when a polled callback unregistered itself (`attempt to index
+  local 'cb'`); role icons no longer disappear after skinning; 10 frame names that
+  do not exist in this client were removed from the diagnostics.
+
 ## 0.13.7 (2026-11-12)
 
 - Skins (regression fix): decorations that were "cleared but came back" after
