@@ -775,7 +775,7 @@ function SimpleConfig:Build()
 
         -- 地图形状只有一套（正方画布 + 遮罩裁带），不再提供切换
 
-        -- 地图内的三个独立按钮（3:4 矩形图标）
+        -- 地图内的四个独立按钮
         local mapCaption = Widget:Font(content, 12, "pixel", "edge", "LEFT")
         mapCaption:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(22))
         mapCaption:SetText("· 地图内的按钮")
@@ -786,14 +786,17 @@ function SimpleConfig:Build()
         MakeCheckbox(content, "难度（左上）", row(26),
             MapSetting("mapDifficulty"), MapSetter("mapDifficulty"))
 
-        MakeCheckbox(content, "插件收纳（右上）", row(24),
+        MakeCheckbox(content, "插件收纳（右上）", row(26),
             MapSetting("mapCompartment"), MapSetter("mapCompartment"))
+
+        MakeCheckbox(content, "寻找组队状态（右下，动态字符）", row(24),
+            MapSetting("mapQueueStatus"), MapSetter("mapQueueStatus"))
 
         local mapHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
         mapHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(38))
         mapHint:SetWidth(328)
         mapHint:SetJustifyH("LEFT")
-        mapHint:SetText("追踪 / 插件收纳开着时，暴雪原来那一个被搬进地图，不再单独隐藏。")
+        mapHint:SetText("追踪 / 插件收纳 / 排队状态开着时，原按钮搬进地图，不再单独隐藏。")
         -- 上面这句在 328 宽里折成两行，行距要给到 38 才不压下一行。
 
         -- 手势速查（写在面板里，免得翻文档）

@@ -1,13 +1,13 @@
 -- Modules/Minimap/Buttons.lua
--- 小地图内的三个独立按钮：追踪（左下）、难度（左上）、插件收纳（右上）。
+-- 小地图内的四个独立按钮：追踪（左下）、难度（左上）、插件收纳（右上）、排队状态（右下）。
 --
--- 追踪与插件收纳用的是**暴雪自己的按钮**（搬进来，不重写）：菜单、追踪状态、插件列表
--- 都由客户端在管，我们只负责摆位和画自己的图标。搬进来的代价是 SetParent / SetSize
--- 在战斗里可能被无声拒绝，所以每次套用都重新摆一遍。
+-- 追踪 / 插件收纳 / 排队状态用的是**暴雪自己的按钮**（搬进来，不重写）：菜单、追踪状态、
+-- 插件列表、队列提示都由客户端在管，我们只负责摆位和换掉图标。搬进来的代价是
+-- SetParent / SetSize 在战斗里可能被无声拒绝，所以每次套用都重新摆一遍、并按拍纠回。
 --
--- 三个按钮共用同一块 3:4 底板（15×20，Widget:Theme 的平边框），图标是自绘的纯白模具
--- （tools/regen-textures.js 生成），颜色在运行期染：追踪=中性色、收纳=边缘色、
--- 难度=副本难度色。
+-- 前三颗共用自绘纯白模具徽章（tools/regen-textures.js 生成）：追踪=中性色、收纳=边缘色、
+-- 难度=副本难度色。第四颗（QueueStatusButton）与复古组队窗肖像位共用
+-- `Skin:GlyphBadge` 的**动态字符徽章**，没有贴图 —— 见 Utils/Skin.lua 末尾。
 
 local ADDON_NAME, ns = ...
 
@@ -15,6 +15,7 @@ local Widget   = ns.Widget
 local Media    = ns.Media
 local Secrets  = ns.Secrets
 local EventBus = ns.EventBus
+local Skin     = ns.Skin
 
 -- 旁表标记（见 Core.lua 的 ns:Mark）
 local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
@@ -354,6 +355,125 @@ local function SetupDifficulty()
     UpdateDifficulty()
 end
 
+-- ------------------------------------------------------------------ 排队状态（右下）
+-- 参照只读参考件 Andromeda 的 `MAP:CreateQueueStatusButton()`（把 QueueStatusButton 摆到
+-- 小地图 BOTTOMRIGHT），但**不抄它的 hooksecurefunc / SetPoint 钩**：AGENTS 禁止往暴雪
+-- 方法槽里写东西。改为 `Widget:PollWatch` 每 0.5 秒按回父级与锚点。
+-- 眼睛本身换成动态字符徽章：两处眼睛（LFG 窗肖像位 / 这里）同一套、同一帧。
+local QUEUE_PATH = "QueueStatusButton"
+
+--- 按钮上的暴雪美术：Highlight（96×96 发光）+ Eye 子树（LFGEyeTemplate 的 flipbook / 光晕）。
+--- 只压 alpha、不 Hide：暴雪靠 QueueStatusButton:Show/Hide 与 Eye 的动画组管状态机，
+--- 断掉 shown 链会让排队提示整个停掉。动画会把 alpha 抬回来 ⇒ QueuePoll 每拍补压。
+local function QueueArtRegions(btn)
+    local out = {}
+    local function walk(obj, depth)
+        if not obj or depth > 3 or not Widget:Readable(obj) then return end
+        local okR, regs = pcall(function() return { obj:GetRegions() } end)
+        if okR and type(regs) == "table" then
+            for i = 1, #regs do
+                local r = regs[i]
+                local okT, kind = pcall(r.GetObjectType, r)
+                if okT and kind == "Texture" then out[#out + 1] = r end
+            end
+        end
+        local okC, kids = pcall(function() return { obj:GetChildren() } end)
+        if okC and type(kids) == "table" then
+            for i = 1, #kids do walk(kids[i], depth + 1) end
+        end
+    end
+    walk(btn, 0)
+    return out
+end
+
+--- 原 alpha 记进旁表（不写暴雪字段），RestoreQueueArt 按值放回。
+local function FadeQueueEye(btn)
+    if not btn then return end
+    local list = Marked(btn, "queueArt")
+    if not list then
+        -- 只扫一次，且必须在建徽章**之前**：自建板的 backdrop 不该被算成暴雪美术。
+        list = {}
+        for _, reg in ipairs(QueueArtRegions(btn)) do
+            local ok, a = pcall(reg.GetAlpha, reg)
+            list[#list + 1] = { region = reg, alpha = (ok and type(a) == "number" and a) or 1 }
+        end
+        Mark(btn, "queueArt", list)
+    end
+    for i = 1, #list do
+        pcall(list[i].region.SetAlpha, list[i].region, 0)
+    end
+end
+
+local function RestoreQueueArt(btn)
+    local list = Marked(btn, "queueArt")
+    if not list then return end
+    for i = 1, #list do
+        pcall(list[i].region.SetAlpha, list[i].region, list[i].alpha)
+    end
+    Mark(btn, "queueArt", nil)
+end
+
+--- 每 0.5 秒：①补压被动画抬回来的 alpha；②按回父级与锚点。
+--- Camelot 的 `QueueStatusButtonMixin:UpdateDefaultAnchor()` 会 ClearAllPoints + SetPoint
+--- 把按钮拉回小地图默认位，**不改父级** ⇒ 只看 parent 的 HookReassert 抓不到这一下。
+local function QueuePoll()
+    local btn = Resolve(QUEUE_PATH)
+    if not btn or not container then return end
+    local saved = savedParents[btn]
+    if not saved or not saved.layout then return end
+    FadeQueueEye(btn)
+    if InCombatLockdown() then return end
+    local okP, par = pcall(btn.GetParent, btn)
+    local okR, rel = pcall(function()
+        local _, r = btn:GetPoint(1)
+        return r
+    end)
+    if not okR or not okP or par ~= container or rel ~= container then
+        PlaceButton(btn, saved.layout)
+    end
+end
+
+local function SetupQueueStatus()
+    local btn = Resolve(QUEUE_PATH)
+    if not btn or not container then return false end
+    local layout = { "BOTTOMRIGHT", "BOTTOMRIGHT", -4, 4 }
+    SaveParent(btn, layout)
+    PlaceButton(btn, layout)
+    HookReassert(btn)
+    FadeQueueEye(btn)
+
+    -- 徽章挂在**按钮**上：显隐完全交给暴雪（没排队时按钮 hidden=true，字符一起隐）。
+    -- 板关鼠标，点击照旧落到 QueueStatusButton 自己的 OnClick / OnEnter / OnLeave。
+    local glyph = Marked(btn, "glyph")
+    if not glyph then
+        glyph = Skin:GlyphBadge(btn, {
+            w = B.WIDTH, h = B.HEIGHT, size = 10, colorKey = "bright",
+        })
+        if glyph then
+            pcall(glyph.SetAllPoints, glyph, btn)
+            Mark(btn, "glyph", glyph)
+        end
+    else
+        Skin:GlyphBadgeOn(glyph)
+    end
+    pcall(btn.EnableMouse, btn, true)
+
+    if not Marked(container, "queuePoll") then
+        Mark(container, "queuePoll", true)
+        Widget:PollWatch(container, QueuePoll, 0.5)
+    end
+    return true
+end
+
+--- QueueStatusButton 属于 LoD 的 Blizzard_QueueStatusFrame；登录那一拍可能还没建出来。
+--- 挂在 UIParent 上等（1 秒一拍），一出现就接走并注销自己。
+local function EnsureQueueStatus()
+    if not container or not Resolve(QUEUE_PATH) then return end
+    local settings = ns:GetModule("Minimap"):GetSettings()
+    if settings.mapQueueStatus ~= false then SetupQueueStatus() end
+    Widget:Unwatch(UIParent, EnsureQueueStatus)
+end
+
 -- ------------------------------------------------------------------ 对外接口
 
 --- 某个开关关掉时：把暴雪按钮放回原来的位置（显隐交给"暴雪集群按钮"那一组管）。
@@ -378,6 +498,11 @@ local function RestoreOne(path)
     -- 从来不存在的字段，所以还原时徽章一直挂在屏幕上（review 2026-10-29）。
     local badge = Marked(frame, "badge")
     if badge then pcall(badge.Hide, badge) end
+    -- 排队按钮的两件私货：动态字符徽章 + 被压掉的 Eye 贴图 alpha。
+    -- 徽章只藏不删（下次 Apply 复用同一块板），贴图 alpha 按存档放回。
+    local glyph = Marked(frame, "glyph")
+    if glyph then Skin:GlyphBadgeOff(glyph) end
+    RestoreQueueArt(frame)
     -- 追踪按钮的原父框（Tracking）是被我们 alpha 0 压掉的，一并还回去。
     local oldParent = saved.parent
     if oldParent and oldParent ~= container and oldParent ~= UIParent
@@ -418,6 +543,14 @@ function B:Apply(overlay)
     else
         if difficultyFrame then difficultyFrame:Hide() end
     end
+    if settings.mapQueueStatus ~= false then
+        -- 老存档没有这个键（nil ~= false ⇒ 默认开），不必写 migration。
+        if not SetupQueueStatus() then
+            Widget:PollWatch(UIParent, EnsureQueueStatus, 1)
+        end
+    else
+        RestoreOne(QUEUE_PATH)
+    end
 end
 
 --- 还原：把暴雪按钮搬回原来的父级与锚点，我们画的底板藏起来。
@@ -444,10 +577,19 @@ function B:Restore()
             end
             local badge = Marked(frame, "badge")
             if badge then pcall(badge.Hide, badge) end
+            local glyph = Marked(frame, "glyph")
+            if glyph then Skin:GlyphBadgeOff(glyph) end
+            RestoreQueueArt(frame)
         end
     end
     savedParents = setmetatable({}, { __mode = "k" })
     if difficultyFrame then difficultyFrame:Hide() end
+    -- 队列的两条轮询一并摘掉：模块关了就别再按拍写暴雪按钮。
+    Widget:Unwatch(UIParent, EnsureQueueStatus)
+    if container then
+        Widget:Unwatch(container, QueuePoll)
+        Mark(container, "queuePoll", nil)
+    end
 end
 
 --- 难度会随进出副本变，单独刷新一次。
@@ -479,6 +621,8 @@ function B:IsOverButton()
     if tracking and tracking:IsMouseOver() then return true end
     local compartment = Resolve("AddonCompartmentFrame")
     if compartment and compartment:IsMouseOver() then return true end
+    local queue = Resolve(QUEUE_PATH)
+    if queue and queue:IsMouseOver() then return true end
     if difficultyFrame and difficultyFrame:IsMouseOver() then return true end
     return false
 end

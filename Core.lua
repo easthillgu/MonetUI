@@ -280,10 +280,11 @@ local DEFAULTS = {
         -- 画面不重绘，所以不会被拉伸。曾经还有一档 "resize"（画布直接 256×190），因为
         -- 非正方形 SetSize 在 WoW 里是把正方渲染拉伸（纵向压扁 ~26%），已经删掉；
         -- 老存档里的 shape 键由 schema 5 清掉（见 Migrate）。
-        -- 地图内的三个独立按钮（3:4 矩形图标）
+        -- 地图内的四个独立按钮（前三颗是 3:4 徽章贴图，第四颗是动态字符徽章）
         mapTracking    = true, -- 追踪（左下）
         mapDifficulty  = true, -- 难度（左上）
         mapCompartment = true, -- 插件收纳（右上）
+        mapQueueStatus = true, -- 排队/寻找组队状态（右下）；与 LFG 窗肖像位共用 Skin:GlyphBadge
         microMenu      = true, -- 右键小地图弹出微型游戏菜单
         microMenuSecure = true, -- #43 全量安全载体（14 行：4 个自有动作 + 10 行代点原生微按钮）。
                                  -- 2026-11-06 作者实机逐行验过转正：能开的全部开出对应面板，

@@ -3857,3 +3857,86 @@ function Skin:ProbeLayers(path, filter)
     end
     return #rows
 end
+
+-- ------------------------------------------------------------------ 动态字符徽章
+-- 2026-11-14 作者口径：「LFG 界面的大眼睛用字符动态变化代替」。
+-- 参照只读参考件 Andromeda 把队列按钮搬上小地图的做法，但**不引它的贴图**（AGENTS：
+-- 参考件 GPL-3.0，只借机制，资源全部自绘）：眼睛位一律换成会动的字符，零新增材质。
+-- 两处（复古组队窗肖像位 / 小地图右下角排队状态）共用同一块 1px 方板、同一档像素字、
+-- 同一张帧表和**同一个驱动** —— 任意时刻两处显示同一帧，这就是「统一的风格」。
+-- 改字符花样只动 GLYPH_FRAMES 这一张表，两个调用点一个字节都不用碰。
+local GLYPH_FRAMES   = { ".", "..", "..." }
+local GLYPH_INTERVAL = 0.45
+local glyphBadges    = setmetatable({}, { __mode = "k" })  -- 弱键：宿主回收后自动摘掉
+local glyphIndex     = 1
+local glyphDriver    = false
+
+-- PollWatch 的回调只投一个参数（Scheduler 契约，见 tools/scheduler-callback-probe.js），
+-- 这里不用它，函数体保持无参。驱动挂在 UIParent 上：徽章自己会长期隐藏（没排队时），
+-- 挂在它们身上动画就停了。
+local function GlyphTick()
+    glyphIndex = glyphIndex % #GLYPH_FRAMES + 1
+    local text = GLYPH_FRAMES[glyphIndex]
+    for host, badge in pairs(glyphBadges) do
+        if badge and badge.fs then
+            -- 宿主隐藏时多写一次 SetText 也无害（每 0.45 秒、至多两处）。
+            local ok = pcall(badge.fs.SetText, badge.fs, text)
+            if not ok then glyphBadges[host] = nil end
+        end
+    end
+end
+
+local function EnsureGlyphDriver()
+    if glyphDriver then return end
+    glyphDriver = true
+    Widget:PollWatch(UIParent, GlyphTick, GLYPH_INTERVAL)
+end
+
+--- 在 parent 上挂一块「动态字符徽章」。
+--- opts = { w, h, size, colorKey, name, bgAlpha, borderAlpha, thickness }
+--- @return frame（自建 BackdropTemplate 框；标 art / ownPlate，公共美术遍历整棵跳过）
+function Skin:GlyphBadge(parent, opts)
+    if not parent or type(parent.CreateTexture) ~= "function" then return nil end
+    opts = opts or {}
+    local ok, frame = pcall(CreateFrame, "Frame", opts.name or nil, parent, "BackdropTemplate")
+    if not ok or not frame then return nil end
+    pcall(frame.SetSize, frame, opts.w or 20, opts.h or 15)
+    -- 关鼠标：绝不吃掉底下暴雪按钮的点击。
+    pcall(frame.EnableMouse, frame, false)
+    Widget:Theme(frame, {
+        thickness   = opts.thickness or 1,
+        bgAlpha     = opts.bgAlpha or 0.35,
+        borderAlpha = opts.borderAlpha or 0.75,
+    })
+    local fs = Widget:Font(frame, opts.size or 12, "pixel", opts.colorKey or "bright", "CENTER")
+    if fs then
+        pcall(fs.SetPoint, fs, "CENTER", frame, "CENTER", 0, 0)
+        pcall(fs.SetText, fs, GLYPH_FRAMES[glyphIndex])
+        Mark(fs, "art", true)
+    end
+    Mark(frame, "art", true)
+    Mark(frame, "ownPlate", true)
+    Mark(frame, "glyph", fs)
+    glyphBadges[frame] = { fs = fs }
+    -- 皮肤层 Apply 开着 recording：面板关掉（Skin:Rollback）时也要把自建板藏起来，
+    -- 否则暴雪肖像恢复了、字符板还盖在上面 —— 违反「关掉完整还原」。
+    self:Record(function()
+        glyphBadges[frame] = nil
+        pcall(frame.Hide, frame)
+    end)
+    EnsureGlyphDriver()
+    return frame
+end
+
+--- 还原路径：只藏并从驱动里摘掉，不销毁（下次 Apply 直接复用同一块板）。
+function Skin:GlyphBadgeOff(frame)
+    if not frame then return end
+    glyphBadges[frame] = nil
+    pcall(frame.Hide, frame)
+end
+
+function Skin:GlyphBadgeOn(frame)
+    if not frame then return end
+    glyphBadges[frame] = { fs = Marked(frame, "glyph") }
+    pcall(frame.Show, frame)
+end

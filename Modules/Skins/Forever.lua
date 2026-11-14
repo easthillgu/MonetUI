@@ -51,7 +51,9 @@ local LFG_DROPDOWNS = { "LFGBrowseFrameCategoryDropdown", "LFGBrowseFrameActivit
 local LFG_SIDE_TABS = { "ListingTab", "BrowsingTab", "WhoListingTab" }
 
 -- QueueStatusButton 是排队状态那枚小眼睛的宿主：属于 Blizzard_QueueStatusFrame，不是本面板的
--- LoD 门管；这里登记只为让 diagnose 能扫到，读不到就落空一行 —— **只进账本，不换肤**。
+-- LoD 门管。2026-11-14 起由 `Modules/Minimap/Buttons.lua` 接管（搬到小地图右下角 + 换上
+-- 与本窗肖像位**同一套**动态字符徽章）——那一路要改父级与锚点，皮肤层不碰。
+-- 这里仍登记进账本，方便 `/mui skins diagnose` 一眼看到能不能读到；**只进账本，不换肤**。
 local LFG_QUEUE = { "QueueStatusButton" }
 
 -- 暴雪的角色图标走图集（atlas）：LFGBROWSE_GROUPDATA_ATLASES 那张表是 Browse.lua 的
@@ -404,9 +406,48 @@ local function LfgSideTabPass(parent)
     end
 end
 
+--- 肖像位的「大眼睛」换成动态字符徽章（2026-11-14 作者口径：字符动态变化代替）。
+--- 必须挂在 **LFGParentFrame** 上，不能挂 LFGParentFramePortrait：那颗眼睛被压成 α0，
+--- 子帧会跟着一起看不见；暴雪 OnShow 还会 Show() 它并跑动画。
+--- 幂等：Apply 与 2 秒轮询都调，窗口重建 / LoD 之后也能补回来。
+local function EnsureLfgGlyph(parent)
+    if not parent or not Widget:Readable(parent) then return nil end
+    local glyph = Marked(parent, "lfgGlyph")
+    if glyph then
+        local okP, p = pcall(glyph.GetParent, glyph)
+        if okP and p == parent then
+            -- 每趟都复活一次：面板关过（Skin:Rollback 把板藏了并摘出驱动）再开时
+            -- 光看「板还在」会漏掉，字符就不动了。
+            Skin:GlyphBadgeOn(glyph)
+            return glyph
+        end
+        -- 窗口重建过：旧板从驱动里摘掉，别让两处同时写。
+        Skin:GlyphBadgeOff(glyph)
+    end
+    local f = Skin:GlyphBadge(parent, {
+        name = "MonetUILfgGlyph", w = 48, h = 36, size = 15, colorKey = "bright",
+    })
+    if not f then return nil end
+    -- 原肖像 64×64 挂在 TOPLEFT 9,-5；4:3 的板收进这个格子里，四周留白。
+    pcall(f.SetPoint, f, "TOPLEFT", parent, "TOPLEFT", 17, -9)
+    local okL, level = pcall(parent.GetFrameLevel, parent)
+    pcall(f.SetFrameLevel, f, (okL and type(level) == "number" and level or 1) + 3)
+    Mark(parent, "lfgGlyph", f)
+    return f
+end
+
+--- 暴雪的眼睛动画会把贴图 alpha 抬回来；每趟补压一次（FadeHold 幂等）。
+local function HoldLfgEye()
+    local eye = Skin:Need("LFGParentFramePortrait")
+    if not eye then return end
+    Skin:FadeHold(eye)
+    if eye.EnableMouse then pcall(eye.EnableMouse, eye, false) end
+end
+
 -- 稳定引用 —— PollWatch / ShowWatch 按函数身份去重，闭包每次新建 = 每一拍都多挂一条轮询。
 local function LfgRepaint()
-    if not M.active then return end
+    -- 面板单独关掉时也要停：否则轮询每 2 秒会把 Rollback 藏起来的徽章又 Show 回来。
+    if not M.active or not M:IsEnabled("lfg") then return end
     -- 轮询不在任何面板 Apply 的作用域里，自己套一层 Skin.With，账本才记在 "lfg" 名下。
     Skin.With("lfg", function()
         local parent = Skin:Need("LFGParentFrame")
@@ -414,6 +455,8 @@ local function LfgRepaint()
         -- 轮询里的抛错不在任何 Apply 的 pcall 保护下，而且每 2 秒一次：自己吞，并借
         -- WarnOnce 把名字报出来（受限框读 GetChildren 就会被拒）。
         local ok, err = pcall(function()
+            HoldLfgEye()                   -- 眼睛 α0 关鼠标，暴雪抬回来就补压
+            EnsureLfgGlyph(parent)         -- 肖像位的动态字符徽章（窗口重建也能补）
             WalkSwapRole(parent, 0)        -- 先换职责图集（并标 art），再褪色
             LfgArtWalk(parent, true)
             LfgSideTabPass(parent)
@@ -440,12 +483,10 @@ end
 local function SkinLFG()
     M:Dress("LFGParentFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 } })
 
-    -- The animated eye in the portrait slot is a button of its own: alpha it away AND take the mouse, so the idle 64px region cannot swallow clicks.
-    local eye = Skin:Need("LFGParentFramePortrait")
-    if eye then
-        Skin:Fade(eye)
-        if eye.EnableMouse then eye:EnableMouse(false) end
-    end
+    -- 肖像位那颗 64×64 动画「大眼睛」：压 α0 + 关鼠标（空闲时不能吞点击），
+    -- 换上 MonetUI 的动态字符徽章 —— 与小地图右下角排队状态同一套、同一帧。
+    HoldLfgEye()
+    EnsureLfgGlyph(Skin:Need("LFGParentFrame"))
 
     -- The three views repaint themselves when swapped in, so each carries its own fill/border art: strip every view, not just the parent.
     M:Controls(LFG_VIEWS, function(view)
@@ -455,8 +496,8 @@ local function SkinLFG()
     M:Dress(LFG_BUTTONS, { as = "button" })
     M:Dress(LFG_TOP_TABS, { as = "tab" })
     M:Dress(LFG_DROPDOWNS, { as = "dropdown" })
-    -- 队列眼睛的宿主框：不做换肤（属于 Blizzard_QueueStatusFrame、有自己的动画），
-    -- 只过 Need 让它进账本，方便 `/mui skins diagnose` 一眼看到能不能读到。
+    -- 队列眼睛的宿主框：换肤归 `Modules/Minimap/Buttons.lua`（要改父级与锚点，皮肤层不碰），
+    -- 这里只过 Need 让它进账本，方便 `/mui skins diagnose` 一眼看到能不能读到。
     -- （2026-11-03 独立审查必改项：原先这里写的是 M:Dress(LFG_QUEUE, { as = "fade" })，
     --  而 DRESSERS.fade 实际会调 Skin:Fade 把框压成 alpha 0 —— 排队眼睛直接消失，
     --  与注释正好相反；去掉换肤调用，只保留账本登记。）
@@ -484,6 +525,8 @@ M:Panel("lfg", {
     addons = { Blizzard_GroupFinder_VanillaStyle = true },
     frames = {
         "LFGParentFrame", "LFGParentFramePortrait",
+        -- 自建件：肖像位换上去的动态字符徽章（diagnose 能读到 = 挂上了）。
+        "MonetUILfgGlyph",
         "LFGParentFrame.ListingTab", "LFGParentFrame.BrowsingTab", "LFGParentFrame.WhoListingTab",
         LFG_VIEWS, LFG_BUTTONS, LFG_TOP_TABS, LFG_DROPDOWNS, LFG_QUEUE,
     },
