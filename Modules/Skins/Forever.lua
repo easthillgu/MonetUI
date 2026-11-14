@@ -104,6 +104,14 @@ local function SwapRoleAtlas(tex)
     -- 暴雪复用行、重新 SetAtlas 之后我们才再换一次。
     if pcall(tex.SetTexture, tex, path) then
         if type(tex.SetTexCoord) == "function" then pcall(tex.SetTexCoord, tex, 0, 1, 0, 1) end
+        -- **自己压过的那张要复活**：`SetTexture` **不带 alpha** —— 我们的美术褪色遍历
+        -- （force 那一趟会走到隐藏页上的职责图集）若先把这张压成 α0，换图之后它仍然是 α0，
+        -- 图标看着"没了"（11-14 实机回归）。只在带 `hidden` 标记时复活 —— 那是我们自己压的；
+        -- 别的 alpha 一律不动（暴雪自己压暗的图不能被我们点亮）。
+        if Marked(tex, "hidden") then
+            Mark(tex, "hidden", nil)
+            pcall(tex.SetAlpha, tex, 1)
+        end
         -- 换上去的就是我们的图：标 `art` 让 `Skin:Fade` / `Strip` / 下面那趟美术褪色
         -- 一律跳过（否则 85×85 的职责图标会被当成"暴雪美术"压掉）。
         Mark(tex, "art", true)
@@ -155,7 +163,11 @@ local LFG_ART = {
     "^common%-button%-", "^common%-dropdown%-",
     "^ui%-frame%-", "^_ui%-frame%-", "^!ui%-frame%-",
     "^gamepad%-uiframemetal", "^toptilestreaks",
-    "^ui%-lfg%-roleicon%-",
+    -- **只收职责钮的"金圈底"，不收 glyph**：`UI-LFG-RoleIcon-Tank-Background` 是那圈金边，
+    -- 而 `UI-LFG-RoleIcon-Tank` 本身**就是那个职责图标**（要换成我们自己的）。
+    -- 曾经用 `^ui%-lfg%-roleicon%-` 一把收掉两样 ⇒ 图标本体被压成 α0，
+    -- 而换图只在可见页跑（`SetTexture` 不带 alpha），窗口打开时图标再也回不来（11-14 回归）。
+    "^ui%-lfg%-roleicon%-.*%-background$",
 }
 local function IsLfgArt(atlas)
     if type(atlas) ~= "string" then return false end
@@ -435,6 +447,18 @@ local function LfgRepaint()
     end)
 end
 
+--- 分类行的横幅是**内容图**：`Skin:Button` 的 `Strip` 会把它连同金框一起压掉。
+--- 按 atlas 认脸 —— 只放行 `groupfinder-button-<内容>`（dungeons / questing / battlegrounds /
+--- custom-pve），同族的 `groupfinder-button-cover*`（金框）照压。
+--- 这条是**兜底**：`M:Controls` 那趟在 Apply 时跑，而分类行是开页时才懒建的，
+--- 所以多数时候碰不到；但只要有一次 Apply 落在开页之后，横幅就会没了（11-14 的同类隐患）。
+local function LfgKeepBanner(region)
+    local okA, atlas = pcall(region.GetAtlas, region)
+    if not okA or type(atlas) ~= "string" then return false end
+    local low = atlas:lower()
+    return low:find("^groupfinder%-button%-") ~= nil and low:find("cover", 1, true) == nil
+end
+
 local function SkinLFG()
     M:Dress("LFGParentFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 } })
 
@@ -448,7 +472,7 @@ local function SkinLFG()
     -- The three views repaint themselves when swapped in, so each carries its own fill/border art: strip every view, not just the parent.
     M:Controls(LFG_VIEWS, function(view)
         Skin:Strip(view)
-        M:SkinButtonsIn(view)
+        M:SkinButtonsIn(view, { keep = LfgKeepBanner }, 1)
     end)
     M:Dress(LFG_BUTTONS, { as = "button" })
     M:Dress(LFG_TOP_TABS, { as = "tab" })
