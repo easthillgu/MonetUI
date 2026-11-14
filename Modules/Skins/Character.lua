@@ -61,6 +61,17 @@ local FADE_CHARACTER_ATLAS = {
     -- 复验读数 α1.00，是角色窗唯一残留；技能页名单早收了同一条，这里对齐。
     -- `FadeAtlasBackdrop` 递归 8 层，挂在哪一层子帧上都扫得到。
     "gamepad%-uiframemetal",
+    -- 11-14 全量普查（§8.114.5）补漏：角色窗里还亮着、但名单没有的装饰族。
+    --   AzeriteArmor-CharacterInfo-*  = 项链/护甲那一圈边框光晕（5 张）
+    --   GearEnchant*                  = 附魔光环 + 图标外框（2 张）
+    --   Nzoth-charactersheet-item-glow= 腐化装备的紫光
+    --   pvpqueue-sidebar-honorbar-background / transfer-log-background = PvP 侧栏与转服记录的底
+    -- 都是纯装饰（图标与数值不受影响）。
+    "azeritearmor%-characterinfo%-",
+    "gearenchant",
+    "nzoth%-charactersheet%-item%-glow",
+    "pvpqueue%-sidebar%-honorbar%-background",
+    "transfer%-log%-background",
 }
 local SWAP_CHARACTER_ATLAS = {
     -- 选中页签 → 我们的**矩形** barfill 盒子（通用方法会把它压到图标之下当底色，不糊图标）。

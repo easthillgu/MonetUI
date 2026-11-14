@@ -48,6 +48,25 @@ local SOCIAL_UI_WINDOW = "SocialUIFrame"
 --- 判定位置就被挪走，闸门会报"只在名单里、代码从不取用"。
 local SocialSideTabPass
 
+--- 好友 / 社交窗的**装饰族**（11-14 全量普查 §8.114.5 补漏）。
+--- 普查里这两扇窗还亮着、但逐窗名单一条都没有的：
+---   friends-frame-*BG            = 经典好友窗的上下底图（3 张）
+---   collections-newglow           = "有新内容"的呼吸光
+---   azsharawards-*                = 奖励条的光效
+---   _uiframe-tab-center / -activetab-center = 顶部页签的底与选中态
+--- 全是装饰（列表行、职业卡、徽记都不动）。
+local FADE_FRIENDS_ATLAS = {
+    "friends%-frame%-%w*bg",
+    "collections%-newglow",
+    "azsharawards%-",
+    "^_?uiframe%-tab%-center",
+    "^_?uiframe%-activetab%-center",
+}
+local FADE_RECRUIT_ATLAS = {
+    -- 招兵买马那几扇子窗（RecruitAFriend*）：纸底 / 角标 / 石质分隔 / 圆环。
+    "recruitafriend_",
+}
+
 local function SkinFriends()
     -- 各标签页（好友 / 声望 / 团队 / 公会…）的列表用 ScrollBox，滚动条是无名 Frame + Thumb，
     -- 而且行在切页时才建出来。以前这里给每个子 Frame 各挂一条永久 ShowWatch（帧多、且切页
@@ -99,7 +118,11 @@ SocialSideTabPass = function()
         -- （见上面那段注释），漏一扇就是那一扇还是暴雪原样。
         for _, wname in ipairs({ SOCIAL_UI_WINDOW, "FriendsFrame" }) do
             local w = Skin:Need(wname)
-            if w then pcall(Skin.SideTabArt, Skin, w, 3) end
+            if w then
+                pcall(Skin.SideTabArt, Skin, w, 3)
+                -- 同族的装饰：底图 / 新内容呼吸光 / 奖励条光效 / 顶部页签底（每趟写 α0）
+                pcall(Skin.FadeAtlasBackdrop, Skin, w, FADE_FRIENDS_ATLAS, nil, 0)
+            end
         end
     end)
 end
@@ -125,6 +148,18 @@ local ADDFRIEND_WINDOWS = {
     "RecruitAFriendRecruitmentFrame", "RecruitAFriendRewardsFrame",
 }
 
+--- 招兵买马 / 加好友那一族的装饰（纸底 / 角标 / 石质分隔 / 圆环）：每趟写 α0。
+--- 稳定引用（PollWatch 按函数身份去重）。
+local function RecruitArtPass()
+    if not M.active then return end
+    Skin.With("friends", function()
+        for i = 1, #ADDFRIEND_WINDOWS do
+            local w = Skin:Need(ADDFRIEND_WINDOWS[i])
+            if w then pcall(Skin.FadeAtlasBackdrop, Skin, w, FADE_RECRUIT_ATLAS, nil, 0) end
+        end
+    end)
+end
+
 local function SkinAddFriend()
     M:Dress(ADDFRIEND_WINDOWS, {
         window = true,
@@ -132,6 +167,13 @@ local function SkinAddFriend()
         panel = { bgAlpha = 0.96 },
         deep = true,
     })
+    RecruitArtPass()
+    for i = 1, #ADDFRIEND_WINDOWS do
+        local w = Skin:Need(ADDFRIEND_WINDOWS[i])
+        if w and Widget and Widget.PollWatch and Widget:Readable(w) then
+            Widget:PollWatch(w, RecruitArtPass, 2)
+        end
+    end
 end
 
 -- `CommunitiesFrameTab1..3` 在 1.60 没有实名（页签是 `TabSystemTemplate` 的运行期子件）⇒ 摘掉点名。
