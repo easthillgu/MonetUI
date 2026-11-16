@@ -3,6 +3,31 @@
 This file is used verbatim as the CurseForge release changelog (see `.pkgmeta`).
 Update the top section before tagging a new release.
 
+## 0.13.10 (2026-11-16)
+
+- Colours: fixed the zone-change theme refresh chain. A CallbackHandler registration
+  key collision (Core and the animation layer both used the library table as `self`)
+  silently dropped one of the two callbacks, so map changes never repainted nor
+  announced the new primary colour; the fallback zone hook was suppressed as well.
+- Toast: a "primary colour changed" notice now fires on real zone shifts, and notices
+  display in up to three parallel columns instead of a single lane.
+- Toast: notice and warning toasts now carry icons -- an info glyph for theme changes
+  and new mail (tinted with the theme highlight), a warning glyph for full bags and
+  low durability (tinted danger red), matching the combat enter/leave banners.
+- Skins: round icon buttons (transmog wardrobe slot navigation, spell book / talent
+  page tabs) get a self-drawn dark well and a thin ring that follows hover and
+  selection, using two new stencil textures.
+- Skins: side tabs are unified on the Collections window look (button styling plus
+  selection underline) across the character, professions, friends, quest map, legacy
+  and group-finder windows; the legacy window's tabs are now skinned and kept that
+  way on page switches. Functional icons are exempt from art stripping again.
+- Textures: new square-line icon master set (Aurora-style, B size) and the two round
+  button stencils, all shipped as BLP2 with full mip chains.
+- Defaults: factory defaults now have a single source of truth in Core; new profiles
+  pick up the revised values while existing saved variables keep their own settings.
+- Fixes: colour readability guards, secret-value read checks, icon vertex-colour
+  resets and scheduler diagnostics lookups hardened throughout.
+
 ## 0.13.9 (2026-11-15)
 
 - Colour readability: a configurable minimum-contrast control (default 1.8) lifts
