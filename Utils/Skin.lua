@@ -1964,10 +1964,15 @@ function Skin:SideTabArt(frame, depth)
     if SidetabFingerprint(frame) then
         return self:Tab(frame)
     end
-    self:WalkFrames(frame, { depth = depth }, function(h, atlases)
-        local kind = select(2, pcall(h.GetObjectType, h))
-        if kind == "Button" and self:AtlasMatch(atlases, { "^common%-sidetab$" }) then
+    --    ⚠ 整窗档**不许按 GetObjectType()=="Button" 过滤**（2026-11-17 专业窗判例）：
+    --    LargeSideTabButtonTemplate 本体是 <Frame>（SharedUIPanelTemplates.xml:1008），
+    --    专业窗 / 角色窗 / 传承 / 任务图 / 冷却监视器全是 Frame 族，只有社交窗那族是
+    --    <Button> —— 按类型过滤 = 除了社交窗全漏。一律用 SidetabFingerprint
+    --    （Background atlas + Icon 字段），与对象类型无关。
+    self:WalkFrames(frame, { depth = depth }, function(h)
+        if SidetabFingerprint(h) then
             self:Tab(h)
+            return "stop"
         end
     end)
 end

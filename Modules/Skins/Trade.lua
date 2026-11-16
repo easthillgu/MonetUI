@@ -460,8 +460,9 @@ local function StyleProfessionsArt()
         Skin:StyleAtlasBackdrop(f, {}, SWAP_PROF_ATLAS, TINT_PROF_ATLAS)
         Skin:FadeAtlasBackdrop(f, FADE_PROF_ATLAS, nil, 0)
         -- 侧页签：统一 = 收藏窗的美化（Skin:SideTabArt）。页签没有实名（camelot 模板
-        -- LargeSideTabButtonTemplate 的运行期子件），子树扫 + 指纹认脸；幂等。
-        Skin:SideTabArt(f, 3)
+        -- LargeSideTabButtonTemplate 的运行期子件，且本体是 <Frame> 不是 Button），
+        -- 整窗子树扫 + 指纹认脸；深度 4 对齐 HEAD 的"嵌套子帧"口径（§8.40 ②）。幂等。
+        Skin:SideTabArt(f, 4)
     end
     DressProfessionsWells()
     DressRecipeRows()
