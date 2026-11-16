@@ -99,6 +99,33 @@ local CHARACTER_MODE_TABS = {
     "CharacterFrameModeTab4", "CharacterFrameModeTab5", "CharacterFrameModeTab6",
 }
 
+-- 角色窗纸娃娃顶部的暴雪横带 `tex:374155`（398×36，ARTWORK 层）。
+-- `FadePlainBackdrops` 只收 BACKGROUND/BORDER 层，收不到它 ⇒ 单独按
+-- fileID + 尺寸精确认，每趟 `FadeHold` 写 α0（实测暴雪会把 alpha 抬回 1.00）。
+-- 递归深度 3 只覆盖 PaperDollFrame 子树；`CurrencyTransferLog` 的 374155 是
+-- 331×347 大图（h > 60）且在 TokenFrame 下，不会被误压。
+local function PressCharacterTitleBand(host, d)
+    if not host or d > 3 then return end
+    local okR, regs = pcall(function() return { host:GetRegions() } end)
+    if okR and regs then
+        for i = 1, #regs do
+            local reg = regs[i]
+            pcall(function()
+                if reg:GetObjectType() ~= "Texture" then return end
+                local okT, tx = pcall(reg.GetTexture, reg)
+                if not (okT and tx == 374155) then return end
+                local w, h = 0, 0
+                pcall(function() w, h = reg:GetWidth() or 0, reg:GetHeight() or 0 end)
+                if w > 300 and h > 20 and h < 60 then Skin:FadeHold(reg) end
+            end)
+        end
+    end
+    local okC, kids = pcall(function() return { host:GetChildren() } end)
+    if okC and kids then
+        for i = 1, #kids do PressCharacterTitleBand(kids[i], d + 1) end
+    end
+end
+
 -- 模块级稳定引用：PollWatch 按引用去重。
 local function StyleCharacterArt()
     local f = Skin:Need("CharacterFrame")
@@ -109,6 +136,24 @@ local function StyleCharacterArt()
     Skin:FadeAtlasBackdrop(f, FADE_CHARACTER_ATLAS, nil, 0)
     -- Aurora `HidePaneArt` 的两层粒度，但只收「认不出名字」的数字 fileID 大贴图（§8.107 四道门）。
     Skin:FadePlainBackdrops(f, { depth = 1, minSize = 120 })
+    -- 2026-11-17：纸娃娃模型场景的 4 张拼图背景（131105/106/107/108）挂在
+    -- CharacterModelScene（d2），上面那趟 depth=1 扫不到 ⇒ 点名 scene 单跑一趟
+    -- depth=0，只压这 4 张（BACKGROUND 层、无 atlas、尺寸 >120），不碰模型本身
+    -- （PlayerModel 不是 Texture）也不碰我们的 skinPlate。CurrencyTransferLog
+    -- 那张底图在 TokenFrame 下，完全不受影响。
+    local pd = Skin:Need("PaperDollFrame")
+    if pd then
+        local scene = pd.CharacterModelScene
+        if scene then Skin:FadePlainBackdrops(scene, { depth = 0, minSize = 120 }) end
+        -- 标题横带 tex:374155 压掉（ARTWORK，FadePlainBackdrops 收不到）。
+        PressCharacterTitleBand(pd, 0)
+    end
+    -- 标题下补我们的材质横线（monet_hairline，HeaderRule 自带 key 早退；
+    -- 作者 11-17 拍板：背景剥掉、横带去掉后，在 title 下加这条发丝线收口）。
+    local title = Skin:AdoptTopTitle(f)
+    if title and Widget and Widget.HeaderRule then
+        Widget:HeaderRule(f, title, { pad = 8, gap = 3 })
+    end
     for i = 1, #EQUIPMENT_SLOTS do
         local slot = Skin:Need(EQUIPMENT_SLOTS[i])
         local bf = slot and slot.BorderFrame
