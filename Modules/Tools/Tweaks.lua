@@ -7,9 +7,9 @@
 -- 逐条账本。名字在本客户端不存在或被拒写时，只会在账本里落一行 ✗，不报错、不静默空转。
 --
 -- 名单来自 2026-11-06 的常用优化截图。`nameplateMaxDistance`（姓名板可视距离）已由姓名板模块
--- 负责（Core.lua 的 viewDistance），这里不重复。**默认全关**：这些是画质 / 手感取向的改动，
--- 开哪条是玩家的选择，不是缺省 —— 例外只有 2026-11-13 作者拍板的两条（见 DEFAULT_SWITCHES）：
--- 伤害数字 ×0.5、战斗文字只留伤害数字。
+-- 负责（Core.lua 的 viewDistance），这里不重复。**默认全开**（2026-11-16 按作者实机存档对齐）：
+-- 九条都是作者自己长期在用的画质 / 手感组合，新存档即拿到同一套观感；玩家仍可逐条关掉，
+-- 关掉后不会再被登录补回来（见 SEED_ADDITIONS 的说明）。
 --
 -- 2026-11-08 作者拍板：另加一层「默认画面快照」—— 把当时调好的整套观感 CVar 设为出厂默认，
 -- 每次登录自动对齐。快照只裁决插件不管的 CVar，开着的开关优先级更高（见 AlignVision）。
@@ -111,15 +111,17 @@ local FACTORY_VISION = {
     weatherDensity        = "3",
 }
 
--- 出厂默认开关组合（同上，来自实盘 MonetUI.lua 的 db.tweaks 5 开 3 关 + 2026-11-13 新加的一条 ⇒ 6 开 3 关）。
+-- 出厂默认开关组合（2026-11-16 按作者实机存档对齐：9 条全部默认开）。
 -- 只用于**新存档**（db.tweaks 还不存在时）；老存档按 SEED_ADDITIONS 只补新增的键，见 Settings()。
+-- 改这里的默认值**不影响已在用的存档**：那是玩家自己的开关状态，SEED_VERSION 不因"默认值变了"而上调 ——
+-- 版本号只用来给「这个机制之后新增的键」补默认开，否则会把玩家亲手关掉的开关重新打开。
 -- 稀疏存：关着的键不写，IsOn 判 nil 就是关，跟 Core 的 StripDefaults 不冲突（这个表不在 DEFAULTS 里）。
 -- 注：`lootRange`（cvar=autoLootRange）已移除 —— 该 CVar 在 Forever 1.60 不存在（§Tweaks），留着只会
 -- 在账本里落一行 ✗ 空转，对面板 / 玩家零价值。
 local DEFAULT_SWITCHES = {
     cameraZoom = true, combatText = true, questGlow = true,
-    noDeathGray = true, sharpen = false, noWeather = true,
-    fewParticles = false, noFog = false,
+    noDeathGray = true, sharpen = true, noWeather = true,
+    fewParticles = true, noFog = true,
     damageTextOnly = true,
 }
 

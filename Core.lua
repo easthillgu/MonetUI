@@ -76,20 +76,26 @@ local DEFAULTS = {
         -- 既是撞色区域纠偏的目标、也是那些区域在 /mui colors 账本里的判定线。
         -- 达标的区域（含河林默认）保持引擎原色。文字(4.5) / 边框(3.0) 另有固定可读线，
         -- 不跟这一条滑，避免把可读线调低成假达标。
-        minContrast    = 1.8,
+        -- 2026-11-16 按作者实机存档对齐：默认取最宽松的 1.4（原来是 1.8）。控制值越低，
+        -- 撞色区域越少触发补色回避 / 亮度兜底，观感更接近引擎原色；代价是 /mui colors
+        -- 的判定线一起放宽，账本里"达标"的含义比原来的 1.8 松。
+        minContrast    = 1.4,
         -- Which engine slot borders are drawn from (see Color:GetBorderKey); one dropdown re-tints every border in the addon.
         borderKey      = "edge",
         -- Who owns the UI scale: "auto" pins it to the resolution (Utils/Media.lua scalePresets, so
         -- 1 UI unit is a whole number of physical pixels), "game" leaves it to the client's own setting.
         uiScaleMode    = "auto",
     },
-    -- 氛围暗角（Modules/Atmosphere.lua）：strength = 压暗层的顶点 alpha，只有验收页量过的三档
-    -- （0.06 / 0.10 / 0.12）；认不到就退回 0.10 那一档。压的是世界，所有 UI 天然在这层之上。
+    -- 氛围暗角（Modules/Tools/Atmosphere.lua）：strength = 压暗层的顶点 alpha，只有验收页量过的
+    -- 三档（0.06 / 0.10 / 0.12）；认不到就退回 0.10 那一档。压的是世界，所有 UI 天然在这层之上。
+    -- 2026-11-16 按作者实机存档对齐：默认 0.06（最淡那一档）。
     atmosphere = {
-        strength = 0.10,
+        strength = 0.06,
     },
-    -- Big-number formatting for health text: "cn" = 万/亿 (natural on zhCN), "auto" = K/M/B.
-    numberFormat = (GetLocale() == "zhCN") and "cn" or "auto",
+    -- Big-number formatting for health text: "cn" = 万/亿, "auto" = K/M/B.
+    -- 2026-11-16 按作者实机存档对齐：统一默认 "auto"（zhCN 也用 K/M/B，不再是万/亿）；
+    -- 中文习惯仍可在 单位框架 → 大数字格式 里切回 "cn"。
+    numberFormat = "auto",
     -- Categorized bags & bank (Modules/Bags/Bags.lua): every slot is scanned once and claimed by the first matching category (垃圾 / 装备 / 消耗品 / 材料 / 任务 / 收藏 / 其他); each category gets its own framed, movable window tiled from `anchor`.  Reads only this client's C_Container / C_Bank APIs.
     bags = {
         iconSize       = 34,
@@ -126,7 +132,7 @@ local DEFAULTS = {
     -- PlayerHealthHeight = 4, PlayerPowerHeight = 1, PlayerWidth = 160, PetWidth = 60 ...).  They used to be half that
     -- (health 2) because Andromeda rescales UIParent while MonetUI draws 1:1, so half its number was the same physical
     -- thickness -- but the woven ground (Widget:BarWeave) needs the room, so the bars are Andromeda's numbers now.
-    -- fillColor/lostColor/powerColor pick the bar colours (inverse = edge 的 RGB 反相 + lost = 暗织纹底，两者都吃 Utils/Color.lua 的四级亮度阶梯，玩家/宠物/目标的目标默认这一对；class = the colour the game itself draws the unit in; black = missing part reads as background; type = coloured by UnitPowerType); smoothBars eases every bar from the client side so it still works while values are hidden.
+    -- fillColor/lostColor/powerColor pick the bar colours (inverse = edge 的 RGB 反相 + lost = 暗织纹底，两者都吃 Utils/Color.lua 的四级亮度阶梯；player/pet/targettarget 默认这一对，2026-11-16 起 target / focus 的 lostColor 也改成 weave；class = the colour the game itself draws the unit in; black = missing part reads as background; type = coloured by UnitPowerType); smoothBars eases every bar from the client side so it still works while values are hidden.
     -- classPower draws the player's combo points as slim pips under the player frame (Blizzard keeps them inside the PlayerFrame this addon hides); threatGlow / hoverGlow are Andromeda-style edge glows re-tinted through Widget:SetBorderState so theme refreshes cannot stomp them.
     unitFrames = {
         hideBlizzard = true,
@@ -149,13 +155,13 @@ local DEFAULTS = {
         targetAuraGap   = 22,
         player = { width = 160, health = 4, power = 1, fillColor = "inverse", lostColor = "weave",
                    point = "CENTER", relativeTo = "UIParent", relativePoint = "CENTER", x = 0,    y = -180 },
-        target = { width = 160, health = 4, power = 1, fillColor = "class", lostColor = "danger",
+        target = { width = 160, health = 4, power = 1, fillColor = "class", lostColor = "weave",
                    point = "LEFT",   relativeTo = "player",   relativePoint = "RIGHT",  x = 40,   y = 40 },
         targettarget = { width = 60, health = 4, power = 1, fillColor = "inverse", lostColor = "weave",
                    point = "LEFT",   relativeTo = "target",   relativePoint = "RIGHT",  x = 6,    y = 0 },
         pet    = { width = 60,  health = 4, power = 1, fillColor = "inverse", lostColor = "weave",
                    point = "RIGHT",  relativeTo = "player",   relativePoint = "LEFT",   x = -6,   y = 0 },
-        focus  = { width = 60,  health = 4, power = 1, fillColor = "class", lostColor = "danger",
+        focus  = { width = 60,  health = 4, power = 1, fillColor = "class", lostColor = "weave",
                    point = "RIGHT",  relativeTo = "player",   relativePoint = "LEFT",   x = -100, y = -40 },
     },
     -- 小队 / 团队框架（Modules/UnitFrames/Groups.lua）：暴雪安全头 + Monet 皮肤，位置交给 Utils/Mover.lua。
@@ -228,8 +234,9 @@ local DEFAULTS = {
         showTotems   = true,
         showSelf     = false,
         hideCritters = true,
-        hideDead     = false,
-        viewDistance = 60,      -- nameplateMaxDistance
+        -- 2026-11-16 按作者实机存档对齐：默认过滤死亡单位、可视距离 40 码（原来 60）。
+        hideDead     = true,
+        viewDistance = 40,      -- nameplateMaxDistance
 
         width        = 120,
         height       = 12,
@@ -331,7 +338,8 @@ local DEFAULTS = {
         currencyMode     = "backpack",
         currencyWatch    = {},
         currencyMax      = 3,
-        currencyShowZero = true,
+        -- 2026-11-16 按作者实机存档对齐：0 值不占格（原来显示）。
+        currencyShowZero = false,
         blocks = {
             gold       = true,
             durability = true,
@@ -358,13 +366,14 @@ local DEFAULTS = {
         trail = true,
         glow  = true,
     },
-    -- 通知横幅 (Modules/Toast)：只做本项目真的缺的两件事 —— 新邮件（小地图邮件图标被藏掉了）
-    -- 和背包满。duration = 每条停留秒数。
+    -- 通知横幅 (Modules/Toast)：只做本项目真的缺的几件事 —— 新邮件（小地图邮件图标被藏掉了）、
+    -- 背包满、主色变色。duration = 每条停留秒数。
     toast = {
         mail    = true,
         bagFull = true,
-        duration = 5,
+        duration = 8,         -- 2026-11-16 按作者实机存档对齐（原 5 秒）
         combatAlert = true,   -- 进入 / 离开战斗提醒（原 CombatText 的 alert，2026-11-02 并入）
+        themeColor  = true,   -- 主色真的变了就弹一条（写明新色值 + 区域 / 原因，2026-11-16 加入）
     },
     -- 装备耐久警告 (Modules/Durability)：跌破 threshold 时弹一条通知，修好/换装后才再次提醒。
     durability = {

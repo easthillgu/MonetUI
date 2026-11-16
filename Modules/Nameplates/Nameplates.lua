@@ -199,7 +199,7 @@ function M:ApplyCVars()
     WriteCVar("nameplateShowEnemyTotems",   OnOff(Setting("showTotems")))
     WriteCVar("nameplateShowFriendlyTotems", OnOff(Setting("showTotems")))
     WriteCVar("nameplateShowSelf",          Setting("showSelf") and "1" or "0")
-    WriteCVar("nameplateMaxDistance",       tostring(Setting("viewDistance") or 60))
+    WriteCVar("nameplateMaxDistance",       tostring(Setting("viewDistance") or 40))
     FlushCVarNotes()
 end
 

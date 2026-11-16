@@ -132,7 +132,7 @@ local function check(name, cond, extra)
 end
 local function Text() return table.concat(out, "\n") end
 
--- 实盘里的开关组合（lootRange 已移除：autoLootRange 在 Forever 1.60 不存在）。
+-- 模拟一份玩家自选的开关组合（不是出厂默认；lootRange 已移除：autoLootRange 在 Forever 1.60 不存在）。
 -- damageTextOnly 是 2026-11-13 新加的默认开条目（版本 2），老存档由 SEED_ADDITIONS 补。
 local function LiveSwitches()
     return {
@@ -147,11 +147,17 @@ Reset()
 DB = {}
 local M1 = Load()
 local s1 = M1:Settings()
-check("新存档铺了 6 条默认开关",
-    s1.cameraZoom and s1.combatText and s1.questGlow and s1.noDeathGray
-    and s1.noWeather and s1.damageTextOnly)
-check("默认关的 3 条没写进存档",
-    not s1.sharpen and not s1.fewParticles and not s1.noFog)
+local SEEDED = {
+    "cameraZoom", "combatText", "questGlow", "noDeathGray", "sharpen",
+    "noWeather", "fewParticles", "noFog", "damageTextOnly",
+}
+local on, total = 0, 0
+for _, key in ipairs(SEEDED) do
+    if s1[key] then on = on + 1 end
+end
+for _ in pairs(s1) do total = total + 1 end
+check("新存档 9 条默认开关全部打开（2026-11-16 作者实机对齐）", on == 9, tostring(on) .. "/9")
+check("新存档没多写别的键", total == 9, tostring(total))
 check("新存档记下种子版本", DB.tweakSeed == 2, tostring(DB.tweakSeed))
 
 -- 老存档 = 本机制之前就在的那批。稀疏存里「键不存在」既可能是「关掉」也可能是「没见过」，

@@ -624,8 +624,8 @@ function SimpleConfig:Build()
     -- 不跟着这一条滑 —— 否则把文字线调到 2.0 就成了"假达标"。
     -- 上限 3.0：再高会超出高饱和色相可达的亮度（AtLightness out-of-gamut）。
     local CONTRAST_ITEMS = {
-        { value = 1.4, text = "1.4 · 最宽松" },
-        { value = 1.8, text = "1.8 · 标准（默认）" },
+        { value = 1.4, text = "1.4 · 最宽松（默认）" },
+        { value = 1.8, text = "1.8 · 标准" },
         { value = 2.1, text = "2.1 · 偏强" },
         { value = 2.4, text = "2.4 · 分明" },
         { value = 2.7, text = "2.7 · 很强" },
@@ -1601,12 +1601,19 @@ function SimpleConfig:Build()
                 toast:Settings().combatAlert = value and true or false
             end)
 
+        -- 只报"真的变了"：引擎每趟重算都会发主题事件，回到去过的地图颜色一模一样（解析见 Toast.lua）。
+        MakeCheckbox(content, "主色变色时弹一条提示（写明色值 / 区域）", row(28),
+            function() return toast:GetSetting("themeColor") end,
+            function(value)
+                toast:Settings().themeColor = value and true or false
+            end)
+
         MakeDropdown(content, row(26), "停留时长", {
             { value = 3, text = "3 秒" },
             { value = 5, text = "5 秒" },
             { value = 8, text = "8 秒" },
         },
-            function() return toast:GetSetting("duration") or 5 end,
+            function() return toast:GetSetting("duration") or 8 end,
             function(value)
                 toast:Settings().duration = value
             end)
@@ -1615,7 +1622,7 @@ function SimpleConfig:Build()
         toastHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(34))
         toastHint:SetWidth(328)
         toastHint:SetJustifyH("LEFT")
-        toastHint:SetText("横幅在屏幕顶部居中，一次只显示一条，多的排队；底边一条细线随停留时间排空，点一下可提前关掉。")
+        toastHint:SetText("横幅在屏幕顶部，最多同时三列（先正中、再右、再左），再多的排队；每列底边一条细线随停留时间排空，点一下可提前关掉。")
         sec.bodyHeight = -row.y + 4
     end
 
@@ -1694,7 +1701,7 @@ function SimpleConfig:Build()
         tweakHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(44))
         tweakHint:SetWidth(328)
         tweakHint:SetJustifyH("LEFT")
-        tweakHint:SetText("逐条开关客户端控制台设置：打开写入、关掉还原成你原来的值。名单来自《无限》服常用优化，个别名字在本客户端可能不存在或被拒写——那样这条会空转，用 /mui tweaks status 看账本。默认开着作者调好的那几条（含伤害数字 ×0.5、战斗文字只留伤害），其余全关。")
+        tweakHint:SetText("逐条开关客户端控制台设置：打开写入、关掉还原成你原来的值。名单来自《无限》服常用优化，个别名字在本客户端可能不存在或被拒写——那样这条会空转，用 /mui tweaks status 看账本。默认全部开着（2026-11-16 对齐作者实机那套：锐化、去雾、雨雪、视距、伤害数字 ×0.5、战斗文字只留伤害等）；已在用的存档保留你自己的开关状态。")
         sec.bodyHeight = -row.y + 4
     end
 
