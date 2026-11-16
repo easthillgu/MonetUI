@@ -35,8 +35,10 @@ jobs:
           fi
 
       # Dev surface stays in the repo and in the local WOWFOREVER install. Before packaging,
-      # flip the TOC dev flag and drop the DEV-ONLY Script lines; .pkgmeta excludes the two
-      # dev files themselves. packager copies from this working tree, so the edits land in the zip.
+      # flip the TOC dev flag and drop the four DEV-ONLY Script lines (DevTools / Report /
+      # DevProbe / DevCommands); .pkgmeta excludes those files themselves. Core.lua keeps
+      # only a nil-checked ns.DevCommands hook, so the release build ships no dev command
+      # implementation at all. packager copies from this working tree.
       - name: Strip dev-only surface for the release build
         run: |
           node tools/strip-dev.js --self-test

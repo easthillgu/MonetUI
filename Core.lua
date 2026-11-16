@@ -977,8 +977,8 @@ ns.hasMonetColorCallback = ReserveMonetColorCallback()
 
 local function PrintStatus()
     local source, profile = ns.Color:GetSource()
-    ns:Print(string.format("v%s | MonetColor: %s | 主题来源: %s%s | 回调: %s",
-        ns.version,
+    ns:Print(string.format("v%s%s | MonetColor: %s | 主题来源: %s%s | 回调: %s",
+        ns.version, ns.dev and " |cffffa940[DEV]|r" or "",
         ns:HasMonetColor() and "|cff00ff00已接入|r" or "|cffff6b6b未找到|r",
         source,
         source == "monet" and ("（" .. tostring(profile) .. "）") or "",
@@ -1009,273 +1009,9 @@ local function PrintStatus()
     end
 end
 
---- 受限窗口自查（`/mui restrict`）：本客户端把"不许插件碰东西"做成六类限制
---- （Combat / Encounter / ChallengeMode / PvPMatch / Map / Chat，`C_RestrictedActions`）。
---- 以前排查只盯着 PLAYER_REGEN_*，等于只看 Combat；这一条用一次就能看清另外五类
---- 在这个构建里到底存不存在、现在哪一类是活的，以及 `canaccessvalue` 这类正规前置可用不可用。
-local function PrintRestrictions()
-    local api = _G.C_RestrictedActions
-    if type(api) ~= "table" then
-        ns:Print("这个客户端没有 C_RestrictedActions（退回只看战斗中）。")
-    else
-        for _, name in ipairs({ "InCombatLockdown", "IsAddOnRestrictionActive",
-            "GetAddOnRestrictionState", "CheckAllowProtectedFunctions" }) do
-            ns:Print(("  C_RestrictedActions.%s：%s"):format(name, type(api[name]) == "function" and "有" or "没有"))
-        end
-    end
-    local enum = _G.Enum and _G.Enum.AddOnRestrictionType
-    ns:Print("  Enum.AddOnRestrictionType：" .. (type(enum) == "table" and "有" or "没有"))
-    local tracked, known = ns:Restrictions()
-    local live = {}
-    for name in pairs(tracked) do live[#live + 1] = name end
-    table.sort(live)
-    ns:Print(("当前受限：%s（战斗中 %s · IsRestricted %s · 旗帜 %s · 账本 %s）"):format(
-        #live > 0 and table.concat(live, " / ") or "无",
-        ns:InCombat() and "是" or "否",
-        ns:IsRestricted() and "是" or "否",
-        ns.Restricted and "有" or "无",
-        known and "已建立" or "还没建立（没收到过事件）"))
-    -- 逐类对照"我们的账"和"客户端的实时答案"：只有两边不一致才说明事件路径有问题。
-    -- 实机踩过一次坑：`当前受限：无` 分不清"真没限制"和"我们压根没记账"。
-    local isActive = RestrictedFn("IsAddOnRestrictionActive")
-    if isActive and enum then
-        for i = 1, #RESTRICTION_ORDER do
-            local name = RESTRICTION_ORDER[i]
-            local t = enum[name]
-            if t ~= nil then
-                local ok, on = pcall(isActive, t)
-                ns:Print(("  %s：账本 %s / 实时 %s"):format(name,
-                    tracked[name] and "活" or "空",
-                    (ok and on) and "活" or "空"))
-            else
-                ns:Print(("  %s：枚举里没有这个值"):format(name))
-            end
-        end
-    end
-    local Secrets = ns.Secrets
-    if type(Secrets) == "table" and type(Secrets.CanRead) == "function" then
-        ns:Print(("  canaccessvalue：%s（没有时 CanRead 退回 not issecretvalue）"):format(
-            type(_G.canaccessvalue) == "function" and "有" or "没有"))
-    end
-    -- 被暂停的轮询框也放在这里看：告警每个框只印一条，聊天很快被 NPC 对话顶掉，
-    -- 而这本账（`pausedUntil`）在暂停期间一直有效，随时能重看是谁登记的。
-    local Widget = ns.Widget
-    if type(Widget) == "table" and type(Widget.PrintStalled) == "function" then
-        ns:Print("轮询被暂停的框（forbidden 对象，读不出可见性）：")
-        Widget:PrintStalled()
-    end
-end
-
---- 拦截归因账本（`/mui blocks`）。AGENTS 的结论：本客户端对 `ADDON_ACTION_BLOCKED`
---- **不写 taint.log**，所以只能认我们自己记的栈 —— `Secrets.Bool()` 的失败路径会逐条存
---- `debugstack`。这一族就是 docs/PLAN-refactor 里那批 `UNKNOWN()`（机密布尔被真值测试）。
---- 只覆盖 `Secrets.Bool`：别的来源（引擎容器 / 半套压制）这里看不到，得走开关式二分。
-local function PrintBlockLedger(rest)
-    -- 事件处理器抛错也在这本账里露一面：EventBus 每个事件只提示一次、之后静默（不这样会刷屏），
-    -- 所以"到底还在不在报"只能靠这里读。
-    local function PrintBusErrors()
-        local bus = ns.EventBus
-        if not bus or type(bus.FailureCounts) ~= "function" then return end
-        local counts = bus.FailureCounts()
-        local order = {}
-        for event in pairs(counts) do order[#order + 1] = event end
-        if #order == 0 then return end
-        table.sort(order, function(a, b) return counts[a] > counts[b] end)
-        ns:Print("事件处理器失败（同一事件只提示一次，其余静默）：")
-        for i = 1, #order do
-            if i > 8 then
-                ns:Print(("  …另有 %d 个事件"):format(#order - 8))
-                break
-            end
-            ns:Print(("  |cffffd100×%d|r %s"):format(counts[order[i]], order[i]))
-        end
-    end
-
-    if type(ns.Secrets) ~= "table" or type(ns.Secrets.BoolBlocks) ~= "function" then
-        ns:Print("这个构建没有 BoolBlocks 账本。")
-        PrintBusErrors()
-        return
-    end
-    local blocks, total = ns.Secrets.BoolBlocks()
-    if total == 0 or #blocks == 0 then
-        ns:Print("|cff88ff88账本为空|r：本会话没有机密布尔被拦的记录。")
-        ns:Print("（只统计 `Secrets.Bool` 的失败路径；其它 `UNKNOWN()` 来源要靠关模块二分。）")
-        PrintBusErrors()
-        return
-    end
-    local order, groups = {}, {}
-    for _, entry in ipairs(blocks) do
-        local head = string.match(entry.stack or "?", "[^\r\n]+") or "?"
-        if not groups[head] then
-            groups[head] = { n = 0 }
-            order[#order + 1] = head
-        end
-        groups[head].n = groups[head].n + 1
-    end
-    ns:Print(("机密布尔被拦 |cffffa940%d|r 条 · 去重 %d 个调用点："):format(total, #order))
-    for i, head in ipairs(order) do
-        if i > 8 then
-            ns:Print(("  …另有 %d 个调用点（/mui blocks full 看完整栈）"):format(#order - 8))
-            break
-        end
-        ns:Print(("  |cffffd100×%d|r %s"):format(groups[head].n, head))
-    end
-    if rest == "full" then
-        local first = blocks[1]
-        ns:Print("最早一条的完整栈：")
-        for line in string.gmatch((first and first.stack or "?"), "[^\r\n]+") do
-            ns:Print("  " .. line)
-        end
-    end
-    PrintBusErrors()
-end
-
---- 亮度阶梯自查（`/mui colors`）。HANDOFF 8.14.3 的实测：面板（ambient×0.35）和掉血空槽
---- （neutral×0.32）在 14 个区域里对比度只有 1.00–1.19 —— 不是色相选错，是两档亮度重合。
---- 现在这两档都由 Utils/Color.lua 的阶梯按 CIE L* 定死，验收只看 CR。
---- §8.123 起判定行与各自的线**全部来自配色库**（Color:Surface().rows）：Core 不再另写一份
---- 阈值，否则两边必然漂移；这里只组数据、打印、落盘，还多记一份「这一区纠偏了什么」。
---- 为什么要账本：一行只装得下四档 hex，逐组 CR + 判定是十几行，聊天框一定被顶掉；
---- 读法同 compatReport —— <游戏目录>/WTF/Account/<账号>/SavedVariables/MonetUI.lua 里的
---- colorReport，而且落盘比 /reload 晚 1–2 分钟。
-
---- 组一份亮度阶梯账本（`/mui colors` 的数据相）：四档色卡、逐组 CR 判定、区域与来源。
---- 只读 Color，不碰 DB、不 print —— 实机第一次跑就是"全过线 + 账本没落成"，
---- 只报"读不到"查不下去，所以组数据和落盘分开，落盘的失败原因要能单独归因。
-local function BuildColorReport(su)
-    local source, profile = ns.Color:GetSource()
-    local mapID, zoneName, envSource = ns.Color:GetZoneInfo()
-
-    -- 副本而非 su 本身：账本要进 SavedVariables，不许和运行期阶梯表共用引用。
-    local checked, passed, rows = 0, 0, {}
-    for i = 1, #(su.rows or {}) do
-        local src = su.rows[i]
-        local entry = { key = src.key, label = src.label, cr = src.cr,
-                        min = src.min, ok = src.ok, note = src.note }
-        rows[#rows + 1] = entry
-        -- 豁免行（min = nil）只显示数值、不计入过线数；CR 为 nil 的是"工具函数没拿到"。
-        if entry.min and type(entry.cr) == "number" then
-            checked = checked + 1
-            if entry.cr >= entry.min then passed = passed + 1 end
-        end
-    end
-
-    local colors = {}
-    for i = 1, #su.keys do
-        local c = su[su.keys[i]]
-        if c then colors[su.keys[i]] = { r = c.r, g = c.g, b = c.b } end
-    end
-
-    return {
-        client = ns:ClientIdentity(),
-        when = (_G.date and _G.date("%Y-%m-%d %H:%M:%S")) or nil,
-        source = source,
-        profile = profile,
-        mapID = mapID,
-        zone = zoneName,
-        envSource = envSource,
-        keys = { unpack(su.keys) },
-        steps = su.steps,
-        levels = su.levels,
-        colors = colors,
-        cr = su.cr,
-        crMin = su.crMin,
-        environment = su.environment,
-        adjust = su.adjust,
-        toolsReady = su.toolsReady,
-        rows = rows,
-        min = su.minContrast,
-        passed = passed,
-        checked = checked,
-    }
-end
-
---- 账本无条件写：判不过的那一趟恰恰最需要留在 WTF 里看（聊天框那时已经全是红字）。
--- @return saved, why —— why 只在失败时有意义，供 print 归因。
-local function SaveColorReport(report)
-    local ok, db = pcall(function() return ns:DB() end)
-    if not ok then return false, "DB() 抛错：" .. tostring(db) end
-    if type(db) ~= "table" then return false, "DB() 返回 " .. type(db) end
-    local okSet, errSet = pcall(function() db.colorReport = report end)
-    if okSet then return true end
-    return false, "写入抛错：" .. tostring(errSet)
-end
-
-local function PrintColorLadder()
-    local Color = ns.Color
-    if type(Color) ~= "table" or type(Color.Surface) ~= "function" then
-        ns:Print("Color.Surface 不可用：阶梯层没进去（Utils/Color.lua 是旧的）。")
-        return
-    end
-
-    local su = Color:Surface()
-
-    -- 每档写成"用这个颜色本身显示的文字"：一眼看出四档的明暗次序，数字是那档的 CIE L*。
-    -- 一行只放得下这么多：文字压到"档名 + 一位小数"，颜色靠颜色码自己表观（Compat 的教训是
-    -- 一折行，颜色码就会被转义成字面量）。
-    local hexes = {}
-    for i = 1, #su.keys do
-        local key = su.keys[i]
-        local c = su[key]
-        if c then
-            local hex = ns.Math:RGBToHex(c.r, c.g, c.b)
-            local l = su.levels and su.levels[key]
-            hexes[#hexes + 1] = string.format("|cff%s%s %s|r", hex, key,
-                type(l) == "number" and string.format("%.1f", l) or "?")
-        end
-    end
-
-    local report = BuildColorReport(su)
-    ns:Print(string.format("配色阶梯 %s | %s | %s",
-        table.concat(hexes, " "),
-        report.source == "monet" and ("monet/" .. tostring(report.profile)) or "fallback",
-        report.mapID and (tostring(report.zone or "?") .. " " .. tostring(report.mapID) .. " " .. tostring(report.envSource or "?")) or "区域未知"))
-
-    for i = 1, #report.rows do
-        local row = report.rows[i]
-        if type(row.cr) == "number" then
-            if row.min then
-                ns:Print(string.format("  %s %s%.2f（线 %.1f）|r%s", row.label,
-                    row.ok and "|cff88ff88" or "|cffff6b6b", row.cr, row.min,
-                    row.note and (" · " .. row.note) or ""))
-            else
-                -- 悬停态那一行是刻意贴近期，只报数值不判红绿。
-                ns:Print(string.format("  %s %.2f · %s", row.label, row.cr, row.note or "豁免"))
-            end
-        end
-    end
-
-    local saved, why = SaveColorReport(report)
-
-    if report.checked == 0 then
-        ns:Print("|cffff6b6b没有 ContrastRatio / AtLightness|r：vendored LibMonetColor 早于 1.2.0，阶梯退回旧的固定乘数（观感和升级前一致）。")
-        ns:Print("  修法：把 monetcolors 仓库的 LibMonetColor-1.0.lua 同步进 Libs/ 后 /reload。")
-        return
-    end
-
-    -- 这一区到底动没动配色：达标地图必须明确显示「未触发」，否则玩家没法判断
-    -- 颜色变化是环境色换了、还是对比度契约在纠偏。
-    local adj = su.adjust
-    if adj and adj.applied then
-        local bits = {}
-        if adj.fillHue then bits[#bits + 1] = "血条转环境补色" end
-        if adj.fillTo then bits[#bits + 1] = string.format("填充 L*%.0f→%.0f", adj.fillFrom or 0, adj.fillTo) end
-        if adj.textTo then bits[#bits + 1] = string.format("文字 L*%.0f→%.0f", adj.textFrom or 0, adj.textTo) end
-        if adj.edgeTo then bits[#bits + 1] = string.format("边框 L*%.0f→%.0f", adj.edgeFrom or 0, adj.edgeTo) end
-        ns:Print("  自动纠偏：" .. table.concat(bits, " / "))
-    else
-        ns:Print("  自动纠偏：未触发（这一区各配对本来就过线，配色保持引擎原色）")
-    end
-
-    ns:Print(string.format("|cffffd100配色阶梯|r：%d/%d 组过线（最小对比控制值 %.1f）%s",
-        report.passed, report.checked, report.min or 0,
-        saved and "；全量已存 MonetUIDB.colorReport（WTF 里可直接读）"
-            or ("；|cffff6b6b账本没落成 —— " .. tostring(why) .. "|r")))
-end
 
 local function PrintHelp()
-    -- 发布版只列玩家向命令；下面 `if not ns.dev then return end` 之后的整段诊断清单，
-    -- 连同这些文案本身，都只在仓库 / 本地开发版里出现。
+    -- 玩家向命令固定在这里；开发版诊断清单由 ns.DevCommands 追加（发布包不含那层代码）。
     ns:Print("命令：")
     ns:Print("  |cffffd100/mui|r            打开配置面板")
     ns:Print("  |cffffd100/mui status|r     显示模块与主题状态")
@@ -1293,31 +1029,7 @@ local function PrintHelp()
     ns:Print("  |cffffd100/mui groupframes defaults|r 恢复默认位置：小队回屏幕原位，团队贴小地图")
     ns:Print("  |cffffd100/mui whatsnew|r  重看本版要点；/mui tweaks 看控制台优化")
     ns:Print("  |cffffd100/mui reset|r      恢复默认设置（需 /reload）")
-    if not ns.dev then return end
-
-    ns:Print("  —— 开发版诊断（发布版不提供）——")
-    ns:Print("  |cffffd100/mui scale|r      像素网格 / 缩放自检（改完 UI 缩放后再跑一次对比）")
-    ns:Print("  |cffffd100/mui blocks|r     机密布尔被拦的调用栈账本（`UNKNOWN()` 归因，加 full 看完整栈）")
-    ns:Print("  |cffffd100/mui restrict|r   六类受限窗口自查（战斗只是其中一类）+ 可读性前置是否可用")
-    ns:Print("  |cffffd100/mui colors|r     配色亮度阶梯 + 逐组对比度判定（含最小对比控制值与纠偏记录），账本 MonetUIDB.colorReport")
-    ns:Print("  |cffffd100/mui lost|r       血条「损失部分」配色自查：样式有没有落地、织纹有没有把颜色盖住")
-    ns:Print("  |cffffd100/mui compat|r     客户端能力自查：换客户端第一趟跑它（bad 只看与假设不符的，tmpl 连模板一起探，find <片段> 扫暴雪帧真名）")
-    ns:Print("  |cffffd100/mui skins diagnose|r 对象名可达性账本（全仓一本账：skins / nameplates / infobar / minimap）")
-    ns:Print("  |cffffd100/mui minimap menu|r 微菜单现场判据：行建不建得出 / 面板受不受保护 / 此刻右键落点（开服日「右键没反应」）")
-    ns:Print("  |cffffd100/mui groupframes status|r 打印锚点 / 显隐诊断（同时写入 MonetUIDB.groupReport）")
-    ns:Print("  |cffffd100/mui skins diagnose bad|r 只看「命中但不是框体」那一类（全量几百行，聊天框装不下）")
-    ns:Print("  |cffffd100/mui skins layers <窗口名> [片段]|r 这个窗口的底有几层、每层谁能碰（region / 字段可剥 / 要点名；全量存 MonetUIDB.layerReport）")
-    ns:Print("  |cffffd100/mui skins templates [片段]|r 模板库账本：多少个模板 / 映射到 skinAs / Camelot 覆盖；带片段查「这个控件被认成什么」")
-    -- 上线日验收用的只读探针（一个字节都不写，全量都落 SavedVariables）：
-    ns:Print("  |cffffd100/mui dev|r        元素探测面板（256×256）：列出目标窗体包含的框体/贴图，点行复制名字去接线")
-    ns:Print("  |cffffd100/mui dig|r        枚举指针下的窗体：先把鼠标指到目标窗口上，再输入这条命令（全量存 MonetUIDB.devProbeReport）")
-    ns:Print("  |cffffd100/mui perf [reset|diag]|r 调度器总账：订阅数 / 逐路耗时排序 / 失败计数 + 外部驱动账 + Lua 内存 + 当前被暂停的轮询框；带 reset 先清零再计时，带 diag 打调试能力自检（账本 MonetUIDB.perfReport）")
-    ns:Print("  |cffffd100/mui skins closes|r 关闭按钮换皮覆盖面：按图集全量扫，已换皮/仍是暴雪原样/读不出三档（closeReport）")
-    ns:Print("  |cffffd100/mui skins inset|r 换皮容器的有效 alpha（父链连乘，不是单点 GetAlpha），α<0.99 全列（insetReport）")
-    ns:Print("  |cffffd100/mui skins arrows|r 滚动条/步进器箭头逐对象：旋转角 + UV 翻转 + stepper 属性，用来定左右方向（arrowReport）")
-    ns:Print("  |cffffd100/mui buffframe probe|r 只数战斗光环容器的子框个数，不读任何 aura 字段（buffProbe）")
-    ns:Print("  |cffffd100/mui nameplates siblings|r 每块牌 base:GetChildren() 的真名 + alpha，判据是名单里有没有 BuffListFrame（nameplateSiblings）")
-    ns:Print("  |cffffd100/mui …|r          以上探针全量只进账本：落盘比 /reload 晚 1–2 分钟，登出后读最稳，聊天框只有前几行")
+    if ns.DevCommands then ns.DevCommands:PrintHelpTail() end
 end
 
 -- The UI scale.  Every size in this addon is authored in UI units, so the scale decides
@@ -1396,73 +1108,13 @@ local function ApplyAutoScale()
     return false
 end
 
--- Pixel-grid / scale report.  Every quantity the border model leans on, in one place, because the
--- two obvious ways of measuring it are both unavailable on this client (see Utils/Media.lua Mult):
--- GetEffectiveScale() comes back secret, and UIParent:GetHeight() stops tracking the screen as soon
--- as another addon resizes UIParent.  What IS readable is the uiScale CVar, which is what we use --
--- so this command is also the way to confirm that path is still returning something sane.
---   Run it, then drag the UI scale slider in the game's settings and run it again: mult must track it.
-local function PrintScale()
-    local Media = ns.Media
-    local raw = (_G.C_CVar and _G.C_CVar.GetCVar) and _G.C_CVar.GetCVar("uiScale") or nil
-    local scale = tonumber(raw)
-    local mult  = Media:Mult()
 
-    ns:Print("---- 像素网格 / 缩放 ----")
-    ns:Print(string.format("uiScale CVar        : %s", tostring(raw)))
-    ns:Print(string.format("Mult() = 1/scale    : %.4f UI 单位 / 物理px", mult))
-    ns:Print(string.format("  => 1 物理px 需要   : %.4f UI 单位", mult))
-    ns:Print(string.format("  => 1 UI 单位 =     : %.3f 物理px", mult > 0 and 1 / mult or 0))
-
-    local theme = ns:DB().theme or {}
-    ns:Print(string.format("缩放模式            : %s", theme.uiScaleMode == "auto" and "自动（按分辨率固定）" or "跟随游戏设置"))
-    local presetScale, presetPixels = Media:PinnedScale()
-    if presetScale then
-        ns:Print(string.format("固定值（按分辨率）  : %.4f  ->  1 UI 单位 = %d 物理像素",
-            presetScale, presetPixels or 0))
-    else
-        local h = Media:ScreenHeight()
-        ns:Print(string.format("固定值（按分辨率）  : 无（当前高度 %s 不在固定表里）", tostring(h)))
-    end
-
-    if _G.GetPhysicalScreenSize then
-        local w, h = _G.GetPhysicalScreenSize()
-        ns:Print(string.format("物理分辨率         : %d x %d", w or 0, h or 0))
-    end
-    ns:Print(string.format("逻辑分辨率         : %d x %d", _G.GetScreenWidth and _G.GetScreenWidth() or 0,
-                                                _G.GetScreenHeight and _G.GetScreenHeight() or 0))
-    if UIParent and UIParent.GetHeight then
-        ns:Print(string.format("UIParent:GetHeight(): %.2f UI 单位", UIParent:GetHeight()))
-    end
-
-    -- 原生分辨率校验：逻辑分辨率与物理分辨率不等，说明画面在被缩放，"1 物理像素"不是真正的栅格
-    local pw, ph = _G.GetPhysicalScreenSize and _G.GetPhysicalScreenSize()
-    local lw, lh = _G.GetScreenWidth and _G.GetScreenWidth(), _G.GetScreenHeight and _G.GetScreenHeight()
-    if pw and ph and lw and lh and pw > 0 and ph > 0 then
-        if lw == pw and lh == ph then
-            ns:Print("分辨率            : 原生（栅格 = 物理像素）")
-        else
-            ns:Print(string.format("分辨率            : 非原生！%dx%d -> %dx%d，栅格比物理像素粗",
-                                    lw, lh, pw, ph))
-        end
-    end
-    -- 本客户端没有 C_Console 命名空间（wow-forever-api 索引里只有全局 ConsoleGetAllCommands），
-    -- 这里以前用 C_Console.GetAllCommands 当开关，永远为假，那行提示从来没打出来过。
-    if type(_G.ConsoleGetAllCommands) == "function" then
-        ns:Print("提示：graphicsTextureResolution = "
-            .. tostring((_G.C_CVar and _G.C_CVar.GetCVar and _G.C_CVar.GetCVar("graphicsTextureResolution")) or "?")
-            .. "（UI 贴图不受它缩放，仅供确认）")
-    end
-
-    ns:Print(string.format("示例：thickness=1 的边框 = %.4f UI 单位 = 1 物理px",
-                           1 * mult))
-    ns:Print(string.format("      thickness=2 的边框 = %.4f UI 单位 = 2 物理px", 2 * mult))
-    ns:Print("改动游戏里的 UI 缩放后再跑一次，Mult() 应随之变化。")
-end
-
---- 发布版不提供的诊断命令。玩家向命令（配置 / 模块开关 / 状态 / 主题 / 背包 / 货币 /
---- 团队框 / tweaks / whatsnew / init / reset）一律保留。模块子命令按「模块名 + 首词」
---- 精确匹配，别误伤 `/mui tweaks status` 这类玩家命令。
+--- 发布版拦截表（不是命令实现）：开发版命令层在 Modules/Tools/DevCommands.lua，
+--- 发布包不含那层代码，但仍要挡住玩家输入诊断词 —— 否则 `/mui skins diagnose`
+--- 会顺着「模块名 + HandleCommand」落到玩家向模块里执行诊断。
+--- 玩家向命令（配置 / 模块开关 / 状态 / 主题 / 背包 / 货币 / 团队框 / tweaks /
+--- whatsnew / init / reset）一律保留。模块子命令按「模块名 + 首词」精确匹配，
+--- 别误伤 `/mui tweaks status` 这类玩家命令。
 local DEV_COMMANDS = {
     scale = true, blocks = true, restrict = true, colors = true, lost = true,
     compat = true, perf = true, report = true, devtools = true,
@@ -1482,6 +1134,9 @@ local DEV_SUBCOMMANDS = {
 local function HandleSlash(message)
     local command, rest = string.match(message or "", "^(%S*)%s*(.-)$")
     command = string.lower(command or "")
+
+    -- 开发版命令层（Modules/Tools/DevCommands.lua）只在 dev 包里加载；发布版为 nil。
+    if ns.DevCommands and ns.DevCommands:Handle(message) then return end
 
     -- 发布版：诊断命令整体不可达（帮助里也不列），给一句人话别让输入像被吞掉。
     if not ns.dev then
@@ -1560,65 +1215,6 @@ local function HandleSlash(message)
         MergeDefaults(db, DEFAULTS)
         db.schema = SCHEMA
         ns:Print("设置已重置为默认值，执行 /reload 后生效。")
-
-    elseif command == "scale" then
-        PrintScale()
-
-    elseif command == "blocks" then
-        PrintBlockLedger(rest)
-
-    elseif command == "restrict" then
-        PrintRestrictions()
-
-    elseif command == "colors" then
-        PrintColorLadder()
-
-    elseif command == "lost" then
-        -- 血条"损失部分"配色自查：样式有没有落地、织纹有没有把颜色盖住（见 HANDOFF 8.17）。
-        local unitFrames = ns:GetModule("UnitFrames")
-        if unitFrames and type(unitFrames.DebugLost) == "function" then
-            unitFrames:DebugLost()
-        else
-            ns:Print("单位框模块没加载，读不到血条配色。")
-        end
-
-    elseif command == "perf" then
-        -- 调度器总账 + Lua 内存 + 当前被暂停的轮询框（只读，见 Modules/Tools/DevTools.lua）。
-        local devTools = ns:GetModule("DevTools")
-        if devTools and type(devTools.Perf) == "function" then
-            devTools:Perf(rest)   -- `/mui perf reset` 靠这个参数
-        else
-            ns:DevPrint("DevTools 探针模块没加载：检查 Modules/Tools/Tools.xml 里有没有 DevTools.lua。")
-        end
-
-    elseif command == "compat" then
-        local Compat = ns.Compat
-        if type(Compat) ~= "table" then
-            ns:Print("能力自查没加载：检查 Utils/Utils.xml 里有没有 Compat.lua。")
-        else
-            local arg = string.lower(rest or "")
-            if string.find(arg, "^find") then
-                Compat:Find(string.match(arg, "^find%s+(.*)"))
-            elseif arg == "caps" then
-                -- N4：只报"代码已经问过哪些能力、答案是什么"，不造任何实例（报告命令不许改运行期状态）
-                ns:Print("|cffffd100能力表|r（未探测 = 还没人问过；要现探就照常跑 /mui compat）")
-                for _, line in ipairs(Compat:ListCapabilities()) do ns:Print("  " .. line) end
-            elseif type(Compat.Print) == "function" then
-                Compat:Print({ bad = string.find(arg, "bad") ~= nil, tmpl = string.find(arg, "tmpl") ~= nil })
-            else
-                ns:Print("Compat.Print 不可调用。")
-            end
-        end
-
-    elseif command == "dev" or command == "dig" then
-        -- 元素探测面板（仅开发版，见 Modules/Tools/DevProbe.lua）：
-        -- /mui dev 开关面板，/mui dig 枚举鼠标指针下的窗体。
-        local probe = ns:GetModule("DevProbe")
-        if probe and type(probe.HandleCommand) == "function" then
-            probe:HandleCommand(command == "dig" and "dig" or "")
-        else
-            ns:DevPrint("DevProbe 模块没加载：检查 Modules/Tools/Tools.xml 里有没有 DevProbe.lua。")
-        end
 
     elseif command == "help" then
         PrintHelp()
@@ -1757,8 +1353,8 @@ ns.EventBus:Register("PLAYER_LOGIN", function()
         ApplyAutoScale()
         ns:StartModules()
 
-        ns:Print(string.format("v%s 已加载。MonetColor: %s。输入 |cffffd100/mui|r 打开配置。",
-            ns.version,
+        ns:Print(string.format("v%s%s 已加载。MonetColor: %s。输入 |cffffd100/mui|r 打开配置。",
+            ns.version, ns.dev and " |cffffa940[DEV]|r" or "",
             ns:HasMonetColor() and "|cff00ff00已接入|r" or "|cffff6b6b未找到（使用内置调色板）|r"))
         ns:DevPrint("客户端：" .. ns:ClientIdentity())
     end

@@ -28,6 +28,7 @@ ignore:
   - Modules/Tools/DevTools.lua
   - Modules/Tools/Report.lua
   - Modules/Tools/DevProbe.lua
+  - Modules/Tools/DevCommands.lua
   - "*.zip"
   - "NVIDIA Corporation"
 

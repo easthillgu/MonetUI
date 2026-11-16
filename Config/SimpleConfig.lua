@@ -353,7 +353,7 @@ function SimpleConfig:Build()
 
     local subtitle = Widget:Font(panel, 12, "pixel", "neutral", "CENTER")
     subtitle:SetPoint("TOP", title, "BOTTOM", 0, -4)
-    subtitle:SetText("v" .. ns.version .. " · 印象派自适应界面")
+    subtitle:SetText("v" .. ns.version .. (ns.dev and " |cffffa940[DEV]|r" or "") .. " · 印象派自适应界面")
 
     local close = Widget:CloseButton(panel)
     close:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -6, -6)

@@ -701,6 +701,273 @@ function drawOptions(ctx, cx, cy, size) {
   }
 }
 
+// ============================================================
+// 统一线稿母版 v2（2026-11-16）
+// ------------------------------------------------------------
+// 一套图标共用同一套几何纪律：64x64 画布 / 中心 (32,32) / 笔画 5px /
+// 圆头端帽 + 圆头连接 / 纯白 #fff 模具（色相全靠运行期 SetVertexColor 染）。
+// close_hover 与 win_maximize 是有意保留的彩色（见 Media.lua 注释）。
+// 之前 close X 是 8px、chevron 是 3px、map/tool 是 SVG 中等描边、role/combat 是
+// 渐变剪影——四套语言混在一起。这一套全部拉到 5px 等宽线稿。
+// ============================================================
+// 之前 close X 是 8px、chevron 是 3px、map/tool 是 SVG 中等描边、role/combat 是
+// 渐变剪影——四套语言混在一起。这一套全部拉到 Aurora 式方角冷线：
+// 方头端帽（butt）、尖角连接（miter）、无圆角矩形、无渐变无装饰。
+const ICON_T = 3;
+
+// 给 ctx 套上线稿母版的笔刷（color 默认纯白模具）。
+// lineCap='butt' / lineJoin='miter' 是 Aurora 式冷硬方角，不要改回 round。
+function iconBrush(ctx, color) {
+  ctx.strokeStyle = color || PALETTE.stencil;
+  ctx.fillStyle = color || PALETTE.stencil;
+  ctx.lineWidth = ICON_T;
+  ctx.lineCap = 'butt';
+  ctx.lineJoin = 'miter';
+  ctx.miterLimit = 4;
+}
+
+function drawV2Close(ctx, size, color) {
+  const c = size / 2;
+  iconBrush(ctx, color);
+  ctx.beginPath(); ctx.moveTo(c-11,c-11); ctx.lineTo(c+11,c+11); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(c+11,c-11); ctx.lineTo(c-11,c+11); ctx.stroke();
+}
+
+function drawV2ChevronUp(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.beginPath(); ctx.moveTo(c-10,c+7); ctx.lineTo(c,c-6); ctx.lineTo(c+10,c+7); ctx.stroke();
+}
+
+function drawV2WinArrow(ctx, size, upRight) {
+  const c = size / 2, dx = upRight?1:-1, dy = upRight?-1:1;
+  iconBrush(ctx);
+  ctx.beginPath();
+  ctx.moveTo(c-10*dx, c-10*dy); ctx.lineTo(c+10*dx, c+10*dy); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(c+2*dx, c+10*dy); ctx.lineTo(c+10*dx, c+10*dy); ctx.lineTo(c+10*dx, c+2*dy); ctx.stroke();
+}
+
+function drawV2Check(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.beginPath(); ctx.moveTo(c-11,c+1); ctx.lineTo(c-4,c+9); ctx.lineTo(c+12,c-10); ctx.stroke();
+}
+
+function drawV2Radio(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.beginPath(); ctx.arc(c,c,11,0,Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(c,c,3.5,0,Math.PI*2); ctx.fill();
+}
+
+function drawV2Refresh(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.beginPath(); ctx.arc(c,c,10.5,-0.2*Math.PI,1.2*Math.PI); ctx.stroke();
+  const a = 1.2*Math.PI, ax = c+10.5*Math.cos(a), ay = c+10.5*Math.sin(a);
+  ctx.save(); ctx.translate(ax,ay); ctx.rotate(a+Math.PI/2);
+  ctx.beginPath(); ctx.moveTo(7,0); ctx.lineTo(-4,-5); ctx.lineTo(-4,5); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function drawV2Sliders(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  const ys = [-9,0,9], knobs = [-4,5,-1.5];
+  ys.forEach((dy,i) => {
+    ctx.beginPath(); ctx.moveTo(c-13,c+dy); ctx.lineTo(c+13,c+dy); ctx.stroke();
+    ctx.strokeRect(c+knobs[i]-2.2, c+dy-2.2, 4.4, 4.4);
+  });
+}
+
+// --- role / combat：从渐变剪影拉成 Aurora 方角线稿 ---
+function drawV2RoleTank(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.beginPath();
+  ctx.moveTo(c-10,c-10); ctx.lineTo(c+10,c-10);
+  ctx.lineTo(c+10,c+2); ctx.lineTo(c,c+12); ctx.lineTo(c-10,c+2);
+  ctx.closePath(); ctx.stroke();
+}
+
+function drawV2RoleHeal(ctx, size) {
+  const c = size / 2, w = 4, L = 12;
+  iconBrush(ctx);
+  ctx.beginPath();
+  ctx.moveTo(c-w,c-L); ctx.lineTo(c+w,c-L); ctx.lineTo(c+w,c-w); ctx.lineTo(c+L,c-w); ctx.lineTo(c+L,c+w);
+  ctx.lineTo(c+w,c+w); ctx.lineTo(c+w,c+L); ctx.lineTo(c-w,c+L); ctx.lineTo(c-w,c+w);
+  ctx.lineTo(c-L,c+w); ctx.lineTo(c-L,c-w); ctx.lineTo(c-w,c-w);
+  ctx.closePath(); ctx.stroke();
+}
+
+function drawV2RoleDps(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  // 双剑交叉（X 形）：剑刃拉长，护手外移避免中心糊成一团
+  ctx.beginPath(); ctx.moveTo(c-12,c-12); ctx.lineTo(c+11,c+11); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(c+12,c-12); ctx.lineTo(c-11,c+11); ctx.stroke();
+  // 护手 A：离交叉点 6px，靠近剑柄端
+  ctx.save(); ctx.translate(c+6, c+6); ctx.rotate(-Math.PI/4);
+  ctx.beginPath(); ctx.moveTo(-3,0); ctx.lineTo(3,0); ctx.stroke();
+  ctx.restore();
+  // 护手 B：离交叉点 6px
+  ctx.save(); ctx.translate(c-6, c+6); ctx.rotate(Math.PI/4);
+  ctx.beginPath(); ctx.moveTo(-3,0); ctx.lineTo(3,0); ctx.stroke();
+  ctx.restore();
+}
+
+function drawV2RoleLeader(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.beginPath();
+  ctx.moveTo(c-11,c+8); ctx.lineTo(c+11,c+8);
+  ctx.lineTo(c+11,c-2); ctx.lineTo(c+5,c-8); ctx.lineTo(c,c-2.5);
+  ctx.lineTo(c-5,c-8); ctx.lineTo(c-11,c-2); ctx.closePath(); ctx.stroke();
+}
+
+function drawV2CombatSword(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.save(); ctx.translate(c,c); ctx.rotate(-Math.PI/4);
+  ctx.beginPath();
+  ctx.moveTo(-1.8,3); ctx.lineTo(-1.3,-10); ctx.lineTo(0,-14); ctx.lineTo(1.3,-10); ctx.lineTo(1.8,3);
+  ctx.closePath(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-4,4); ctx.lineTo(4,4); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0,4); ctx.lineTo(0,10); ctx.stroke();
+  ctx.restore();
+}
+
+function drawV2CombatShield(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.beginPath();
+  ctx.moveTo(c-10,c-10); ctx.lineTo(c+10,c-10);
+  ctx.lineTo(c+10,c+2); ctx.lineTo(c,c+12); ctx.lineTo(c-10,c+2);
+  ctx.closePath(); ctx.stroke();
+}
+
+// --- 小地图三按钮（原 SVG 手绘，改 Aurora 方角线稿） ---
+function drawV2MapTracking(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.beginPath(); ctx.arc(c,c,8.5,0,Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(c,c,4,0,Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(c,c,1.4,0,Math.PI*2); ctx.fill();
+}
+
+function drawV2MapCompartment(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.strokeRect(c-9, c-6, 18, 15);
+  ctx.beginPath(); ctx.moveTo(c-9,c-1); ctx.lineTo(c+9,c-1); ctx.stroke();
+}
+
+function drawV2MapDifficulty(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.beginPath();
+  ctx.moveTo(c,c-11); ctx.lineTo(c+9,c); ctx.lineTo(c,c+11); ctx.lineTo(c-9,c); ctx.closePath(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(c-9,c); ctx.lineTo(c+9,c); ctx.stroke();
+}
+
+// --- 背包工具三钮（原 SVG 实心剪影，改 Aurora 方角线稿） ---
+function drawV2ToolSort(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.beginPath(); ctx.moveTo(c-9,c-7); ctx.lineTo(c+6,c-7); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(c-9,c); ctx.lineTo(c+2.5,c); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(c-9,c+7); ctx.lineTo(c,c+7); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(c+10,c-9); ctx.lineTo(c+14,c-13); ctx.lineTo(c+18,c-9); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(c+10,c+9); ctx.lineTo(c+14,c+13); ctx.lineTo(c+18,c+9); ctx.stroke();
+}
+
+function drawV2ToolDeposit(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.beginPath(); ctx.moveTo(c,c-10); ctx.lineTo(c,c+3); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(c-5,c-1); ctx.lineTo(c,c+5); ctx.lineTo(c+5,c-1); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(c-9,c+9); ctx.lineTo(c+9,c+9); ctx.stroke();
+}
+
+function drawV2ToolSlots(ctx, size) {
+  const c = size / 2, s = 8.5;
+  iconBrush(ctx);
+  ctx.strokeRect(c-s, c-s, s*2, s*2);
+  ctx.beginPath(); ctx.moveTo(c-s,c); ctx.lineTo(c+s,c); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(c,c-s); ctx.lineTo(c,c+s); ctx.stroke();
+}
+
+// --- 新增高频图标（Aurora 方角线稿） ---
+function drawV2Search(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.beginPath(); ctx.arc(c-4,c-4,8.5,0,Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(c+2.5,c+2.5); ctx.lineTo(c+11,c+11); ctx.stroke();
+}
+
+function drawV2Lock(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.beginPath(); ctx.arc(c,c-4,5.5,Math.PI,0); ctx.stroke();
+  ctx.strokeRect(c-10, c-3, 20, 13);
+  ctx.beginPath(); ctx.arc(c,c+4,1.5,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(c,c+5); ctx.lineTo(c,c+8); ctx.stroke();
+}
+
+function drawV2Trash(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.beginPath(); ctx.moveTo(c-11,c-8); ctx.lineTo(c+11,c-8); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(c-3,c-8); ctx.lineTo(c-3,c-11); ctx.lineTo(c+3,c-11); ctx.lineTo(c+3,c-8); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(c-8.5,c-8); ctx.lineTo(c-6,c+10); ctx.lineTo(c+6,c+10); ctx.lineTo(c+8.5,c-8); ctx.stroke();
+}
+
+function drawV2Plus(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.beginPath(); ctx.moveTo(c-10,c); ctx.lineTo(c+10,c); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(c,c-10); ctx.lineTo(c,c+10); ctx.stroke();
+}
+
+function drawV2Minus(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.beginPath(); ctx.moveTo(c-10,c); ctx.lineTo(c+10,c); ctx.stroke();
+}
+
+function drawV2Warning(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.beginPath();
+  ctx.moveTo(c,c-11); ctx.lineTo(c+11,c+8); ctx.lineTo(c-11,c+8); ctx.closePath(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(c,c-3); ctx.lineTo(c,c+3); ctx.stroke();
+  ctx.beginPath(); ctx.arc(c,c+6.5,1.5,0,Math.PI*2); ctx.fill();
+}
+
+function drawV2Info(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.beginPath(); ctx.arc(c,c,10.5,0,Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(c,c-4.5,1.5,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(c,c-0.5); ctx.lineTo(c,c+7); ctx.stroke();
+}
+
+function drawV2Gear(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.beginPath(); ctx.arc(c,c,5.5,0,Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(c,c,1.8,0,Math.PI*2); ctx.stroke();
+  for (let i=0;i<8;i++){
+    const a = i*Math.PI/4;
+    ctx.beginPath();
+    ctx.moveTo(c+7.5*Math.cos(a), c+7.5*Math.sin(a));
+    ctx.lineTo(c+11*Math.cos(a), c+11*Math.sin(a));
+    ctx.stroke();
+  }
+}
+
 function drawBarFill(ctx, w, h) {
   // 状态条/滑块的"基材"，刻意画成**平的**：明暗不烘进纹理，由运行期 SetGradient 按条轴算。
   // 这是参考插件 EllesmereUI 的思路（EllesmereUIUnitFrames.lua:1337 ApplyBarGradient）：
@@ -1007,26 +1274,46 @@ const generators = {
   'monet_barfill_gradient': (ctx, w, h) => drawBarFillGradient(ctx, w, h),
   'monet_barfill_thin':  (ctx, w, h) => drawBarFillThin(ctx, w, h),
   'monet_stripe_weave':  (ctx, w, h) => drawBarStripe(ctx, w),
-  'monet_check':         (ctx, w, h) => drawCheck(ctx, w/2, h/2, Math.min(w,h), PALETTE.stencil, 20),
-  // close 三态：同一几何，颜色取当前视觉档的 CLOSE.*（标准档 = 白 / 金 / 灰）。
-  'monet_close_normal':  (ctx, w, h) => drawCloseX(ctx, Math.min(w, h), CLOSE.normal),
-  'monet_close_hover':   (ctx, w, h) => drawCloseX(ctx, Math.min(w, h), CLOSE.hover),
-  'monet_close_push':    (ctx, w, h) => drawCloseX(ctx, Math.min(w, h), CLOSE.push),
-  // 窗口右上角的两颗斜箭头（与 close 同一口径；颜色同 normal = 纯白模具，运行期染色）。
-  'monet_maximize_arrow': (ctx, w, h) => drawWinArrow(ctx, Math.min(w, h), CLOSE.normal, true),
-  'monet_minimize_arrow': (ctx, w, h) => drawWinArrow(ctx, Math.min(w, h), CLOSE.normal, false),
+  // —— 统一线稿母版 v2（5px / 圆头 / 纯白模具）——
+  'monet_check':         (ctx, w, h) => drawV2Check(ctx, Math.min(w,h)),
+  'monet_close_normal':  (ctx, w, h) => drawV2Close(ctx, Math.min(w,h), CLOSE.normal),
+  'monet_close_hover':   (ctx, w, h) => drawV2Close(ctx, Math.min(w,h), CLOSE.hover),
+  'monet_close_push':    (ctx, w, h) => drawV2Close(ctx, Math.min(w,h), CLOSE.push),
+  'monet_maximize_arrow': (ctx, w, h) => drawV2WinArrow(ctx, Math.min(w,h), true),
+  'monet_minimize_arrow': (ctx, w, h) => drawV2WinArrow(ctx, Math.min(w,h), false),
+  'monet_chevron_up':    (ctx, w, h) => drawV2ChevronUp(ctx, Math.min(w,h)),
+  'monet_radio':         (ctx, w, h) => drawV2Radio(ctx, Math.min(w,h)),
+  'monet_refresh':       (ctx, w, h) => drawV2Refresh(ctx, Math.min(w,h)),
+  'monet_options':       (ctx, w, h) => drawV2Sliders(ctx, Math.min(w,h)),
+  // role / combat：从渐变剪影拉成 5px 线稿（2026-11-16）
+  'monet_role_dps':      (ctx, w, h) => drawV2RoleDps(ctx, Math.min(w,h)),
+  'monet_role_heal':     (ctx, w, h) => drawV2RoleHeal(ctx, Math.min(w,h)),
+  'monet_role_leader':   (ctx, w, h) => drawV2RoleLeader(ctx, Math.min(w,h)),
+  'monet_role_tank':     (ctx, w, h) => drawV2RoleTank(ctx, Math.min(w,h)),
+  'monet_combat_sword':  (ctx, w, h) => drawV2CombatSword(ctx, Math.min(w,h)),
+  'monet_combat_shield': (ctx, w, h) => drawV2CombatShield(ctx, Math.min(w,h)),
+  // 小地图三按钮：从 SVG 手绘收进程序化线稿
+  'monet_map_tracking':    (ctx, w, h) => drawV2MapTracking(ctx, Math.min(w,h)),
+  'monet_map_compartment': (ctx, w, h) => drawV2MapCompartment(ctx, Math.min(w,h)),
+  'monet_map_difficulty':  (ctx, w, h) => drawV2MapDifficulty(ctx, Math.min(w,h)),
+  // 背包工具三钮：从 SVG 实心剪影收进程序化线稿
+  'monet_tool_sort':     (ctx, w, h) => drawV2ToolSort(ctx, Math.min(w,h)),
+  'monet_tool_deposit':  (ctx, w, h) => drawV2ToolDeposit(ctx, Math.min(w,h)),
+  'monet_tool_slots':    (ctx, w, h) => drawV2ToolSlots(ctx, Math.min(w,h)),
+  // 新增高频图标（2026-11-16）
+  'monet_search':        (ctx, w, h) => drawV2Search(ctx, Math.min(w,h)),
+  'monet_lock':          (ctx, w, h) => drawV2Lock(ctx, Math.min(w,h)),
+  'monet_trash':         (ctx, w, h) => drawV2Trash(ctx, Math.min(w,h)),
+  'monet_plus':          (ctx, w, h) => drawV2Plus(ctx, Math.min(w,h)),
+  'monet_minus':         (ctx, w, h) => drawV2Minus(ctx, Math.min(w,h)),
+  'monet_warning':       (ctx, w, h) => drawV2Warning(ctx, Math.min(w,h)),
+  'monet_info':          (ctx, w, h) => drawV2Info(ctx, Math.min(w,h)),
+  'monet_gear':          (ctx, w, h) => drawV2Gear(ctx, Math.min(w,h)),
+  // —— 非图标类（保留原实现）——
   'monet_corner':        (ctx, w, h) => drawCorner(ctx, w),
   'monet_hairline':      (ctx, w, h) => drawHairline(ctx, w, h),
-  'monet_radio':         (ctx, w, h) => drawRadio(ctx, w/2, h/2, Math.min(w,h), 20),
-  'monet_refresh':       (ctx, w, h) => drawRefresh(ctx, w/2, h/2, Math.min(w,h)),
-  'monet_options':       (ctx, w, h) => drawOptions(ctx, w/2, h/2, Math.min(w,h)),
-  'monet_role_dps':      (ctx, w, h) => drawRoleDps(ctx, w/2, h/2, Math.min(w,h)),
-  'monet_role_heal':     (ctx, w, h) => drawRoleHeal(ctx, w/2, h/2, Math.min(w,h)),
-  'monet_role_leader':   (ctx, w, h) => drawRoleLeader(ctx, w/2, h/2, Math.min(w,h)),
-  'monet_role_tank':     (ctx, w, h) => drawRoleTank(ctx, w/2, h/2, Math.min(w,h)),
   'monet_scrollbar_track': (ctx, w, h) => glyphScrollTrack(ctx, w, h),
   'monet_scrollbar_thumb': (ctx, w, h) => glyphScrollThumb(ctx, w, h),
-  // A4 氛围暗角（只有 alpha，强度在运行期给）：见 drawVignette 的头注
   'monet_vignette_62':     (ctx, w, h) => drawVignette(ctx, w, h, 0.62),
   'monet_vignette_55':     (ctx, w, h) => drawVignette(ctx, w, h, 0.55),
 };

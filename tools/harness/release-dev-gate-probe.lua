@@ -2,8 +2,9 @@
 -- 发布版 dev 门闸 / 启动提示 / 物理剥离链路的静态一致性回归桩。
 --   lua tools/harness/release-dev-gate-probe.lua
 --
--- 判据（11-10 作者指示）：dev 功能与开发期提示只在本地和仓库保留，发布包里
--- 不注册诊断命令、不打印自检提示、不含 DevTools.lua / Report.lua / DevProbe.lua。
+-- 判据（11-10 作者指示，11-15 收紧）：dev 功能与开发期提示只在本地和仓库保留，发布包里
+-- 不注册诊断命令、不打印自检提示、不含 DevTools / Report / DevProbe / DevCommands.lua，
+-- 连 Core.lua 里的 dev 命令实现与帮助文案都不在包里（只留一份发布版拦截表）。
 
 local function read(path)
     local f = assert(io.open(path, "rb"), "missing file: " .. path)
@@ -32,6 +33,8 @@ end
 
 local toc = read("MonetUI.toc")
 local core = read("Core.lua")
+local devcli = read("Modules/Tools/DevCommands.lua")
+local config = read("Config/SimpleConfig.lua")
 local init = read("Init.lua")
 local xml = read("Modules/Tools/Tools.xml")
 local pkg = read(".pkgmeta")
@@ -53,15 +56,20 @@ check("取不到标记时默认关闭（fail-closed）",
 check("DevPrint 只在 dev 版打印",
     has(core, "function ns:DevPrint(message)")
     and has(core, "if self.dev then self:Print(message) end"))
-check("玩家向版本横幅仍用 ns:Print", has(core, 'ns:Print(string.format("v%s 已加载。'))
+check("玩家向版本横幅仍用 ns:Print", has(core, 'ns:Print(string.format("v%s%s 已加载。'))
+check("开发版显示 [DEV] 标识（横幅 / status / 配置副标题）",
+    has(core, 'ns.dev and " |cffffa940[DEV]|r" or ""')
+    and has(config, 'ns.dev and " |cffffa940[DEV]|r" or ""'))
+check("发布版不显示 [DEV]（ns.dev=false 时字符串为空）",
+    core:find('ns%.dev and " |cffffa940%[DEV%]|r" or ""') ~= nil)
 
 -- ---------------------------------------------------------------------------
--- 2. 诊断命令门闸 + 帮助文本分叉
+-- 2. 发布版拦截表 + 帮助文本分叉
 -- ---------------------------------------------------------------------------
 local devTable = core:match("local DEV_COMMANDS = {.-}") or ""
 -- 表里每项是内嵌的 { ... }，非贪婪 `.-}` 会停在第一个内嵌表上；改按独立的收尾 `}` 行切。
 local devSubTable = core:match("local DEV_SUBCOMMANDS = {(.-)\n}") or ""
-check("DEV_COMMANDS 存在且列齐顶层诊断命令",
+check("发布版拦截表 DEV_COMMANDS 列齐顶层诊断命令",
     devTable ~= ""
     and has(devTable, "scale = true, blocks = true, restrict = true, colors = true, lost = true,")
     and has(devTable, "compat = true, perf = true, report = true, devtools = true,"))
@@ -77,9 +85,53 @@ check("不误伤 tweaks / bags 的玩家向子命令",
     not has(devSubTable, "tweaks") and not has(devSubTable, "bags"))
 check("HandleSlash 开头有发布版拦截",
     core:find("local function HandleSlash.-if not ns%.dev then.-DEV_SUBCOMMANDS%[command%]") ~= nil)
-check("PrintHelp 发布版提前 return", has(core, "if not ns.dev then return end"))
+local hookAt = core:find("if ns.DevCommands and ns.DevCommands:Handle(message) then return end", 1, true)
+local guardAt2 = core:find("if not ns.dev then", 1, true)
+check("HandleSlash 先问 dev 层、再走发布版拦截",
+    hookAt ~= nil and guardAt2 ~= nil and hookAt < guardAt2)
+check("PrintHelp 把诊断清单委托给 dev 层",
+    has(core, "if ns.DevCommands then ns.DevCommands:PrintHelpTail() end"))
+check("Core 里不再有 dev 帮助文案 / 提前 return",
+    not has(core, "—— 开发版诊断") and not has(core, "if not ns.dev then return end"))
 check("用法提示不再向发布版提 diagnose",
     has(core, 'if ns.dev and type(module.HandleCommand) == "function" then'))
+
+-- ---------------------------------------------------------------------------
+-- 2.5 dev 命令层：本地完整、发布包里连实现都没有（11-15 收紧）
+-- ---------------------------------------------------------------------------
+check("DevCommands.lua fail-closed（非 dev 直接 return）",
+    has(devcli, 'if type(ns) ~= "table" or not ns.dev then return end'))
+check("DevCommands.lua 注册 ns.DevCommands 并实现 Handle / PrintHelpTail",
+    has(devcli, "ns.DevCommands = M")
+    and has(devcli, "function M:Handle(message)")
+    and has(devcli, "function M:PrintHelpTail()"))
+check("dev 层分发表列齐 9 条实现命令",
+    has(devcli, "local DISPATCH = {")
+    and has(devcli, "scale = true, blocks = true, restrict = true, colors = true, lost = true,")
+    and has(devcli, "compat = true, perf = true, dev = true, dig = true,"))
+check("dev 帮助文案只在 dev 层", has(devcli, "—— 开发版诊断（发布版不提供）——"))
+check("Core 不再含任何 dev 命令实现函数",
+    not has(core, "local function PrintScale")
+    and not has(core, "local function PrintBlockLedger")
+    and not has(core, "local function PrintRestrictions")
+    and not has(core, "local function BuildColorReport")
+    and not has(core, "local function SaveColorReport")
+    and not has(core, "local function PrintColorLadder"))
+check("Core 不再含 dev 命令分支（scale/colors/perf/dev）",
+    not has(core, 'elseif command == "scale" then')
+    and not has(core, 'elseif command == "colors" then')
+    and not has(core, 'elseif command == "perf" then')
+    and not has(core, 'elseif command == "dev" or command == "dig" then'))
+check("dev 实现确实搬进了 dev 层",
+    has(devcli, "local function PrintScale")
+    and has(devcli, "local function PrintColorLadder")
+    and has(devcli, "local function PrintRestrictions"))
+check("玩家向命令分支仍完整（status/theme/reset/unlock/help）",
+    has(core, 'elseif command == "status" then')
+    and has(core, 'elseif command == "theme" then')
+    and has(core, 'elseif command == "reset" then')
+    and has(core, 'elseif command == "help" then')
+    and has(core, 'elseif command == "unlock" or command == "lock" then'))
 
 -- ---------------------------------------------------------------------------
 -- 3. 启动自检提示改 DevPrint（玩家主动命令输出仍走 Print）
@@ -111,18 +163,21 @@ local devLines = 0
 for line in (xml .. "\n"):gmatch("([^\n]*)\n") do
     if has(line, "<Script") and has(line, "<!-- DEV-ONLY -->") then devLines = devLines + 1 end
 end
-check("Tools.xml 恰好三行 DEV-ONLY Script", devLines == 3, "count=" .. devLines)
-check("DEV-ONLY 标记只挂在三份 dev 文件上",
+check("Tools.xml 恰好四行 DEV-ONLY Script", devLines == 4, "count=" .. devLines)
+check("DEV-ONLY 标记只挂在四份 dev 文件上",
     has(xml, '<Script file="DevTools.lua"/><!-- DEV-ONLY -->')
     and has(xml, '<Script file="Report.lua"/><!-- DEV-ONLY -->')
-    and has(xml, '<Script file="DevProbe.lua"/><!-- DEV-ONLY -->'))
+    and has(xml, '<Script file="DevProbe.lua"/><!-- DEV-ONLY -->')
+    and has(xml, '<Script file="DevCommands.lua"/><!-- DEV-ONLY -->'))
 -- XML 注释里不能再嵌 <!--：否则客户端解析直接失败。
 local commentBody = xml:match("<!%-%-%s*\n%s*加载顺序：(.-)%-%->") or ""
 check("Tools.xml 大注释块存在且没有嵌套 <!--",
     commentBody ~= "" and not has(commentBody, "<!--"), commentBody:sub(1, 80))
-check(".pkgmeta 物理排除三份 dev 文件",
+check(".pkgmeta 物理排除四份 dev 文件",
     has(pkg, "Modules/Tools/DevTools.lua") and has(pkg, "Modules/Tools/Report.lua")
-    and has(pkg, "Modules/Tools/DevProbe.lua"))
+    and has(pkg, "Modules/Tools/DevProbe.lua") and has(pkg, "Modules/Tools/DevCommands.lua"))
+check("strip-dev.js 的 DEV_FILES 含 DevCommands.lua",
+    has(strip, "'DevCommands.lua'"))
 check("tools/ 本身不进发布包", has(pkg, "  - tools"))
 local guardAt = wf:find("Guard - TOC version must match the tag", 1, true)
 local selfTestAt = wf:find("strip%-dev%.js %-%-self%-test", 1, false)
