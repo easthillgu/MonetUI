@@ -19,12 +19,13 @@ local function InCombat()
     return type(InCombatLockdown) == "function" and InCombatLockdown()
 end
 
--- The two Forever windows carry gold "side tabs" (LFG 的列表/浏览/谁在找, 传承进度的三个页签): the ornate gold frame and glow go, the icon stays.
+-- The two Forever windows carry gold "side tabs" (LFG 的列表/浏览/谁在找, 传承进度的三个页签):
+-- 2026-11-16 晚作者拍板：侧边钮统一 = 收藏窗侧边钮的美化 → `Skin:SideTabArt`
+-- （褪金框四件 + Skin:Tab 按钮美化 + 下划线）。上一版是 fade-only 的旧路（传承窗因此
+-- "美化漏了"—— 金框褪了但没有上 Tab 美化），现在两窗同一条。
 local function SideTab(tab)
     if not tab then return end
-    if tab.Background then Skin:Fade(tab.Background) end
-    if tab.TabGlow then Skin:Fade(tab.TabGlow) end
-    Skin:FadeButtonArt(tab)
+    Skin:SideTabArt(tab, 1)
 end
 
 local function SideTabs(parentPath, names)
@@ -393,10 +394,10 @@ local function LfgControlsPass(parent)
     pcall(M.SkinScrollsIn, M, parent)
 end
 
---- 侧页签：与角色界面（`CharacterFrameModeTab*`）**同一套**（11-14 作者口径）。
---- 上一版是"自建方板 + 选中环 + 图标明暗"，那是我们自己发明的样式；现在统一走
---- `Skin:SideTabArt`：金框 / 悬停金框 / 圆形遮罩褪掉，选中态换成我们的**矩形** barfill 盒子
---- （画在图标之下，不糊图标）。图标本身保持暴雪原样 —— 角色界面那边也是这样。
+--- 侧页签：2026-11-16 晚全仓统一口径 —— 侧边钮都做成**收藏窗侧边钮的美化**
+--- （`Skin:SideTabArt`：金框四件褪掉 + `Skin:Tab` 按钮美化 + 选中下划线）。
+--- 历史口径（都已退役）：上一版"自建方板 + 选中环 + 图标明暗"（自己发明的样式）、
+--- 11-14 "选中态换矩形 barfill 盒"。图标本身保持暴雪原样 —— 收藏窗也是这样。
 --- 选中态由暴雪自己切（`common-sidetab-selected` 那张纹理本来就是"选中才画"），
 --- 所以这里**不需要**再用 view 可见性去推选中态（上一版那套也一并撤掉）。
 local function LfgSideTabPass(parent)
@@ -541,9 +542,20 @@ local LEGACY_SIDE_TABS = { "LegacyRewardTrackTab", "LegacyChallengeTab", "Legacy
 local LEGACY_PAGES     = { "LegacySystemFrame.RewardTrackPage", "LegacySystemFrame.ChallengesPage",
                            "LegacySystemFrame.TreePage" }
 
+-- 模块级稳定引用（PollWatch 按引用去重，Apply 里现造闭包会每次多挂一条）：
+-- 暴雪换页 / 重开窗会把金框 alpha 抬回，跟 LFG 一样 2 秒复涂。
+local function LegacySideTabPass()
+    SideTabs("LegacySystemFrame", LEGACY_SIDE_TABS)
+end
+
 local function SkinLegacySystem()
     M:Dress("LegacySystemFrame", { window = true, inset = true, panel = { bgAlpha = 0.96 } })
     SideTabs("LegacySystemFrame", LEGACY_SIDE_TABS)
+    local lsf = Skin:Need("LegacySystemFrame")
+    if lsf and Widget:Readable(lsf) then
+        Widget:PollWatch(lsf, LegacySideTabPass, 2)
+        Widget:ShowWatch(lsf, LegacySideTabPass)
+    end
 
     M:Controls(LEGACY_PAGES, function(page)
         Skin:Strip(page)

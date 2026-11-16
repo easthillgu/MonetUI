@@ -73,10 +73,17 @@ local function HasWork()
     return next(subs) ~= nil or next(pending) ~= nil
 end
 
-local function ReportFailure(id, err)
+--- 失败记账。`dead` = 回调跑完之后这一路已经不在册（回调自己把自己注销了）：
+--- 那时 `failures[id]` 刚被 Unregister 清掉，再写一笔就会把它复活成"僵尸行"，
+--- 所以只进聚合账 + 打一条，不落明细。
+local function ReportFailure(id, err, dead)
+    totals.failures = totals.failures + 1
+    if dead then
+        print("|cffff6b6b[MonetUI]|r Scheduler 订阅 #" .. tostring(id) .. "（回调里已注销）: " .. tostring(err))
+        return
+    end
     local n = (failures[id] or 0) + 1
     failures[id] = n
-    totals.failures = totals.failures + 1
     if n == 1 then
         print("|cffff6b6b[MonetUI]|r Scheduler 订阅 #" .. tostring(id) .. ": " .. tostring(err))
     elseif n == 2 then
@@ -130,8 +137,14 @@ local function Invoke(id, sub, elapsed)
         ok, err = pcall(sub.fn)
     end
     local after = Now()
-    RecordCost(id, (before and after) and (after - before) or nil)
-    if not ok then ReportFailure(id, err) end
+    -- 回调可能**把自己注销**（Toast 播完就把动画订阅摘掉）：那一拍 Unregister 刚把
+    -- `timings[id]` / `failures[id]` 删掉，这里再记一笔就会把它们复活成"僵尸账"
+    -- —— calls 停在 1、永不更新、也不会被清掉，而且在 /mui perf 里照样占一行（静默）。
+    -- 所以只在**仍活着**时落明细；已经死了的那条，错误照旧报（见 ReportFailure 的 dead）。
+    if sub.active then
+        RecordCost(id, (before and after) and (after - before) or nil)
+    end
+    if not ok then ReportFailure(id, err, not sub.active) end
 end
 
 local function MasterTick(elapsed)

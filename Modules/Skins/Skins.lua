@@ -763,7 +763,18 @@ function M:IconWidgetsIn(frame, depth, withInfo)
                     end
                     -- **标记落在门之后**：只有"这一趟真做了事"或"按设计确定跳过"才落 iconFlat。
                     -- 尺寸没落地的那一档不落标记，留给显示期补扫（IconPass）下一趟再来。
-                    if sized and isSlot and not hasAtlas then
+                    -- **内容在 NormalTexture 上的按钮也整钮跳过**：外观页的部位导航钮
+                    -- （`WardrobeSlotButtonTemplate`，31x31、没有 `.icon` 字段）图标就是
+                    -- `NormalTexture` 的 `transmog-nav-slot-<部位>`，铺平档把它当 quickslot 槽框
+                    -- 压成 α0 ⇒ 整排部位图标消失（2026-11-16 玩家实机判例）。判据走**内容分类器**，
+                    -- 不是"有没有 atlas"——真物品格的圆角 quickslot 也是 atlas，那个必须照旧压掉。
+                    local contentInNormal = false
+                    if not hasAtlas and type(Skin.IsContentIcon) == "function"
+                        and type(target.GetNormalTexture) == "function" then
+                        local okNT, nt = pcall(target.GetNormalTexture, target)
+                        if okNT and nt then contentInNormal = Skin.IsContentIcon(nt) end
+                    end
+                    if sized and isSlot and not hasAtlas and not contentInNormal then
                     Mark(child, "iconFlat", true)
                     pcall(Skin.FlattenSlotArt, Skin, target)
                     for _, key in ipairs({ "icon", "Icon", "iconTexture", "IconTexture" }) do

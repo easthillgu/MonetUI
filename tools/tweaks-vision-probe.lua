@@ -166,5 +166,32 @@ check("标成「已关·值没还原」，不冒充「不是本插件」",
 check("判读里给出 restore 命令", text:find("/mui tweaks restore", 1, true) ~= nil)
 check("判读里点出条数", text:find("条开关已关，但值还是我们的目标值", 1, true) ~= nil)
 
+print("== 7) 出厂快照管着的 CVar（没有开关，但登录会写回）==")
+-- 2026-11-16 判例：FACTORY_VISION 收口成「只管插件不管的 CVar」之后，gamma / brightness / contrast /
+-- ffxGlow 只剩快照这一条归属。以前这里一律打「不是本插件」并给出 /console 建议 ——
+-- 玩家照敲之后下次登录又被 AlignVision 写回来，两套说法打架。
+DB.tweakDefaults = { vision = { ffxGlow = "0", brightness = "0.600000" }, auto = true }
+CVARS.brightness.value = "0.600000"          -- 与快照一致、偏离客户端默认 0.5
+CVARS.ffxGlow.value = "0"
+ok, err, text = Run("snapshot-owned")
+check("不抛", ok, err)
+local glowLine = text:match("[^\n]*ffxGlow[^\n]*") or ""
+check("标成「出厂快照」，不再冒充「不是本插件」", glowLine:find("出厂快照", 1, true) ~= nil, glowLine)
+-- 实机判例（15:59）：gamma 当前 1 = 客户端默认 1，却是快照管的 → 旧计数把它算进分子，
+-- 打出「偏离 8 条，其中本插件写的 9 条」。分子必须是分母的子集。
+local dev, own = text:match("偏离默认 (%d+) 条，其中本插件写的 (%d+) 条")
+check("汇总里「本插件写的」不超过「偏离」条数",
+    dev ~= nil and own ~= nil and tonumber(own) <= tonumber(dev),
+    tostring(dev) .. "/" .. tostring(own))
+check("不再给 /console ffxGlow（那会跟登录对齐打架）", text:find("/console ffxGlow", 1, true) == nil,
+    text:match("[^\n]*/console[^\n]*"))
+check("给了快照的两条出路（重采 / 停对齐）", text:find("/mui tweaks defaults off", 1, true) ~= nil)
+
+DB.tweakDefaults.auto = false
+ok, err, text = Run("snapshot-off")
+check("停掉对齐后不再冒充我们写的，并给回 /console 建议",
+    text:find("/console ffxGlow 1", 1, true) ~= nil, text:match("[^\n]*[Ff]fxGlow[^\n]*"))
+DB.tweakDefaults = nil
+
 print(fail == 0 and "\n全部通过" or ("\n失败 " .. fail .. " 项"))
 os.exit(fail == 0 and 0 or 1)

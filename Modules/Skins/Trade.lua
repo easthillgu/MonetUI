@@ -358,8 +358,8 @@ local FADE_PROF_ATLAS = {
 -- `SwapArt` 默认把 alpha 复位到 1，把 13 行全点亮（"行条都混成一片了"）。
 -- ⇒ 单独一趟：**换图 + 保留 alpha**（见 `DressRecipeRows` 与 `Skin:SwapArt` 的 `keepAlpha`）。
 local SWAP_PROF_ATLAS = {
-    -- 侧页签选中态 → 换成我们的矩形 barfill（通用方法把盒子压到内容之下，不糊图标）
-    "common%-sidetab%-selected",
+    -- 2026-11-16 晚二次口径：侧边钮统一 = 收藏窗的美化（Skin:Tab 下划线），
+    -- 选中金框由 Skin:SideTabArt 的褪色档压掉，这里不再换矩形盒（swap 留空）。
 }
 local TINT_PROF_ATLAS = {
 }
@@ -459,6 +459,9 @@ local function StyleProfessionsArt()
     if f then
         Skin:StyleAtlasBackdrop(f, {}, SWAP_PROF_ATLAS, TINT_PROF_ATLAS)
         Skin:FadeAtlasBackdrop(f, FADE_PROF_ATLAS, nil, 0)
+        -- 侧页签：统一 = 收藏窗的美化（Skin:SideTabArt）。页签没有实名（camelot 模板
+        -- LargeSideTabButtonTemplate 的运行期子件），子树扫 + 指纹认脸；幂等。
+        Skin:SideTabArt(f, 3)
     end
     DressProfessionsWells()
     DressRecipeRows()

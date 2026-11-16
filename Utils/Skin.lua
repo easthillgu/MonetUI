@@ -434,6 +434,18 @@ end
 local CONTENT_ICON_ATLAS = {
     "^spellicon%-", "^spell%-icon%-", "^inv%-", "^ability_", "^spell_", "^item_",
     "^coin%-", "^class%-icon", "^pet%-", "^icons\\", "^interface\\icons\\",
+    -- 外观页的部位导航钮（WardrobeSlotButtonTemplate）：图标就是按钮的 NormalTexture，
+    -- 运行期由引擎设成 `transmog-nav-slot-<部位>`（head/shoulder/…，Blizzard_Wardrobe.lua:337）。
+    -- 这族 atlas 不在前缀名单里 ⇒ 被当装饰压成 α0，外观页顶部只剩一排空格子
+    -- （2026-11-16 玩家实机判例，收藏侧页签数字 ID 那条的 atlas 面）。
+    "^transmog%-nav%-slot%-",
+}
+
+--- 名单命中后的**排除项**：atlas 名里带 `-selected` 的是状态美术（选中描边），不是内容。
+--- `transmog-nav-slot-selected(-small)` 会撞上上面的前缀，但没有这条它会被一并豁免 ——
+--- 选中环是"当前选了哪个"的状态指示，压掉归压掉（与 common-sidetab-selected 同一口径），不跟内容图标走。
+local CONTENT_ICON_EXCLUDE = {
+    "%-selected",
 }
 
 local function IsContentIcon(tex)
@@ -442,9 +454,34 @@ local function IsContentIcon(tex)
     -- 方向严格安全：只多豁免（保住功能图标），绝不会多剥一张。
     local low = ArtIdentity(tex)
     if not low then return false end
+    for i = 1, #CONTENT_ICON_EXCLUDE do
+        if low:find(CONTENT_ICON_EXCLUDE[i]) then return false end
+    end
     for i = 1, #CONTENT_ICON_ATLAS do
         if low:find(CONTENT_ICON_ATLAS[i]) then return true end
     end
+    return false
+end
+
+--- 对外暴露同一个判据，供模块层按"这张贴图是不是内容"做门（`Modules/Skins/Skins.lua` 的铺平档
+--- 要看 `NormalTexture` 是不是内容图标，见那里的判例注释）。分类器只有一份，不另抄名单。
+Skin.IsContentIcon = IsContentIcon
+
+--- 框体**自己的内容图标字段**：`Icon` / `icon` 指向的 region 就是"这颗按钮是什么"本身。
+--- 为什么要按结构而不按贴图认（2026-11-16 玩家实机判例）：收藏窗右侧那排圆形侧页签
+--- （`CollectionsJournalTab1..5`，55x55）整颗按钮的内容就是一张**数字文件 ID** 的图标
+--- （`GetNormalTexture` 都没有，图标在 region2 / `tab.Icon` 上）—— 数字 ID 在 `ArtIdentity`
+--- 里刻意返回 nil（我们自己的 BLP 也走数字 ID，不能凭"看着像图标"乱认），于是被通用剥图
+--- 循环当成窗体装饰压成 α0，页签只剩 ControlBg 垫出来的一格格子。atlas / 路径豁免
+--- （IsContentIcon）管不到它，按字段角色豁免才管得住：**字段叫 Icon 就是内容**，剥它等于
+--- 删功能，跟商人铁槌（atlas 那条）是同一纪律的另一半。只豁免字段本身指向的那一个 region，
+--- 不按贴图内容扩大豁免面 —— 方向只更安全。
+local function IsOwnIconField(frame, region)
+    if not frame or not region then return false end
+    local ok1, icon = pcall(function() return frame.Icon end)
+    if ok1 and icon ~= nil and icon == region then return true end
+    local ok2, icon2 = pcall(function() return frame.icon end)
+    if ok2 and icon2 ~= nil and icon2 == region then return true end
     return false
 end
 
@@ -942,7 +979,9 @@ function Skin:Strip(frame, opts)
                     if not (keep and keep(region)) then
                         -- 功能图标（法术 / 物品 / 职业 / 货币 atlas）不剥：它不是窗体装饰，
                         -- 剥掉就是把"这按钮是干什么的"删了（FadeButtonArt 同一条豁免）。
-                        if not IsContentIcon(region) then
+                        -- 数字文件 ID 的图标认不出贴图内容，但 `frame.Icon` / `frame.icon`
+                        -- 字段指向的那一个 region 按角色就是内容 —— 一并豁免（收藏窗侧页签判例）。
+                        if not IsContentIcon(region) and not IsOwnIconField(frame, region) then
                             self:Fade(region)
                         end
                     end
@@ -1886,29 +1925,294 @@ function Skin:SquarePortrait(frame)
     return self:HidePortraits(frame) > 0
 end
 
---- 侧页签统一档（2026-11-14 作者口径："寻求组队 / 好友的侧面按钮都统一成角色界面那种样式"）。
+--- 侧边钮统一档（2026-11-16 晚作者拍板："其他页面的侧边按钮都做成**收藏窗侧边钮**的美化"）。
 ---
---- 角色界面那边（`CharacterFrameModeTab1..6`）的口径是：
----   ① 选中态那张 `common-sidetab-selected` → 换成我们自己的**矩形** barfill 盒子
----      （`StyleAtlasBackdrop` 的 swap 档：α0.6、画在 `BACKGROUND/-6` ⇒ 盒子在图标**之下**、
----        不糊图标；暴雪那个选中态是斜角框，tint 保留它仍是斜的，换矩形才方正）；
----   ② 金框 / 悬停金框 / 圆形遮罩 → 褪掉。
---- 这两档抽成一个入口，找组队（`LFGParentFrame` 的三颗）与好友（`SocialUIFrame` 的四颗）都用它，
---- 免得每个窗口各做各的（上一轮找组队就做成了"自建方板 + 选中环 + 图标明暗"，和角色界面不是一套）。
----
---- **换在前、褪在后**：`SwapArt` 会把 alpha 复位到 1，而褪色那趟是"每趟写 α0"；
---- 顺序反了的话选中盒子刚换上就被压成 α0（与 §8.114.2 职责图标同一族的坑）。
+--- 基准 = 收藏窗 `tabs =` 那条路，即 `Skin:Tab`：按钮美化 + 选中下划线（三态染色由
+--- `UpdateTabState` 每 0.5 秒轮询，侧边钮没有 `IsSelected`，下划线常挂 Normal 档灰，
+--- 与收藏窗现状逐位一致）。本入口做两件事：
+---   ① 金框 / 悬停金框 / 圆形遮罩 / 选中金框 → 褪掉（每趟写 α0）；
+---   ② 页签本身涂上 `Skin:Tab`（点名档直接涂；整窗档按 `SidetabFingerprint` 子树认脸）。
+--- 历史口径（都已退役）：11-14 "选中态换矩形 barfill 盒"；11-16 午 "整条委托圆形件"
+--- （55×54 不规则斜角框盖圆井 = 搞坏，当天即回退）。
 --- @param frame 页签框体，或装着页签的窗口（depth 够深就能扫到里面的页签）
 --- @param depth 递归深度（页签自己的贴图在 depth 0~1；隔着窗口扫就调大）
+--- 侧边钮指纹（SidePanelTabButtonTemplate 家）：`Background` atlas 是 `common-sidetab`
+--- 且带 `Icon` 字段。收藏窗 / 社交窗 / 角色窗 ModeTab / 传承进度全是这一族。
+local function SidetabFingerprint(button)
+    if not button then return false end
+    local okB, bg = pcall(function() return button.Background end)
+    if not (okB and bg and type(bg.GetAtlas) == "function") then return false end
+    local okA, atlas = pcall(bg.GetAtlas, bg)
+    if not (okA and type(atlas) == "string" and atlas:lower():find("common%-sidetab$")) then return false end
+    local okI, icon = pcall(function() return button.Icon end)
+    return (okI and icon ~= nil) or false
+end
+
 function Skin:SideTabArt(frame, depth)
     if not frame then return end
     depth = depth or 1
-    -- ① 选中态 → 我们的矩形盒子
-    self:StyleAtlasBackdrop(frame, {}, { "common%-sidetab%-selected" }, {}, depth)
-    -- ② 金框 / 悬停金框 / 圆形遮罩 → 每趟写 α0（暴雪换页会把 alpha 抬回来）
+    -- ① 金框 / 悬停框 / 圆形遮罩 / 选中框 → 每趟写 α0（选中态改由 Skin:Tab 的下划线表达；
+    --    `common-sidetab-selected` 本来就是"选中才画"，压掉后与收藏窗同观感）。
     self:FadeAtlasBackdrop(frame, {
         "common%-sidetab$", "common%-sidetab%-hover", "common%-sidetab%-mask",
+        "common%-sidetab%-selected",
     }, depth, 0)
+    -- ② 2026-11-16 晚二次口径（作者拍板）：**侧边钮统一 = 收藏窗侧边钮的美化**
+    --    （`Skin:Tab`：按钮美化 + 选中下划线；收藏窗 `tabs =` 那条路就是它）。
+    --    点名档：frame 就是页签本身 → 直接涂；整窗档（Social 传 SocialUIFrame）→
+    --    子树扫按指纹认脸。幂等：Skin:Tab 自带 `tab` 标记早退。
+    if SidetabFingerprint(frame) then
+        return self:Tab(frame)
+    end
+    self:WalkFrames(frame, { depth = depth }, function(h, atlases)
+        local kind = select(2, pcall(h.GetObjectType, h))
+        if kind == "Button" and self:AtlasMatch(atlases, { "^common%-sidetab$" }) then
+            self:Tab(h)
+        end
+    end)
+end
+
+-- ============================================================================
+-- 圆形内容按钮（2026-11-16，"圆形保留"那档）
+-- ============================================================================
+
+--- 两族圆形按钮的压制名单：这些暴雪状态美术由我们的圆环替代表达，
+--- 每趟补写 α0（暴雪换页 / 换装会抬回来，FadeHold 语义）。
+local ROUND_SUPPRESS = {
+    -- 部位导航的选中环（transmog-nav-slot-selected）：同"状态美术继续剥"口径。
+    navslot = { "transmog%-nav%-slot%-selected" },
+    -- 书页签（法术书 / 天赋页的 44×32 圆签）：三层暴雪框全剥 —— TabSystem 矩形底、
+    -- spellbook-Tab-Frame-C60 金圆环、glow / 渐变两件。选中态由环染主色替代表达
+    -- （我们压掉 activetab 底，但**只读**它的 IsShown 当信号）。
+    booktab = { "spellbook%-Tab%-Frame", "^uiframe%-activetab", "^uiframe%-tab" },
+}
+
+--- 按钮属于哪一族圆形内容钮，nil = 不是。
+--- 指纹从严（宁漏勿错）：
+---   * sidetab = SidePanelTabButtonMixin：`Background` atlas 是 `common-sidetab` +
+---     `Icon` + `SelectedTexture` 三件字段都在；（2026-11-16 晚**退役**：侧页签是不规则
+---     斜角框，作者拍板回退到 `Skin:SideTabArt` 的 barfill 口径，不再进圆形件。）
+---   * navslot = WardrobeSlotButtonTemplate：`GetNormalTexture` 的 atlas 命中**内容图集**
+---     （transmog-nav-slot-<部位>，走 IsContentIcon；真物品格的 quickslot 圆框不命中）
+---     且带 `SelectedTexture`。
+local function RoundButtonMode(button)
+    if not button then return nil end
+    local okN, nt
+    if type(button.GetNormalTexture) == "function" then
+        okN, nt = pcall(button.GetNormalTexture, button)
+        if okN and nt and IsContentIcon(nt) then
+            local okS, sel = pcall(function() return button.SelectedTexture end)
+            if okS and sel then return "navslot" end
+        end
+    end
+    -- 书页签（44×32）：自家 region 上挂着 `spellbook-Tab-Frame-C60` 圆框 + Icon 字段。
+    local okR, regs = pcall(function() return { button:GetRegions() } end)
+    if okR and type(regs) == "table" then
+        for i = 1, #regs do
+            local low = ArtIdentity(regs[i])
+            if low and low:find("^spellbook%-tab%-frame") then
+                local okI, icon = pcall(function() return button.Icon end)
+                if okI and icon then return "booktab" end
+            end
+        end
+    end
+    return nil
+end
+
+--- 单颗圆形钮的每趟复检（PollWatch 0.25s，登记一次）。
+--- 稳定引用：闭包只在 RoundIconButton 首次建件时造一次，不在 Apply 里现造。
+--- selRegions = booktab 的选中态信号区（`uiframe-activetab-*`，我们压掉但只读 IsShown）。
+local function RoundIconTick(button, ring, well, patterns, selRegions)
+    -- 模块关掉就停手：轮询不在面板 Apply 的 pcall 保护下，自己不抛。
+    local SM = ns.Skins
+    if SM and not SM.active then return end
+    -- ① 压制名单每趟补写（可见期补扫 / 换装 / 换页都会把 alpha 抬回来）。
+    local okR, regs = pcall(function() return { button:GetRegions() } end)
+    if okR and type(regs) == "table" then
+        for i = 1, #regs do
+            local reg = regs[i]
+            if IsTexture(reg) then
+                local low = ArtIdentity(reg)
+                if low then
+                    for j = 1, #patterns do
+                        if low:find(patterns[j]) then
+                            Skin:FadeHold(reg)
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end
+    -- ② 环色三态：选中（主色）> 悬停（bright）> 默认（border 槽色）。
+    --    可见性可能是**机密布尔**，真值测试会拦成 UNKNOWN() ⇒ 一律过 Secrets.Bool。
+    --    ⚠ 不写 `IsShown() or false` 这种收尾：`or` 对机密值做真值测试同样会拦
+    --    （2026-11-16 书页签接入时的自查，提前拆掉）。
+    local selected = false
+    for i = 1, #selRegions do
+        local okS, sv = pcall(selRegions[i].IsShown, selRegions[i])
+        if okS and Secrets.Bool(sv, false) then
+            selected = true
+            break
+        end
+    end
+    local okH, hv = pcall(button.IsMouseOver, button)
+    local hover = okH and Secrets.Bool(hv, false) or false
+    local r, g, b
+    if selected then
+        r, g, b = Color:GetPrimary()
+    elseif hover then
+        r, g, b = Widget:PaletteColor("bright")
+    else
+        r, g, b = Widget:PaletteColor("border")
+    end
+    if r then pcall(ring.SetVertexColor, ring, r, g, b, 1) end
+    -- 井随悬停微抬一档，给"这颗能按"的反馈（同一只旋钮，不另开 alpha 源）。
+    pcall(well.SetAlpha, well, hover and 0.42 or 0.30)
+end
+
+--- 圆形内容按钮的专属美化：**圆井 + 圆环**（2026-11-16 作者拍板"圆形保留"）。
+--- 覆盖（一次扫全的实机普查）：
+---   * 部位导航族（31/25，WardrobeSlotButtonTemplate）：外观页 15 颗；
+---   * 书页签族（44×32，spellbook-Tab-Frame-C60 家）：法术书 / 天赋页的分类圆签。
+---   * ~~侧页签族~~（55×54 不规则斜角框）：2026-11-16 晚回退——作者拍板
+---     "侧边按钮之前美化没问题"，回到 `Skin:SideTabArt` 的 barfill 口径，不进圆形件。
+--- 形状语言：自绘圆盘（monet_round_well）垫在图标下染近黑，自绘细环
+--- （monet_round_ring）叠在图标上染主题色 —— 悬停抬 bright、选中染主色。
+--- 为什么不 HookScript / 不写暴雪字段：环色轮询走 Widget:PollWatch，
+--- 选中态读暴雪自己的 SelectedTexture:IsShown()（SharedUIPanelTemplates.lua:398
+--- 按 SetShown 切），只读不写；井 / 环是 `button:CreateTexture` 造的子件
+--- （Skin:Tab 下划线同款先例），引用记 ns:Mark 旁表。
+--- @param opts { mode = "navslot"|"booktab" } —— 省略时按指纹自认
+function Skin:RoundIconButton(button, opts)
+    if not button or not self:IsScriptObject(button) then return button end
+    opts = opts or {}
+    -- 已建过件：直接早退（幂等；复检由已登记的 PollWatch 负责，不用调用方操心）。
+    if Marked(button, "roundIcon") then return button end
+    local mode = opts.mode or RoundButtonMode(button)
+    if not mode then return button end
+    -- **指纹复核**：显式传 mode 的调用点（SideTabArt 整窗档的旧语义）可能途经
+    -- "根本不是圆钮"的框体 —— 不复核就会把井/环盖到窗口或普通按钮上
+    -- （2026-11-16 好友窗判例：Social 传整窗，窗口被盖了口大井、四颗页签反而没人管）。
+    if RoundButtonMode(button) ~= mode then return button end
+    local patterns = ROUND_SUPPRESS[mode]
+    if not patterns then return button end
+
+    -- 井/环按**正方形**放：书页签是 44×32 的横长条（图标 36×35 还比按钮高），
+    -- SetAllPoints 会把圆拉成椭圆。侧边 = min(按钮宽, 高)；书页签改按内容取
+    -- （max(Icon 宽, 高)），圆环正好贴着图标边。31×31 的导航钮算出来
+    -- 与 SetAllPoints 等价，统一走这一条。
+    local bw, bh = 0, 0
+    pcall(function() bw, bh = button:GetWidth() or 0, button:GetHeight() or 0 end)
+    local side = (Secrets.CanRead(bw) and Secrets.CanRead(bh) and math.min(bw, bh) > 0)
+        and math.min(bw, bh) or nil
+    if mode == "booktab" then
+        local okI, ic = pcall(function() return button.Icon end)
+        if okI and ic then
+            local okiw, iw = pcall(ic.GetWidth, ic)
+            local okih, ih = pcall(ic.GetHeight, ic)
+            if okiw and okih and Secrets.CanRead(iw) and Secrets.CanRead(ih)
+                and math.max(iw, ih) > 0 then
+                side = math.max(iw, ih)
+            end
+        end
+    end
+    local function PlaceSquare(tex)
+        if side then
+            tex:SetSize(side, side)
+            tex:ClearAllPoints()
+            tex:SetPoint("CENTER", button, "CENTER", 0, 0)
+        else
+            tex:SetAllPoints(button)
+        end
+    end
+
+    -- 选中态信号区：navslot 用暴雪的 SelectedTexture；booktab 没有
+    -- SelectedTexture 字段，信号是 TabSystem 的 `uiframe-activetab-*` 底（压掉但仍读它）。
+    local selRegions = {}
+    if mode == "booktab" then
+        local okSR, sregs = pcall(function() return { button:GetRegions() } end)
+        if okSR and type(sregs) == "table" then
+            for i = 1, #sregs do
+                local low = ArtIdentity(sregs[i])
+                if low and low:find("^uiframe%-activetab") then
+                    selRegions[#selRegions + 1] = sregs[i]
+                end
+            end
+        end
+    else
+        local okS, st = pcall(function() return button.SelectedTexture end)
+        if okS and st then selRegions[#selRegions + 1] = st end
+    end
+
+    -- 井：BACKGROUND/-8（垫在暴雪 BACKGROUND/0 的图标之下，宠物条 well 同款层位）。
+    local okW, well = pcall(button.CreateTexture, button, nil, "BACKGROUND", nil, -8)
+    if okW and well then
+        well:SetTexture(Media:Texture("monet_round_well"))
+        PlaceSquare(well)
+        -- 模具是纯白，近黑由顶点色给（贴图 × 顶点色）；整体深浅走 SetAlpha。
+        well:SetVertexColor(0, 0, 0, 1)
+        well:SetAlpha(0.30)
+    else
+        well = nil
+    end
+    -- 环：OVERLAY/7（图标是 ARTWORK，环压在图标上沿；7 = 图标抬层同款层号）。
+    local okR, ring = pcall(button.CreateTexture, button, nil, "OVERLAY", nil, 7)
+    if okR and ring then
+        ring:SetTexture(Media:Texture("monet_round_ring"))
+        PlaceSquare(ring)
+    else
+        ring = nil
+    end
+    if not ring then
+        -- 环建不出来（受限对象 / 受限窗口）：不落标记，留给可见期补扫下一趟；
+        -- 井如果建出来了先退掉，避免半套（"借来的东西要连事件一起收"同一纪律）。
+        if well then pcall(well.SetAlpha, well, 0) end
+        return button
+    end
+
+    Mark(button, "roundIcon", true)
+    Mark(button, "roundWell", well)
+    Mark(button, "roundRing", ring)
+    -- Apply 期登记进"我们建的件"名册：面板关掉时随 Rollback 一起藏、重开时 ShowAdded 拉回来
+    -- （轮询复涂路径 recording=false 时 Track 自动 no-op，不重复登记）。
+    if well then self:Track(well) end
+    self:Track(ring)
+    Widget:PollWatch(button, function()
+        RoundIconTick(button, ring, well, patterns, selRegions)
+    end, 0.25)
+    -- 首趟立即结算一次，不等 0.25 秒的第一拍。
+    RoundIconTick(button, ring, well, patterns, selRegions)
+    return button
+end
+
+--- 子树里把"圆形内容按钮"逐颗接上（幂等：RoundIconButton 自带 Marked 早退）。
+--- 给"按钮是懒建 / 匿名（没有全局名）"的窗口用 —— 点名 Need 办不到的那批
+--- （外观页部位导航钮是切页才建的、社交/任务图/冷却监视器的页签没有实名）。
+--- 指纹从严见 RoundButtonMode：认不出就整颗跳过，绝不会把普通按钮误圆化。
+--- @param opts { depth = 4, mode = nil } —— mode 省略时逐颗自认
+--- @return 这一趟在册的颗数（含之前已建过件的）
+function Skin:RoundButtonsIn(root, opts)
+    if not root or type(root.GetChildren) ~= "function" then return 0 end
+    opts = opts or {}
+    local maxDepth = opts.depth or 4
+    local count = 0
+    local function walk(f, d)
+        if d > maxDepth or not Widget:Readable(f) then return end
+        local okC, kids = pcall(function() return { f:GetChildren() } end)
+        if not okC or type(kids) ~= "table" then return end
+        for i = 1, #kids do
+            local c = kids[i]
+            local okT, kind = pcall(c.GetObjectType, c)
+            if okT and kind == "Button" then
+                self:RoundIconButton(c, { mode = opts.mode })
+                if Marked(c, "roundIcon") then count = count + 1 end
+            end
+            walk(c, d + 1)
+        end
+    end
+    walk(root, 0)
+    return count
 end
 
 --- 通用 **chrome** 图集族（金属框 / 内框 / 顶栏流光 / 分隔线 / 里面板框 / 手柄提示 …）。
@@ -3494,7 +3798,12 @@ function Skin:FlattenSlotArt(btn)
         pcall(btn.flash.SetAlpha, btn.flash, 0)
         pcall(btn.flash.Hide, btn.flash)
     end
-    if btn.NormalTexture then
+    -- NormalTexture 一般是圆角 quickslot 槽框，压掉它、靠自绘方槽补回；
+    -- **但它也可能是这颗按钮的内容本身**：外观页的部位导航钮（`WardrobeSlotButtonTemplate`）
+    -- 没有 `.icon`，图标就挂在 `NormalTexture` 上（引擎设 `transmog-nav-slot-<部位>`）——
+    -- 一律压掉的话整排图标消失、只剩垫出来的空格子（2026-11-16 玩家实机判例，
+    -- 症状与"没被豁免"一模一样，但那层豁免管不到这里：走的是铺平档，不是剥图档）。
+    if btn.NormalTexture and not IsContentIcon(btn.NormalTexture) then
         pcall(btn.NormalTexture.SetAlpha, btn.NormalTexture, 0)
     end
     if btn.IconBorder then

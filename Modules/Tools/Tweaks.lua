@@ -92,23 +92,22 @@ end
 
 -- 出厂默认「画面快照」（2026-11-08 作者拍板：把当时调好的那套设为默认，登录自动对齐）。
 -- 值来自本机 `_forever_/WTF/Config.wtf` 的实盘读数，不是猜的、也不是客户端默认值：
---   Brightness 55 / Contrast 75 / ffxGlow 0 / particleDensity 80 / Gamma 1 /
---   RenderScale 1 / ResampleAlwaysSharpen 1 / ffxDeath 0 / weatherDensity 3 /
---   volumefog 未写 = 默认 1
+--   Brightness 55 / Contrast 75 / ffxGlow 0 / Gamma 1
+-- （RenderScale / 锐化 / 粒子 / 雾 / 天气 / 死亡灰度都归开关管了，见下面的说明。）
 -- ⚠ Config.wtf 是落盘值，可能比游戏内当前值旧（刚 /console 改过还没写盘）。所以这只是 seed：
 --   进游戏敲一次 `/mui tweaks snapshot` 用实机值覆盖，命令会逐条打「旧 → 新」供核对。
 --   没证据的条目（ResampleQuality）留空，对齐时跳过，等 snapshot 补 —— 不瞎填一个数。
 -- 快照只裁决「插件不管」的 CVar；开关开着的条目一律交给开关，见 AlignVision。
+-- 2026-11-16 收口（代码审查）：**被 TWEAKS 开关管住的一律不进这张表** ——
+-- 以前这里还写着 particleDensity 80 / volumefog 1 / weatherDensity 3 / ffxDeath 0 /
+-- ResampleAlwaysSharpen 1，和「开关默认全开」正面冲突：AlignVision 跳过开关开着的条目，
+-- 于是新存档实际落到开关写的 0/0/0，快照那几个数**永远不下发** —— 两套默认各说各话，
+-- 玩家关掉开关时又会被快照写回 0（等于插件替他关）。作者实机复核同样是 0/0/0。
 local FACTORY_VISION = {
     gamma                 = "1",
     brightness            = "55",
     contrast              = "75",
-    ResampleAlwaysSharpen = "1",
-    particleDensity       = "80",
-    volumefog             = "1",
     ffxGlow               = "0",
-    ffxDeath              = "0",
-    weatherDensity        = "3",
 }
 
 -- 出厂默认开关组合（2026-11-16 按作者实机存档对齐：9 条全部默认开）。
@@ -555,7 +554,17 @@ end
 function M:Vision()
     ns:Print("|cffffd100画面观感诊断|r（当前值 vs 客户端默认值，只读）")
 
-    local deviated, ours, stuck = 0, 0, 0
+    -- 出厂快照管着的那几个（gamma / brightness / contrast / ffxGlow）：它们**没有**开关键，
+    -- 但登录时 AlignVision 会把快照值写回去。归属必须照实说 —— 否则这里一边打「不是本插件」、
+    -- 一边给 /console 建议，玩家照敲之后下次登录又被我们写回来（两套说法打架，2026-11-16 判例：
+    -- FACTORY_VISION 收口成「只管插件不管的 CVar」之后，这四个就只剩快照这一条归属了）。
+    -- 只读 db，不调 VisionStore()：报告命令不许给存档播种（那个函数会把缺的键补上）。
+    local vdb = ns.DB and ns:DB()
+    local vstore = type(vdb) == "table" and vdb.tweakDefaults or nil
+    local snap = vstore and vstore.vision or nil
+    local autoAlign = not (vstore and vstore.auto == false)
+
+    local deviated, ours, oursSwitch, oursSnap, stuck = 0, 0, 0, 0, 0
     -- 偏离默认、又不归我们管的条目：末尾直接给可抄的 /console 行。
     -- 报告命令本身仍然只读（不改 CVar），只是把「照着敲什么」算给玩家看。
     local fixes = {}
@@ -578,21 +587,33 @@ function M:Vision()
             -- 归属三态。中间那一档是 2026-11-07 判例：开关已关、值却还是我们的目标值
             -- （旧版原值只存运行期，reload 后"还原"还原到自己写的值）。以前这里打
             -- 「不是本插件」，等于把真问题盖住了 —— 玩家会觉得"关了没用，不是它"。
+            -- 第四档（出厂快照）专给"没有开关、但登录会被写回"的那几个，见上面 vstore 的注释。
             local state, isOurs, isStuck
+            local isSwitch, isSnap = false, false
             if v.key then
                 local want = TweakValue(v.key)
                 local looksWritten = want ~= nil and SameValue(cur, want)
                 if M:IsOn(v.key) then
-                    state, isOurs = "|cff00ff00本插件写|r", true
-                    ours = ours + 1
+                    state, isOurs, isSwitch = "|cff00ff00本插件写|r", true, true
                 elseif looksWritten then
                     state, isStuck = "|cffffa940已关·值没还原|r", true
                     stuck = stuck + 1
                 else
                     state = "|cff808080不是本插件|r"
                 end
+            elseif snap and snap[v.cvar] ~= nil and autoAlign then
+                state, isOurs, isSnap = "|cff00ff00出厂快照|r", true, true
             else
                 state = "|cff808080不是本插件|r"
+            end
+
+            -- 计数**只算真偏离的行**：`ours` 是"偏离里我们占几条"，值就落在客户端默认上时
+            -- 它不该进这个分子（实机判例：gamma 当前 1 = 默认 1、却算成我们写的，
+            -- 于是打出「偏离 8 条，其中本插件写的 9 条」这种自相矛盾的汇总）。
+            if diff ~= "" then
+                if isOurs then ours = ours + 1 end
+                if isSwitch then oursSwitch = oursSwitch + 1 end
+                if isSnap then oursSnap = oursSnap + 1 end
             end
 
             ns:Print(("  %-22s 当前 %-6s %s%s"):format(v.cvar, Text(cur), state, diff))
@@ -635,9 +656,13 @@ function M:Vision()
         ns:Print(("  |cffffa940注意：%d 条开关已关，但值还是我们的目标值 —— 那次关闭没有还原成功。|r"):format(stuck))
         ns:Print("  一条命令全推回去：/mui tweaks restore")
     end
-    if ours > 0 then
+    if oursSwitch > 0 then
         ns:Print("  逐条关着试（即时生效，不用 reload）：/mui tweaks set <key> 0 —— 会打出「值 A → B」，值没变就是这条本来没生效")
         ns:Print("  全关：/mui tweaks all 0　｜　全推回原值：/mui tweaks restore")
+    end
+    if oursSnap > 0 then
+        ns:Print("  标「出厂快照」的那些没有开关可拨：登录时按默认画面快照写回。")
+        ns:Print("  想换成你现在的画面：/mui tweaks snapshot　｜　不想被写回：/mui tweaks defaults off")
     end
     if #fixes > 0 then
         ns:Print(("  另有 %d 条不是本插件写的，想回默认照着敲（即时生效，不用 reload）："):format(#fixes))

@@ -28,7 +28,7 @@ local MAP_BUTTONS = { "WorldMapFrameHomeButton", "WorldMapFrameOverflowButton" }
 --- 以前只给 QuestMapFrame / 列表 / 详情挂了底板 ⇒ 行还是暴雪整行底图、侧页签还是金框、
 --- `QuestLogCount` 还挂着搜索框那圈边。这里按**同一套语言**补齐（与组队窗 / 角色窗一致）：
 ---   ① 任务栏 chrome 族 → 每趟写 α0（换页会把 alpha 抬回来）；
----   ② 侧页签 → `Skin:SideTabArt`（金框褪掉、选中态换我们的矩形盒子）；
+---   ② 侧页签 → `Skin:SideTabArt`（金框四件褪掉、页签上 Skin:Tab——2026-11-16 晚全仓统一口径）；
 ---   ③ 任务行 → `Skin:Button`（剥掉整行底图 + 我们的底板 + 悬停抬亮；老行会被列表回收，幂等）；
 ---   ④ 搜索框 → `Skin:EditBox`（放大镜保留）。
 local QUEST_ART = {

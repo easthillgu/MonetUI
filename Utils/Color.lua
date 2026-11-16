@@ -172,9 +172,8 @@ end
 -- minContrast = 玩家可调的「血条填充 ↔ 背景（世界 / 空槽）」最小 CR，既是触发后的纠偏
 -- 目标、也是被修过的区域在账本里的判定线。阶梯相邻档 / 正文 / 边框按用途固定，
 -- 不跟着玩家那条滑 —— 否则把文字线调到 2.0 就成了假达标。
-local CR_DEFAULT     = 1.8    -- 默认偏克制：再高会把 fill 推到发白，压住血条上的数字（见 textFill 行）
 local CR_MAX         = 3.0    -- 上限：再高会超出高饱和色相的可达亮度（AtLightness out-of-gamut）
-local CR_STEP_MIN    = 1.4    -- 阶梯相邻档（panelHover 是设计上的例外，见 computeSurface）
+local CR_STEP_MIN    = 1.4    -- 阶梯相邻档（panelHover 是设计上的例外，见 computeSurface）；也是出厂默认
 local CR_BARENV      = 1.5    -- fill↔世界环境的撞色线：低于它才触发补色回避
 local CR_TEXT        = 4.5    -- 正文↔实际合成底板（WCAG AA 正文）
 local CR_TEXT_LOST   = 3.0    -- 正文↔凹槽（lost）稍宽，凹槽不是主阅读面
@@ -182,12 +181,16 @@ local CR_EDGE        = 3.0    -- 边框↔底板（1px 发丝线）
 local CR_PLATE_ALPHA = 0.35   -- 最透的常见底板（聊天 / 输入区）；按最坏情况算文字
 local CR_L_LO, CR_L_HI = 2, 96
 
---- 玩家可调的最小对比控制值。DB 没这一项 / 值出界就回默认，绝不把 nil 传进算术。
+--- 玩家可调的最小对比控制值。DB 没这一项 / 值出界就回**出厂默认**，绝不把 nil 传进算术。
+--- 出厂默认只有一个真相：`Core.lua` 的 `DEFAULTS.theme.minContrast`（这里以前写死 1.8，
+--- 默认改成 1.4 之后，任何越界 / 缺失的值都会被静默顶回「标准」档，而 1.4 恰好是区间下界）。
 function Color:MinContrast()
     local db = ns.DB and ns:DB()
     local v = db and db.theme and db.theme.minContrast
     if type(v) == "number" and v >= CR_STEP_MIN and v <= CR_MAX then return v end
-    return CR_DEFAULT
+    local d = ns.DEFAULTS and ns.DEFAULTS.theme and ns.DEFAULTS.theme.minContrast
+    if type(d) == "number" and d >= CR_STEP_MIN and d <= CR_MAX then return d end
+    return CR_STEP_MIN
 end
 
 --- 当前区域的环境色（游戏世界的平均色）：RGB + 色相。拿不到就回 nil 让纠偏整层跳过 ——

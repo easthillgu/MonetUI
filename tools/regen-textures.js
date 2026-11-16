@@ -761,6 +761,26 @@ function drawV2Radio(ctx, size) {
   ctx.beginPath(); ctx.arc(c,c,3.5,0,Math.PI*2); ctx.fill();
 }
 
+// --- 圆形内容按钮（2026-11-16 作者拍板"圆形保留"）---
+// 消费者（11-16 晚收口后）：外观页部位导航（WardrobeSlotButtonTemplate 31/25）+
+// 法术书/天赋页书页签（spellbook-Tab-Frame 家 44×32）—— 皮肤层 Skin:RoundIconButton。
+// 侧页签族（55×54 不规则斜角框）当天回退到 Skin:SideTabArt 的 Skin:Tab 口径，不吃这两张图。
+// 两张都是无色相模具（STENCIL）：井运行期染近黑、环染主题边框/主色。
+// 井半径 c-1：整圆铺满按钮、留 1px AA 边距；环半径 c-2.5 略缩进，
+// 缩到 25px 显示时环不贴边被裁；环描边 3px@64 → 55px 显示 ≈2.6px、31px ≈1.5px。
+function drawV2RoundWell(ctx, size) {
+  const c = size / 2;
+  ctx.fillStyle = PALETTE.stencil;
+  ctx.beginPath(); ctx.arc(c, c, c - 1, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawV2RoundRing(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(c, c, c - 2.5, 0, Math.PI * 2); ctx.stroke();
+}
+
 function drawV2Refresh(ctx, size) {
   const c = size / 2;
   iconBrush(ctx);
@@ -966,6 +986,22 @@ function drawV2Gear(ctx, size) {
     ctx.lineTo(c+11*Math.cos(a), c+11*Math.sin(a));
     ctx.stroke();
   }
+}
+
+// 面板展开/收起：左侧方角面板框 + 右侧方头箭头（2026-11-16 加，同一套 Aurora 方角线稿）。
+// 直边一律走 px* 吸附助手：ICON_T = 3 是**奇数**，把 3px 线画在整数坐标上会两侧各落半个像素，
+// 实测 10 处软边（audit-pixels 的「软边」列）—— 缩到 20px 显示就是发虚。
+// 斜向箭头本来就该带半覆盖，但它每段只有 4~6px 长，够不上「>=8px 满 alpha 直段」的判据（MIN_RUN），
+// 所以不会被误报成软边。整张图纯白（色相 0），运行期 SetVertexColor 染色。
+function drawV2PanelToggle(ctx, size) {
+  const c = size / 2;
+  iconBrush(ctx);
+  // 面板框：3px 边框，外沿吸附到整数像素（ink 18..33 x 21..43，和原来的视觉范围一致）
+  pxStrokeRect(ctx, c - 14, c - 11, c + 1, c + 11, ICON_T, PALETTE.stencil);
+  // 箭杆（水平线，方帽）
+  pxHLine(ctx, c + 2, c + 12, c, ICON_T, PALETTE.stencil);
+  // 箭头头（方头斜线；短段，半覆盖是几何必然）
+  ctx.beginPath(); ctx.moveTo(c+8, c-4); ctx.lineTo(c+12, c); ctx.lineTo(c+8, c+4); ctx.stroke();
 }
 
 function drawBarFill(ctx, w, h) {
@@ -1309,6 +1345,10 @@ const generators = {
   'monet_warning':       (ctx, w, h) => drawV2Warning(ctx, Math.min(w,h)),
   'monet_info':          (ctx, w, h) => drawV2Info(ctx, Math.min(w,h)),
   'monet_gear':          (ctx, w, h) => drawV2Gear(ctx, Math.min(w,h)),
+  'monet_panel_toggle':  (ctx, w, h) => drawV2PanelToggle(ctx, Math.min(w,h)),
+  // 圆形内容按钮：圆井（实心盘，垫在图标下）+ 圆环（细环，叠在图标上做悬停/选中态）
+  'monet_round_well':    (ctx, w, h) => drawV2RoundWell(ctx, Math.min(w,h)),
+  'monet_round_ring':    (ctx, w, h) => drawV2RoundRing(ctx, Math.min(w,h)),
   // —— 非图标类（保留原实现）——
   'monet_corner':        (ctx, w, h) => drawCorner(ctx, w),
   'monet_hairline':      (ctx, w, h) => drawHairline(ctx, w, h),

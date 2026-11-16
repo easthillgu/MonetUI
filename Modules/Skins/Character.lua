@@ -74,9 +74,8 @@ local FADE_CHARACTER_ATLAS = {
     "transfer%-log%-background",
 }
 local SWAP_CHARACTER_ATLAS = {
-    -- 选中页签 → 我们的**矩形** barfill 盒子（通用方法会把它压到图标之下当底色，不糊图标）。
-    -- 作者要"规则方形"：暴雪 sidetab 是斜角框，tint 保留它仍是斜的；换成我们的矩形盒子才方正。
-    "common%-sidetab%-selected",
+    -- 2026-11-16 晚二次口径：侧边钮统一 = 收藏窗的美化（Skin:Tab 下划线），
+    -- 选中金框由 Skin:SideTabArt 的褪色档压掉，这里不再换矩形盒（swap 留空）。
 }
 local TINT_CHARACTER_ATLAS = {
 }
@@ -90,6 +89,14 @@ local EQUIPMENT_SLOTS = {
     "CharacterHandsSlot", "CharacterWaistSlot", "CharacterLegsSlot", "CharacterFeetSlot",
     "CharacterFinger0Slot", "CharacterFinger1Slot", "CharacterTrinket0Slot", "CharacterTrinket1Slot",
     "CharacterMainHandSlot", "CharacterSecondaryHandSlot", "CharacterRangedSlot", "CharacterAmmoSlot",
+}
+
+-- 六颗侧页签（1.60 实机：54×54，SidePanelTabButtonMixin，`common-sidetab` 家）。
+-- 2026-11-16 晚作者拍板：侧边钮统一 = 收藏窗侧边钮的美化 → 点名走 Skin:SideTabArt
+-- （它先褪金框四件、再上 Skin:Tab 按钮美化 + 下划线）。
+local CHARACTER_MODE_TABS = {
+    "CharacterFrameModeTab1", "CharacterFrameModeTab2", "CharacterFrameModeTab3",
+    "CharacterFrameModeTab4", "CharacterFrameModeTab5", "CharacterFrameModeTab6",
 }
 
 -- 模块级稳定引用：PollWatch 按引用去重。
@@ -106,6 +113,12 @@ local function StyleCharacterArt()
         local slot = Skin:Need(EQUIPMENT_SLOTS[i])
         local bf = slot and slot.BorderFrame
         if bf and type(bf.SetAlpha) == "function" then pcall(bf.SetAlpha, bf, 0) end
+    end
+    -- 六颗侧页签：统一 = 收藏窗的美化（Skin:SideTabArt 褪金框四件 + Skin:Tab）。
+    -- 幂等：1s 复涂轮询里重复进来只是六次 Skin:Tab 的 `tab` 标记早退。
+    for i = 1, #CHARACTER_MODE_TABS do
+        local tab = Skin:Need(CHARACTER_MODE_TABS[i])
+        if tab then pcall(Skin.SideTabArt, Skin, tab, 1) end
     end
 end
 
@@ -140,6 +153,9 @@ M:Panel("character", {
     frames = {
         "CharacterFrame", "CharacterFrameCloseButton",
         CHARACTER_TAB_WIDGET,
+        -- 六颗侧页签：名单与取用路径同源（CHARACTER_MODE_TABS）。
+        "CharacterFrameModeTab1", "CharacterFrameModeTab2", "CharacterFrameModeTab3",
+        "CharacterFrameModeTab4", "CharacterFrameModeTab5", "CharacterFrameModeTab6",
         "PaperDollFrame", "ReputationFrame", "TokenFrame",
     },
 })

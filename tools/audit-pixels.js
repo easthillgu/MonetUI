@@ -115,6 +115,9 @@ const NO_SOFT_EDGE = new Set([
   'monet_close_normal', 'monet_close_hover', 'monet_close_push',
   // 窗口按钮：maximize / minimize 都是横竖直边（minimize 是那条横杠）。
   'monet_win_maximize', 'monet_win_minimize',
+  // 面板展开/收起：面板框与水平箭杆都是横竖直线，直边必须落在像素边界上。
+  // （箭头头的两条斜线各 4~6px，够不上 MIN_RUN=8 的「直边段」判据，半覆盖不会被误报。）
+  'monet_panel_toggle',
 ]);
 
 // STENCIL —— 纯粹当染色模具用的纹理：运行期用 SetVertexColor / SetBackdropBorderColor 上色，
@@ -145,6 +148,9 @@ const STENCIL = new Set([
   // 地图内的三个 4:3 徽章：运行期用 SetVertexColor 染成主题色 / 副本难度色，
   // 所以底色必须中性灰、描边必须纯白（它们的底与描边都在贴图里）。
   'monet_map_tracking', 'monet_map_compartment', 'monet_map_difficulty',
+  // 提示 / 告警弹窗的图标（monet_info ℹ / monet_warning ⚠）：与战斗剑 / 盾同源的
+  // V2 灰度线稿，运行期 Paint 染主题高光（info）或 GetDanger 危险红（warning）。
+  'monet_info', 'monet_warning',
   // 进出战斗提示的剑 / 盾：运行期 SetVertexColor 染主题高光 / 主题色，图内只许明度层次。
   'monet_combat_sword', 'monet_combat_shield',
   // 背包 / 银行工具钮图标（整理 / 一键存入 / 栏位管理）：纯白剪影，运行期染 bright 档。
@@ -152,6 +158,11 @@ const STENCIL = new Set([
   // A4 氛围暗角：整张图只给径向 alpha，压暗的颜色（近黑）由运行期 SetVertexColor 给 ——
   // 模具带色相会把那一点色相乘进"整个世界"，所以必须纯白。
   'monet_vignette_62', 'monet_vignette_55',
+  // 面板展开/收起：纯白线稿，颜色交给运行期 SetVertexColor（尚未接线，先按模具口径管住）。
+  'monet_panel_toggle',
+  // 圆形内容按钮的井 / 环：井染近黑、环染主题边框 / 主色，全部运行期 SetVertexColor 上色，
+  // 模具只许提供 alpha（2026-11-16 收藏侧页签 / 外观部位导航的"圆形保留"那档）。
+  'monet_round_well', 'monet_round_ring',
 ]);
 
 // 色相偏离：非全透明像素里，三个通道两两之差的最大值。0 = 完全中性（纯白或纯灰都合法）。

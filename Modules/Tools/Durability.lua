@@ -91,7 +91,11 @@ local function Check()
         local text = string.format("最低剩 %d%%，记得修理", math.floor(pct + 0.5))
         local toast = ns:GetModule("Toast")
         if toast and toast.Notify then
-            toast:Notify("装备耐久", text)
+            -- 告警族带 ⚠ 图标 + 危险红（2026-11-16 全仓提示/告警接图标的口径）。
+            toast:Notify("装备耐久", text, {
+                icon = "monet_warning",
+                tint = { ns.Color:GetDanger() },
+            })
         else
             ns:Print("装备耐久：" .. text)
         end

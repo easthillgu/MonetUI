@@ -345,6 +345,14 @@ Media.texture = {
     ["monet_info"]            = ASSET .. "Textures\\monet_info",
     ["monet_gear"]            = ASSET .. "Textures\\monet_gear",
 
+    -- 圆形内容按钮两件套（2026-11-16"圆形保留"那档，消费者 Skin:RoundIconButton）：
+    -- 外观页部位导航（31/25）与法术书/天赋页书页签（44×32）的圆井 / 圆环。
+    -- 井运行期染近黑（面板井语言）、环染主题边框色（悬停抬 bright、选中染主色）——
+    -- 两张都是 STENCIL 模具，图里只许有 alpha（audit-pixels 强制）。
+    -- 侧页签族（55×54 不规则斜角框）当天回退到 Skin:SideTabArt，不吃这两张图。
+    ["monet_round_well"]      = ASSET .. "Textures\\monet_round_well",
+    ["monet_round_ring"]      = ASSET .. "Textures\\monet_round_ring",
+
     -- A4 氛围暗角（Modules/Atmosphere）：128x128 纯白模具，整张图只给**径向 alpha**，
     -- 压暗的近黑由运行期 SetVertexColor 给，强度（.06 / .10 / .12）给顶点 alpha。
     -- 键名里的数字是剖面里"平段半径" r0（候选页 tools/gen-beauty-candidates.js 的 vignette）：

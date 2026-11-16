@@ -184,11 +184,14 @@ CVARS.brightness.value = "50"          -- 出厂 55
 CVARS.contrast.value = "50"            -- 出厂 75
 CVARS.ffxGlow.value = "1"              -- 出厂 0
 CVARS.gamma.value = "1.4"              -- 出厂 1
-CVARS.particleDensity.value = "100"    -- 出厂 80（fewParticles 关 → 归快照）
-CVARS.volumefog.value = "0"            -- 出厂 1（noFog 关 → 归快照）
-CVARS.ResampleAlwaysSharpen.value = "0" -- 出厂 1（sharpen 关 → 归快照）
-CVARS.ffxDeath.value = "1"             -- noDeathGray 开 → 由开关写 0
-CVARS.weatherDensity.value = "3"       -- noWeather 开 → 由开关写 0，快照 3 不许抢
+-- 下面五个 CVar 由 TWEAKS 开关管，快照里**没有**它们的条目（2026-11-16 收口，代码审查 #2）。
+-- LiveSwitches 里 fewParticles / noFog / sharpen 是**关**的 → 以前会被快照顶回 80/1/1，
+-- 现在必须**原样保留玩家自己的值**；noWeather / noDeathGray 是开的 → 由开关写 0。
+CVARS.particleDensity.value = "100"
+CVARS.volumefog.value = "1"
+CVARS.ResampleAlwaysSharpen.value = "1"
+CVARS.ffxDeath.value = "1"
+CVARS.weatherDensity.value = "3"
 DB = { tweaks = LiveSwitches() }
 out = {}
 local M3 = Load()
@@ -197,12 +200,29 @@ check("brightness 拉回 55", CVARS.brightness.value == "55", CVARS.brightness.v
 check("contrast 拉回 75", CVARS.contrast.value == "75", CVARS.contrast.value)
 check("ffxGlow 拉回 0", CVARS.ffxGlow.value == "0", CVARS.ffxGlow.value)
 check("gamma 拉回 1", CVARS.gamma.value == "1", CVARS.gamma.value)
-check("particleDensity 拉回 80（开关关）", CVARS.particleDensity.value == "80", CVARS.particleDensity.value)
-check("volumefog 拉回 1（开关关）", CVARS.volumefog.value == "1", CVARS.volumefog.value)
-check("ResampleAlwaysSharpen 拉回 1（开关关）", CVARS.ResampleAlwaysSharpen.value == "1",
-    CVARS.ResampleAlwaysSharpen.value)
-check("weatherDensity 由 noWeather 写成 0，没被快照的 3 抢走",
-    CVARS.weatherDensity.value == "0", CVARS.weatherDensity.value)
+
+-- 快照只裁决「插件不管」的 CVar：被开关管住的一律不进 vision，
+-- 否则关掉开关的玩家会被快照写回 0（等于插件替他关），而且开关开时那些数永远不下发。
+local store3 = DB.tweakDefaults and DB.tweakDefaults.vision
+local stray = ""
+if store3 then
+    for _, k in ipairs({ "particleDensity", "volumefog", "weatherDensity", "ffxDeath",
+                         "ResampleAlwaysSharpen" }) do
+        if store3[k] ~= nil then stray = stray .. " " .. k .. "=" .. tostring(store3[k]) end
+    end
+else
+    stray = " (vision 表不存在)"
+end
+check("快照里不再有被开关管住的 CVar", stray == "", stray)
+
+check("fewParticles 关着 → particleDensity 保留玩家的 100（快照不再顶回 80）",
+    CVARS.particleDensity.value == "100", CVARS.particleDensity.value)
+check("noFog 关着 → volumefog 保留玩家的 1（快照不再顶回 1=无条件写）",
+    CVARS.volumefog.value == "1", CVARS.volumefog.value)
+check("sharpen 关着 → ResampleAlwaysSharpen 保留玩家的 1",
+    CVARS.ResampleAlwaysSharpen.value == "1", CVARS.ResampleAlwaysSharpen.value)
+check("weatherDensity 由 noWeather 写成 0，快照不抢", CVARS.weatherDensity.value == "0",
+    CVARS.weatherDensity.value)
 check("ffxDeath 由 noDeathGray 写成 0", CVARS.ffxDeath.value == "0", CVARS.ffxDeath.value)
 
 -- 2026-11-13 作者拍板的两条默认：伤害数字 ×0.5、「只留伤害数字」关掉整族战斗文字。

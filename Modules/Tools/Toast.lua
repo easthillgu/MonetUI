@@ -20,7 +20,7 @@ local Color    = ns.Color
 local Media    = ns.Media
 local Math     = ns.Math
 local EventBus = ns.EventBus
--- 下面 Fill / Tick 里防机密值要用 Secrets.IsSecret —— 必须在这里声明：`Secrets` 只是 ns.Secrets，
+-- 下面 Fill / Tick / ColumnCount 里防机密值要用 Secrets.CanRead —— 必须在这里声明：`Secrets` 只是 ns.Secrets，
 -- 没有全局同名对象；漏声明不会在加载期报错，只在第一条 toast 弹红字（AGENTS「静态闸门抓不到」那条）。
 local Secrets  = ns.Secrets
 local Scheduler = ns.Scheduler
@@ -117,13 +117,20 @@ local function Dress(p, entry)
         title:SetTextColor(r, g, b, 1)
         if entry.icon then p.icon:SetVertexColor(r, g, b, 1) end
     else
+        -- 没有 tint 就把图标的顶点色**复位**再交给 Paint()：tint 分支会写顶点色，
+        -- 不复位的话下一条「带图标但不带 tint」的通知会沿用上一条的颜色（潜伏 bug：
+        -- 目前只有战斗提醒带 tint，所以还没人被咬到）。
+        if entry.icon then p.icon:SetVertexColor(1, 1, 1, 1) end
         Paint()
     end
 end
 
 --- 这条该停留多久：提醒类（战斗进出）用 entry.hold 覆盖，不跟普通通知的 duration 走。
+--- 出厂默认只有一个真相：GetSetting 已经落到 `DEFAULTS.toast.duration`（Core.lua）。这里的
+--- 字面量只防「DEFAULTS 自己缺键」这种改坏的情况，不再代表任何一档默认值。
 local function HoldFor(entry)
-    return entry.hold or math.max(1, tonumber(M:GetSetting("duration")) or 5)
+    local d = tonumber(M:GetSetting("duration")) or 8
+    return entry.hold or math.max(1, d)
 end
 
 --- 填满一列并开始播：面板自己的阶段计时，互不影响（三列可以同时在不同进度）。
@@ -134,7 +141,7 @@ local function Fill(p, entry)
     frame:SetAlpha(0)
     -- 先读宽度并检查是否为机密值（防止 SetWidth 里的机密值拦截）
     local fw = frame:GetWidth() or WIDTH
-    if Secrets.IsSecret(fw) then fw = WIDTH end
+    if not Secrets.CanRead(fw) then fw = WIDTH end
     p.drain:SetWidth(fw)
     frame:Show()
 
@@ -162,7 +169,7 @@ local function RetargetKind(entry)
             if p.phase ~= "in" then
                 p.phase, p.t = "hold", 0
                 local fw = p.frame:GetWidth() or WIDTH
-                if Secrets.IsSecret(fw) then fw = WIDTH end
+                if not Secrets.CanRead(fw) then fw = WIDTH end
                 p.drain:SetWidth(fw)
                 p.frame:SetAlpha(1)
             end
@@ -224,7 +231,7 @@ function M.Tick(elapsed)
                 else
                     -- 同样在 Tick 防止机密值 SetWidth 失败
                     local fw = p.frame:GetWidth() or WIDTH
-                    if Secrets.IsSecret(fw) then fw = WIDTH end
+                    if not Secrets.CanRead(fw) then fw = WIDTH end
                     p.drain:SetWidth(fw * progress)
                 end
             else -- out
@@ -251,7 +258,9 @@ end
 
 --- 对外入口。有空列就直接播（三列可以同时显示），三列都占着才压队列、播完自动接上。
 --- 弹一条通知。opts 可带 icon / tint / hold / kind：
---   icon = Media 键（战斗提醒用 monet_combat_sword / monet_combat_shield）
+--   icon = Media 键 —— 进出战斗 monet_combat_sword / monet_combat_shield；
+--          提示类 monet_info（无 tint → Paint 染主题高光奶白）；
+--          告警类 monet_warning + tint = { Color:GetDanger() }（2026-11-16 全仓接图标口径）。
 --   tint = { r, g, b }（色条、标题、图标同色）
 --   hold = 停留秒数（覆盖全局 duration）
 --   kind = 同族标记：同 kind 只留最新的一条 —— 正在播的那列就地换内容（不闪），排队的删掉。
@@ -268,13 +277,9 @@ function M:Notify(head, text, opts)
 
     if RetargetKind(entry) then return end
 
-    local p = FreePanel()
-    if p and #queue == 0 then
-        Fill(p, entry)
-        return
-    end
-
-    -- 没有空列（或前面还有排队的）：入队。
+    -- 统一走「入队 + Dispatch」：有空列就**当场**填进去（同一个面板、同一拍开始淡入），
+    -- 没有就排队，两者行为完全一样。以前这里另有一条"有空列且队列为空就直接 Fill"的
+    -- 快路径，和 Dispatch 等价，只让人误以为「队列与空列可以并存」。
     queue[#queue + 1] = entry
     -- 队列不能无限长：掉线重连那种场景会一次涌进来一堆。
     while #queue > 8 do table.remove(queue, 1) end
@@ -333,10 +338,10 @@ end
 
 --- 屏幕上真放得下几列：n 列占 n*WIDTH + (n-1)*GAP（再留 40 的边）。小窗口 / 高缩放时
 -- 三列会顶出屏幕，宁可少开一列也不要把最左最右那两条推到屏幕外。
--- UIParent 宽度读不出来（0 / 机密）就按最大列数走 —— 这条只是防丑，不该把功能卡掉。
+-- UIParent 宽度读不出来（0 / 读不了）就按最大列数走 —— 这条只是防丑，不该把功能卡掉。
 local function ColumnCount()
     local width = _G.UIParent and _G.UIParent:GetWidth()
-    if Secrets.IsSecret(width) then return MAX_COLUMNS end
+    if not Secrets.CanRead(width) then return MAX_COLUMNS end
     if type(width) ~= "number" or width <= 0 then return MAX_COLUMNS end
     for n = MAX_COLUMNS, 1, -1 do
         if width >= n * WIDTH + (n - 1) * GAP + 40 then return n end
@@ -344,6 +349,8 @@ local function ColumnCount()
     return 1
 end
 
+--- 建列（只建一次）。**列数在这里定死**：玩家长大窗口 / 改 UI 缩放后不会补列，缩小窗口
+--- 也不会撤列（撤列要处理正在播的那条，得不偿失）。可接受的代价：改完缩放 `/reload` 一次。
 local function Build()
     if panels[1] then return true end
     for i = 1, ColumnCount() do
@@ -363,13 +370,17 @@ end
 local lastPrimary          -- 上一次读过的主色；nil = 还没建立基线
 local COLOR_EPS = 0.004    -- ≈1/255：低于它的差异色值抹平、肉眼也读不出
 
---- 读当前主色并与上一次比，顺手把基线推到当前值（无论这次要不要发提示）。
--- @return r, g, b, changed —— 机密值读不出来时返回 nil（这一条就不发）。
+--- 读当前主色并与上一次比，顺手把基线推到当前值（**读得到**的时候）。
+--- @return r, g, b, changed —— 机密 / 读不出来的值返回 nil（这一条就不发）。
+--- 注意：读不出来时**基线保持不动**（不是"顺手推"）：那一拍我们根本没拿到值，
+--- 拿它当"没变"会把下一次真实的变色吞掉，当"变了"则是凭空弹一条。
 local function PrimaryDelta()
     local r, g, b = Color:GetPrimary()
     -- 颜色来自我们自己的库 profile，但受限窗口里任何值都可能被标成机密：宁可少发一条，
     -- 也不要在 math.abs 里撞上机密数字比较（会变成一条 ADDON_ACTION_BLOCKED）。
-    if Secrets.IsSecret(r) or Secrets.IsSecret(g) or Secrets.IsSecret(b) then return nil end
+    -- 判据用 CanRead（"此刻能不能运算"）而不是 IsSecret（"是不是机密"）：后者不抛，
+    -- 但非机密而当前读不了的值它也会放行。
+    if not (Secrets.CanRead(r) and Secrets.CanRead(g) and Secrets.CanRead(b)) then return nil end
     r, g, b = r or 0, g or 0, b or 0
 
     local prev = lastPrimary
@@ -383,11 +394,14 @@ local function PrimaryDelta()
 end
 
 -- RefreshTheme 的 reason（Core.lua）：让玩家知道这条是换区域还是自己改的设置。
+-- `config` 来自我们的设置面板（对比度 / 调色那几处都走 RefreshTheme("config")），
+-- `manual` 才是 `/mui theme` 命令 —— 两个都算"玩家自己动的手"，但一个在面板里、一个在命令行。
 local THEME_REASON = {
     login  = "登录",
     world  = "进世界",
     zone   = "换区域",
     monet  = "区域配色",
+    config = "面板",
     manual = "手动",
 }
 
@@ -397,15 +411,17 @@ local function ThemeNotice(reason)
     if not (M.active and M:GetSetting("themeColor")) then return end
 
     local text = "#" .. Math:RGBToHex(r, g, b)
-    -- 区域名来自我们自己的数据表（不是客户端给的字符串）；照样判一次机密 —— 它之后要进 concat，
-    -- 机密串的 type() 仍然是 "string"（AGENTS 的判例），只判类型拦不住。
+    -- 区域名来自我们自己的数据表（不是客户端给的字符串）；照样判一次可读性 —— 它之后要进
+    -- concat，机密串的 type() 仍然是 "string"（AGENTS 的判例），只判类型拦不住。
+    -- 顺序：**先 CanRead 再做 `~= ""`**。以前是反的（先比较后判机密），等于没防 ——
+    -- 现在 zone 来自我们自己的表所以不会真抛，但这行注释声称的守卫必须是真守卫。
     local _, zone = Color:GetZoneInfo()
-    if type(zone) == "string" and zone ~= "" and not Secrets.IsSecret(zone) then
+    if Secrets.CanRead(zone) and type(zone) == "string" and zone ~= "" then
         text = text .. " · " .. zone
     end
     local why = THEME_REASON[reason]
     if why then text = text .. "（" .. why .. "）" end
-    M:Notify("主色已更换", text, { hold = 4, kind = "themeColor" })
+    M:Notify("主色已更换", text, { hold = 4, kind = "themeColor", icon = "monet_info" })
 end
 
 --- 新邮件：小地图的邮件图标被 Minimap 默认藏掉了，这里补一条提示。
@@ -417,7 +433,9 @@ local function CheckMail()
     local ok, value = pcall(has)
     if not ok then return end
     value = value and true or false
-    if value and lastMail ~= true then M:Notify("新邮件", "邮箱里有未读邮件") end
+    if value and lastMail ~= true then
+        M:Notify("新邮件", "邮箱里有未读邮件", { icon = "monet_info" })
+    end
     lastMail = value
 end
 
@@ -437,7 +455,11 @@ local function CheckBags()
 
     if total == 0 and not bagWarned then
         bagWarned = true
-        M:Notify("背包已满", "所有背包格子都用完了")
+        -- 告警族带 ⚠ 图标 + 危险红（与战斗横幅同一套 tint 机制，monet_warning 灰度模具）。
+        M:Notify("背包已满", "所有背包格子都用完了", {
+            icon = "monet_warning",
+            tint = { Color:GetDanger() },
+        })
     elseif total > 0 then
         bagWarned = false
     end

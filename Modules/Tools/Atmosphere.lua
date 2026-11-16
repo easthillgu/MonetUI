@@ -41,14 +41,26 @@ function M:Settings()
     return db.atmosphere
 end
 
---- 当前那一档（按 alpha 认，认不到退回默认那档）。
-function M:Tier()
-    local want = tonumber(self:Settings().strength)
-    if not want then return TIERS[2] end
+--- 当前那一档（按 alpha 认，认不到退回**出厂默认那一档**）。
+--- 默认值只有一个真相：Core 的 `DEFAULTS.atmosphere.strength`。这里以前写死 `TIERS[2]`，
+--- 而默认从 .10 改成 .06 之后，那个下标代表的是"中"档，注释却还写着"退回默认那档" ——
+--- 于是"最淡"被静默顶成"中"。
+local function DefaultTier()
+    local want = ns.DEFAULTS and ns.DEFAULTS.atmosphere and ns.DEFAULTS.atmosphere.strength
     for i = 1, #TIERS do
         if TIERS[i].alpha == want then return TIERS[i] end
     end
-    return TIERS[2]
+    return TIERS[1]
+end
+
+--- 当前那一档：DB 里存的是三档之一的 alpha 就用它，否则（缺失 / 越界）用出厂默认。
+function M:Tier()
+    local want = tonumber(self:Settings().strength)
+    if not want then return DefaultTier() end
+    for i = 1, #TIERS do
+        if TIERS[i].alpha == want then return TIERS[i] end
+    end
+    return DefaultTier()
 end
 
 function M:SetTier(alpha)

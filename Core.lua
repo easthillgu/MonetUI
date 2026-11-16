@@ -366,7 +366,7 @@ local DEFAULTS = {
         trail = true,
         glow  = true,
     },
-    -- 通知横幅 (Modules/Toast)：只做本项目真的缺的几件事 —— 新邮件（小地图邮件图标被藏掉了）、
+    -- 通知横幅 (Modules/Tools/Toast.lua)：只做本项目真的缺的几件事 —— 新邮件（小地图邮件图标被藏掉了）、
     -- 背包满、主色变色。duration = 每条停留秒数。
     toast = {
         mail    = true,
@@ -958,14 +958,25 @@ ns.RefreshTheme = RefreshTheme
 --- 且与 zone 兜底互斥（hasMonetColorCallback），不会双重重涂。
 ---
 --- LibMonetColor ships with or without CallbackHandler-1.0 and the two expose the registration differently, so the shape is detected rather than assumed and both are pcall'd.  Either way the handler is handed the event name first, which is why it ignores its arguments.  No engine, or no notification, leaves the zone handlers below as the baseline.
+---
+--- 2026-11-16（换图变色整条断死，实锤判例）：注册键**不能用 LMC 自己**。CallbackHandler-1.0
+--- 按 `events[eventname][self]` 存回调（DF 那份 :129），我们传 LMC 当 self、而
+--- LibMonetColor-Anim 的 `subscribeCore` 也传 `core=LMC` 当 self —— **同键，后到的覆盖先到的**，
+--- 两个 handler 只活一个。实机账本：41 条换区域事件 0 条 THEME；桶里恒 1 个回调；
+--- 手动 `LMC.events:Fire` 派发不到 Core 的 handler，而新注册的回调立即收到（派发机制无辜）。
+--- 修法：用**独有字符串 id** 当 self（CH :113 允许 string "addonId" 形态；`self==target`
+--- 的报错只在 method 为字符串时才触发，函数引用不受影响）。派发时 handler 收到的是
+--- (self_id, eventname, entry)，本 handler 不读参数，两种形态一致。LMC 自家的 fallback
+--- registry（:97）按位置收参 `(self, event, fn)`，同样的调用两边都成立。
 local function ReserveMonetColorCallback()
     if not LMC then return false end
 
     local handler = function() RefreshTheme("monet") end
 
     -- CallbackHandler style: the method is embedded on the library itself.
+    -- ⚠ 独有字符串 id 当 self，绝不传 LMC —— 会与 Anim 层 subscribeCore 同键互踩。
     if type(LMC.RegisterCallback) == "function" then
-        if pcall(LMC.RegisterCallback, LMC, "OnThemeRefreshed", handler) then
+        if pcall(LMC.RegisterCallback, "MonetUI-Core", "OnThemeRefreshed", handler) then
             return true
         end
     end

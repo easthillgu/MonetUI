@@ -38,6 +38,17 @@ local COLLECTIONS_SEARCH = {
 -- 上面 `M:Dress(COLLECTIONS_PANELS, { deep = true })` 已经覆盖这些子控件，
 -- 留着点名只会让 `/mui skins diagnose` 长期报五行的假"缺失"。
 
+-- 侧页签：**2026-11-16 晚回退** —— 作者复看后拍板"侧边按钮之前美化没问题，圆形按钮才有
+-- 问题"。恢复 11-14 原路径：页签走 `tabs =`（Skin:Tab），55×54 的不规则侧页签不再卷进圆形件
+-- （圆井/圆环按正方形盖，形状对不上 = 搞坏）。
+-- 外观页部位导航钮（真圆钮）：**切到外观页才建**（WardrobeItemsCollectionMixin:CreateSlotButtons，
+-- Blizzard_Wardrobe.lua:325），点名办不到 ⇒ 显示期补扫接住；按钮挂在 WCF 下两层匿名框里，
+-- 深度 4 够。RoundButtonMode 不再有 sidetab 模式，这趟子树扫只认 navslot / booktab 指纹。
+local function RoundCollections()
+    local wcf = Skin:Need("WardrobeCollectionFrame")
+    if wcf then Skin:RoundButtonsIn(wcf, { depth = 4 }) end
+end
+
 local function SkinCollections()
     M:Dress("CollectionsJournal", {
         window = true, inset = true, panel = { bgAlpha = 0.96 }, rule = true, tabs = COLLECTIONS_TABS,
@@ -53,6 +64,10 @@ local function SkinCollections()
     -- 面板里的行是切页时才建的，deep 的可见期补扫负责之后每次翻页。
     M:Dress(COLLECTIONS_PANELS, { panel = { bgAlpha = 0.96 }, deep = true })
     M:Dress(COLLECTIONS_SEARCH, { as = "editbox" })
+    RoundCollections()
+    -- 窗口每次打开补扫一趟（LoD 包重建 / 部位钮懒建都能接住；幂等）。
+    local cj = Skin:Need("CollectionsJournal")
+    if cj then M:HookShow(cj, RoundCollections) end
 end
 
 -- The talent / spell book.  **1.60 实名（11-05 `/mui compat find PlayerSpells` / `find SpellBook`）**：
@@ -145,6 +160,14 @@ local function DarkenSpellbookPage()
     Skin:WatchMaximizeMinimize(f)
 end
 
+-- 法术书 / 天赋页的**书页签**（44×32 圆签，`spellbook-Tab-Frame-C60` 家 + 数字 ID 图标）：
+-- 圆形保留的第三族（2026-11-16）。页签挂在窗口壳之下两三层匿名框里，点名办不到
+-- ⇒ 子树扫 + 指纹认脸（幂等：RoundIconButton 自带 Marked 早退）。
+local function RoundSpellsTabs()
+    local psf = Skin:Need("PlayerSpellsFrame")
+    if psf then Skin:RoundButtonsIn(psf, { depth = 4 }) end
+end
+
 local function SkinPlayerSpells()
     -- 11-05 实机（天赋/法术页开着扫 `/mui skins layers PlayerSpellsFrame`）：窗口壳已涂，
     -- 但 `PlayerSpellsFramePortrait`（62×62）+ 那张 58×58 CircleMask 还是"暴雪原样" ⇒ 补 portrait 隐藏。
@@ -168,6 +191,9 @@ local function SkinPlayerSpells()
     -- 我们不挂 OnUpdate、不 hook，只把已有的 PollWatch 周期对齐到同一量级。
     -- FadeAtlasBackdrop 本身递归 GetChildren，新行出生后下一拍就会被扫到。
     if frame then Widget:PollWatch(frame, DarkenSpellbookPage, 0.5) end
+    -- 书页签：圆形保留。Apply 一趟 + 窗口每次打开补扫（LoD 重建也能接住）。
+    RoundSpellsTabs()
+    if frame then M:HookShow(frame, RoundSpellsTabs) end
 end
 
 local ACHIEVEMENT_TABS = { "AchievementFrameTab1", "AchievementFrameTab2" }
