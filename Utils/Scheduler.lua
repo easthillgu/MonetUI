@@ -199,9 +199,14 @@ end
 --- 先前两版分别试过「按栈层取」和「按函数取」，都只返回 nil，白花了两轮实机验证。
 --- 所以标签改由调用点写：`Scheduler:Every(100, fn, "控件:悬停轮询")`。
 --- 下面 WhereOf 只作为「有 debug 的客户端」的兜底，本客户端恒 nil，不要再指望它。
+--- 裸名 `debug` 会被 `tools.wuxian.check` 判成 missing-lib（误报：我们本来就有 type 守卫，
+--- 取不到就早退）。所以只取一次、用一个 local 持有：行为完全不变，只是让静态闸门
+--- 看得见"先探后用"，0 错误的那条验收线才成立。
+local debugLib = rawget(_G, "debug")
+
 local function WhereOf(fn)
-    if type(debug) ~= "table" or type(debug.getinfo) ~= "function" then return nil end
-    local ok, info = pcall(debug.getinfo, fn, "S")
+    if type(debugLib) ~= "table" or type(debugLib.getinfo) ~= "function" then return nil end
+    local ok, info = pcall(debugLib.getinfo, fn, "S")
     if not ok or type(info) ~= "table" then return nil end
     local src = info.short_src or info.source
     if type(src) ~= "string" or src == "" then return nil end
@@ -216,18 +221,18 @@ end
 --- 事后靠猜；以后遇到「诊断字段是空的」，先跑这个看客户端到底给了什么。
 function Scheduler:ProbeDebug()
     local out = {
-        hasDebug = type(debug) == "table",
-        hasGetinfo = (type(debug) == "table" and type(debug.getinfo) == "function"),
+        hasDebug = type(debugLib) == "table",
+        hasGetinfo = (type(debugLib) == "table" and type(debugLib.getinfo) == "function"),
     }
     if not out.hasGetinfo then return out end
     local sample = function() return 1 end
-    local okF, infoF = pcall(debug.getinfo, sample, "S")
+    local okF, infoF = pcall(debugLib.getinfo, sample, "S")
     if okF and type(infoF) == "table" then
         out.fn = string.format("%s:%s", tostring(infoF.short_src), tostring(infoF.linedefined))
     else
         out.fn = "失败：" .. tostring(infoF)
     end
-    local okL, infoL = pcall(debug.getinfo, 1, "Sl")
+    local okL, infoL = pcall(debugLib.getinfo, 1, "Sl")
     if okL and type(infoL) == "table" then
         out.level = string.format("%s:%s", tostring(infoL.short_src), tostring(infoL.currentline))
     else
