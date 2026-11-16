@@ -722,6 +722,130 @@ end
 --- 实测 masks=1）—— 带 mask 的贴图 `SetTexCoord` 会被客户端拒绝，图标就永远停在"圆角原样"，
 --- 与我们背包/动作条的方角 0.08 裁切对不上。走 `Skin:CropIcon`（先 `StripMasks` 摘 mask 再裁），
 --- 驱动帧之后每 0.5 秒补摘一次，暴雪 `UpdateVisuals` 把 mask 挂回来也压得住。
+--- 天赋节点：剥暴雪方框（talents-node-square-* 族），只留裁好的图标 + 我们的 1px 方边。
+--- 2026-11-17 判例：天赋节点其实**已经**被 M:IconWidgetsIn 处理过（iconFlat=true、
+--- 图标 0.08 裁切、mask 已摘、方边已挂），漏的是 region 上的 `talents-node-square-locked`
+--- 等方框仍 α1 —— 于是变成"暴雪方框 + 我们方边"两层，玩家看到的正是
+--- "图标的暴雪材质没剥掉，只在外面加了一层方框"。
+--- 口径照 `Skin:SpellbookItemArt`：按 atlas 精确压装饰贴图，`Icon` 字段豁免，
+--- MaskTexture 不碰（压 mask 会把被它遮的图标整块不画）。每趟写 α0（暴雪
+--- UpdateVisuals 会单独把状态框抬回来），天赋页是切页懒建的 ⇒ 挂在
+--- DarkenSpellbookPage 的 0.5s 轮询里，不依赖 Apply 时序。
+function Skin:TalentNodeArt(frame, depth)
+    if not frame or (depth or 0) > 10 or type(frame.GetChildren) ~= "function" then return end
+    depth = depth or 0
+    if frame.IsForbidden then
+        local okF, forbidden = pcall(function() return frame:IsForbidden() end)
+        if okF and forbidden then return end
+    end
+    local okKind, kind = pcall(frame.GetObjectType, frame)
+    if okKind and kind == "Button" then
+        local okI, icon = pcall(function() return frame.Icon end)
+        if okI and icon then
+            local okR, regs = pcall(function() return { frame:GetRegions() } end)
+            if okR and type(regs) == "table" then
+                for i = 1, #regs do
+                    local reg = regs[i]
+                    if reg ~= icon and IsTexture(reg) then
+                        local low = ArtIdentity(reg)
+                        if low and low:find("^talents%-node%-square") then
+                            self:FadeHold(reg)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    local okC, kids = pcall(function() return { frame:GetChildren() } end)
+    if okC and type(kids) == "table" then
+        for i = 1, #kids do self:TalentNodeArt(kids[i], depth + 1) end
+    end
+end
+
+--- 法术书翻页钮（"1/1页" 旁的 ◄ ►，32×32 老式多状态按钮）：
+--- `M:IconWidgetsIn` 给它们造了 1px 透明方框（ItemQualityBorder），但按钮自己 4 张
+--- 暴雪贴图（数字 fileID 的底衬 + 三态箭头）α1 一张没剥 —— 玩家看到的就是
+--- "我们加了方框，里面的材质却没做好"（2026-11-17）。`ScrollArrowButton` 按 atlas
+--- 认脸，这族全是数字 fileID 认不出，所以单开一条：
+---   ① 每趟压掉全部暴雪贴图（FadeHold 幂等写 α0，暴雪换页会抬回）；
+---   ② 首次补我们的主题色箭头（monet_chevron_up + Widget:Arrow），
+---      左/右按屏幕 x 排序，不硬编码 fileID。方框保留（用户已接受它）。
+local function LooksLikePageArrow(btn)
+    if not btn or type(btn.GetObjectType) ~= "function" then return false end
+    local okK, kind = pcall(btn.GetObjectType, btn)
+    if not (okK and kind == "Button") then return false end
+    local w, h = 0, 0
+    pcall(function() w, h = btn:GetWidth() or 0, btn:GetHeight() or 0 end)
+    if not (Secrets.CanRead(w) and Secrets.CanRead(h))
+        or w < 24 or w > 40 or math.abs(w - h) > 8 then return false end
+    local okR, regs = pcall(function() return { btn:GetRegions() } end)
+    if not (okR and type(regs) == "table") then return false end
+    local n = 0
+    for i = 1, #regs do
+        local reg = regs[i]
+        local okT, kind2 = pcall(reg.GetObjectType, reg)
+        if okT and kind2 == "Texture" then
+            if ArtIdentity(reg) then return false end  -- 有 atlas / 路径 ⇒ 不是老式数字贴图钮
+            n = n + 1
+        end
+    end
+    return n >= 3
+end
+
+function Skin:SpellbookPageArrows(root)
+    if not root or type(root.GetChildren) ~= "function" then return end
+    local hits = {}
+    local function walk(f, d)
+        if d > 8 or not Widget:Readable(f) then return end
+        local okC, kids = pcall(function() return { f:GetChildren() } end)
+        if not (okC and type(kids) == "table") then return end
+        for i = 1, #kids do
+            local c = kids[i]
+            if LooksLikePageArrow(c) then hits[#hits + 1] = c end
+            walk(c, d + 1)
+        end
+    end
+    walk(root, 0)
+    table.sort(hits, function(a, b)
+        local okA, la = pcall(a.GetLeft, a)
+        local okB, lb = pcall(b.GetLeft, b)
+        local xa = (okA and Secrets.CanRead(la)) and la or 0
+        local xb = (okB and Secrets.CanRead(lb)) and lb or 0
+        return xa < xb
+    end)
+    for i = 1, math.min(2, #hits) do
+        local btn = hits[i]
+        local dir = (i == 1) and "left" or "right"
+        local own = Marked(btn, "pageArrow")
+        local okR, regs = pcall(function() return { btn:GetRegions() } end)
+        if okR and type(regs) == "table" then
+            for j = 1, #regs do
+                local reg = regs[j]
+                -- 我们自己的箭头（带 art 标记）与功能图标豁免，别每趟压掉。
+                if reg ~= own and not Marked(reg, "art") and IsTexture(reg)
+                    and not ArtIdentity(reg) and not IsContentIcon(reg) then
+                    self:FadeHold(reg)
+                end
+            end
+        end
+        if not own then
+            local okA, our = pcall(btn.CreateTexture, btn, nil, "ARTWORK", nil, 2)
+            if okA and our then
+                local s = 18
+                our:SetSize(s, s)
+                our:SetPoint("CENTER")
+                our:SetTexture(Media:Texture("monet_chevron_up"))
+                Widget:Arrow(our, dir)
+                local r, g, b = Color:GetBorder()
+                our:SetVertexColor(r, g, b)
+                Mark(our, "art", true)
+                Mark(btn, "pageArrow", our)
+                self:Track(our)
+            end
+        end
+    end
+end
+
 function Skin:SpellbookItemArt(frame, depth)
     if not frame or (depth or 0) > 10 or type(frame.GetChildren) ~= "function" then return end
     depth = depth or 0
@@ -1978,6 +2102,116 @@ function Skin:SideTabArt(frame, depth)
 end
 
 -- ============================================================================
+-- 方形书页签（法术书 / 天赋页，spellbook-Tab-Frame 家，2026-11-17）
+-- ============================================================================
+
+--- 暴雪三层框：TabSystem 矩形底、spellbook 金框、glow / 渐变。
+--- ⚠ 全小写：ArtIdentity 返回小写身份串，Lua 模式大小写敏感（写大写 T/F 会静默失配）。
+local BOOKTAB_SUPPRESS = {
+    "spellbook%-tab%-frame", "^uiframe%-activetab", "^uiframe%-tab",
+}
+
+--- 单颗书页签：**方的美化** = 剥暴雪方金框 + `Skin:Tab`（收藏窗同款的方形底板 +
+--- 选中下划线）。作者 2026-11-17 关掉美化确认原始材质是**方形**金页签框，
+--- 所以不再用圆形件（那会造成"圆图标 + 方边框"混搭）。每趟可重入：
+--- 压制走 FadeHold（幂等写 α0），Skin:Tab 自带 `tab` 标记早退。
+function Skin:BookTabArt(button)
+    if not button or not self:IsScriptObject(button) then return button end
+    -- ① 按 atlas 精确压制（不会误伤我们的 tabBar / 图标：它们没有这些 atlas）
+    local okR, regs = pcall(function() return { button:GetRegions() } end)
+    if okR and type(regs) == "table" then
+        for i = 1, #regs do
+            local reg = regs[i]
+            if IsTexture(reg) then
+                local low = ArtIdentity(reg)
+                if low then
+                    for j = 1, #BOOKTAB_SUPPRESS do
+                        if low:find(BOOKTAB_SUPPRESS[j]) then
+                            self:FadeHold(reg)
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end
+    -- ② 47×34 的 NineSlice 子框（9 张数字 fileID 边框贴图，没有 atlas、也不在
+    --    GetRegions 里）：整框压 α0。我们的 controlBg 是另一个子框，豁免。
+    local okK, kids = pcall(function() return { button:GetChildren() } end)
+    if okK and type(kids) == "table" then
+        local ownBg = Marked(button, "controlBg")
+        for i = 1, #kids do
+            local kid = kids[i]
+            if kid and kid ~= ownBg then pcall(kid.SetAlpha, kid, 0) end
+        end
+    end
+    -- ③ 方的美化（只首次）：Strip 会清掉剩余暴雪贴图并保住 Icon 字段
+    --    （IsOwnIconField 豁免，收藏窗侧页签判例），ControlBg 画方底板、Tab 挂下划线。
+    --    随后把底板 / 下划线**按图标边长收成正方形**：按钮是 44×32 横长条，图标却是
+    --    36×35 的方图，ControlBg 默认 SetAllPoints 会画成矩形框，方图标塞矩形里
+    --    就是作者 11-17 报的"icon 尺寸和边框不匹配"。收方后底板、图标、下划线同宽。
+    if not Marked(button, "tab") then
+        self:Tab(button)
+        local side
+        local okI, ic = pcall(function() return button.Icon end)
+        if okI and ic then
+            local okw, iw = pcall(ic.GetWidth, ic)
+            local okh, ih = pcall(ic.GetHeight, ic)
+            if okw and okh and Secrets.CanRead(iw) and Secrets.CanRead(ih)
+                and math.max(iw, ih) > 0 then
+                side = math.max(iw, ih)
+            end
+        end
+        local iconHost = (okI and ic) or button
+        if not side then
+            local okw, bw = pcall(button.GetWidth, button)
+            local okh, bh = pcall(button.GetHeight, button)
+            if okw and okh and Secrets.CanRead(bw) and Secrets.CanRead(bh)
+                and math.min(bw, bh) > 0 then
+                side = math.min(bw, bh)
+            end
+        end
+        if side then
+            local bg = Marked(button, "controlBg")
+            if bg then
+                pcall(bg.ClearAllPoints, bg)
+                pcall(bg.SetSize, bg, side, side)
+                -- ⚠ 锚到 **Icon** 而不是按钮：实机图标中心比按钮中心高 1.5px
+                -- （按钮 44×32 / 图标 36×35，图标还凸出按钮上沿 3px），锚按钮 CENTER
+                -- 会让方底板与方图标错开，看起来"尺寸不匹配"。
+                pcall(bg.SetPoint, bg, "CENTER", iconHost, "CENTER", 0, 0)
+            end
+            local bar = Marked(button, "tabBar")
+            if bar then
+                pcall(bar.ClearAllPoints, bar)
+                -- 下沿**之外** 1px：贴着方底板 / 图标的最底部，而不是落在图标内部
+                -- （2026-11-17 作者"下划线不是在最底部"判例：原来锚按钮 BOTTOM+1，
+                --  实测下划线 1013~1015、图标下沿 1012 —— 整条在图标里面）。
+                local host = bg or button
+                pcall(bar.SetPoint, bar, "TOPLEFT", host, "BOTTOMLEFT", 0, -Media:SnapUnit(1))
+                pcall(bar.SetPoint, bar, "TOPRIGHT", host, "BOTTOMRIGHT", 0, -Media:SnapUnit(1))
+            end
+        end
+    end
+    return button
+end
+
+--- 子树扫：页签匿名、切页懒建，点名办不到。认脸 = 自身 region 有
+--- `spellbook-Tab-Frame` 图集且带 `Icon` 字段。幂等（BookTabArt 可重入）。
+function Skin:BookTabsIn(root, opts)
+    opts = opts or {}
+    return self:WalkFrames(root, { depth = opts.depth or 4 }, function(h, atlases)
+        if self:AtlasMatch(atlases, { "spellbook%-tab%-frame" }) then
+            local okI, icon = pcall(function() return h.Icon end)
+            if okI and icon then
+                self:BookTabArt(h)
+                return "stop"
+            end
+        end
+    end)
+end
+
+-- ============================================================================
 -- 圆形内容按钮（2026-11-16，"圆形保留"那档）
 -- ============================================================================
 
@@ -1986,10 +2220,11 @@ end
 local ROUND_SUPPRESS = {
     -- 部位导航的选中环（transmog-nav-slot-selected）：同"状态美术继续剥"口径。
     navslot = { "transmog%-nav%-slot%-selected" },
-    -- 书页签（法术书 / 天赋页的 44×32 圆签）：三层暴雪框全剥 —— TabSystem 矩形底、
-    -- spellbook-Tab-Frame-C60 金圆环、glow / 渐变两件。选中态由环染主色替代表达
-    -- （我们压掉 activetab 底，但**只读**它的 IsShown 当信号）。
-    booktab = { "spellbook%-Tab%-Frame", "^uiframe%-activetab", "^uiframe%-tab" },
+    -- 专精徽章（48×48 Frame）：暴雪金环 Talents-Main-Ring-c60 / -Box-c60 由我们的
+    -- 圆环替代。`Talents-small-divider-c60` 是列分隔线，前缀不同，不压。
+    specring = { "^talents%-main%-ring" },
+    -- ~~booktab~~（2026-11-17 退役）：作者关掉美化确认过原始材质是**方形**金页签框，
+    -- 按"方的按方的美化"改走 Skin:BookTabArt → Skin:Tab，不再进圆形件。
 }
 
 --- 按钮属于哪一族圆形内容钮，nil = 不是。
@@ -2000,6 +2235,8 @@ local ROUND_SUPPRESS = {
 ---   * navslot = WardrobeSlotButtonTemplate：`GetNormalTexture` 的 atlas 命中**内容图集**
 ---     （transmog-nav-slot-<部位>，走 IsContentIcon；真物品格的 quickslot 圆框不命中）
 ---     且带 `SelectedTexture`。
+---   * specring = 天赋页专精徽章（48×48 **Frame**）：自家 region 有 `Talents-Main-Ring-c60`
+---     金环 + `Icon` 字段（2026-11-17 补；Frame 族，RoundButtonsIn 已放宽收 Frame）。
 local function RoundButtonMode(button)
     if not button then return nil end
     local okN, nt
@@ -2010,23 +2247,27 @@ local function RoundButtonMode(button)
             if okS and sel then return "navslot" end
         end
     end
-    -- 书页签（44×32）：自家 region 上挂着 `spellbook-Tab-Frame-C60` 圆框 + Icon 字段。
+    -- 专精徽章（48×48 **Frame**，不是 Button）：自家 region 挂 `Talents-Main-Ring-c60`
+    -- 金环 + `Icon` 字段 + 圆 MaskTexture。作者 11-17 指认"中间偏上一排 3 个圆形图标"，
+    -- 按形状分流归圆形件。
     local okR, regs = pcall(function() return { button:GetRegions() } end)
     if okR and type(regs) == "table" then
         for i = 1, #regs do
             local low = ArtIdentity(regs[i])
-            if low and low:find("^spellbook%-tab%-frame") then
+            if low and low:find("^talents%-main%-ring") then
                 local okI, icon = pcall(function() return button.Icon end)
-                if okI and icon then return "booktab" end
+                if okI and icon then return "specring" end
             end
         end
     end
+    -- 2026-11-17：书页签（spellbook-Tab-Frame 家）不再认作圆钮 —— 关掉美化后
+    -- 实机确认原始是**方形**金页签框，按作者口径归 Skin:BookTabArt（方的）。
     return nil
 end
 
 --- 单颗圆形钮的每趟复检（PollWatch 0.25s，登记一次）。
 --- 稳定引用：闭包只在 RoundIconButton 首次建件时造一次，不在 Apply 里现造。
---- selRegions = booktab 的选中态信号区（`uiframe-activetab-*`，我们压掉但只读 IsShown）。
+--- selRegions = 暴雪的 SelectedTexture（只读 IsShown；booktab 退役后只剩这一路）。
 local function RoundIconTick(button, ring, well, patterns, selRegions)
     -- 模块关掉就停手：轮询不在面板 Apply 的 pcall 保护下，自己不抛。
     local SM = ns.Skins
@@ -2077,18 +2318,18 @@ local function RoundIconTick(button, ring, well, patterns, selRegions)
 end
 
 --- 圆形内容按钮的专属美化：**圆井 + 圆环**（2026-11-16 作者拍板"圆形保留"）。
---- 覆盖（一次扫全的实机普查）：
----   * 部位导航族（31/25，WardrobeSlotButtonTemplate）：外观页 15 颗；
----   * 书页签族（44×32，spellbook-Tab-Frame-C60 家）：法术书 / 天赋页的分类圆签。
----   * ~~侧页签族~~（55×54 不规则斜角框）：2026-11-16 晚回退——作者拍板
----     "侧边按钮之前美化没问题"，回到 `Skin:SideTabArt` 的 barfill 口径，不进圆形件。
+--- 2026-11-17 收口：覆盖**真正圆的那两族** —— 外观页部位导航（31/25，
+--- WardrobeSlotButtonTemplate）与天赋页专精徽章（48×48 Frame，Talents-Main-Ring 家）。
+--- 书页签（44×32）与侧页签（55×54）关掉美化后确认原始都是**方形框**，按作者
+--- "方的按方的美化"分别归 Skin:BookTabArt 与 Skin:SideTabArt，都不进圆形件
+--- （否则就是"圆图标 + 方边框"的混搭）。
 --- 形状语言：自绘圆盘（monet_round_well）垫在图标下染近黑，自绘细环
 --- （monet_round_ring）叠在图标上染主题色 —— 悬停抬 bright、选中染主色。
 --- 为什么不 HookScript / 不写暴雪字段：环色轮询走 Widget:PollWatch，
 --- 选中态读暴雪自己的 SelectedTexture:IsShown()（SharedUIPanelTemplates.lua:398
 --- 按 SetShown 切），只读不写；井 / 环是 `button:CreateTexture` 造的子件
 --- （Skin:Tab 下划线同款先例），引用记 ns:Mark 旁表。
---- @param opts { mode = "navslot"|"booktab" } —— 省略时按指纹自认
+--- @param opts { mode = "navslot"|"specring" } —— 省略时按指纹自认
 function Skin:RoundIconButton(button, opts)
     if not button or not self:IsScriptObject(button) then return button end
     opts = opts or {}
@@ -2103,22 +2344,32 @@ function Skin:RoundIconButton(button, opts)
     local patterns = ROUND_SUPPRESS[mode]
     if not patterns then return button end
 
-    -- 井/环按**正方形**放：书页签是 44×32 的横长条（图标 36×35 还比按钮高），
-    -- SetAllPoints 会把圆拉成椭圆。侧边 = min(按钮宽, 高)；书页签改按内容取
-    -- （max(Icon 宽, 高)），圆环正好贴着图标边。31×31 的导航钮算出来
-    -- 与 SetAllPoints 等价，统一走这一条。
+    -- 井/环按**正方形**放：SetAllPoints 在非方形按钮上会把圆拉成椭圆。
+    -- 侧边 = min(按钮宽, 高)；31×31 的导航钮算出来与 SetAllPoints 等价。
     local bw, bh = 0, 0
     pcall(function() bw, bh = button:GetWidth() or 0, button:GetHeight() or 0 end)
     local side = (Secrets.CanRead(bw) and Secrets.CanRead(bh) and math.min(bw, bh) > 0)
         and math.min(bw, bh) or nil
-    if mode == "booktab" then
-        local okI, ic = pcall(function() return button.Icon end)
-        if okI and ic then
-            local okiw, iw = pcall(ic.GetWidth, ic)
-            local okih, ih = pcall(ic.GetHeight, ic)
-            if okiw and okih and Secrets.CanRead(iw) and Secrets.CanRead(ih)
-                and math.max(iw, ih) > 0 then
-                side = math.max(iw, ih)
+    -- specring：按钮是 48×48，但圆图标只有 40（暴雪 40×40 圆 MaskTexture 把 36×36
+    -- 方贴图裁成圆）。按按钮尺寸铺井/环会多出一圈深色空隙，看起来像"图标被裁小"。
+    -- 作者 2026-11-17 拍板"圆环收小、贴紧图标" ⇒ 按圆 mask 的尺寸取方，
+    -- 环线（贴图内缩 2.5px）正好贴着图标圆边，像给圆图标描一圈细边。
+    -- 找不到 mask 就保留按钮尺寸兜底，不硬套。
+    if mode == "specring" then
+        local okMR, mregs = pcall(function() return { button:GetRegions() } end)
+        if okMR and type(mregs) == "table" then
+            for i = 1, #mregs do
+                local reg = mregs[i]
+                local hit = false
+                pcall(function()
+                    if reg:GetObjectType() ~= "MaskTexture" then return end
+                    local mw, mh = reg:GetWidth() or 0, reg:GetHeight() or 0
+                    if Secrets.CanRead(mw) and Secrets.CanRead(mh) and math.max(mw, mh) > 0 then
+                        side = math.max(mw, mh)
+                        hit = true
+                    end
+                end)
+                if hit then break end
             end
         end
     end
@@ -2132,23 +2383,10 @@ function Skin:RoundIconButton(button, opts)
         end
     end
 
-    -- 选中态信号区：navslot 用暴雪的 SelectedTexture；booktab 没有
-    -- SelectedTexture 字段，信号是 TabSystem 的 `uiframe-activetab-*` 底（压掉但仍读它）。
+    -- 选中态信号区：暴雪的 SelectedTexture（只读 IsShown，过 Secrets.Bool）。
     local selRegions = {}
-    if mode == "booktab" then
-        local okSR, sregs = pcall(function() return { button:GetRegions() } end)
-        if okSR and type(sregs) == "table" then
-            for i = 1, #sregs do
-                local low = ArtIdentity(sregs[i])
-                if low and low:find("^uiframe%-activetab") then
-                    selRegions[#selRegions + 1] = sregs[i]
-                end
-            end
-        end
-    else
-        local okS, st = pcall(function() return button.SelectedTexture end)
-        if okS and st then selRegions[#selRegions + 1] = st end
-    end
+    local okS, st = pcall(function() return button.SelectedTexture end)
+    if okS and st then selRegions[#selRegions + 1] = st end
 
     -- 井：BACKGROUND/-8（垫在暴雪 BACKGROUND/0 的图标之下，宠物条 well 同款层位）。
     local okW, well = pcall(button.CreateTexture, button, nil, "BACKGROUND", nil, -8)
@@ -2176,6 +2414,65 @@ function Skin:RoundIconButton(button, opts)
         return button
     end
 
+    -- ===== specring 两层处理（2026-11-17 作者：图标处理完，数值再处理一次）=====
+    if mode == "specring" then
+        -- ① 图标层：暴雪把圆图标往左上挪了约 2px 给右下"投入点数"腾位置，
+        --    按钮 CENTER 与 Icon 中心并不重合；井/环改锚 Icon CENTER，圆环才真贴紧。
+        local okI, ic = pcall(function() return button.Icon end)
+        if okI and ic then
+            for _, tex in ipairs({ well, ring }) do
+                if tex then
+                    pcall(tex.ClearAllPoints, tex)
+                    pcall(tex.SetPoint, tex, "CENTER", ic, "CENTER", 0, 0)
+                end
+            end
+        end
+        -- ② 数值层：右下角点数自带 24×20 的暴雪底框 `Talents-Main-Ring-Box-c60`
+        --    （压制名单已压 α0）。补一块我们的**带 1px 主题边框**的小底板
+        --    （作者 11-17 "数值也加个框"）—— `ControlBg` 自带底板 + 边框且跟主题重涂；
+        --    子框层级压到按钮之下，不会盖住数字 FontString。按底框自身矩形定位。
+        if not Marked(button, "specPointPlate") then
+            local pw, ph, px, py = 24, 20, 2, 2
+            local okSR, sregs = pcall(function() return { button:GetRegions() } end)
+            if okSR and type(sregs) == "table" then
+                for i = 1, #sregs do
+                    local reg = sregs[i]
+                    pcall(function()
+                        local low = ArtIdentity(reg)
+                        if low and low:find("talents%-main%-ring%-box") then
+                            local bw, bh = reg:GetWidth() or 0, reg:GetHeight() or 0
+                            local bl, bb = reg:GetLeft() or 0, reg:GetBottom() or 0
+                            local fr, fb = button:GetRight() or 0, button:GetBottom() or 0
+                            if Secrets.CanRead(bw) and Secrets.CanRead(bh)
+                                and Secrets.CanRead(bl) and Secrets.CanRead(bb)
+                                and Secrets.CanRead(fr) and Secrets.CanRead(fb)
+                                and bw > 0 and bh > 0 then
+                                pw, ph = bw, bh
+                                px = bl + bw - fr
+                                py = bb - fb
+                            end
+                        end
+                    end)
+                end
+            end
+            local okPF, pf = pcall(CreateFrame, "Frame", nil, button, "BackdropTemplate")
+            if not (okPF and pf) then
+                okPF, pf = pcall(CreateFrame, "Frame", nil, button)
+            end
+            if okPF and pf then
+                local okLv, lv = pcall(button.GetFrameLevel, button)
+                pcall(pf.SetFrameLevel, pf, math.max(0, (okLv and lv or 1) - 1))
+                pcall(pf.EnableMouse, pf, false)
+                pcall(pf.SetSize, pf, pw, ph)
+                pcall(pf.ClearAllPoints, pf)
+                pcall(pf.SetPoint, pf, "BOTTOMRIGHT", button, "BOTTOMRIGHT", px, py)
+                self:ControlBg(pf, { bgAlpha = 0.55, thickness = 1 })
+                Mark(button, "specPointPlate", pf)
+                self:Track(pf)
+            end
+        end
+    end
+
     Mark(button, "roundIcon", true)
     Mark(button, "roundWell", well)
     Mark(button, "roundRing", ring)
@@ -2193,7 +2490,9 @@ end
 
 --- 子树里把"圆形内容按钮"逐颗接上（幂等：RoundIconButton 自带 Marked 早退）。
 --- 给"按钮是懒建 / 匿名（没有全局名）"的窗口用 —— 点名 Need 办不到的那批
---- （外观页部位导航钮是切页才建的、社交/任务图/冷却监视器的页签没有实名）。
+--- （外观页部位导航钮是切到外观页才建的、天赋页专精徽章是 Frame 且匿名）。
+--- 2026-11-17 收口后只认 navslot / specring 两族圆形件；侧页签（sidetab）走
+--- Skin:SideTabArt、方书页签走 Skin:BookTabsIn。
 --- 指纹从严见 RoundButtonMode：认不出就整颗跳过，绝不会把普通按钮误圆化。
 --- @param opts { depth = 4, mode = nil } —— mode 省略时逐颗自认
 --- @return 这一趟在册的颗数（含之前已建过件的）
@@ -2209,7 +2508,10 @@ function Skin:RoundButtonsIn(root, opts)
         for i = 1, #kids do
             local c = kids[i]
             local okT, kind = pcall(c.GetObjectType, c)
-            if okT and kind == "Button" then
+            -- 2026-11-17：专精徽章是 **Frame** 不是 Button（同模板在不同窗口类型不同，
+            -- 与 §8.132 "按结构字段认脸、不按 GetObjectType" 同一条教训）。
+            -- 放宽到 Frame 由 RoundButtonMode 的指纹从严兜底，普通 Frame 一律认不出。
+            if okT and (kind == "Button" or kind == "Frame") then
                 self:RoundIconButton(c, { mode = opts.mode })
                 if Marked(c, "roundIcon") then count = count + 1 end
             end

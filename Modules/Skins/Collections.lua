@@ -43,7 +43,8 @@ local COLLECTIONS_SEARCH = {
 -- （圆井/圆环按正方形盖，形状对不上 = 搞坏）。
 -- 外观页部位导航钮（真圆钮）：**切到外观页才建**（WardrobeItemsCollectionMixin:CreateSlotButtons，
 -- Blizzard_Wardrobe.lua:325），点名办不到 ⇒ 显示期补扫接住；按钮挂在 WCF 下两层匿名框里，
--- 深度 4 够。RoundButtonMode 不再有 sidetab 模式，这趟子树扫只认 navslot / booktab 指纹。
+-- 深度 4 够。RoundButtonMode 现在只剩 navslot / specring 两个圆形模式
+-- （sidetab 11-16 退役、booktab 11-17 关美化确认原始是方框后改走 Skin:BookTabsIn）。
 local function RoundCollections()
     local wcf = Skin:Need("WardrobeCollectionFrame")
     if wcf then Skin:RoundButtonsIn(wcf, { depth = 4 }) end
@@ -139,6 +140,12 @@ local function DarkenSpellbookPage()
     end
     -- 法术格美术（backplate 归零 / 金环整圈归零 / 图标方角裁切）—— 这一步只碰格子，不动页签。
     Skin:SpellbookItemArt(f)
+    -- 天赋节点美术（talents-node-square-* 方框归零）—— 天赋页切页才懒建，同走
+    -- 这条 0.5s 复涂；图标裁切 / 方边由 M:IconWidgetsIn 那条路径负责，这里只补剥方框。
+    Skin:TalentNodeArt(f)
+    -- 法术书翻页钮（1/1页 旁 ◄ ►）—— 方框由 IconWidgetsIn 已造，这里成对做
+    -- "压暴雪贴图 + 补我们的箭头"，每趟复涂兜住换页抬回的 alpha。
+    Skin:SpellbookPageArrows(f)
     -- 页签：**只做纯文字页签**（专精 / 天赋 / 法术书）。
     -- `CategoryTabSystem`（法术书里那排分类图标）**整档不碰** —— 2026-11-06 实机：
     -- 那排页签在展开/收回两种布局下都被法术网格压住、图标不可见；照 EUI 判据换皮后依旧不可见，
@@ -160,12 +167,15 @@ local function DarkenSpellbookPage()
     Skin:WatchMaximizeMinimize(f)
 end
 
--- 法术书 / 天赋页的**书页签**（44×32 圆签，`spellbook-Tab-Frame-C60` 家 + 数字 ID 图标）：
--- 圆形保留的第三族（2026-11-16）。页签挂在窗口壳之下两三层匿名框里，点名办不到
--- ⇒ 子树扫 + 指纹认脸（幂等：RoundIconButton 自带 Marked 早退）。
-local function RoundSpellsTabs()
+-- 法术书 / 天赋页顶部的**形状分流**（2026-11-17 作者口径：圆的按圆的、方的按方的）：
+--   ① 方形书页签（44×32，spellbook-Tab-Frame 家）→ `Skin:BookTabsIn`（剥金框 + Skin:Tab）；
+--   ② 圆形专精徽章（48×48 Frame，Talents-Main-Ring 家）→ `Skin:RoundButtonsIn`
+--      （剥暴雪金环 + 圆井/圆环）。两者都匿名、切页懒建 ⇒ 子树扫 + 指纹认脸，幂等。
+local function StyleSpellFrameTabs()
     local psf = Skin:Need("PlayerSpellsFrame")
-    if psf then Skin:RoundButtonsIn(psf, { depth = 4 }) end
+    if not psf then return end
+    Skin:BookTabsIn(psf, { depth = 4 })
+    Skin:RoundButtonsIn(psf, { depth = 4 })
 end
 
 local function SkinPlayerSpells()
@@ -191,9 +201,13 @@ local function SkinPlayerSpells()
     -- 我们不挂 OnUpdate、不 hook，只把已有的 PollWatch 周期对齐到同一量级。
     -- FadeAtlasBackdrop 本身递归 GetChildren，新行出生后下一拍就会被扫到。
     if frame then Widget:PollWatch(frame, DarkenSpellbookPage, 0.5) end
-    -- 书页签：圆形保留。Apply 一趟 + 窗口每次打开补扫（LoD 重建也能接住）。
-    RoundSpellsTabs()
-    if frame then M:HookShow(frame, RoundSpellsTabs) end
+    -- 顶部两族：Apply 一趟 + 窗口每次打开补扫（LoD 重建）+ 0.5s 复涂
+    -- （暴雪换分类 / 切页会把金框 alpha 抬回来，压制是"每趟写 α0"）。
+    StyleSpellFrameTabs()
+    if frame then
+        M:HookShow(frame, StyleSpellFrameTabs)
+        Widget:PollWatch(frame, StyleSpellFrameTabs, 0.5)
+    end
 end
 
 local ACHIEVEMENT_TABS = { "AchievementFrameTab1", "AchievementFrameTab2" }
