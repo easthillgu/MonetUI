@@ -306,6 +306,32 @@ local function MenuButtonTint(btn, hovered)
     pcall(s.bg.SetVertexColor, s.bg, r, g, b, hovered and 0.9 or 0.45)
 end
 
+-- 菜单里的勾选 / 单选记号：白色模具（实测 vcolor=1,1,1），染我们的主题色。
+-- 1.60（Camelot 走 Mainline 变体）的两张图：未选中方框 `common-dropdown-ticksquare`、
+-- 选中勾 `common-dropdown-icon-checkmark-yellow`；单选另有 `-tickradial` / `-radialtick-yellow`。
+-- 暴雪只在选中时才建第二张，且每次开关菜单重新拼元素 ⇒ 每趟按 atlas 认脸重染（幂等）。
+local MENU_CHECK_ATLAS = {
+    "common%-dropdown%-ticksquare", "common%-dropdown%-icon%-checkmark%-yellow",
+    "common%-dropdown%-tickradial", "common%-dropdown%-icon%-radialtick%-yellow",
+}
+local function TintMenuChecks(btn)
+    -- 每趟重扫：菜单池化复用，选中时才建第二张勾图，扫一次会漏掉新生那张。
+    local list = RegionsOf(btn) or {}
+    for j = 1, #list do
+        local rgn = list[j]
+        local oka, atlas = pcall(rgn.GetAtlas, rgn)
+        if oka and type(atlas) == "string" then
+            for k = 1, #MENU_CHECK_ATLAS do
+                if atlas:find(MENU_CHECK_ATLAS[k]) then
+                    local r, g, b = ns.Color:GetBorder()
+                    pcall(rgn.SetVertexColor, rgn, r, g, b)
+                    break
+                end
+            end
+        end
+    end
+end
+
 --- 一个菜单元素按钮：底衬贴图（本来就是白的）染我们的按钮色。
 --- 悬停走 Widget:HoverWatch（**绝不挂 OnEnter**：那是往暴雪框的脚本槽写我们的函数）。
 local function StyleMenuButton(btn, force)
@@ -333,6 +359,7 @@ local function StyleMenuButton(btn, force)
                                  function(self) MenuButtonTint(self, false) end)
     end
     MenuButtonTint(btn, false)
+    TintMenuChecks(btn)
     if s.text then
         -- 字体不能换（assertsafe 拒 SetFont），只改颜色。
         local r, g, b = ns.Color:Get("neutral")
@@ -420,12 +447,28 @@ local function DressMenu(menu)
     end
 end
 
+--- 菜单打开期间每拍重染勾选记号：选中态的勾是暴雪**选中那一刻**新建的第二张 region，
+--- `DressMenu` 的签名守卫只在元素数量/高度变化时重刷，池化复用时新冒出的勾会漏。
+--- 这里只扫菜单的直接 Button 子级（成本可忽略），按 atlas 认脸重染（TintMenuChecks 自带幂等）。
+local function RetintMenuChecks(menu)
+    local ok, kids = pcall(function() return { menu:GetChildren() } end)
+    if not ok then return end
+    for i = 1, #kids do
+        if RegionKind(kids[i]) == "Button" then TintMenuChecks(kids[i]) end
+    end
+end
+
 --- 把现代菜单接上：一个 UIParent 上的轮询，覆盖右键菜单 / 上下文菜单 / 下拉菜单本体。
 local function WatchModernMenus(anchor)
     if not _G.Menu or not _G.Menu.GetManager then return end
     ns.Widget:PollWatch(anchor, function()
         local menu = OpenMenu()
-        if menu then DressMenu(menu) end
+        if menu then
+            DressMenu(menu)
+            RetintMenuChecks(menu)
+            -- 菜单打开期间顺带复压下拉按钮的展开态箭头（暴雪此刻会新建一张 alpha 1 的）。
+            if ns.Skin and ns.Skin.ReassertDropdowns then ns.Skin:ReassertDropdowns() end
+        end
     end, MENU_POLL)
 end
 

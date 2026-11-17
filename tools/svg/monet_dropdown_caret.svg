@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- MonetUI —— 下拉按钮专用「粗 V」caret（朝下），tools/svg/monet_dropdown_caret.svg
+
+     为什么单独画一张：现役 `monet_chevron_up` 是 V 形描边，笔画 0.115×size —— 12px 时
+     仅 1.4px，缩到小下拉钮（14×15）上几乎看不见（玩家 11-17 报「太小了」）。
+     这张把笔画提到约 0.2×size（缩到 8px 显示时约 3px），粗近一倍；仍走 chevron 家族的
+     V 形语言，不借施法三角的实心语义。
+
+     画布 **32×16**（2 的幂），运行时按按钮高度缩到「高 = min(高/2, 8)，宽 = 高×2」——
+     2:1 画布与显示比例一致，不变形；先画大再缩小，边缘才干净。
+
+     几何：V 尖在 (16,13) 朝下，两端 (6,4)/(26,4)；stroke 6 ≈ 0.2×画布高。
+     纯白染色模具：颜色交给 SetVertexColor（主题边框色）；
+     透明像素 RGB 由 tools/svg-to-tga.js 补白衬底。 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="16" viewBox="0 0 32 16">
+  <path d="M 6 4 L 16 13 L 26 4" fill="none" stroke="#ffffff" stroke-width="6"
+        stroke-linecap="butt" stroke-linejoin="round"/>
+</svg>

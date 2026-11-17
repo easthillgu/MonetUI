@@ -3430,6 +3430,128 @@ function Skin:Dropdown(button, opts)
     return self:Button(button, opts or { size = 12 })
 end
 
+--- 现代 DropdownButton 收起态换肤（1.60 实测：法术书/天赋、世界地图、LFG 的下拉
+--- 都是暴雪原生 `DropdownButtonMixin`——`CreateRootDescription` / `OpenMenu` 那套，
+--- 匿名 + LoD 懒建，箭头是 `common-dropdown-a-button` atlas）。
+---
+--- 两件事缺一不可（11-17 三页实测判例）：
+---   ① **底板/文字**：`Skin:Dropdown`（=Button 别名）走 Strip 压掉原生 textholder/箭头
+---      + ControlBg + hover；但它**没补箭头** ⇒ 收起态看着像普通按钮。
+---   ② **补我们的 V 形**：Strip 把原生箭头压成 α0，必须在 Strip 之后挂自建 chevron
+---      （`art` 标记 + 主题边框色），否则下拉没了方向指示。
+---
+--- 幂等靠 `muiDropdownBtn` 标记。反复 Apply / 轮询直接重跑：Strip / ControlBg / Hover 自带幂等守卫，
+--- 箭头那步靠标记跳过——暴雪换页重建按钮时是新对象，没有标记，会被下一轮补扫到。
+--- 展开后的**菜单本体**不归这里：那是 `System.lua` 的 `WatchModernMenus`（走 Menu.GetManager）。
+-- 已换肤的下拉按钮（弱键旁表）：展开菜单时暴雪会**新建**一张 ARTWORK 态箭头（alpha 1），
+-- 面板轮询（0.5s）会漏出一段可见窗口。登记在这里，由 `System.lua` 的 0.1s 菜单看守
+-- 在菜单打开期间每拍复压，把窗口压到 0.1s 以内。
+local dressedDropdowns = setmetatable({}, { __mode = "k" })
+
+function Skin:ReassertDropdowns()
+    for btn in pairs(dressedDropdowns) do
+        local okR, regions = pcall(function() return { btn:GetRegions() } end)
+        if okR then
+            for _, r in ipairs(regions) do
+                local okA, atlas = pcall(r.GetAtlas, r)
+                if okA and type(atlas) == "string" and atlas:lower():find("common-dropdown", 1, true) then
+                    -- 直写 α0，不走 FadeHold：展开态那张是暴雪**新建**的无标记 region，
+                    -- FadeHold 见的还是旧对象 → 顶不住；这里按 atlas 无条件压当前这张。
+                    local okAl, al = pcall(r.GetAlpha, r)
+                    if okAl and al ~= 0 then pcall(r.SetAlpha, r, 0) end
+                end
+            end
+        end
+    end
+end
+
+function Skin:DropdownButtonArt(button, opts)
+    if not button or not self:IsScriptObject(button) then return button end
+    if Widget.Readable and not Widget:Readable(button) then return button end
+    opts = opts or {}
+
+    self:Dropdown(button, opts.control)
+
+    -- 原生箭头**每趟全数复压**：实测（1.60 世界地图 31×31 那颗）一张按钮上挂了
+    -- 两张 `common-dropdown-a-button`，`Skin:Dropdown` 的 Strip 只压掉一张，另一张
+    -- alpha=1 / hidden=nil 叠在我们的 chevron 上 ⇒ 看着仍像暴雪原样。
+    -- `FadeHold` 对已压过的零成本早退，只纠被抬回来的和新冒出来的。
+    local okR, regions = pcall(function() return { button:GetRegions() } end)
+    if okR then
+        for _, r in ipairs(regions) do
+            local okA, atlas = pcall(r.GetAtlas, r)
+            if okA and type(atlas) == "string" and atlas:lower():find("common-dropdown", 1, true) then
+                self:FadeHold(r)
+            end
+        end
+    end
+    dressedDropdowns[button] = true
+
+    if not Marked(button, "muiDropdownBtn") then
+        Mark(button, "muiDropdownBtn", true)
+        local ok, tex = pcall(button.CreateTexture, button, nil, "OVERLAY", nil, 7)
+        if ok and tex then
+            -- 文件索引是客户端**启动那一刻**建的：新贴图要完全重启才认（1.60 实测
+            -- GetFileIDFromPath 对没索引的名字返回 nil）。没索引这次会话先用 chevron，
+            -- 重启后自动换成粗 caret —— 避免部署完到重启之间箭头是空白。
+            local caretKey = "monet_dropdown_caret"
+            if type(GetFileIDFromPath) == "function" then
+                local okF, id = pcall(GetFileIDFromPath, Media:Texture(caretKey))
+                if not okF or not id then caretKey = "monet_chevron_up" end
+            end
+            -- 按按钮高度自适应：高 = min(高/2, 8)，宽 = 高×2（caret 画布是 2:1）。
+            -- 没索引到 caret 时退回 chevron（正方形），那就用小边摆正方形、不要拉宽。
+            local okH, bh = pcall(button.GetHeight, button)
+            local h = math.max(6, math.min(math.floor((okH and bh or 24) / 2), 8))
+            local w = caretKey == "monet_dropdown_caret" and (h * 2) or h
+            pcall(tex.SetSize, tex, w, h)
+            -- 锚点分两类（1.60 实机）：带 `common-dropdown-textholder` 的是文字下拉，
+            -- 箭头靠右（RIGHT/-6）；纯箭头钮（地图 31×31 / 法术书 14×15）必须居中，
+            -- 否则 14px 的钮上偏左 6px，看着「左右不居中」，天赋那颗 25×24 只偏 1.5px 才显得正常。
+            local hasText = false
+            local okt2, regs2 = pcall(function() return { button:GetRegions() } end)
+            if okt2 then
+                for _, r in ipairs(regs2) do
+                    local okA, atlas = pcall(r.GetAtlas, r)
+                    if okA and type(atlas) == "string" and atlas:lower():find("common-dropdown-textholder", 1, true) then
+                        hasText = true
+                        break
+                    end
+                end
+            end
+            if hasText then
+                pcall(tex.SetPoint, tex, "RIGHT", button, "RIGHT", opts.arrowOffset or -6, 0)
+            else
+                pcall(tex.SetPoint, tex, "CENTER", button, "CENTER", 0, 0)
+            end
+            pcall(tex.SetTexture, tex, Media:Texture(caretKey))
+            if caretKey == "monet_chevron_up" then Widget:Arrow(tex, "down") end
+            Mark(tex, "art", true)   -- Strip 的认脸探针只信标记与字符串路径（#44/#45）
+            local function tint()
+                local r, g, b = Color:GetBorder()
+                if r then pcall(tex.SetVertexColor, tex, r, g, b) end
+            end
+            tint()
+            self:OnTheme(tint)
+        end
+    end
+    return button
+end
+
+--- 按 atlas 认脸扫一棵子树里的下拉按钮并逐个换肤（匿名 + 懒建控件通用入口）。
+--- 只认 `common%-dropdown` 且是 Button；`WalkFrames` 自带 Readable 守卫，不碰 forbidden 框。
+--- 调用点把返回数写进账本；0.5 秒轮询补扫切页/下拉重建时新生的按钮。
+function Skin:DropdownsIn(root, opts)
+    if not root then return 0 end
+    opts = opts or {}
+    return self:WalkFrames(root, { depth = opts.depth or 8 }, function(frame, atlases)
+        local ok, kind = pcall(frame.GetObjectType, frame)
+        if ok and kind == "Button" and self:AtlasMatch(atlases, { "common%-dropdown" }) then
+            pcall(self.DropdownButtonArt, self, frame, opts)
+        end
+    end)
+end
+
 --- 输入框里哪些贴图**不是** chrome：搜索框的放大镜（`common-search-magnifyingglass`）
 --- 和边框用的是同一批 region，以前一律 Strip，放大镜也变 alpha 0。
 --- 实机 1.60 探针（2026-11-01）：19 个输入框全部 `common-search-magnifyingglass@0.00`，

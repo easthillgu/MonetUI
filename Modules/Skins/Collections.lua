@@ -178,6 +178,14 @@ local function StyleSpellFrameTabs()
     Skin:RoundButtonsIn(psf, { depth = 4 })
 end
 
+-- 法术书 / 天赋页的下拉（筛选等）：1.60 实测 3 颗匿名现代 DropdownButton，LoD + 切页新生。
+-- 与顶部页签同款驱动（Apply + HookShow + 0.5s 轮询），按 atlas 认脸补底板 + V 形。
+local function StyleSpellDropdowns()
+    local psf = Skin:Need("PlayerSpellsFrame")
+    if not psf then return end
+    Skin:DropdownsIn(psf, { depth = 8 })
+end
+
 local function SkinPlayerSpells()
     -- 11-05 实机（天赋/法术页开着扫 `/mui skins layers PlayerSpellsFrame`）：窗口壳已涂，
     -- 但 `PlayerSpellsFramePortrait`（62×62）+ 那张 58×58 CircleMask 还是"暴雪原样" ⇒ 补 portrait 隐藏。
@@ -207,6 +215,14 @@ local function SkinPlayerSpells()
     if frame then
         M:HookShow(frame, StyleSpellFrameTabs)
         Widget:PollWatch(frame, StyleSpellFrameTabs, 0.5)
+    end
+    -- 下拉按钮：同一套驱动补扫切页重生的按钮。周期 0.2s —— 暴雪在**点击展开那拍**
+    -- 新建一张 ARTWORK 态箭头 alpha=1（1.60 实机），0.5s 会漏出肉眼可见的一段；
+    -- 菜单打开期间另有 System.lua 的 0.1s 复压兜底，这里收窄到 0.2s 兜住非菜单时刻。
+    StyleSpellDropdowns()
+    if frame then
+        M:HookShow(frame, StyleSpellDropdowns)
+        Widget:PollWatch(frame, StyleSpellDropdowns, 0.2)
     end
 end
 

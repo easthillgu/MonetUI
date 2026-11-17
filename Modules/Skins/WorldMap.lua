@@ -72,6 +72,17 @@ local function StyleQuestPane()
     end)
 end
 
+-- 地图上的下拉（追踪筛选等）：1.60 实测 2 颗匿名现代 DropdownButton，LoD + 切页新生。
+-- 走通用漏斗按 atlas 认脸补底板 + V 形；与边框纠回同一条 1 秒轮询补扫新生的按钮。
+local function StyleMapDropdowns()
+    if not M.active then return end
+    local wm = Skin:Need("WorldMapFrame")
+    if not wm then return end
+    Skin.With("worldmap", function()
+        Skin:DropdownsIn(wm, { depth = 8 })
+    end)
+end
+
 local function SkinQuestMap()
     M:Dress("QuestMapFrame", { panel = { bgAlpha = 0.96 } })
 
@@ -194,6 +205,12 @@ local function SkinWorldMap()
     RestyleBorderFrame()
     if ns.Widget and ns.Widget.PollWatch then ns.Widget:PollWatch(wm, RestyleBorderFrame, 1) end
     EnsureBorderEvents(wm)
+
+    -- 下拉按钮：Apply 一趟 + 显示期轮询兜住切页/重建新生的按钮，以及点击展开那拍
+    -- 新建的 ARTWORK 态箭头 alpha=1（1.60 实机）。0.2s 压窄可见窗口；菜单打开期间
+    -- 另有 System.lua 的 0.1s 复压兜底。
+    StyleMapDropdowns()
+    if ns.Widget and ns.Widget.PollWatch then ns.Widget:PollWatch(wm, StyleMapDropdowns, 0.2) end
 end
 
 M:Panel("worldmap", {

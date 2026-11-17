@@ -303,27 +303,12 @@ local function ResolveLfgPath(path)
     return node
 end
 
---- 下拉的小 V 形：`Strip` 压掉了暴雪那颗，补我们自己的。
---- 与 `Skin:Stepper` 同一套口径（自建 Texture + `art` 标记 + 主题边框色）。
-local function LfgDropdownArrow(btn)
-    if not btn or Marked(btn, "lfgArrow") then return end
-    local ok, tex = pcall(btn.CreateTexture, btn, nil, "OVERLAY", nil, 7)
-    if not ok or not tex then return end
-    Mark(btn, "lfgArrow", true)
-    pcall(tex.SetSize, tex, 12, 12)
-    pcall(tex.SetPoint, tex, "RIGHT", btn, "RIGHT", -6, 0)
-    pcall(tex.SetTexture, tex, ns.Media:Texture("monet_chevron_up"))
-    pcall(Widget.Arrow, Widget, tex, "down")
-    Mark(tex, "art", true)
-    local r, g, b = Color:GetBorder()
-    if r then pcall(tex.SetVertexColor, tex, r, g, b) end
-end
-
+--- 下拉换肤走通用漏斗 `Skin:DropdownButtonArt`（法术书 / 世界地图同款）：
+--- 底板 + Strip 压原生箭头 + 补我们的 V 形，一条负责。幂等与主题重染都在漏斗里，
+--- 这里不再自己维护 `lfgArrow` 标记。
 local function LfgDressDropdown(btn)
     if not btn then return end
-    -- 已接过 `Skin:Button` 的下拉（controlBg 在）不必重跑，箭头照样补。
-    if not Marked(btn, "controlBg") then pcall(Skin.Dropdown, Skin, btn) end
-    LfgDropdownArrow(btn)
+    pcall(Skin.DropdownButtonArt, Skin, btn)
 end
 
 --- 匿名控件的结构认脸：**只认 atlas**，不猜名字（AGENTS：帧名永不凭记忆）。
@@ -370,6 +355,15 @@ local function LfgTinyIcons()
         local info = LFG_TINY_ICONS[i]
         local btn = rawget(_G, info.name)
         if btn and not Marked(btn, "lfgTiny") then
+            -- 先把暴雪原生图标压掉：实测「重新搜索」钮上有一张 tex=851904 a=1
+            -- 盖在我们的 monet_refresh 之上（Skin:Button 的 Strip 没认出它），
+            -- 于是"原材质还在"。Fade 只压非 art 的贴图，重复调用靠 hidden 标记幂等。
+            local okt, regs = pcall(function() return { btn:GetRegions() } end)
+            if okt then
+                for _, r in ipairs(regs) do
+                    if not Marked(r, "art") then pcall(Skin.Fade, Skin, r) end
+                end
+            end
             local ok, tex = pcall(btn.CreateTexture, btn, nil, "OVERLAY", nil, 7)
             if ok and tex then
                 Mark(btn, "lfgTiny", true)

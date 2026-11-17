@@ -1642,18 +1642,23 @@ local bankFreeWin, bankDepositBtn, bankTabBtn
 --- 有图标就**只画图标不带文字** —— 18px 高的钮里图标 + 10px 像素字会把字挤成竖排
 --- （2026-11-11 作者实机反馈），图标本身够表意（整理条 / 入盘箭头 / 栏位格阵）。
 --- 没传图标时退回居中文字（当前三颗调用方都传了图标）。
-local function BankHeadButton(parent, label, width, onClick, iconKey)
+local function BankHeadButton(parent, label, width, onClick, iconKey, iconSize)
     -- kind 必须是 "Button"：`Widget:CreateFrame` 不传 kind 默认建 Frame，Frame 没有
     -- RegisterForClicks / OnClick（建出来那一刻就 attempt to call nil）。
     local button = Widget:CreateFrame(nil, parent, width, 18, nil, "Button")
     Widget:Theme(button, { thickness = 1, bgAlpha = 0.9 })
-    Widget:ButtonMaterial(button, { alpha = 0, weaveAlpha = 0.25 })
+    -- 纯图标功能钮：不铺织纹底（weaveAlpha 0）。原来 0.25 的斜纹在放大图标后
+    -- 从小钮边缘露出来，喧宾夺主（玩家 11-17 报「按钮带斜纹」）。只留 Theme 纯色底板。
+    Widget:ButtonMaterial(button, { alpha = 0, weaveAlpha = 0 })
     button:EnableMouse(true)
     button:RegisterForClicks("AnyUp")
     local iconPath = iconKey and Media:Texture(iconKey)
     if iconPath then
         local icon = button:CreateTexture(nil, "ARTWORK", nil, 2)
-        icon:SetSize(10, 10)
+        -- 默认 10px；「整理」的 monet_tool_sort 覆盖率只有 3.7%，缩到 10px 笔画糊成
+        -- 看不清（玩家 11-17 报），单独给 14px。其余工具钮维持原尺寸。
+        local isz = iconSize or 10
+        icon:SetSize(isz, isz)
         icon:SetPoint("CENTER")
         icon:SetTexture(iconPath)
         -- 色键是 bright：`edge` 摆在 bgAlpha 0.9 的深底板上会读成"禁用"（11-04 的实测判例）。
@@ -1759,7 +1764,7 @@ end
 --- SORT_RESERVE 让位，不依赖这颗钮是否建好。
 EnsureSortButton = function(win)
     if not win or sortBtn then return end
-    sortBtn = BankHeadButton(win, "整理", SORT_BTN_W, SortBagsNow, "monet_tool_sort")
+    sortBtn = BankHeadButton(win, "整理", SORT_BTN_W, SortBagsNow, "monet_tool_sort", 14)
     sortBtn:SetPoint("TOPRIGHT", win, "TOPRIGHT", -8, -6)
 end
 
