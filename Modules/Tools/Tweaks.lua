@@ -644,13 +644,6 @@ function M:Vision()
         ns:Print(("  %-22s 当前 %-6s 范围 %s–%s"):format("RenderScale", Text(scale), lo, hi))
     end
 
-    local atmo = ns:GetModule("Atmosphere")
-    if atmo then
-        local on = ns:IsModuleEnabled("Atmosphere")
-        ns:Print(("  %-22s %s｜强度 %.2f｜只压四周，中心不压"):format(
-            "氛围暗角", on and "|cff00ff00开|r" or "|cff808080关|r", atmo:Tier().alpha))
-    end
-
     ns:Print(("判读：偏离默认 %d 条，其中本插件写的 %d 条。"):format(deviated, ours))
     if stuck > 0 then
         ns:Print(("  |cffffa940注意：%d 条开关已关，但值还是我们的目标值 —— 那次关闭没有还原成功。|r"):format(stuck))

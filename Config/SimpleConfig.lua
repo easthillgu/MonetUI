@@ -26,7 +26,7 @@ local refreshZonePreview   -- 区域色预览行（"主题"组里建，开面板
 -- The rows live in a scrollable content frame: the panel itself stays a fixed size on
 -- screen (it is clamped to the screen, so an unbounded height would push the last
 -- sections out of reach), and the content is what moves.
-local root, view, scrollThumb, scrollTrack   -- root = 滚动内容根框；各分组（可折叠）挂在它下面
+local root, view, scrollThumb, scrollTrack   -- root = 内容根框；各分组（可折叠）挂在它下面，3 列排布
 local scrollOffset = 0
 local setOffset        -- Build 里定义，Show/Toggle 打开面板时归零
 
@@ -34,7 +34,6 @@ local MODULE_ORDER = {
     "UnitFrames", "Cooldown", "BuffFrame",
     "Minimap", "Bags", "QuestTracker", "ActionBars", "Nameplates", "Skins",
     "InfoBar", "Tooltip", "Cursor", "Toast", "Durability",
-    "Atmosphere",
 }
 
 local MODULE_LABEL = {
@@ -52,7 +51,6 @@ local MODULE_LABEL = {
     Cursor       = "光标拖尾 (Cursor)",
     Toast        = "通知横幅 (Toast)",
     Durability   = "耐久警告 (Durability)",
-    Atmosphere   = "氛围暗角 (Atmosphere)",
     Tweaks       = "控制台优化 (Tweaks)",
     WhatsNew     = "更新提示 (WhatsNew)",
 }
@@ -327,7 +325,9 @@ end
 function SimpleConfig:Build()
     if panel then return panel end
 
-    panel = Widget:CreateFrame("MonetUIConfigFrame", UIParent, 400, 800)
+    -- 3 列横排（2026-11-17：玩家要"一页放完、不用来回下翻"）。每列沿用原来的 400 宽，
+    -- 列间距 16；默认只展开主题/模块，三列高度都不大，滚动条在放得下时自动隐藏。
+    panel = Widget:CreateFrame("MonetUIConfigFrame", UIParent, 1280, 800)
     -- 直角版（square-blp）：不带 round，走 SetBackdrop 的直角边框。
     Widget:Theme(panel, { thickness = 2, bgAlpha = 0.96, borderAlpha = 1 })
     panel:SetPoint("CENTER")
@@ -382,6 +382,7 @@ function SimpleConfig:Build()
     -- 展开状态变了只做一件事：relayout() 把各组重新摞一遍、面板跟着内容缩放。
     local SECTIONS = {}
     local HEADER_H = 24
+    local COLS, COL_W, COL_GAP = 3, 400, 16   -- 3 列横排；列宽沿用原面板 400
     local relayout          -- 定义在滚动逻辑里（要用到 SetOffset）
     local content, row, sec   -- row = 行布局光标(每个分组 LayoutCursor(0) 重新赋值)
 
@@ -400,8 +401,9 @@ function SimpleConfig:Build()
 
     local function BeginSection(caption, expanded)
         local holder = CreateFrame("Frame", nil, root)
-        holder:SetPoint("TOPLEFT", root, "TOPLEFT", 0, 0)
-        holder:SetPoint("TOPRIGHT", root, "TOPRIGHT", 0, 0)
+        -- 列号按创建顺序轮转（0/1/2），宽固定 COL_W；实际 x 由 relayout() 按列号摆放。
+        local col = #SECTIONS % COLS
+        holder:SetWidth(COL_W)
         holder:SetHeight(HEADER_H)
 
         local header = CreateFrame("Button", nil, holder)
@@ -436,7 +438,8 @@ function SimpleConfig:Build()
         body:SetHeight(1)
         body:SetShown(expanded)
 
-        local entry = { holder = holder, body = body, mark = mark, expanded = expanded, bodyHeight = 1 }
+        local entry = { holder = holder, body = body, mark = mark, expanded = expanded,
+                        bodyHeight = 1, col = col }
         SECTIONS[#SECTIONS + 1] = entry
 
         header:SetScript("OnClick", function()
@@ -1658,28 +1661,6 @@ function SimpleConfig:Build()
         sec.bodyHeight = -row.y + 4
     end
 
-    local atmosphere = ns:GetModule("Atmosphere")
-    if atmosphere then
-        sec = BeginSection("氛围暗角", false)
-        content = sec.body
-        row = LayoutCursor(0)
-
-        MakeDropdown(content, row(28), "强度", {
-            { value = 0.06, text = "轻 0.06" },
-            { value = 0.10, text = "中 0.10（默认）" },
-            { value = 0.12, text = "重 0.12" },
-        },
-            function() return atmosphere:Tier().alpha end,
-            function(value) atmosphere:SetTier(value) end)
-
-        local atHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-        atHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(44))
-        atHint:SetWidth(328)
-        atHint:SetJustifyH("LEFT")
-        atHint:SetText("只在画面四周压暗，越靠中心越亮：压的是游戏世界，所有界面（面板、动作条、姓名板）都天然在这层之上，文字亮度一位不减。默认关。")
-        sec.bodyHeight = -row.y + 4
-    end
-
     local tweaks = ns:GetModule("Tweaks")
     if tweaks then
         sec = BeginSection("控制台优化", false)
@@ -1874,21 +1855,26 @@ function SimpleConfig:Build()
     end
     setOffset = SetOffset
 
-    -- 展开 / 收起：重新摞一遍分组，内容高度、面板高度、滚动范围一起更新。
+    -- 展开 / 收起：3 列各自往下摞，面板高度取最高那列。列号在 BeginSection 里按创建顺序
+    -- 轮转定好（0/1/2），这里只按列累加 y。滚动条仍在，内容放得下时 UpdateThumb 自己隐藏；
+    -- 万一玩家把所有组全展开超出屏幕，还能滚——不会丢设置。
     relayout = function()
-        local acc = 0
+        local colY = { [0] = 0, [1] = 0, [2] = 0 }
         for i = 1, #SECTIONS do
             local entry = SECTIONS[i]
-            entry.holder:ClearAllPoints()
-            entry.holder:SetPoint("TOPLEFT", root, "TOPLEFT", 0, -acc)
-            entry.holder:SetPoint("TOPRIGHT", root, "TOPRIGHT", 0, -acc)
+            local x = entry.col * (COL_W + COL_GAP)
+            local y = colY[entry.col]
             local height = HEADER_H + (entry.expanded and entry.bodyHeight or 0)
+            entry.holder:ClearAllPoints()
+            entry.holder:SetPoint("TOPLEFT", root, "TOPLEFT", x, -y)
             entry.holder:SetHeight(height)
-            acc = acc + height
+            colY[entry.col] = y + height + 6   -- 列内组间距
         end
-        root:SetHeight(acc + 10)
+        local tallest = math.max(colY[0], colY[1], colY[2])
+        root:SetHeight(tallest + 10)
+        -- root 宽由 view 的左右锚点定（= 3*400 + 2*16），不再显式 SetWidth 与锚点打架。
         local screenH = (_G.GetScreenHeight and _G.GetScreenHeight()) or 800
-        Widget:Height(panel, math.min((root:GetHeight() or 0) + 108, screenH - 40))
+        Widget:Height(panel, math.min(tallest + 108, screenH - 40))
         SetOffset(scrollOffset)
     end
 

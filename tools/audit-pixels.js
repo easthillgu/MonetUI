@@ -155,9 +155,6 @@ const STENCIL = new Set([
   'monet_combat_sword', 'monet_combat_shield',
   // 背包 / 银行工具钮图标（整理 / 一键存入 / 栏位管理）：纯白剪影，运行期染 bright 档。
   'monet_tool_sort', 'monet_tool_deposit', 'monet_tool_slots',
-  // A4 氛围暗角：整张图只给径向 alpha，压暗的颜色（近黑）由运行期 SetVertexColor 给 ——
-  // 模具带色相会把那一点色相乘进"整个世界"，所以必须纯白。
-  'monet_vignette_62', 'monet_vignette_55',
   // 面板展开/收起：纯白线稿，颜色交给运行期 SetVertexColor（尚未接线，先按模具口径管住）。
   'monet_panel_toggle',
   // 圆形内容按钮的井 / 环：井染近黑、环染主题边框 / 主色，全部运行期 SetVertexColor 上色，

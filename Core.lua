@@ -54,7 +54,6 @@ local DEFAULTS = {
         Skins        = true,
         InfoBar      = true,
         Tooltip      = true,
-        Atmosphere   = false,   -- A4 氛围暗角：默认关（它压的是整个画面，开不开是审美选择，不是缺省）
     },
     -- 位置服务（Utils/Mover.lua）：全 addon 的框共用一套拖拽 / 吸附 / 锁。locked 是全局锁，locks 按组覆盖；
     -- grid 是网格步长（物理像素，0 = 关），snap / snapRange 是框与框互相吸附的开关与范围（物理像素）。
@@ -85,12 +84,6 @@ local DEFAULTS = {
         -- Who owns the UI scale: "auto" pins it to the resolution (Utils/Media.lua scalePresets, so
         -- 1 UI unit is a whole number of physical pixels), "game" leaves it to the client's own setting.
         uiScaleMode    = "auto",
-    },
-    -- 氛围暗角（Modules/Tools/Atmosphere.lua）：strength = 压暗层的顶点 alpha，只有验收页量过的
-    -- 三档（0.06 / 0.10 / 0.12）；认不到就退回 0.10 那一档。压的是世界，所有 UI 天然在这层之上。
-    -- 2026-11-16 按作者实机存档对齐：默认 0.06（最淡那一档）。
-    atmosphere = {
-        strength = 0.06,
     },
     -- Big-number formatting for health text: "cn" = 万/亿, "auto" = K/M/B.
     -- 2026-11-16 按作者实机存档对齐：统一默认 "auto"（zhCN 也用 K/M/B，不再是万/亿）；
@@ -934,8 +927,8 @@ function ns:StartModules()
         end
     end
     -- 分母只算"开着要加载"的模块。旧写法在玩家于设置里关掉一个模块时打成「已加载 19/20」，
-    -- 看着就像有模块坏了（11-05 开服实测：Atmosphere 被关 → 接手的人第一反应是找故障）。
-    -- 真没初始化起来的模块仍然会让两个数不等，那种才是故障。
+    -- 看着就像有模块坏了（11-05 开服实测过的判例）。真没初始化起来的模块仍然会让两个数不等，
+    -- 那种才是故障。
     local tail = off > 0 and string.format("（另 %d 个已在设置中关闭）", off) or ""
     self:DevPrint(string.format("已加载 %d/%d 个模块%s。", count, #moduleOrder - off, tail))
 end

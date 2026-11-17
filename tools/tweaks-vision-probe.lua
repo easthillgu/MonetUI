@@ -9,7 +9,6 @@
 --   2) 偏离默认的项被标出来，条数对得上
 --   3) 客户端没有的 CVar 打成「本客户端没有」，不是 0 或空
 --   4) 数字型值（RenderScale / default 是 number）不会喂崩 %s / 比较
---   5) 暗角模块缺席时不抛（没装/被裁）
 --
 -- 跑法：lua tools/tweaks-vision-probe.lua    退出码 0 = 全绿
 -- 依赖：lua 5.4（loadfile 三参 env）；无第三方库。
@@ -65,16 +64,10 @@ local DB = {
         noDeathGray = true, sharpen = true, noWeather = true, fewParticles = true,
         noFog = true,
     },
-    atmosphere = { strength = 0.10 },
 }
 ns.DB = function() return DB end
 ns.Register = function() end
-ns.GetModule = function(name)
-    if name == "Atmosphere" then
-        return { Tier = function() return { alpha = 0.10 } end }
-    end
-    return nil
-end
+ns.GetModule = function() return nil end
 ns.IsModuleEnabled = function() return true end
 
 local chunk = assert(loadfile("Modules/Tools/Tweaks.lua", "t", env))
@@ -148,14 +141,7 @@ check("数字型 default 仍能判偏离", text:find("判读：偏离默认 7 �
     text:match("判读：[^\n]*"))
 env.C_CVar.GetCVarInfo = oldInfo
 
-print("== 5) 没有暗角模块 ==")
-local oldGet = ns.GetModule
-ns.GetModule = function() return nil end
-ok, err, text = Run("no-atmosphere")
-check("暗角缺席时不抛", ok, err)
-ns.GetModule = oldGet
-
-print("== 6) 开关已关、值没还原（2026-11-07 判例的三态标注）==")
+print("== 5) 开关已关、值没还原（2026-11-07 判例的三态标注）==")
 DB.tweaks.sharpen = false                            -- 勾已经取消
 CVARS.ResampleAlwaysSharpen.value = "1"              -- 值却还是我们的目标值
 ok, err, text = Run("stuck")
@@ -166,7 +152,7 @@ check("标成「已关·值没还原」，不冒充「不是本插件」",
 check("判读里给出 restore 命令", text:find("/mui tweaks restore", 1, true) ~= nil)
 check("判读里点出条数", text:find("条开关已关，但值还是我们的目标值", 1, true) ~= nil)
 
-print("== 7) 出厂快照管着的 CVar（没有开关，但登录会写回）==")
+print("== 6) 出厂快照管着的 CVar（没有开关，但登录会写回）==")
 -- 2026-11-16 判例：FACTORY_VISION 收口成「只管插件不管的 CVar」之后，gamma / brightness / contrast /
 -- ffxGlow 只剩快照这一条归属。以前这里一律打「不是本插件」并给出 /console 建议 ——
 -- 玩家照敲之后下次登录又被 AlignVision 写回来，两套说法打架。

@@ -89,7 +89,7 @@ env.GetMinRenderScale = function() return 0.33 end
 env.GetMaxRenderScale = function() return 1.0 end
 
 -- "存档"：两个 chunk 实例共享，模拟 /reload 前后同一份 SavedVariables
-local DB = { tweaks = {}, atmosphere = { strength = 0.10 } }
+local DB = { tweaks = {} }
 
 local out = {}
 local function MakeNS()
