@@ -3,6 +3,28 @@
 This file is used verbatim as the CurseForge release changelog (see `.pkgmeta`).
 Update the top section before tagging a new release.
 
+## 0.13.11 (2026-11-19)
+
+- Config: the settings panel is now paginated -- one page per main-menu entry, with a
+  fixed 440x620 window and per-page scrolling instead of one long scroll. Row heights
+  and widths come from a single design-token table, and hand-drawn accents (dividers,
+  carets, scroll thumb, page indicator) repaint with the theme.
+- Config: removed the Atmosphere (screen vignette) module and its textures.
+- Skins: world map and spell book dropdowns are now skinned (backplate plus a new
+  self-drawn caret), and check/radio marks in expanded dropdown menus are tinted with
+  the theme colour, including marks created while the menu is open.
+- Skins: character frame -- the paper-doll puzzle background and the title art band are
+  stripped, and a hairline rule is drawn under the title; equipment slot icons are
+  left untouched.
+- Skins: spell book / talent window -- square book tabs get the square tab treatment
+  (they were wrongly routed to the round-button path), talent node square frames are
+  suppressed, specialization badges get a themed ring plus a small plate behind the
+  point count, and page-turn arrows are replaced with themed chevrons.
+- Skins: profession window side tabs are now recognised by structural fingerprint;
+  the previous object-type filter missed Frame-based tab templates entirely.
+- Skins: LFG refresh/options buttons and the bag sort icon are cleaned up before
+  their icons are drawn.
+
 ## 0.13.10 (2026-11-16)
 
 - Colours: fixed the zone-change theme refresh chain. A CallbackHandler registration
