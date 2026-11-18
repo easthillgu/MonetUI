@@ -23,12 +23,109 @@ local moduleCheckboxes = {}
 local refreshStatus
 local refreshZonePreview   -- 区域色预览行（"主题"组里建，开面板 / 主题刷新时各更新一次）
 
--- The rows live in a scrollable content frame: the panel itself stays a fixed size on
--- screen (it is clamped to the screen, so an unbounded height would push the last
--- sections out of reach), and the content is what moves.
-local root, view, scrollThumb, scrollTrack   -- root = 内容根框；各分组（可折叠）挂在它下面，3 列排布
+-- Only the selected page is on screen: the rows live in a scrollable content frame (the panel itself
+-- stays a fixed size on screen -- it is clamped to the screen, so an unbounded height would push the
+-- last rows out of reach), and the scroll range is that one page's height, never the sum of all pages.
+local root, view, scrollThumb, scrollTrack   -- root = 滚动内容根框；各**页**（主菜单一项一页）挂在它下面
 local scrollOffset = 0
 local setOffset        -- Build 里定义，Show/Toggle 打开面板时归零
+
+-- 主菜单：pages 按建页顺序排列，一页 = 一个按钮 + 一块正文。
+local pages, tabButtons = {}, {}
+local selected = 1
+local tabBar           -- 按钮容器（建面板时就挂好，走到 Build 末尾才知道最终有几页）
+
+-- ══ 设计令牌 —— 面板美术的唯一口径 ---------------------------------------------------
+-- 以前同一个面板里同时躺着 20 / 22 / 24 / 26 / 28 / 30 六种行高、120 / 216 / 276 / 300 / 328 五种
+-- 限宽，而且 view 和行**各缩一次 24**（合计 48）：加一行只能照抄邻居的魔法数，于是"每个分组各画
+-- 一套"。现在只有一个来源 —— 行高三档（组名 / 复选框 / 下拉）+ 提示按行数现算，横向只缩一次
+-- （T.padX），正文宽 = 面板宽 - 2×padX：所有行、按钮、细线共用同一条竖线。
+local T = {
+    padX     = 24,    -- 内容左右留白，也是所有行的原点（唯一一次缩进）
+    capH     = 22,    -- 组名行
+    rowH     = 26,    -- 复选框行
+    dropH    = 28,    -- 下拉行
+    subH     = 20,    -- 副注行（挂在主行下面的一行小字 / 一行状态）
+    gapS     = 4,     -- 行尾小留白（光标只前进、不取位置）
+
+    ctrlW    = 190,   -- 下拉控件宽
+    ctrlH    = 22,    -- 下拉控件高
+    labelW   = 132,   -- 下拉左列标签宽
+    swatch   = 12,    -- 配色方块边长
+    listRowH = 20,    -- 下拉列表行高
+
+    hintLine = 17,    -- 提示段落行距（12px 像素字不压字的最小值）
+    hintPad  = 8,     -- 提示段落上下留白
+
+    tabH     = 26,    -- 主菜单按钮高
+    tabGap   = 6,     -- 主菜单间距（横竖同值 ⇒ 网格是方的）
+    tabPerRow = 5,    -- 每行最多几个，总行数再按页数均分
+
+    titleH   = 40,    -- 标题行
+    bottomH  = 66,    -- 底部提示 + 重载按钮带
+    panelH   = 620,   -- 面板固定高：切页不缩放，title / 主菜单钉在顶上，内容多的页靠滚动
+}
+T.panelW   = 440                      -- 面板宽（400 → 440：长标签不再被切）
+T.contentW = T.panelW - T.padX * 2    -- 正文可用宽（392）
+T.textW    = T.contentW - 30          -- 复选框标签限宽（框体本身占掉那一截）
+
+--- 提示段落的行数：按 UTF-8 字节现算（全角 3 字节 / 半角 1 字节）。不查客户端的字体度量 ——
+--- 本仓的判例是"量到的不一定是这一帧的布局"，宁可估宽一点多空一格，也不要压字。
+local function HintLines(text)
+    local bytes = string.len(text)
+    local ascii = select(2, string.gsub(text, "[\1-\127]", ""))
+    local cjk = (bytes - ascii) / 3
+    local width = cjk * 12.6 + ascii * 7
+    return math.max(1, math.ceil(width / (T.contentW - 12)))
+end
+
+--- 一段提示占的整块行高（几行就是几行，不再逐处手写 34 / 38 / 44 / 46 / 48）。
+local function HintH(text)
+    return HintLines(text) * T.hintLine + T.hintPad
+end
+
+-- ---------------------------------------------------------------------------
+-- 手画的那几笔（分隔线、下拉箭头、滚动条、页签指示线）不进 Widget 的主题登记表：它们是裸贴图，
+-- 创建时把颜色烙上去之后就不动了，换主题会留下旧色。统一登记到 tinted、一次重涂；颜色只从
+-- Widget:PaletteColor 的命名档取，本文件不出现字面色值。
+-- ---------------------------------------------------------------------------
+local tinted = {}
+
+local function Tint(tex, colorKey, alpha)
+    tinted[#tinted + 1] = { tex = tex, key = colorKey, alpha = alpha }
+    local r, g, b = Widget:PaletteColor(colorKey)
+    if r and tex.SetVertexColor then tex:SetVertexColor(r, g, b, alpha) end
+    return tex
+end
+
+local function RepaintTinted()
+    for i = 1, #tinted do
+        local e = tinted[i]
+        local r, g, b = Widget:PaletteColor(e.key)
+        if r and e.tex.SetVertexColor then e.tex:SetVertexColor(r, g, b, e.alpha) end
+    end
+end
+
+--- 本面板所有横细线的唯一画法（monet_hairline 横向撑满 parent 减 inset）。
+--- @param opts { inset = T.padX, y = 0, alpha = 0.45, key = "edge", h = 1, side = "top"|"bottom" }
+local function HLine(parent, opts)
+    opts = opts or {}
+    local tex = parent:CreateTexture(nil, "ARTWORK")
+    tex:SetTexture(Media:Texture("monet_hairline"))
+    local inset, y = opts.inset or T.padX, opts.y or 0
+    if opts.side == "bottom" then
+        tex:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", inset, y)
+        tex:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -inset, y)
+    else
+        tex:SetPoint("TOPLEFT", parent, "TOPLEFT", inset, y)
+        tex:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -inset, y)
+    end
+    tex:SetHeight(Media:SnapUnit(opts.h or 1))
+    -- 单行不透明图：任何亚像素落点都是糊，所以这里确定该贴像素格（同 Widget:Hairline 的理由）。
+    if tex.SetSnapToPixelGrid then pcall(tex.SetSnapToPixelGrid, tex, true) end
+    if tex.SetTexelSnappingBias then pcall(tex.SetTexelSnappingBias, tex, 0) end
+    return Tint(tex, opts.key or "edge", opts.alpha or 0.45)
+end
 
 local MODULE_ORDER = {
     "UnitFrames", "Cooldown", "BuffFrame",
@@ -73,7 +170,7 @@ end
 
 local function MakeCheckbox(parent, label, yOffset, getter, setter)
     local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
-    cb:SetPoint("TOPLEFT", parent, "TOPLEFT", 24, yOffset)
+    cb:SetPoint("TOPLEFT", parent, "TOPLEFT", T.padX, yOffset)
     cb:SetChecked(getter() and true or false)
     cb:SetScript("OnClick", function(self)
         setter(self:GetChecked() and true or false)
@@ -85,17 +182,38 @@ local function MakeCheckbox(parent, label, yOffset, getter, setter)
     text:SetPoint("LEFT", cb, "RIGHT", 6, 0)
     -- 单行 + 限宽：长标签（"剩余时间紧张时变红、放大字体"这种）换行后会压到下一行，
     -- 实机看到的就是两行字叠在一起。限宽后最多是被切掉一点，不会重叠。
-    text:SetWidth(276)
+    text:SetWidth(T.textW)
     text:SetWordWrap(false)
     text:SetText(label)
 
     return cb, text
 end
 
+--- 页内组名：一行字 + 一条发丝线，画法与标题带、页签底下的线同一套。
+--- 自己吃掉一个组名行高，调用点只写 `Group(content, row, "能量条")`；页里要再分小组时才用。
+local function Group(parent, cursor, caption)
+    local y = cursor(T.capH)
+    local fs = Widget:Font(parent, 12, "pixel", "edge", "LEFT")
+    fs:SetPoint("TOPLEFT", parent, "TOPLEFT", T.padX, y - 4)
+    fs:SetText(caption)
+    HLine(parent, { y = y - T.capH + 5, alpha = 0.3 })
+    return y
+end
+
+--- 一段说明文字：原点、限宽、行距、颜色档全从令牌走，占几行按文本现算，布局光标自动让位。
+--- 以前这里是每处自己 SetWidth(328) + 手写 34 / 38 / 44 / 46 / 48，改一次面板宽就要全表重算。
+local function Hint(parent, cursor, text)
+    local fs = Widget:Font(parent, 12, "pixel", "neutral", "LEFT")
+    fs:SetPoint("TOPLEFT", parent, "TOPLEFT", T.padX, cursor(HintH(text)) - 4)
+    fs:SetWidth(T.contentW)
+    fs:SetJustifyH("LEFT")
+    fs:SetText(text)
+    return fs
+end
+
 -- Blizzard's menu framework (UIDropDownMenu / MenuUtil) is not part of the documented client API and differs between builds, so the panel paints its own small themed list instead of depending on either.
 
 local dropdowns = {}   -- list of refreshers, run when the panel is shown
-local chevrons = {}    -- 下拉箭头贴图（真材质 chevron）：主题换色时统一重染，Build 里注册一次
 local openList         -- the list currently on screen, if any
 local catcher          -- the click-anywhere-else closer
 
@@ -130,22 +248,22 @@ end
 --- 看见颜色才知道自己选的是哪个（2026-10-31 玩家反馈"血量颜色设置界面有点混乱"）。
 local function MakeDropdown(parent, y, caption, items, getter, setter, swatch)
     local label = Widget:Font(parent, 12, "pixel", "neutral", "LEFT")
-    label:SetPoint("TOPLEFT", parent, "TOPLEFT", 24, y - 4)
+    label:SetPoint("TOPLEFT", parent, "TOPLEFT", T.padX, y - 4)
     -- 同 1)：描述限宽到控件左侧，超出的部分切掉而不是钻到下拉框下面
-    label:SetWidth(120)
+    label:SetWidth(T.labelW)
     label:SetWordWrap(false)
     label:SetText(caption)
 
-    local button = Widget:CreateFrame(nil, parent, 190, 20)
+    local button = Widget:CreateFrame(nil, parent, T.ctrlW, T.ctrlH)
     Widget:Theme(button, { thickness = 1, bgAlpha = 0.9 })
     -- 织纹底（ADD 混合，和动作条按钮一致）：垫在 Theme 的深色底板之上、文字之下。
     Widget:ButtonMaterial(button, { alpha = 0, weaveAlpha = 0.25 })
-    button:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -24, y)
+    button:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -T.padX, y)
     button:EnableMouse(true)
 
     local chip, chipFill
     if swatch then
-        chip = Widget:CreateFrame(nil, parent, 12, 12)
+        chip = Widget:CreateFrame(nil, parent, T.swatch, T.swatch)
         Widget:Theme(chip, { thickness = 1, bgAlpha = 1 })
         chip:SetPoint("RIGHT", button, "LEFT", -8, 0)
         pcall(chip.EnableMouse, chip, false)
@@ -156,23 +274,21 @@ local function MakeDropdown(parent, y, caption, items, getter, setter, swatch)
     local value = Widget:Font(button, 12, "pixel", "edge", "LEFT")
     value:SetPoint("LEFT", button, "LEFT", 7, 0)
     value:SetPoint("RIGHT", button, "RIGHT", -16, 0)
-    -- 长选项（"自动（按分辨率固定，像素完美）"）会折成两行、从 20px 高的按钮里溢出来，
+    -- 长选项（"自动（按分辨率固定，像素完美）"）会折成两行、从按钮里溢出来，
     -- 压到下一行上。关掉换行，超宽就切在按钮右边。
     value:SetWordWrap(false)
 
-    -- 箭头用真材质（monet_chevron_up 朝下翻转）：像素字体的 "v" 在小字号下读成字母而不是
-    -- 控件符号，和全仓滚动条/步进钮的 chevron 也不是一种画风。主题换色跟着下面的 chevrons 表走。
+    -- 箭头用真材质（monet_chevron_up 朝下翻转）：像素字的 "v" 在小字号下读成字母而不是
+    -- 控件符号，和全仓滚动条/步进钮的 chevron 也不是一种画风。颜色走 tinted 登记，换主题重涂。
     local chevron = button:CreateTexture(nil, "ARTWORK", nil, 2)
     chevron:SetSize(8, 8)
     chevron:SetPoint("RIGHT", button, "RIGHT", -6, 0)
     chevron:SetTexture(Media:Texture("monet_chevron_up"))
     Widget:Arrow(chevron, "down")
-    local cr, cg, cb = Color:GetNeutral()
-    chevron:SetVertexColor(cr, cg, cb)
-    chevrons[#chevrons + 1] = chevron
+    Tint(chevron, "neutral", 1)
 
     -- The list hangs off the panel (UIParent) so the panel can never clip it.
-    local list = Widget:CreateFrame(nil, UIParent, 190, #items * 20 + 4)
+    local list = Widget:CreateFrame(nil, UIParent, T.ctrlW, #items * T.listRowH + 4)
     Widget:Theme(list, { thickness = 1, bgAlpha = 0.98 })
     list:SetFrameStrata("FULLSCREEN_DIALOG")
     list:SetPoint("TOPRIGHT", button, "BOTTOMRIGHT", 0, -2)
@@ -201,8 +317,8 @@ local function MakeDropdown(parent, y, caption, items, getter, setter, swatch)
 
     for index, item in ipairs(items) do
         local row = CreateFrame("Button", nil, list)
-        row:SetPoint("TOPLEFT", list, "TOPLEFT", 2, -2 - (index - 1) * 20)
-        row:SetSize(186, 20)
+        row:SetPoint("TOPLEFT", list, "TOPLEFT", 2, -2 - (index - 1) * T.listRowH)
+        row:SetSize(T.ctrlW - 4, T.listRowH)
         -- 行的底色比按钮更淡（列表本身已有深色底），只留一层织纹。
         Widget:ButtonMaterial(row, { alpha = 0, weaveAlpha = 0.15 })
 
@@ -325,9 +441,12 @@ end
 function SimpleConfig:Build()
     if panel then return panel end
 
-    -- 3 列横排（2026-11-17：玩家要"一页放完、不用来回下翻"）。每列沿用原来的 400 宽，
-    -- 列间距 16；默认只展开主题/模块，三列高度都不大，滚动条在放得下时自动隐藏。
-    panel = Widget:CreateFrame("MonetUIConfigFrame", UIParent, 1280, 800)
+    -- 页 / 页签 / 手画贴图都登记在模块级的表里；Build 只跑一次（上面有 panel 守卫），
+    -- 这里清一遍，是为了万一以后面板能被销毁重建时不会攒出第二套页签。
+    pages, tabButtons, tinted = {}, {}, {}
+    selected = 1
+
+    panel = Widget:CreateFrame("MonetUIConfigFrame", UIParent, T.panelW, T.panelH)
     -- 直角版（square-blp）：不带 round，走 SetBackdrop 的直角边框。
     Widget:Theme(panel, { thickness = 2, bgAlpha = 0.96, borderAlpha = 1 })
     panel:SetPoint("CENTER")
@@ -340,35 +459,49 @@ function SimpleConfig:Build()
     panel:SetClampedToScreen(true)
     panel:Hide()
 
-    local title = Widget:Font(panel, 24, "pixel", "edge", "CENTER")
-    title:SetPoint("TOP", panel, "TOP", 0, -16)
+    -- ---- ① 标题行：独占一行，标题不再和正文抢地方 ------------------------------------
+    -- 三段：睡莲 logo + 名字（左）· 版本与一句话（右，让开关闭钮）· 关闭钮（右上角）。
+    local titleBar = CreateFrame("Frame", nil, panel)
+    titleBar:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, 0)
+    titleBar:SetPoint("TOPRIGHT", panel, "TOPRIGHT", 0, 0)
+    Widget:Height(titleBar, T.titleH)
+
+    -- Logo 整图烘焙彩色（见 Media 注册处），只给 alpha、不染色。
+    local logo = titleBar:CreateTexture(nil, "ARTWORK")
+    logo:SetTexture(Media:Texture("monet_addon_icon"))
+    Widget:Size(logo, 22, 22)
+    logo:SetPoint("LEFT", titleBar, "LEFT", T.padX, 0)
+
+    local title = Widget:Font(titleBar, 20, "pixel", "edge", "LEFT")
+    title:SetPoint("LEFT", logo, "RIGHT", 10, 0)
     title:SetText("MonetUI")
 
-    -- Logo：就是插件列表那张睡莲图标，挂标题左侧、垂直居中（边中点对边中点）。
-    -- 整图烘焙彩色（见 Media 注册处），只给 alpha，不染色。
-    local logo = panel:CreateTexture(nil, "ARTWORK")
-    logo:SetTexture(Media:Texture("monet_addon_icon"))
-    logo:SetSize(24, 24)
-    logo:SetPoint("RIGHT", title, "LEFT", -8, 0)
+    local subtitle = Widget:Font(titleBar, 12, "pixel", "neutral", "RIGHT")
+    subtitle:SetPoint("RIGHT", titleBar, "RIGHT", -(T.padX + 22), 0)
+    subtitle:SetWordWrap(false)
+    subtitle:SetText("v" .. ns.version .. " · 印象派自适应界面")
 
-    local subtitle = Widget:Font(panel, 12, "pixel", "neutral", "CENTER")
-    subtitle:SetPoint("TOP", title, "BOTTOM", 0, -4)
-    subtitle:SetText("v" .. ns.version .. (ns.dev and " |cffffa940[DEV]|r" or "") .. " · 印象派自适应界面")
-
+    -- 关闭钮的 Monet 细金 ✕ 由 Widget:CloseButton 工厂内部就挂好了（全仓唯一入口），这里不再补一句。
     local close = Widget:CloseButton(panel)
     close:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -6, -6)
-    if ns.Skin then ns.Skin:CloseButton(close) end
 
     -- Chrome: a cool drop shadow plus brush corner ornaments; the top-right corner stays bare because the close button already owns it.
     Widget:Shadow(panel, { size = 7, alpha = 0.5 })
     Widget:Corners(panel, { omit = { "TOPRIGHT" } })
 
-    -- Scrollable body: the rows are parented to `content`, which sits inside a clipping
-    -- `view`.  The view starts below the subtitle, so a scrolled row never slides over
-    -- the title.
+    HLine(titleBar, { y = -T.titleH, inset = 14, alpha = 0.45 })
+
+    -- ---- ② 主菜单：横向按钮，点一个只显示那一页 --------------------------------------
+    tabBar = CreateFrame("Frame", nil, panel)
+    tabBar:SetPoint("TOPLEFT", panel, "TOPLEFT", T.padX, -T.titleH)
+    tabBar:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -T.padX, -T.titleH)
+    Widget:Height(tabBar, T.tabH)
+
+    -- ---- ③ 正文：`content` = 当前页的 body，行以它的左上角为原点 ------------------------
+    -- 剪进 view 的是"这一页"，所以滚过的行绝不会滑到标题或主菜单上面。
     view = CreateFrame("Frame", nil, panel)
-    view:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -50)
-    view:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -24, 58)
+    view:SetPoint("TOPLEFT", tabBar, "BOTTOMLEFT", 0, -T.tabGap)
+    view:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0, T.bottomH)
     view:SetClipsChildren(true)
 
     root = CreateFrame("Frame", nil, view)
@@ -376,19 +509,11 @@ function SimpleConfig:Build()
     root:SetPoint("TOPRIGHT", view, "TOPRIGHT", 0, 0)
     root:SetHeight(100)
 
-    -- ---- 可折叠分组 ------------------------------------------------------------
-    -- 每个分组 = 一个容器（常显的标题带 + 可隐藏的 body）。行代码不用改：
-    -- 它们照旧以 `content`（= 当前分组的 body）左上角为原点、行偏移由 `row` 光标给出。
-    -- 展开状态变了只做一件事：relayout() 把各组重新摞一遍、面板跟着内容缩放。
-    local SECTIONS = {}
-    local HEADER_H = 24
-    local COLS, COL_W, COL_GAP = 3, 400, 16   -- 3 列横排；列宽沿用原面板 400
-    local relayout          -- 定义在滚动逻辑里（要用到 SetOffset）
-    local content, row, sec   -- row = 行布局光标(每个分组 LayoutCursor(0) 重新赋值)
+    local content, row, sec   -- row = 行布局光标（每页 LayoutCursor(0) 重新赋值）
 
     -- 光标式行布局(review 2026-10-24 #8):设置面板是纯垂直流,以前每行手写
     -- "y = y - 28" 记账、增删一行要重算一片偏移;现在 row(h) 取"当前行的 y"并
-    -- 前进 h —— 取用即记账。row.y 为纯读(分组结算 bodyHeight 用)。
+    -- 前进 h —— 取用即记账。row.y 为纯读(页结算 bodyHeight 用)。
     local function LayoutCursor(yStart)
         return setmetatable({ y = yStart }, {
             __call = function(self, step)
@@ -399,103 +524,95 @@ function SimpleConfig:Build()
         })
     end
 
-    local function BeginSection(caption, expanded)
-        local holder = CreateFrame("Frame", nil, root)
-        -- 列号按创建顺序轮转（0/1/2），宽固定 COL_W；实际 x 由 relayout() 按列号摆放。
-        local col = #SECTIONS % COLS
-        holder:SetWidth(COL_W)
-        holder:SetHeight(HEADER_H)
-
-        local header = CreateFrame("Button", nil, holder)
-        header:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, 0)
-        header:SetPoint("TOPRIGHT", holder, "TOPRIGHT", 0, 0)
-        header:SetHeight(HEADER_H)
-        header:EnableMouse(true)
-
-        local line = header:CreateTexture(nil, "ARTWORK")
-        line:SetPoint("TOPLEFT", header, "TOPLEFT", 20, -6)
-        line:SetPoint("TOPRIGHT", header, "TOPRIGHT", -20, -6)
-        line:SetHeight(1)
-        local nr, ng, nb = Color:GetNeutral()
-        line:SetColorTexture(nr, ng, nb, 0.35)
-
-        -- 展开标记画在标题**左边**，标题再往右让 14：这样折叠时那一行仍然是可读的"分组名"。
-        local mark = Widget:Font(header, 12, "pixel", "edge", "LEFT")
-        mark:SetPoint("TOPLEFT", line, "BOTTOMLEFT", 0, -3)
-        mark:SetText(expanded and "-" or "+")
-
-        local title = Widget:Font(header, 12, "pixel", "edge", "LEFT")
-        title:SetPoint("TOPLEFT", line, "BOTTOMLEFT", 14, -3)
-        title:SetText(caption)
-
-        local glow = header:CreateTexture(nil, "HIGHLIGHT")
-        glow:SetAllPoints(header)
-        glow:SetColorTexture(1, 1, 1, 0.05)
-
-        local body = CreateFrame("Frame", nil, holder)
-        body:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, -HEADER_H)
-        body:SetPoint("TOPRIGHT", holder, "TOPRIGHT", 0, -HEADER_H)
+    --- 建一页 = 建一块正文（主菜单按钮在 Build 末尾按 pages 现生成，所以模块没加载 ⇒ 页没建 ⇒ 按钮也没有）。
+    local function BeginPage(key, caption)
+        local body = CreateFrame("Frame", nil, root)
+        body:SetPoint("TOPLEFT", root, "TOPLEFT", 0, 0)
+        body:SetPoint("TOPRIGHT", root, "TOPRIGHT", 0, 0)
         body:SetHeight(1)
-        body:SetShown(expanded)
-
-        local entry = { holder = holder, body = body, mark = mark, expanded = expanded,
-                        bodyHeight = 1, col = col }
-        SECTIONS[#SECTIONS + 1] = entry
-
-        header:SetScript("OnClick", function()
-            entry.expanded = not entry.expanded
-            entry.body:SetShown(entry.expanded)
-            entry.mark:SetText(entry.expanded and "-" or "+")
-            CloseDropdown()
-            if relayout then relayout() end
-        end)
-
+        body:Hide()
+        local entry = { key = key, caption = caption, body = body, bodyHeight = 1 }
+        pages[#pages + 1] = entry
         return entry
     end
 
+    -- 页签的三态就这三处：常态（暗底 + 中性字）、悬停（背板抬一档，SetHoverLift）、选中
+    -- （边框换 highlight + 亮字 + 底下一条指示线）。颜色一律从命名档取，页签自己不持有任何色值。
+    local function PaintTab(i)
+        local tab = tabButtons[i]
+        if not tab then return end
+        local on = (i == selected)
+        if on then
+            local r, g, b = Color:GetHighlight()
+            Widget:SetBorderState(tab.frame, r, g, b, 1)
+        else
+            Widget:SetBorderState(tab.frame, nil)
+        end
+        Widget:ColorText(tab.text, on and "bright" or "neutral")
+        if on then tab.mark:Show() else tab.mark:Hide() end
+    end
+
+    --- 切页：只显示那一页的正文，滚动范围跟着那一页走。面板高固定（T.panelH），
+    --- title 和主菜单钉在顶上不随内容多少上下跳。
+    local function SelectPage(index)
+        local page = pages[index]
+        if not page then return end
+        selected = index
+        CloseDropdown()
+        for i = 1, #pages do
+            pages[i].body:SetShown(i == index)
+        end
+        for i = 1, #tabButtons do PaintTab(i) end
+        local bodyH = page.bodyHeight
+        -- 页框的高和滚动内容的高都在切页时一次落定：bodyHeight 建页时已经把这页的行、
+        -- 分界线、末尾留白全算进去了（含 hintPad），这里只是把它们写到框子上。
+        Widget:Height(page.body, bodyH)
+        Widget:Height(root, bodyH)
+        if setOffset then setOffset(0) end
+    end
+
     -- Slim scrollbar on the right: a track plus a draggable thumb, both drawn here
-    -- (the client's own scrollbar art is not part of the Monet look).
+    -- (the client's own scrollbar art is not part of the Monet look).  上下贴 view 那一段，
+    -- 主菜单换行 / 底部带变高都自动让位 —— 以前是写死的 -50 / 58，一改标题行高度就对不上。
     scrollTrack = panel:CreateTexture(nil, "ARTWORK")
-    scrollTrack:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -14, -50)
-    scrollTrack:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -14, 58)
-    scrollTrack:SetWidth(4)
-    local nr, ng, nb = Color:GetNeutral()
-    scrollTrack:SetColorTexture(nr, ng, nb, 0.25)
+    scrollTrack:SetPoint("TOPRIGHT", view, "TOPRIGHT", -10, 0)
+    scrollTrack:SetPoint("BOTTOMRIGHT", view, "BOTTOMRIGHT", -10, 0)
+    Widget:Width(scrollTrack, 4)
 
     scrollThumb = CreateFrame("Button", nil, panel)
     scrollThumb:SetPoint("TOPLEFT", scrollTrack, "TOPLEFT", 0, 0)
-    scrollThumb:SetWidth(4)
+    Widget:Width(scrollThumb, 4)
     scrollThumb:SetHeight(40)
     scrollThumb:EnableMouse(true)
     local thumbTex = scrollThumb:CreateTexture(nil, "BACKGROUND")
     thumbTex:SetAllPoints()
-    local er, eg, eb = Color:GetEdge()
-    thumbTex:SetColorTexture(er, eg, eb, 0.8)
 
-    -- The scrollbar is drawn by hand, so it does not follow Widget's theme registry;
-    -- repaint it when the theme changes.
+    -- 这两块是 SetColorTexture 平涂的纯色（不是贴图），换主题只能重涂颜色本身；
+    -- 贴图那几笔（细线 / 下拉箭头 / 页签指示线）走 tinted → RepaintTinted。
+    local function RepaintScrollbar()
+        local nr, ng, nb = Color:GetNeutral()
+        scrollTrack:SetColorTexture(nr, ng, nb, 0.25)
+        local er, eg, eb = Color:GetEdge()
+        thumbTex:SetColorTexture(er, eg, eb, 0.8)
+    end
+    RepaintScrollbar()
+
+    -- 主题换色只留这一个出口：贴图重染、纯色块重涂、选中页签把 highlight 重新按一遍。
+    -- （Widget / Skin 各自的 handler 在文件加载时就注册了，本面板的注册在它们之后，
+    --   所以这里按上去的是最终色，不会被登记表的老口径盖回去。）
     ns.EventBus:Register("MONETUI_THEME_CHANGED", function()
         if not panel then return end
-        local nr, ng, nb = Color:GetNeutral()
-        local er, eg, eb = Color:GetEdge()
-        scrollTrack:SetColorTexture(nr, ng, nb, 0.25)
-        thumbTex:SetColorTexture(er, eg, eb, 0.8)
+        RepaintTinted()
+        RepaintScrollbar()
+        for i = 1, #tabButtons do PaintTab(i) end
     end)
 
-    -- 下拉箭头是贴图（不吃 Widget:Theme 的字体色轨），主题换色时同样要重染一遍。
-    ns.EventBus:Register("MONETUI_THEME_CHANGED", function()
-        local r, g, b = Color:GetNeutral()
-        for i = 1, #chevrons do
-            if chevrons[i].SetVertexColor then chevrons[i]:SetVertexColor(r, g, b) end
-        end
-    end)
-
-    -- 主题 / 模块：默认展开（其余收起，一屏就能看完，点标题带展开）
-    sec = BeginSection("主题", true)
+    -- ① 主题外观
+    sec = BeginPage("theme", "主题外观")
     content = sec.body
     row = LayoutCursor(0)
 
-    MakeCheckbox(content, "使用 MonetColor 动态主题", row(28),
+    MakeCheckbox(content, "使用 MonetColor 动态主题", row(T.rowH),
         function()
             local db = ns:DB()
             return db.theme.useMonetColor
@@ -508,8 +625,8 @@ function SimpleConfig:Build()
         end)
 
     local statusText = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-    statusText:SetPoint("TOPLEFT", content, "TOPLEFT", 46, row(20))
-    statusText:SetWidth(300)
+    statusText:SetPoint("TOPLEFT", content, "TOPLEFT", T.padX + 22, row(T.subH))
+    statusText:SetWidth(T.contentW - 22)
     statusText:SetJustifyH("LEFT")
 
     refreshStatus = function()
@@ -532,9 +649,9 @@ function SimpleConfig:Build()
     -- 全程零像素读取；没采到色的区域落**无彩灰兜底**（:78），而"这一区本来就是灰的"和"没数据"
     -- 在屏幕上长得一模一样。这一行把两件事分开：左边当前区域名 + 右边阶梯四档实色块，
     -- 缺数据时另外标一句。纯 UI：数据全走 Color（GetZoneInfo 查表、GetSurface 读阶梯）。
-    local yZone = row(20)
+    local yZone = row(T.subH)
     local zoneCaption = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-    zoneCaption:SetPoint("TOPLEFT", content, "TOPLEFT", 24, yZone - 4)
+    zoneCaption:SetPoint("TOPLEFT", content, "TOPLEFT", T.padX, yZone - 4)
     zoneCaption:SetWidth(96)
     zoneCaption:SetWordWrap(false)
     zoneCaption:SetText("区域配色")
@@ -546,10 +663,10 @@ function SimpleConfig:Build()
     local ZONE_STEPS = { "panel", "hover", "lost", "fill" }
     local zoneChips, zoneFills = {}, {}
     for i = #ZONE_STEPS, 1, -1 do
-        local chip = Widget:CreateFrame(nil, content, 12, 12)
+        local chip = Widget:CreateFrame(nil, content, T.swatch, T.swatch)
         Widget:Theme(chip, { thickness = 1, bgAlpha = 1 })
         if i == #ZONE_STEPS then
-            chip:SetPoint("TOPRIGHT", content, "TOPRIGHT", -24, yZone)
+            chip:SetPoint("TOPRIGHT", content, "TOPRIGHT", -T.padX, yZone)
         else
             chip:SetPoint("RIGHT", zoneChips[i + 1], "LEFT", -6, 0)
         end
@@ -566,17 +683,19 @@ function SimpleConfig:Build()
     zoneText:SetWordWrap(false)
 
     -- 第二行：左边一句状态（缺色时才有字），右边四档的名字，按从暗到亮的阶梯顺序。
-    local yMark = row(16)
-    local zoneMark = Widget:Font(content, 10, "pixel", "edge", "LEFT")
-    zoneMark:SetPoint("TOPLEFT", content, "TOPLEFT", 24, yMark - 2)
-    zoneMark:SetWidth(216)
-    zoneMark:SetWordWrap(false)
-    zoneMark:SetText("")
-
+    -- 图例先建，状态行再把右边缘挂在图例左边缘上：以前状态行是"contentW - 150"的写死宽，
+    -- 图例比 150 宽一点（10 号字 ~133 + 左边距），两个文本会压在一起 7px。
+    local yMark = row(T.hintLine)
     local zoneLegend = Widget:Font(content, 10, "pixel", "neutral", "RIGHT")
-    zoneLegend:SetPoint("TOPRIGHT", content, "TOPRIGHT", -24, yMark - 2)
+    zoneLegend:SetPoint("TOPRIGHT", content, "TOPRIGHT", -T.padX, yMark - 2)
     zoneLegend:SetWordWrap(false)
     zoneLegend:SetText("面板 · 悬停 · 空槽 · 填充")
+
+    local zoneMark = Widget:Font(content, 10, "pixel", "edge", "LEFT")
+    zoneMark:SetPoint("TOPLEFT", content, "TOPLEFT", T.padX, yMark - 2)
+    zoneMark:SetPoint("RIGHT", zoneLegend, "LEFT", -8, 0)
+    zoneMark:SetWordWrap(false)
+    zoneMark:SetText("")
 
     refreshZonePreview = function()
         local mapID, engineName, source = Color:GetZoneInfo()
@@ -615,38 +734,12 @@ function SimpleConfig:Build()
         { value = "highlight", text = "高亮色" },
         { value = "neutral",   text = "中性灰" },
     }
-    MakeDropdown(content, row(28), "边框颜色", BORDER_ITEMS,
+    MakeDropdown(content, row(T.dropH), "边框颜色", BORDER_ITEMS,
         function() return Color:GetBorderKey() end,
         function(value)
             ns:DB().theme.borderKey = value
             ns.RefreshTheme("config")
         end)
-
-    -- 最小对比控制值（§8.123）：数值 = 血条「填充↔背景」的最小 CR。
-    -- 只在撞色的区域触发补色回避 + 亮度兜底；文字(4.5) / 边框(3.0) 另有固定可读线，
-    -- 不跟着这一条滑 —— 否则把文字线调到 2.0 就成了"假达标"。
-    -- 上限 3.0：再高会超出高饱和色相可达的亮度（AtLightness out-of-gamut）。
-    local CONTRAST_ITEMS = {
-        { value = 1.4, text = "1.4 · 最宽松（默认）" },
-        { value = 1.8, text = "1.8 · 标准" },
-        { value = 2.1, text = "2.1 · 偏强" },
-        { value = 2.4, text = "2.4 · 分明" },
-        { value = 2.7, text = "2.7 · 很强" },
-        { value = 3.0, text = "3.0 · 最强" },
-    }
-    MakeDropdown(content, row(28), "最小对比度", CONTRAST_ITEMS,
-        function() return Color:MinContrast() end,
-        function(value)
-            ns:DB().theme.minContrast = value
-            ns.RefreshTheme("config")
-        end)
-
-    local contrastHint = Widget:Font(content, 10, "pixel", "neutral", "LEFT")
-    contrastHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(22))
-    contrastHint:SetWidth(328)
-    contrastHint:SetJustifyH("LEFT")
-    contrastHint:SetWordWrap(false)
-    contrastHint:SetText("低于线才纠偏血条 / 文字；已过线的区域保持引擎原色。")
 
     -- UI scale: the addon's sizes are authored in UI units, so the scale decides whether
     -- they land on whole physical pixels.  "auto" pins it per resolution (see
@@ -655,7 +748,7 @@ function SimpleConfig:Build()
         { value = "auto", text = "自动（按分辨率固定）" },
         { value = "game", text = "跟随游戏设置" },
     }
-    MakeDropdown(content, row(28), "UI 缩放", SCALE_ITEMS,
+    MakeDropdown(content, row(T.dropH), "UI 缩放", SCALE_ITEMS,
         function() return (ns:DB().theme or {}).uiScaleMode or "auto" end,
         function(value)
             ns:DB().theme.uiScaleMode = value
@@ -665,9 +758,9 @@ function SimpleConfig:Build()
             ns:Print("UI 缩放模式：" .. (value == "auto" and "自动（下次 /reload 生效）" or "跟随游戏设置") .. "。")
         end)
 
-    sec.bodyHeight = -row.y + 4
+    sec.bodyHeight = -row.y + T.hintPad
 
-    sec = BeginSection("模块", true)
+    sec = BeginPage("modules", "模块")
     content = sec.body
     row = LayoutCursor(0)
 
@@ -682,13 +775,13 @@ function SimpleConfig:Build()
     end
 
     for _, name in ipairs(MODULE_ORDER) do
-        moduleCheckboxes[name] = MakeCheckbox(content, MODULE_LABEL[name] or name, row(28),
+        moduleCheckboxes[name] = MakeCheckbox(content, MODULE_LABEL[name] or name, row(T.rowH),
             moduleGetter(name), moduleSetter(name))
     end
 
-    sec.bodyHeight = -row.y + 4
+    sec.bodyHeight = -row.y + T.hintPad
 
-    sec = BeginSection("冷却计时", false)
+    sec = BeginPage("cooldown", "冷却计时")
     content = sec.body
     row = LayoutCursor(0)
 
@@ -713,14 +806,14 @@ function SimpleConfig:Build()
         end
     end
 
-    MakeCheckbox(content, "单位自动缩放（秒 → 分钟 → 小时 → 天）", row(28),
+    MakeCheckbox(content, "单位自动缩放（秒 → 分钟 → 小时 → 天）", row(T.rowH),
         CooldownSetting("scale"),
         function(value)
             CooldownSaved().scale = value
             CooldownRefresh()
         end)
 
-    MakeCheckbox(content, "剩余时间紧张时变红 + 放大字体", row(28),
+    MakeCheckbox(content, "剩余时间紧张时变红 + 放大字体", row(T.rowH),
         CooldownSetting("alert"),
         function(value)
             CooldownSaved().alert = value
@@ -733,7 +826,7 @@ function SimpleConfig:Build()
         { value = 8,  text = "8 秒" },
         { value = 10, text = "10 秒" },
     }
-    MakeDropdown(content, row(30), "紧张阈值（秒）", ALERT_ITEMS,
+    MakeDropdown(content, row(T.dropH), "紧张阈值（秒）", ALERT_ITEMS,
         CooldownSetting("alertSeconds"),
         function(value)
             CooldownSaved().alertSeconds = value
@@ -748,7 +841,7 @@ function SimpleConfig:Build()
         { value = 10, text = "10 秒" },
         { value = 20, text = "20 秒" },
     }
-    MakeDropdown(content, row(30), "小数秒阈值（低于则显示 0.1s）", TENTH_ITEMS,
+    MakeDropdown(content, row(T.dropH), "小数秒阈值（低于则显示 0.1s）", TENTH_ITEMS,
         CooldownSetting("tenthsTH"),
         function(value)
             CooldownSaved().tenthsTH = value
@@ -762,18 +855,18 @@ function SimpleConfig:Build()
         { value = 60,  text = "60 秒" },
         { value = 120, text = "120 秒" },
     }
-    MakeDropdown(content, row(30), "m:ss 阈值（达到则显示 1:05）", MMSS_ITEMS,
+    MakeDropdown(content, row(T.dropH), "m:ss 阈值（达到则显示 1:05）", MMSS_ITEMS,
         CooldownSetting("mmssTH"),
         function(value)
             CooldownSaved().mmssTH = value
             CooldownRefresh()
         end)
 
-    sec.bodyHeight = -row.y + 4
+    sec.bodyHeight = -row.y + T.hintPad
 
     local minimap = ns:GetModule("Minimap")
     if minimap then
-        sec = BeginSection("小地图", false)
+        sec = BeginPage("minimap", "小地图")
         content = sec.body
         row = LayoutCursor(0)
 
@@ -787,57 +880,43 @@ function SimpleConfig:Build()
             end
         end
 
-        MakeCheckbox(content, "悬停小地图时显示区域名", row(26),
+        MakeCheckbox(content, "悬停小地图时显示区域名", row(T.rowH),
             MapSetting("zoneText"), MapSetter("zoneText"))
 
-        MakeCheckbox(content, "战区时区域名染成危险色", row(26),
+        MakeCheckbox(content, "战区时区域名染成危险色", row(T.rowH),
             MapSetting("zonePvPColor"), MapSetter("zonePvPColor"))
 
-        MakeCheckbox(content, "滚轮缩放（方形地图四角也够得到）", row(26),
+        MakeCheckbox(content, "滚轮缩放（方形地图四角也够得到）", row(T.rowH),
             MapSetting("scrollZoom"), MapSetter("scrollZoom"))
 
-        MakeCheckbox(content, "右键小地图弹出微型游戏菜单", row(28),
+        MakeCheckbox(content, "右键小地图弹出微型游戏菜单", row(T.rowH),
             MapSetting("microMenu"), MapSetter("microMenu"))
 
-        MakeCheckbox(content, "微型菜单用全量安全载体（自有动作 + 代点原生按钮）", row(28),
+        MakeCheckbox(content, "微型菜单用全量安全载体（自有动作 + 代点原生按钮）", row(T.rowH),
             MapSetting("microMenuSecure"), MapSetter("microMenuSecure"))
 
         -- 地图形状只有一套（正方画布 + 遮罩裁带），不再提供切换
 
-        -- 地图内的四个独立按钮
-        local mapCaption = Widget:Font(content, 12, "pixel", "edge", "LEFT")
-        mapCaption:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(22))
-        mapCaption:SetText("· 地图内的按钮")
+        -- 地图内的三个独立按钮（3:4 矩形图标）
+        Group(content, row, "地图内的按钮")
 
-        MakeCheckbox(content, "追踪（左下）", row(26),
+        MakeCheckbox(content, "追踪（左下）", row(T.rowH),
             MapSetting("mapTracking"), MapSetter("mapTracking"))
 
-        MakeCheckbox(content, "难度（左上）", row(26),
+        MakeCheckbox(content, "难度（左上）", row(T.rowH),
             MapSetting("mapDifficulty"), MapSetter("mapDifficulty"))
 
-        MakeCheckbox(content, "插件收纳（右上）", row(26),
+        MakeCheckbox(content, "插件收纳（右上）", row(T.rowH),
             MapSetting("mapCompartment"), MapSetter("mapCompartment"))
 
-        MakeCheckbox(content, "寻找组队状态（右下，动态字符）", row(24),
-            MapSetting("mapQueueStatus"), MapSetter("mapQueueStatus"))
-
-        local mapHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-        mapHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(38))
-        mapHint:SetWidth(328)
-        mapHint:SetJustifyH("LEFT")
-        mapHint:SetText("追踪 / 插件收纳 / 排队状态开着时，原按钮搬进地图，不再单独隐藏。")
-        -- 上面这句在 328 宽里折成两行，行距要给到 38 才不压下一行。
+        Hint(content, row, "追踪 / 插件收纳开着时，暴雪原来那一个被搬进地图，不再单独隐藏。")
 
         -- 手势速查（写在面板里，免得翻文档）
-        local gestureHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-        gestureHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(38))
-        gestureHint:SetWidth(328)
-        gestureHint:SetJustifyH("LEFT")
-        gestureHint:SetText("左键打标记（四个角也算）· 中键开追踪菜单 · 右键微型菜单 · 滚轮缩放")
+        Hint(content, row, "左键打标记（四个角也算）· 中键开追踪菜单 · 右键微型菜单 · 滚轮缩放")
 
         -- 底边高度是统一的（Utils/Layout.lua 的基线，和第一动作条同一条线），
         -- 这个下拉只管**右边缘**离屏幕右边多远。
-        MakeDropdown(content, row(30), "右边缘间距", {
+        MakeDropdown(content, row(T.dropH), "右边缘间距", {
             { value = 0,  text = "0（贴边）" },
             { value = 16, text = "16" },
             { value = 33, text = "33（默认）" },
@@ -847,26 +926,24 @@ function SimpleConfig:Build()
 
         -- 暴雪的集群按钮：勾选＝藏起来（方形面板和暴雪原样按钮混在一起最难看），
         -- 取消勾选＝把暴雪那个按钮原样放回来。
-        local caption = Widget:Font(content, 12, "pixel", "edge", "LEFT")
-        caption:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(22))
-        caption:SetText("· 暴雪集群按钮（勾选＝藏起来）")
+        Group(content, row, "暴雪集群按钮（勾选＝藏起来）")
 
         for _, entry in ipairs(minimap:ButtonList()) do
             -- 追踪 / 插件收纳由"地图内的按钮"那一组管，这里不重复列
             if not entry.skipKey then
-                MakeCheckbox(content, entry.label, row(26), MapSetting(entry.key), MapSetter(entry.key))
+                MakeCheckbox(content, entry.label, row(T.rowH), MapSetting(entry.key), MapSetter(entry.key))
             end
         end
 
-        row(4)                -- 行尾留白：纯前进，不取位置
-        sec.bodyHeight = -row.y + 4
+        row(T.gapS)                -- 行尾留白：纯前进，不取位置
+        sec.bodyHeight = -row.y + T.hintPad
     end
 
-    sec = BeginSection("单位框架", false)
+    sec = BeginPage("unitFrames", "单位框架")
     content = sec.body
     row = LayoutCursor(0)
 
-    MakeCheckbox(content, "隐藏暴雪默认的玩家/目标框架（需重载恢复）", row(30),
+    MakeCheckbox(content, "隐藏暴雪默认的玩家/目标框架（需重载恢复）", row(T.rowH),
         function() return ns:DB().unitFrames.hideBlizzard end,
         function(value)
             ns:DB().unitFrames.hideBlizzard = value
@@ -927,33 +1004,20 @@ function SimpleConfig:Build()
         end
     end
 
-    -- 组名一行（edge 色 + 下面一条发丝线），把"哪个下拉属于哪一组"从标签里拆出来。
-    local function GroupHeader(caption, y)
-        local fs = Widget:Font(content, 12, "pixel", "edge", "LEFT")
-        fs:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y - 4)
-        fs:SetText(caption)
-        local line = content:CreateTexture(nil, "ARTWORK")
-        line:SetPoint("TOPLEFT", content, "TOPLEFT", 24, y - 20)
-        line:SetPoint("TOPRIGHT", content, "TOPRIGHT", -24, y - 20)
-        line:SetHeight(1)
-        local nr, ng, nb = Color:GetNeutral()
-        line:SetColorTexture(nr, ng, nb, 0.25)
-    end
-
     for _, group in ipairs(COLOR_GROUPS) do
-        GroupHeader(group.label, row(30))
+        Group(content, row, group.label)
         local unit = group.units[1]
         -- UnitSetting 返回 (get, set) **两个值**：直接塞在参数表里时，只有出现在最后一位才会
         -- 展开；放中间会被截成 1 个值，后面的参数就整体错位（第一版就是这样把 swatch 挤进了
         -- setter 位、下拉选择变成静默不保存）。所以这里显式接住再说。
         local getFill, setFill = UnitSetting(group.units, "fillColor", group.fill)
         local getLost, setLost = UnitSetting(group.units, "lostColor", group.lost)
-        MakeDropdown(content, row(26), "血条", FILL_ITEMS, getFill, setFill, Preview("fill", unit))
-        MakeDropdown(content, row(26), "空槽（损失部分）", LOST_ITEMS, getLost, setLost, Preview("lost", unit))
+        MakeDropdown(content, row(T.dropH), "血条", FILL_ITEMS, getFill, setFill, Preview("fill", unit))
+        MakeDropdown(content, row(T.dropH), "空槽（损失部分）", LOST_ITEMS, getLost, setLost, Preview("lost", unit))
     end
 
-    GroupHeader("能量条", row(30))
-    MakeDropdown(content, row(26), "颜色", POWER_ITEMS,
+    Group(content, row, "能量条")
+    MakeDropdown(content, row(T.dropH), "颜色", POWER_ITEMS,
         function() return ns:DB().unitFrames.powerColor end,
         function(value)
             ns:DB().unitFrames.powerColor = value
@@ -970,11 +1034,7 @@ function SimpleConfig:Build()
             return Color:GetResource()
         end)
 
-    local fillHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-    fillHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(46))
-    fillHint:SetWidth(328)
-    fillHint:SetJustifyH("LEFT")
-    fillHint:SetText("血条 = 有血的那段；空槽 = 掉掉的那段（选实色时那层布纹会自动压淡）。右边小方块就是实际颜色。")
+    Hint(content, row, "血条 = 有血的那段；空槽 = 掉掉的那段（选实色时那层布纹会自动压淡）。右边小方块就是实际颜色。")
 
     -- One row for two settings: 0 means "off", anything else is the pip height.
     local CLASS_ITEMS = {
@@ -985,7 +1045,7 @@ function SimpleConfig:Build()
         { value = 5, text = "5 px" },
     }
 
-    MakeDropdown(content, row(28), "连击点（盗贼 / 德鲁伊）", CLASS_ITEMS,
+    MakeDropdown(content, row(T.dropH), "连击点（盗贼 / 德鲁伊）", CLASS_ITEMS,
         function()
             local db = ns:DB().unitFrames
             if db.classPower == false then return 0 end
@@ -998,21 +1058,21 @@ function SimpleConfig:Build()
             RefreshUnitFrames()
         end)
 
-    MakeCheckbox(content, "血量数字按百分比着色", row(28),
+    MakeCheckbox(content, "血量数字按百分比着色", row(T.rowH),
         function() return ns:DB().unitFrames.textColorByPercent end,
         function(value)
             ns:DB().unitFrames.textColorByPercent = value
             RefreshUnitFrames()
         end)
 
-    MakeCheckbox(content, "血条数值平滑过渡", row(28),
+    MakeCheckbox(content, "血条数值平滑过渡", row(T.rowH),
         function() return ns:DB().unitFrames.smoothBars end,
         function(value)
             ns:DB().unitFrames.smoothBars = value
             RefreshUnitFrames()
         end)
 
-    MakeCheckbox(content, "宠物框悬停 / 选中才显示", row(30),
+    MakeCheckbox(content, "宠物框悬停 / 选中才显示", row(T.rowH),
         function() return ns:DB().unitFrames.petHover ~= false end,
         function(value)
             ns:DB().unitFrames.petHover = value
@@ -1023,7 +1083,7 @@ function SimpleConfig:Build()
         { value = "auto", text = "自动 (K / M / B)" },
         { value = "cn",   text = "中文 (万 / 亿)" },
     }
-    MakeDropdown(content, row(30), "大数字格式", NUMBER_ITEMS,
+    MakeDropdown(content, row(T.dropH), "大数字格式", NUMBER_ITEMS,
         function() return ns:DB().numberFormat end,
         function(value)
             ns:DB().numberFormat = value
@@ -1031,16 +1091,16 @@ function SimpleConfig:Build()
         end)
 
     -- The borrowed list's on/off is decided when Blizzard's TargetFrame is first suppressed, so -- like "hideBlizzard" above -- this applies on the next load: a runtime switch cannot re-register what a full-kill removed.
-    MakeCheckbox(content, "显示目标框光环（借用暴雪，需重载）", row(30),
+    MakeCheckbox(content, "显示目标框光环（借用暴雪，需重载）", row(T.rowH),
         function() return ns:DB().unitFrames.showTargetAuras end,
         function(value)
             ns:DB().unitFrames.showTargetAuras = value
             RefreshUnitFrames()
         end)
 
-    sec.bodyHeight = -row.y + 4
+    sec.bodyHeight = -row.y + T.hintPad
 
-    sec = BeginSection("小队 / 团队框架", false)
+    sec = BeginPage("groups", "团队框架")
     content = sec.body
     row = LayoutCursor(0)
 
@@ -1060,16 +1120,16 @@ function SimpleConfig:Build()
         end
     end
 
-    MakeCheckbox(content, "小队框架（自己 + 小队 1-4）", row(26),
+    MakeCheckbox(content, "小队框架（自己 + 小队 1-4）", row(T.rowH),
         GroupGetter("party", "enabled", true), GroupSetter("party", "enabled"))
 
-    MakeCheckbox(content, "团队框架（8 组 × 5 人）", row(26),
+    MakeCheckbox(content, "团队框架（8 组 × 5 人）", row(T.rowH),
         GroupGetter("raid", "enabled", true), GroupSetter("raid", "enabled"))
 
-    MakeCheckbox(content, "小队框里显示自己", row(26),
+    MakeCheckbox(content, "小队框里显示自己", row(T.rowH),
         GroupGetter("party", "showPlayer", true), GroupSetter("party", "showPlayer"))
 
-    MakeCheckbox(content, "隐藏暴雪自带的小队 / 团队框", row(30),
+    MakeCheckbox(content, "隐藏暴雪自带的小队 / 团队框", row(T.rowH),
         function() return ns:DB().groupFrames.hideBlizzard end,
         function(value)
             ns:DB().groupFrames.hideBlizzard = value
@@ -1082,7 +1142,7 @@ function SimpleConfig:Build()
         { value = 120, text = "120 px" },
         { value = 140, text = "140 px" },
     }
-    MakeDropdown(content, row(28), "小队框宽度", PARTY_WIDTHS,
+    MakeDropdown(content, row(T.dropH), "小队框宽度", PARTY_WIDTHS,
         GroupGetter("party", "width", 110), GroupSetter("party", "width"))
 
     local RAID_WIDTHS = {
@@ -1091,7 +1151,7 @@ function SimpleConfig:Build()
         { value = 84, text = "84 px" },
         { value = 96, text = "96 px" },
     }
-    MakeDropdown(content, row(28), "团队框宽度", RAID_WIDTHS,
+    MakeDropdown(content, row(T.dropH), "团队框宽度", RAID_WIDTHS,
         GroupGetter("raid", "width", 72), GroupSetter("raid", "width"))
 
     local HEALTH_TEXT_MODES = {
@@ -1099,50 +1159,37 @@ function SimpleConfig:Build()
         { value = "percent", text = "百分比" },
         { value = "value", text = "当前值" },
     }
-    MakeDropdown(content, row(28), "小队血量文字", HEALTH_TEXT_MODES,
+    MakeDropdown(content, row(T.dropH), "小队血量文字", HEALTH_TEXT_MODES,
         GroupGetter("party", "healthText", "none"), GroupSetter("party", "healthText"))
 
-    MakeDropdown(content, row(26), "团队血量文字", HEALTH_TEXT_MODES,
+    MakeDropdown(content, row(T.dropH), "团队血量文字", HEALTH_TEXT_MODES,
         GroupGetter("raid", "healthText", "none"), GroupSetter("raid", "healthText"))
 
-    MakeCheckbox(content, "血条上显示治疗预估（主题色的浅色延伸段）", row(26),
+    MakeCheckbox(content, "血条上显示治疗预估（主题色的浅色延伸段）", row(T.rowH),
         function() return ns:DB().groupFrames.showIncomingHeals ~= false end,
         function(value)
             ns:DB().groupFrames.showIncomingHeals = value
             RefreshGroups()
         end)
 
-    MakeCheckbox(content, "血条上显示吸收盾（白色叠层）", row(30),
+    MakeCheckbox(content, "血条上显示吸收盾（白色叠层）", row(T.rowH),
         function() return ns:DB().groupFrames.showAbsorbs ~= false end,
         function(value)
             ns:DB().groupFrames.showAbsorbs = value
             RefreshGroups()
         end)
 
-    -- §8.124：默认锁定。以前这一项默认不勾，player 框常驻可见，左键一点一拖就把布局挪乱。
-    -- 写锁统一走 Mover:SetLocked（和 `/mui lock` / `/mui unlock` 同一个键），别在两处各写各的。
-    MakeCheckbox(content, "锁定框架位置（默认开，取消后可拖动）", row(30),
+    MakeCheckbox(content, "锁定所有可移动框（网格吸附与拖动）", row(T.rowH),
         function() return ns:DB().mover.locked end,
         function(value)
-            if type(ns.Mover) == "table" and type(ns.Mover.SetLocked) == "function" then
-                ns.Mover:SetLocked(nil, value)
-            else
-                ns:DB().mover.locked = value
-            end
+            ns:DB().mover.locked = value
             -- 锁是即时判断的（拖动时才读），不需要重贴：下一帧拖动就按新状态走
         end)
 
-    local lockHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-    lockHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(38))
-    lockHint:SetWidth(328)
-    lockHint:SetJustifyH("LEFT")
-    lockHint:SetText("默认锁着，避免左键点着玩家框架误拖。要摆位置：取消勾选，或 /mui unlock；摆完 /mui lock。")
+    sec.bodyHeight = -row.y + T.hintPad
 
-    sec.bodyHeight = -row.y + 4
-
-    sec = BeginSection("首领框架", false)
-    content = sec.body
-    row = LayoutCursor(0)
+    -- 首领框和小队 / 团队框是同一类东西（一屋子人的血条）：同一页，用一个组名分开。
+    Group(content, row, "首领框架")
 
     local function BossGetter(key, fallback)
         return function()
@@ -1162,10 +1209,10 @@ function SimpleConfig:Build()
         end
     end
 
-    MakeCheckbox(content, "启用首领框架", row(26),
+    MakeCheckbox(content, "启用首领框架", row(T.rowH),
         BossGetter("enabled", true), BossSetter("enabled"))
 
-    MakeCheckbox(content, "隐藏暴雪自带首领框", row(26),
+    MakeCheckbox(content, "隐藏暴雪自带首领框", row(T.rowH),
         BossGetter("hideBlizzard", true),
         function(value)
             local cfg = ns:DB().bossFrames
@@ -1180,7 +1227,7 @@ function SimpleConfig:Build()
         { value = 180, text = "180 px" },
         { value = 200, text = "200 px" },
     }
-    MakeDropdown(content, row(28), "首领框宽度", BOSS_WIDTHS,
+    MakeDropdown(content, row(T.dropH), "首领框宽度", BOSS_WIDTHS,
         BossGetter("width", 180), BossSetter("width"))
 
     local BOSS_HEALTH = {
@@ -1189,33 +1236,33 @@ function SimpleConfig:Build()
         { value = 20, text = "20 px" },
         { value = 24, text = "24 px" },
     }
-    MakeDropdown(content, row(28), "首领血条高度", BOSS_HEALTH,
+    MakeDropdown(content, row(T.dropH), "首领血条高度", BOSS_HEALTH,
         BossGetter("health", 20), BossSetter("health"))
 
-    MakeDropdown(content, row(28), "首领血量文字", HEALTH_TEXT_MODES,
+    MakeDropdown(content, row(T.dropH), "首领血量文字", HEALTH_TEXT_MODES,
         BossGetter("healthText", "none"), BossSetter("healthText"))
 
-    sec.bodyHeight = -row.y + 4
+    sec.bodyHeight = -row.y + T.hintPad
 
-    sec = BeginSection("动作条", false)
+    sec = BeginPage("actionBars", "动作条")
     content = sec.body
     row = LayoutCursor(0)
 
-    MakeCheckbox(content, "自绘动作条（LibActionButton）", row(28),
+    MakeCheckbox(content, "自绘动作条（LibActionButton）", row(T.rowH),
         function() return ns:DB().actionBars.ownBars end,
         function(value)
             ns:DB().actionBars.ownBars = value
             RefreshActionBars()
         end)
 
-    MakeCheckbox(content, "隐藏暴雪默认动作条", row(28),
+    MakeCheckbox(content, "隐藏暴雪默认动作条", row(T.rowH),
         function() return ns:DB().actionBars.hideBlizzard end,
         function(value)
             ns:DB().actionBars.hideBlizzard = value
             RefreshActionBars()
         end)
 
-    MakeCheckbox(content, "隐藏暴雪默认背包条", row(28),
+    MakeCheckbox(content, "隐藏暴雪默认背包条", row(T.rowH),
         function() return ns:DB().actionBars.hideBagBar end,
         function(value)
             ns:DB().actionBars.hideBagBar = value
@@ -1237,87 +1284,87 @@ function SimpleConfig:Build()
         COUNT_ITEMS[#COUNT_ITEMS + 1] = { value = count, text = count .. " 组" }
     end
 
-    MakeDropdown(content, row(28), "按钮尺寸", SIZE_ITEMS,
+    MakeDropdown(content, row(T.dropH), "按钮尺寸", SIZE_ITEMS,
         function() return ns:DB().actionBars.buttonSize end,
         function(value)
             ns:DB().actionBars.buttonSize = value
             RefreshActionBars()
         end)
 
-    MakeDropdown(content, row(28), "按钮间距", SPACING_ITEMS,
+    MakeDropdown(content, row(T.dropH), "按钮间距", SPACING_ITEMS,
         function() return ns:DB().actionBars.spacing end,
         function(value)
             ns:DB().actionBars.spacing = value
             RefreshActionBars()
         end)
 
-    MakeDropdown(content, row(28), "显示动作条数量", COUNT_ITEMS,
+    MakeDropdown(content, row(T.dropH), "显示动作条数量", COUNT_ITEMS,
         function() return ns:DB().actionBars.barCount end,
         function(value)
             ns:DB().actionBars.barCount = value
             RefreshActionBars()
         end)
 
-    MakeCheckbox(content, "显示快捷键", row(28),
+    MakeCheckbox(content, "显示快捷键", row(T.rowH),
         function() return ns:DB().actionBars.showHotkey end,
         function(value)
             ns:DB().actionBars.showHotkey = value
             RefreshActionBars()
         end)
 
-    MakeCheckbox(content, "显示堆叠数量", row(28),
+    MakeCheckbox(content, "显示堆叠数量", row(T.rowH),
         function() return ns:DB().actionBars.showCount end,
         function(value)
             ns:DB().actionBars.showCount = value
             RefreshActionBars()
         end)
 
-    MakeCheckbox(content, "显示宏名", row(30),
+    MakeCheckbox(content, "显示宏名", row(T.rowH),
         function() return ns:DB().actionBars.showMacro end,
         function(value)
             ns:DB().actionBars.showMacro = value
             RefreshActionBars()
         end)
 
-    MakeCheckbox(content, "宠物动作条悬停高亮（平时 30%）", row(30),
+    MakeCheckbox(content, "宠物动作条悬停高亮（平时 30%）", row(T.rowH),
         function() return ns:DB().actionBars.petHover ~= false end,
         function(value)
             ns:DB().actionBars.petHover = value
             RefreshActionBars()
         end)
 
-    MakeCheckbox(content, "姿态条悬停高亮（平时 30%）", row(30),
+    MakeCheckbox(content, "姿态条悬停高亮（平时 30%）", row(T.rowH),
         function() return ns:DB().actionBars.stanceHover ~= false end,
         function(value)
             ns:DB().actionBars.stanceHover = value
             RefreshActionBars()
         end)
 
-    sec.bodyHeight = -row.y + 4
+    sec.bodyHeight = -row.y + T.hintPad
 
-    sec = BeginSection("姓名板", false)
+    sec = BeginPage("nameplates", "姓名板")
     content = sec.body
     row = LayoutCursor(0)
 
     -- Which units get a plate at all (CVars; see Modules/Nameplates).
-    MakeCheckbox(content, "显示敌方姓名板", row(28), NameplateCheckbox("showEnemy"))
-    MakeCheckbox(content, "显示友方玩家姓名板", row(28), NameplateCheckbox("showFriendly"))
-    MakeCheckbox(content, "显示友方 NPC 姓名板", row(28), NameplateCheckbox("showNPC"))
-    MakeCheckbox(content, "显示低等级（minus）敌人", row(28), NameplateCheckbox("showMinor"))
-    MakeCheckbox(content, "显示图腾", row(28), NameplateCheckbox("showTotems"))
-    MakeCheckbox(content, "显示自己的姓名板", row(28), NameplateCheckbox("showSelf"))
-    MakeCheckbox(content, "过滤小动物", row(28), NameplateCheckbox("hideCritters"))
-    MakeCheckbox(content, "过滤死亡单位", row(30), NameplateCheckbox("hideDead"))
+    MakeCheckbox(content, "显示敌方姓名板", row(T.rowH), NameplateCheckbox("showEnemy"))
+    MakeCheckbox(content, "显示友方玩家姓名板", row(T.rowH), NameplateCheckbox("showFriendly"))
+    MakeCheckbox(content, "显示友方 NPC 姓名板", row(T.rowH), NameplateCheckbox("showNPC"))
+    MakeCheckbox(content, "显示低等级（minus）敌人", row(T.rowH), NameplateCheckbox("showMinor"))
+    MakeCheckbox(content, "显示图腾", row(T.rowH), NameplateCheckbox("showTotems"))
+    MakeCheckbox(content, "显示自己的姓名板", row(T.rowH), NameplateCheckbox("showSelf"))
+    MakeCheckbox(content, "过滤小动物", row(T.rowH), NameplateCheckbox("hideCritters"))
+    MakeCheckbox(content, "过滤死亡单位", row(T.rowH), NameplateCheckbox("hideDead"))
 
-    MakeCheckbox(content, "显示名称", row(28), NameplateCheckbox("showName"))
-    MakeCheckbox(content, "显示等级 / 精英标记", row(28), NameplateCheckbox("showLevel"))
-    MakeCheckbox(content, "显示血量百分比", row(28), NameplateCheckbox("showPercent"))
-    MakeCheckbox(content, "显示施法条", row(28), NameplateCheckbox("showCast"))
-    MakeCheckbox(content, "职业 / 阵营着色", row(28), NameplateCheckbox("classColor"))
-    MakeCheckbox(content, "仇恨描边", row(28), NameplateCheckbox("showThreat"))
-    MakeCheckbox(content, "当前目标：金色描边 + 放大 1.1 倍", row(28), NameplateCheckbox("highlightTarget"))
-    MakeCheckbox(content, "数值平滑过渡", row(28), NameplateCheckbox("smooth"))
-    MakeCheckbox(content, "同步暴雪点击区域", row(30), NameplateCheckbox("forcePlateSize"))
+    MakeCheckbox(content, "显示名称", row(T.rowH), NameplateCheckbox("showName"))
+    MakeCheckbox(content, "显示等级 / 精英标记", row(T.rowH), NameplateCheckbox("showLevel"))
+    MakeCheckbox(content, "显示血量百分比", row(T.rowH), NameplateCheckbox("showPercent"))
+    MakeCheckbox(content, "显示施法条", row(T.rowH), NameplateCheckbox("showCast"))
+    MakeCheckbox(content, "职业 / 阵营着色", row(T.rowH), NameplateCheckbox("classColor"))
+    MakeCheckbox(content, "仇恨描边", row(T.rowH), NameplateCheckbox("showThreat"))
+    MakeCheckbox(content, "当前目标：金色描边 + 放大 1.1 倍", row(T.rowH), NameplateCheckbox("highlightTarget"))
+    MakeCheckbox(content, "数值平滑过渡", row(T.rowH), NameplateCheckbox("smooth"))
+    MakeCheckbox(content, "同步暴雪点击区域", row(T.rowH), NameplateCheckbox("forcePlateSize"))
 
     local NP_WIDTH = {}
     for _, w in ipairs({ 90, 100, 110, 120, 130, 140, 160 }) do
@@ -1340,23 +1387,23 @@ function SimpleConfig:Build()
         NP_DISTANCE[#NP_DISTANCE + 1] = { value = d, text = d .. " 码" }
     end
 
-    MakeDropdown(content, row(28), "姓名板宽度", NP_WIDTH,
+    MakeDropdown(content, row(T.dropH), "姓名板宽度", NP_WIDTH,
         function() return NameplateSetting("width") end, NameplateSetter("width"))
-    MakeDropdown(content, row(28), "姓名板高度", NP_HEIGHT,
+    MakeDropdown(content, row(T.dropH), "姓名板高度", NP_HEIGHT,
         function() return NameplateSetting("height") end, NameplateSetter("height"))
     -- Name/level font size is fixed on the 12px pixel grid (Media:SnapSize), so there is no size picker any more -- every choice would render as 12.
-    MakeDropdown(content, row(28), "施法条高度", NP_CAST,
+    MakeDropdown(content, row(T.dropH), "施法条高度", NP_CAST,
         function() return NameplateSetting("castHeight") end, NameplateSetter("castHeight"))
-    MakeDropdown(content, row(28), "名称截断长度", NP_LENGTH,
+    MakeDropdown(content, row(T.dropH), "名称截断长度", NP_LENGTH,
         function() return NameplateSetting("nameLength") end, NameplateSetter("nameLength"))
-    MakeDropdown(content, row(30), "显示距离", NP_DISTANCE,
+    MakeDropdown(content, row(T.dropH), "显示距离", NP_DISTANCE,
         function() return NameplateSetting("viewDistance") end, NameplateSetter("viewDistance"))
 
-    sec.bodyHeight = -row.y + 4
+    sec.bodyHeight = -row.y + T.hintPad
 
     local skins = ns:GetModule("Skins")
     if skins then
-        sec = BeginSection("界面美化", false)
+        sec = BeginPage("skins", "界面美化")
         content = sec.body
         row = LayoutCursor(0)
 
@@ -1365,7 +1412,7 @@ function SimpleConfig:Build()
             { value = "pixel", text = "像素字体（推荐）" },
         }
         -- Legacy saved values ("roadway", "number", ...) normalize through GetFontKey, so the row always shows one of the two entries above.
-        MakeDropdown(content, row(24), "统一字体（全局）", FONT_ITEMS,
+        MakeDropdown(content, row(T.dropH), "统一字体（全局）", FONT_ITEMS,
             function() return skins:GetFontKey() or "off" end,
             function(value)
                 ns:DB().skins.font = value
@@ -1375,14 +1422,10 @@ function SimpleConfig:Build()
                 end
             end)
 
-        local fontHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-        fontHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(34))
-        fontHint:SetWidth(328)
-        fontHint:SetJustifyH("LEFT")
-        fontHint:SetText("统一字体影响所有暴雪窗口文字；关闭需重载界面恢复。")
+        Hint(content, row, "统一字体影响所有暴雪窗口文字；关闭需重载界面恢复。")
 
         -- §8.89：页签行整框 alpha 由 GDM 控制，改设置即时生效（不用 /reload）。
-        MakeCheckbox(content, "聊天页签悬停才显示", row(26),
+        MakeCheckbox(content, "聊天页签悬停才显示", row(T.rowH),
             function() return ns:DB().skins.hoverChatTabs ~= false end,
             function(value)
                 ns:DB().skins.hoverChatTabs = value and true or false
@@ -1394,7 +1437,7 @@ function SimpleConfig:Build()
         -- §8.96 输入框平时状态三档（取代 §8.91 的二元「自动隐藏」复选框）：
         -- 渐隐（参考 ChatEditFade：空闲 25%、失焦 3 秒后开始、聚焦全亮）/ 全隐 / 常显。
         -- 切换由 PollWatch 下一拍按新值重钉或交给渐隐引擎，不必 /reload。
-        MakeDropdown(content, row(26), "输入框平时状态", {
+        MakeDropdown(content, row(T.dropH), "输入框平时状态", {
             { value = "fade", text = "渐隐（空闲 25%，聚焦全亮）" },
             { value = "hide", text = "全隐（仅聚焦才出现）" },
             { value = "show", text = "常显" },
@@ -1412,7 +1455,7 @@ function SimpleConfig:Build()
             end)
 
         -- 输入框位置：`show` / `fade` 档才看得出区别（`hide` 档一律折在顶部带里）。
-        MakeDropdown(content, row(26), "输入框位置（常显 / 渐隐时）", {
+        MakeDropdown(content, row(T.dropH), "输入框位置（常显 / 渐隐时）", {
             { value = "top",    text = "框内顶部（推荐）" },
             { value = "bottom", text = "框底（原生位置）" },
         },
@@ -1463,7 +1506,7 @@ function SimpleConfig:Build()
             end
         end
 
-        MakeDropdown(content, row(26), "页签淡入时长", {
+        MakeDropdown(content, row(T.dropH), "页签淡入时长", {
             { value = 0.1,  text = "0.1 秒" },
             { value = 0.18, text = "0.18 秒（默认）" },
             { value = 0.3,  text = "0.3 秒" },
@@ -1476,11 +1519,11 @@ function SimpleConfig:Build()
                end
            end)
 
-        MakeDropdown(content, row(26), "页签色·未选中", TAB_COLOR_ITEMS,
+        MakeDropdown(content, row(T.dropH), "页签色·未选中", TAB_COLOR_ITEMS,
             TabColorGetter("tabColorNormal"), TabColorSetter("tabColorNormal"), TabColorSwatch)
-        MakeDropdown(content, row(26), "页签色·选中", TAB_COLOR_ITEMS,
+        MakeDropdown(content, row(T.dropH), "页签色·选中", TAB_COLOR_ITEMS,
             TabColorGetter("tabColorSelected"), TabColorSetter("tabColorSelected"), TabColorSwatch)
-        MakeDropdown(content, row(26), "页签色·未读", TAB_COLOR_ITEMS,
+        MakeDropdown(content, row(T.dropH), "页签色·未读", TAB_COLOR_ITEMS,
             TabColorGetter("tabColorFlash"), TabColorSetter("tabColorFlash"), TabColorSwatch)
 
         -- Group the windows by section, in registration order.
@@ -1493,26 +1536,24 @@ function SimpleConfig:Build()
         end
 
         for _, group in ipairs(groups) do
-            local caption = Widget:Font(content, 12, "pixel", "edge", "LEFT")
-            caption:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(20))
-            caption:SetText("· " .. group)
+            Group(content, row, group)
 
             for _, entry in ipairs(skins.registry) do
                 if entry.group == group then
-                    MakeCheckbox(content, entry.label, row(26),
+                    MakeCheckbox(content, entry.label, row(T.rowH),
                         function() return skins:IsEnabled(entry.key) end,
                         function(value) skins:SetPanelEnabled(entry.key, value) end)
                 end
             end
         end
 
-        row(4)                -- 行尾留白：纯前进，不取位置
-        sec.bodyHeight = -row.y + 4
+        row(T.gapS)                -- 行尾留白：纯前进，不取位置
+        sec.bodyHeight = -row.y + T.hintPad
     end
 
     local tooltip = ns:GetModule("Tooltip")
     if tooltip then
-        sec = BeginSection("鼠标提示", false)
+        sec = BeginPage("tooltip", "鼠标提示")
         content = sec.body
         row = LayoutCursor(0)
 
@@ -1523,21 +1564,21 @@ function SimpleConfig:Build()
             { value = "minimap", text = "小地图右上角" },
             { value = "off",     text = "暴雪默认位置" },
         }
-        MakeDropdown(content, row(24), "提示框位置", TIP_ANCHOR,
+        MakeDropdown(content, row(T.dropH), "提示框位置", TIP_ANCHOR,
             function() return tooltip:ResolveMode(tooltip) end,
             function(value)
                 tooltip:Settings().anchor = value
                 tooltip:Apply()
             end)
 
-        MakeCheckbox(content, "单位提示补一行「目标」（它正在打谁）", row(26),
+        MakeCheckbox(content, "单位提示补一行「目标」（它正在打谁）", row(T.rowH),
             function() return tooltip:GetSetting("enrich") end,
             function(value)
                 tooltip:Settings().enrich = value and true or false
                 tooltip:Apply()
             end)
 
-        MakeCheckbox(content, "按住 Alt 显示 ID（NPC / 物品 / 法术）", row(26),
+        MakeCheckbox(content, "按住 Alt 显示 ID（NPC / 物品 / 法术）", row(T.rowH),
             function() return tooltip:GetSetting("idsByAlt") end,
             function(value)
                 tooltip:Settings().idsByAlt = value and true or false
@@ -1546,30 +1587,26 @@ function SimpleConfig:Build()
 
         -- 正文归一只动"通用文字"（白 / 灰 / 纯黄的描述行），品质、职业、套装绿、未达标红
         -- 这些身份信息一律不碰；标题行不参与（判据见 Modules/Tooltip.lua 的 IsStaticTextColor）。
-        MakeCheckbox(content, "提示框正文统一成主题文字色（保留品质 / 职业色）", row(26),
+        MakeCheckbox(content, "提示框正文统一成主题文字色（保留品质 / 职业色）", row(T.rowH),
             function() return tooltip:GetSetting("neutralText") end,
             function(value)
                 tooltip:Settings().neutralText = value and true or false
                 tooltip:Apply()
             end)
 
-        local tipHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-        tipHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(44))
-        tipHint:SetWidth(328)
-        tipHint:SetJustifyH("LEFT")
-        tipHint:SetText("用鼠标＝跟手（贴屏幕右/上边缘自动翻边）；用小地图＝提示框右下角对齐小地图面板右上角（面板临时隐藏时保持原位，只有小地图模块关掉才退回跟随）。边框与底色在上方「界面美化 → 系统 → 鼠标提示边框」。")
+        Hint(content, row, "用鼠标＝跟手（贴屏幕右/上边缘自动翻边）；用小地图＝提示框右下角对齐小地图面板右上角（面板临时隐藏时保持原位，只有小地图模块关掉才退回跟随）。边框与底色在上方「界面美化 → 系统 → 鼠标提示边框」。")
 
         -- 光标装饰（Modules/Cursor）：纯视觉，跟着主题色走；用模块开关整体关掉。
         local cursor = ns:GetModule("Cursor")
         if cursor then
-            MakeCheckbox(content, "光标拖尾（快速移动时拖出一条主题色笔迹）", row(26),
+            MakeCheckbox(content, "光标拖尾（快速移动时拖出一条主题色笔迹）", row(T.rowH),
                 function() return cursor:GetSetting("trail") end,
                 function(value)
                     cursor:Settings().trail = value and true or false
                     cursor:Apply()
                 end)
 
-            MakeCheckbox(content, "光标速度星芒（快速甩动时出现十字光）", row(26),
+            MakeCheckbox(content, "光标速度星芒（快速甩动时出现十字光）", row(T.rowH),
                 function() return cursor:GetSetting("glow") end,
                 function(value)
                     cursor:Settings().glow = value and true or false
@@ -1577,72 +1614,61 @@ function SimpleConfig:Build()
                 end)
         end
 
-        sec.bodyHeight = -row.y + 4
+        sec.bodyHeight = -row.y + T.hintPad
     end
 
     local toast = ns:GetModule("Toast")
     if toast then
-        sec = BeginSection("通知", false)
+        sec = BeginPage("notify", "通知横幅")
         content = sec.body
         row = LayoutCursor(0)
 
-        MakeCheckbox(content, "收到新邮件时弹一条提示（小地图邮件图标已隐藏）", row(26),
+        MakeCheckbox(content, "收到新邮件时弹一条提示（小地图邮件图标已隐藏）", row(T.rowH),
             function() return toast:GetSetting("mail") end,
             function(value)
                 toast:Settings().mail = value and true or false
             end)
 
-        MakeCheckbox(content, "背包满时弹一条提示（腾出空间后可再次提示）", row(28),
+        MakeCheckbox(content, "背包满时弹一条提示（腾出空间后可再次提示）", row(T.rowH),
             function() return toast:GetSetting("bagFull") end,
             function(value)
                 toast:Settings().bagFull = value and true or false
             end)
 
-        MakeCheckbox(content, "进入 / 离开战斗时弹一条提醒（剑 / 盾 + 着色 + 文字）", row(28),
+        MakeCheckbox(content, "进入 / 离开战斗时弹一条提醒（剑 / 盾 + 着色 + 文字）", row(T.rowH),
             function() return toast:GetSetting("combatAlert") ~= false end,
             function(value)
                 toast:Settings().combatAlert = value and true or false
             end)
 
-        -- 只报"真的变了"：引擎每趟重算都会发主题事件，回到去过的地图颜色一模一样（解析见 Toast.lua）。
-        MakeCheckbox(content, "主色变色时弹一条提示（写明色值 / 区域）", row(28),
-            function() return toast:GetSetting("themeColor") end,
-            function(value)
-                toast:Settings().themeColor = value and true or false
-            end)
-
-        MakeDropdown(content, row(26), "停留时长", {
+        MakeDropdown(content, row(T.dropH), "停留时长", {
             { value = 3, text = "3 秒" },
             { value = 5, text = "5 秒" },
             { value = 8, text = "8 秒" },
         },
-            function() return toast:GetSetting("duration") or 8 end,
+            function() return toast:GetSetting("duration") or 5 end,
             function(value)
                 toast:Settings().duration = value
             end)
 
-        local toastHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-        toastHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(34))
-        toastHint:SetWidth(328)
-        toastHint:SetJustifyH("LEFT")
-        toastHint:SetText("横幅在屏幕顶部，最多同时三列（先正中、再右、再左），再多的排队；每列底边一条细线随停留时间排空，点一下可提前关掉。")
-        sec.bodyHeight = -row.y + 4
+        Hint(content, row, "横幅在屏幕顶部居中，一次只显示一条，多的排队；底边一条细线随停留时间排空，点一下可提前关掉。")
+        sec.bodyHeight = -row.y + T.hintPad
     end
 
     local durability = ns:GetModule("Durability")
     if durability then
-        sec = BeginSection("耐久警告", false)
+        sec = BeginPage("durability", "耐久警告")
         content = sec.body
         row = LayoutCursor(0)
 
-        MakeCheckbox(content, "装备耐久过低时弹一条提示（修好 / 换装后才会再提醒）", row(28),
+        MakeCheckbox(content, "装备耐久过低时弹一条提示（修好 / 换装后才会再提醒）", row(T.rowH),
             function() return durability:GetSetting("warn") end,
             function(value)
                 durability:Settings().warn = value and true or false
                 durability:Apply()
             end)
 
-        MakeDropdown(content, row(26), "提醒阈值", {
+        MakeDropdown(content, row(T.dropH), "提醒阈值", {
             { value = 20, text = "低于 20%" },
             { value = 30, text = "低于 30%" },
             { value = 50, text = "低于 50%" },
@@ -1653,24 +1679,20 @@ function SimpleConfig:Build()
                 durability:Apply()
             end)
 
-        local durHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-        durHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(30))
-        durHint:SetWidth(328)
-        durHint:SetJustifyH("LEFT")
-        durHint:SetText("只看身上穿着的 10 个部位（头肩胸腿脚腕手腰主副手），取最低的那件。")
-        sec.bodyHeight = -row.y + 4
+        Hint(content, row, "只看身上穿着的 10 个部位（头肩胸腿脚腕手腰主副手），取最低的那件。")
+        sec.bodyHeight = -row.y + T.hintPad
     end
 
     local tweaks = ns:GetModule("Tweaks")
     if tweaks then
-        sec = BeginSection("控制台优化", false)
+        sec = BeginPage("tweaks", "控制台优化")
         content = sec.body
         row = LayoutCursor(0)
 
         local list = tweaks:Tweaks()
         for i = 1, #list do
             local t = list[i]
-            MakeCheckbox(content, t.label, row(26),
+            MakeCheckbox(content, t.label, row(T.rowH),
                 function() return tweaks:IsOn(t.key) end,
                 function(value)
                     tweaks:Settings()[t.key] = value and true or false
@@ -1678,17 +1700,13 @@ function SimpleConfig:Build()
                 end)
         end
 
-        local tweakHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-        tweakHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(44))
-        tweakHint:SetWidth(328)
-        tweakHint:SetJustifyH("LEFT")
-        tweakHint:SetText("逐条开关客户端控制台设置：打开写入、关掉还原成你原来的值。名单来自《无限》服常用优化，个别名字在本客户端可能不存在或被拒写——那样这条会空转，用 /mui tweaks status 看账本。默认全部开着（2026-11-16 对齐作者实机那套：锐化、去雾、雨雪、视距、伤害数字 ×0.5、战斗文字只留伤害等）；已在用的存档保留你自己的开关状态。")
-        sec.bodyHeight = -row.y + 4
+        Hint(content, row, "逐条开关客户端控制台设置：打开写入、关掉还原成你原来的值。名单来自《无限》服常用优化，个别名字在本客户端可能不存在或被拒写——那样这条会空转，用 /mui tweaks status 看账本。默认全关。")
+        sec.bodyHeight = -row.y + T.hintPad
     end
 
     local infobar = ns:GetModule("InfoBar")
     if infobar then
-        sec = BeginSection("信息栏", false)
+        sec = BeginPage("infoBar", "信息栏")
         content = sec.body
         row = LayoutCursor(0)
 
@@ -1698,7 +1716,7 @@ function SimpleConfig:Build()
             else infobar:ApplyLayout() end
         end
 
-        MakeDropdown(content, row(28), "贴边", {
+        MakeDropdown(content, row(T.dropH), "贴边", {
             { value = true,  text = "顶边" },
             { value = false, text = "底边" },
         },
@@ -1708,7 +1726,7 @@ function SimpleConfig:Build()
                 ApplyBar()
             end)
 
-        MakeDropdown(content, row(28), "高度", {
+        MakeDropdown(content, row(T.dropH), "高度", {
             { value = 12, text = "12 px" },
             { value = 14, text = "14 px" },
             { value = 16, text = "16 px" },
@@ -1720,28 +1738,28 @@ function SimpleConfig:Build()
                 ApplyBar()
             end)
 
-        MakeCheckbox(content, "悬停淡入（平时只露底板）", row(26),
+        MakeCheckbox(content, "悬停淡入（平时只露底板）", row(T.rowH),
             function() return infobar:Settings().mouseover end,
             function(value)
                 infobar:Settings().mouseover = value and true or false
                 ApplyBar()
             end)
 
-        MakeCheckbox(content, "战斗时边缘呼吸闪烁", row(26),
+        MakeCheckbox(content, "战斗时边缘呼吸闪烁", row(T.rowH),
             function() return infobar:Settings().combatPulse end,
             function(value)
                 infobar:Settings().combatPulse = value and true or false
                 if infobar.RefreshPulse then infobar.RefreshPulse() end
             end)
 
-        MakeCheckbox(content, "底部经验线（悬停三角看数值）", row(26),
+        MakeCheckbox(content, "底部经验线（悬停三角看数值）", row(T.rowH),
             function() return infobar:GetSetting("xp") end,
             function(value)
                 infobar:Settings().xp = value and true or false
                 ApplyBar()
             end)
 
-        MakeCheckbox(content, "满级后这条线改显示声望", row(26),
+        MakeCheckbox(content, "满级后这条线改显示声望", row(T.rowH),
             function() return infobar:GetSetting("xpFaction") end,
             function(value)
                 infobar:Settings().xpFaction = value and true or false
@@ -1753,7 +1771,7 @@ function SimpleConfig:Build()
         -- 第一次打开时构建一次，不适合放动态列表 —— 那份放在货币格的右键面板里。
         local currency = infobar.Currency
         if currency then
-            MakeDropdown(content, row(28), "货币来源", {
+            MakeDropdown(content, row(T.dropH), "货币来源", {
                 { value = "backpack", text = "跟随背包显示" },
                 { value = "custom",   text = "自定义监控清单" },
                 { value = "all",      text = "全部已发现货币" },
@@ -1763,11 +1781,11 @@ function SimpleConfig:Build()
 
             local maxItems = {}
             for i = 1, 8 do maxItems[i] = { value = i, text = i .. " 项" } end
-            MakeDropdown(content, row(28), "条上最多", maxItems,
+            MakeDropdown(content, row(T.dropH), "条上最多", maxItems,
                 function() return currency:MaxOnBar() end,
                 function(value) currency:SetMax(value) end)
 
-            MakeDropdown(content, row(28), "0 值货币", {
+            MakeDropdown(content, row(T.dropH), "0 值货币", {
                 { value = true,  text = "显示" },
                 { value = false, text = "隐藏" },
             },
@@ -1776,7 +1794,7 @@ function SimpleConfig:Build()
 
             -- §8.84：追踪项一多，「名称 + 完整数量」会被标题行折成 +N。
             -- 图标模式改画「图标 + 短数量」，名称与完整值移到悬停提示。
-            MakeCheckbox(content, "背包标题行：货币用图标（省位置，名称悬停可见）", row(26),
+            MakeCheckbox(content, "背包标题行：货币用图标（省位置，名称悬停可见）", row(T.rowH),
                 function() return ns:DB().bags.currencyIcons ~= false end,
                 function(value)
                     ns:DB().bags.currencyIcons = value and true or false
@@ -1784,23 +1802,24 @@ function SimpleConfig:Build()
                     if bags and bags.RefreshCurrencyTitles then bags:RefreshCurrencyTitles() end
                 end)
 
-            local picker = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-            picker:SetSize(150, 22)
-            picker:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(28) - 2)
-            picker:SetText("编辑监控清单")
+            -- 自建框 + Theme + 织纹底：面板里每一颗按钮（含底部「重载界面」）都是这一套。
+            local picker = Widget:CreateFrame("MonetUIConfigCurrencyPicker", content, 150, T.ctrlH,
+                "BackdropTemplate", "Button")
+            Widget:Theme(picker, { thickness = 1, bgAlpha = 0.9 })
             Widget:ButtonMaterial(picker, { alpha = 0, weaveAlpha = 0.25 })
+            picker:SetPoint("TOPLEFT", content, "TOPLEFT", T.padX, row(T.dropH) - 3)
+            picker:EnableMouse(true)
+            local pickerText = Widget:Font(picker, 12, "pixel", "edge", "CENTER")
+            pickerText:SetPoint("CENTER", picker, "CENTER", 0, 1)
+            pickerText:SetText("编辑监控清单")
             picker:SetScript("OnClick", function() currency:TogglePanel() end)
 
-            local currencyHint = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
-            currencyHint:SetPoint("TOPLEFT", content, "TOPLEFT", 24, row(48))
-            currencyHint:SetWidth(328)
-            currencyHint:SetJustifyH("LEFT")
-            currencyHint:SetText("默认只追踪金币（背包标题行与提示框都会显示）。背包标题行默认用图标 + 短数量，悬停看名称与完整数值；关掉上面的勾选可换回纯文字。其它货币不自动带入：右键信息栏的货币格勾选，或 /mui infobar currency add <ID|名称> 添加；list 查 ID。清单来自角色面板 → 货币 子标签，折叠的分类请先在面板里展开。")
+            Hint(content, row, "默认只追踪金币（背包标题行与提示框都会显示）。背包标题行默认用图标 + 短数量，悬停看名称与完整数值；关掉上面的勾选可换回纯文字。其它货币不自动带入：右键信息栏的货币格勾选，或 /mui infobar currency add <ID|名称> 添加；list 查 ID。清单来自角色面板 → 货币 子标签，折叠的分类请先在面板里展开。")
         end
 
         -- One switch per block, in registration order.
         for _, block in ipairs(infobar.blocks) do
-            MakeCheckbox(content, block.label, row(26),
+            MakeCheckbox(content, block.label, row(T.rowH),
                 function() return infobar:BlockEnabled(block.key) end,
                 function(value)
                     local settings = infobar:Settings()
@@ -1810,26 +1829,30 @@ function SimpleConfig:Build()
                 end)
         end
 
-        row(4)                -- 行尾留白：纯前进，不取位置
-        sec.bodyHeight = -row.y + 4
+        row(T.gapS)                -- 行尾留白：纯前进，不取位置
+        sec.bodyHeight = -row.y + T.hintPad
     end
 
-    -- 面板最高只到屏幕 - 40，正文在里面滚；提示行和「重载界面」按钮固定在最下面那条带子里。
-    -- 内容高度不再写死：分组折叠后由 relayout() 现算。
+    -- 面板高固定（T.panelH）：title 和主菜单钉在顶上不随内容上下跳，正文在里面滚；
+    -- 提示行和「重载界面」按钮固定在最下面那条带子里。每页建完就地结算正文高（sec.bodyHeight）。
 
     -- Scroll: the wheel moves the content, the thumb shows where we are and can be dragged.
+    -- 约定（2026-11 校正）：scrollOffset = "从顶部往上顶了多少像素"，非负，0 = 在顶部。
+    -- 暴雪的 y 轴朝上，所以内容要向上滚就是把 root 的 TOP 挂成 +scrollOffset；
+    -- 原来这里存的是负数、又直接当偏移用，滚一下内容反而往下跑（旧版所有分组默认收起、
+    -- 一屏放得下，所以没暴露）。滑块同理：轨道往下 = 列表往下 = offset 变大。
     local function ContentHeight()
         return root:GetHeight() or 0
     end
 
     local function MaxOffset()
-        return math.min(0, (view:GetHeight() or 0) - ContentHeight())
+        return math.max(0, ContentHeight() - (view:GetHeight() or 0))
     end
 
     local function UpdateThumb()
         local viewH = view:GetHeight() or 0
         local maxOffset = MaxOffset()
-        if maxOffset >= 0 then
+        if maxOffset <= 0 then
             scrollThumb:Hide()
             return
         end
@@ -1837,15 +1860,14 @@ function SimpleConfig:Build()
         local contentH = ContentHeight()
         local thumbH = math.max(24, viewH * (viewH / (contentH > 0 and contentH or viewH)))
         scrollThumb:SetHeight(thumbH)
-        -- 0 = 列表顶（滑块在轨道顶端），1 = 列表底。原来是 (offset - max) / -max：
-        -- offset 为 0 时算出 1，滑块一打开就贴在轨道最下面（实机就是这个现象）。
-        local t = (maxOffset ~= 0) and (scrollOffset / maxOffset) or 0
+        -- 0 = 列表顶（滑块在轨道顶端），1 = 列表底。
+        local t = scrollOffset / maxOffset
         scrollThumb:ClearAllPoints()
         scrollThumb:SetPoint("TOPLEFT", scrollTrack, "TOPLEFT", 0, -t * (viewH - thumbH))
     end
 
     local function SetOffset(value)
-        scrollOffset = math.max(MaxOffset(), math.min(0, value))
+        scrollOffset = math.max(0, math.min(MaxOffset(), value))
         -- 两个角一起挪：只改 TOPLEFT 时，创建时钉在 view 顶边的 TOPRIGHT 会跟它打架，
         -- 内容会被拉变（宽高固定时表现为位置忽上忽下）。
         root:ClearAllPoints()
@@ -1855,35 +1877,56 @@ function SimpleConfig:Build()
     end
     setOffset = SetOffset
 
-    -- 展开 / 收起：3 列各自往下摞，面板高度取最高那列。列号在 BeginSection 里按创建顺序
-    -- 轮转定好（0/1/2），这里只按列累加 y。滚动条仍在，内容放得下时 UpdateThumb 自己隐藏；
-    -- 万一玩家把所有组全展开超出屏幕，还能滚——不会丢设置。
-    relayout = function()
-        local colY = { [0] = 0, [1] = 0, [2] = 0 }
-        for i = 1, #SECTIONS do
-            local entry = SECTIONS[i]
-            local x = entry.col * (COL_W + COL_GAP)
-            local y = colY[entry.col]
-            local height = HEADER_H + (entry.expanded and entry.bodyHeight or 0)
-            entry.holder:ClearAllPoints()
-            entry.holder:SetPoint("TOPLEFT", root, "TOPLEFT", x, -y)
-            entry.holder:SetHeight(height)
-            colY[entry.col] = y + height + 6   -- 列内组间距
+    -- ---- ② 主菜单：按"实际建出来了几页"排按钮 ------------------------------------------
+    -- 行数 = ceil(页数 / 每行上限)，再把每行几个均分回去：模块没加载就少一页，剩下的页签照样
+    -- 排成方整的网格（15 页 → 5×3，12 页 → 4×3），不会出现末行孤零零一个、列宽还变来变去。
+    local function BuildTabs()
+        local n = #pages
+        local rows = math.max(1, math.ceil(n / T.tabPerRow))
+        local perRow = math.max(1, math.ceil(n / rows))
+        local w = Media:SnapUnit((T.contentW - (perRow - 1) * T.tabGap) / perRow)
+
+        for i, page in ipairs(pages) do
+            local r = math.floor((i - 1) / perRow)
+            local c = (i - 1) % perRow
+            -- 名字带 MonetUI 前缀：Widget:ButtonMaterial 认这个名字才用 HookScript 跟尺寸，
+            -- 否则每个页签都得挂一条 0.5 秒轮询（那是给读不到脚本槽的暴雪框体留的路子）。
+            local tab = Widget:CreateFrame("MonetUIConfigTab" .. i, tabBar, w, T.tabH,
+                "BackdropTemplate", "Button")
+            tab:SetPoint("TOPLEFT", tabBar, "TOPLEFT", c * (w + T.tabGap), -r * (T.tabH + T.tabGap))
+            Widget:Theme(tab, { thickness = 1, bgAlpha = 0.55, borderAlpha = 1 })
+            Widget:ButtonMaterial(tab, { alpha = 0, weaveAlpha = 0.18 })
+            tab:EnableMouse(true)
+
+            local fs = Widget:Font(tab, 12, "pixel", "neutral", "CENTER")
+            fs:SetPoint("CENTER", tab, "CENTER", 0, 1)
+            fs:SetWordWrap(false)
+            fs:SetText(page.caption)
+
+            -- 选中线压在按钮底边：2px、highlight 档，和边框用的是同一档色，不另发明颜色。
+            local mark = HLine(tab, { side = "bottom", inset = 2, h = 2, key = "highlight", alpha = 1 })
+            mark:Hide()
+
+            tab:SetScript("OnClick", function() SelectPage(i) end)
+            -- 自建框体的脚本槽是自己的：直接 OnEnter / OnLeave，不去占 HoverWatch 的轮询名额。
+            tab:SetScript("OnEnter", function() Widget:SetHoverLift(tab, true) end)
+            tab:SetScript("OnLeave", function() Widget:SetHoverLift(tab, false) end)
+
+            tabButtons[#tabButtons + 1] = { frame = tab, text = fs, mark = mark }
         end
-        local tallest = math.max(colY[0], colY[1], colY[2])
-        root:SetHeight(tallest + 10)
-        -- root 宽由 view 的左右锚点定（= 3*400 + 2*16），不再显式 SetWidth 与锚点打架。
-        local screenH = (_G.GetScreenHeight and _G.GetScreenHeight()) or 800
-        Widget:Height(panel, math.min(tallest + 108, screenH - 40))
-        SetOffset(scrollOffset)
+
+        local barH = rows * T.tabH + (rows - 1) * T.tabGap
+        Widget:Height(tabBar, barH)
+        -- 主菜单与正文的分界：和标题行底下那条同一个画法、同一个 alpha。
+        HLine(panel, { y = -(T.titleH + barH + T.tabGap + 1), inset = 14, alpha = 0.45 })
     end
 
     -- One handler for the whole panel: the wheel event bubbles up from the row widgets,
     -- and no intermediate frame handles it, so the content moves exactly one step.
     panel:SetScript("OnMouseWheel", function(_, delta)
-        -- 本客户端的滚轮符号是反的（实测：往下滚 delta = +1）。既然往下滚要看后面的内容，
-        -- 偏移就得往负走，所以这里是减号。之前我照零售服的直觉改成加号，方向就反了。
-        SetOffset(scrollOffset - delta * 48)
+        -- 本客户端的滚轮符号是反的（实测：往下滚 delta = +1），而偏移量存的是"往上顶了多少"，
+        -- 两者相合就是加号：往下滚 → 偏移变大 → 内容往上走，看到后面的行。
+        SetOffset(scrollOffset + delta * 48)
     end)
 
     local dragging, dragStartY, dragStartOffset
@@ -1895,7 +1938,8 @@ function SimpleConfig:Build()
             return
         end
         local _, my = GetCursorPosition()
-        SetOffset(dragStartOffset + (my - dragStartY) * Media:Mult())
+        -- GetCursorPosition 的 y 朝上：手往下拖 = my 变小 = 偏移要变大，所以是减号。
+        SetOffset(dragStartOffset - (my - dragStartY) * Media:Mult())
     end
 
     -- 拖动期间才挂着的每帧回调（松手即摘）⇒ 走外部账，不进订阅表（否则面板一开就常驻空转）。
@@ -1913,20 +1957,28 @@ function SimpleConfig:Build()
         scrollThumb:SetScript("OnUpdate", nil)
     end)
 
-    relayout()
+    BuildTabs()
+    SelectPage(1)
+
+    -- ---- ④ 底部带：分界线 + 命令提示（左）+ 重载按钮（右）--------------------------------
+    HLine(panel, { side = "bottom", y = T.bottomH - 8, inset = 14, alpha = 0.45 })
 
     local hint = Widget:Font(panel, 12, "pixel", "neutral", "LEFT")
-    hint:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 24, 52)
-    hint:SetWidth(352)
-    hint:SetText("提示：/mui status 查看模块状态，/mui reset 恢复默认设置。")
+    hint:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", T.padX, 36)
+    hint:SetWidth(T.contentW)
     hint:SetJustifyH("LEFT")
+    hint:SetText("提示：/mui status 查看模块状态，/mui reset 恢复默认设置。")
 
-    local reload = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    reload:SetSize(120, 24)
-    reload:SetPoint("BOTTOM", panel, "BOTTOM", 0, 16)
-    reload:SetText("重载界面")
-    -- 和下拉按钮同款织纹底，让面板里所有"按钮"视觉统一。
+    -- 和下拉按钮同一套（自建框 + Theme + 织纹底），不再用 UIPanelButtonTemplate：
+    -- 暴雪那颗按钮的边框和底色不归主题登记套管，面板里就只有它是另一种画风。
+    local reload = Widget:CreateFrame("MonetUIConfigReload", panel, 120, T.ctrlH, "BackdropTemplate", "Button")
+    Widget:Theme(reload, { thickness = 1, bgAlpha = 0.9 })
     Widget:ButtonMaterial(reload, { alpha = 0, weaveAlpha = 0.25 })
+    reload:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -T.padX, 12)
+    reload:EnableMouse(true)
+    local reloadText = Widget:Font(reload, 12, "pixel", "edge", "CENTER")
+    reloadText:SetPoint("CENTER", reload, "CENTER", 0, 1)
+    reloadText:SetText("重载界面")
     reload:SetScript("OnClick", function()
         if _G.ReloadUI then _G.ReloadUI() end
     end)

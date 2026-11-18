@@ -347,6 +347,7 @@ Media.texture = {
     ["monet_warning"]         = ASSET .. "Textures\\monet_warning",
     ["monet_info"]            = ASSET .. "Textures\\monet_info",
     ["monet_gear"]            = ASSET .. "Textures\\monet_gear",
+    ["monet_panel_toggle"]    = ASSET .. "Textures\\monet_panel_toggle",
 
     -- 圆形内容按钮两件套（2026-11-16"圆形保留"那档，消费者 Skin:RoundIconButton）：
     -- 外观页部位导航（31/25）与法术书/天赋页书页签（44×32）的圆井 / 圆环。
