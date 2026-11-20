@@ -414,11 +414,17 @@ local function ArtIdentity(tex)
     if not tex then return nil end
     if type(tex.GetAtlas) == "function" then
         local okA, atlas = pcall(tex.GetAtlas, tex)
-        if okA and type(atlas) == "string" and atlas ~= "" then return (string.lower(atlas)) end
+        -- 游戏返回值 → CanRead 前置：GetAtlas 在受限环境可能给机密串；先看可读再 `~= ""`。
+        local secrets = ns.Secrets   -- 调用时取（本文件加载期早于 Secrets.lua）
+        if okA and type(atlas) == "string" and secrets and secrets.CanRead
+            and secrets.CanRead(atlas) and atlas ~= "" then return (string.lower(atlas)) end
     end
     if type(tex.GetTexture) == "function" then
         local okT, path = pcall(tex.GetTexture, tex)
-        if okT and type(path) == "string" and path ~= "" then
+        -- 游戏返回值 → CanRead 前置：GetTexture 在受限环境可能给机密串；gsub 之前先看可读。
+        local secrets = ns.Secrets
+        if okT and type(path) == "string" and secrets and secrets.CanRead
+            and secrets.CanRead(path) and path ~= "" then
             return (string.lower(path):gsub("/", "\\"))
         end
     end
@@ -596,7 +602,10 @@ function Skin:FadeAtlasBackdrop(frame, patterns, depth, alpha)
     if okR then
         for _, reg in ipairs(regions) do
             local okA, atlas = pcall(reg.GetAtlas, reg)
-            if okA and type(atlas) == "string" and atlas ~= "" then
+            -- 游戏返回值 → CanRead 前置：GetAtlas 在受限环境可能给机密串；先看可读再 `~= ""`。
+            local secrets = ns.Secrets
+            if okA and type(atlas) == "string" and secrets and secrets.CanRead
+                and secrets.CanRead(atlas) and atlas ~= "" then
                 local low = string.lower(atlas)
                 for i = 1, #patterns do
                     if low:find(patterns[i]) then
@@ -1009,7 +1018,10 @@ function Skin:StyleAtlasBackdrop(frame, fadePatterns, swapPatterns, tintPatterns
     if okR then
         for _, reg in ipairs(regions) do
             local okA, atlas = pcall(reg.GetAtlas, reg)
-            if okA and type(atlas) == "string" and atlas ~= "" then
+            -- 游戏返回值 → CanRead 前置：GetAtlas 在受限环境可能给机密串；先看可读再 `~= ""`。
+            local secrets = ns.Secrets
+            if okA and type(atlas) == "string" and secrets and secrets.CanRead
+                and secrets.CanRead(atlas) and atlas ~= "" then
                 local low = string.lower(atlas)
                 local handled = false
                 if tintPatterns and r then
@@ -2655,7 +2667,11 @@ function Skin:WalkFrames(root, opts, fn)
         if okR and type(regs) == "table" then
             for _, r in ipairs(regs) do
                 local okA, a = pcall(r.GetAtlas, r)
-                if okA and type(a) == "string" and a ~= "" then
+                -- 游戏返回值 → CanRead 前置：GetAtlas 在受限环境可能给机密串，type() 判不出来；
+                -- 必须先看可读再 `~= ""`（本文件加载期早于 Secrets.lua，调用时取，不缓存）。
+                local secrets = ns.Secrets
+                if okA and type(a) == "string" and secrets and secrets.CanRead
+                    and secrets.CanRead(a) and a ~= "" then
                     local low = a:lower()
                     if not seen[low] then
                         seen[low] = true
@@ -2665,7 +2681,10 @@ function Skin:WalkFrames(root, opts, fn)
             end
         end
         local okName, name = pcall(h.GetName, h)
-        if not okName or type(name) ~= "string" or name == "" then name = nil end
+        -- 游戏返回值 → CanRead 前置：GetName 在受限环境可能给机密串，type() 判不出来。
+        local secretsN = ns.Secrets
+        if not okName or type(name) ~= "string" or not secretsN or not secretsN.CanRead
+            or not secretsN.CanRead(name) or name == "" then name = nil end
         local nextCarry = fn and fn(h, atlases, name, carry)
         if nextCarry == "stop" then return end
         if nextCarry == nil then nextCarry = carry end
@@ -4438,7 +4457,10 @@ for i = 1, #BACKDROP_PIECES do BACKDROP_SET[BACKDROP_PIECES[i]] = true end
 
 local function probeLabel(obj)
     local ok, name = pcall(obj.GetName, obj)
-    if ok and type(name) == "string" and name ~= "" then return name end
+    -- 游戏返回值 → CanRead 前置：GetName 在受限环境可能给机密串；先看可读再 `~= ""`。
+    local secrets = ns.Secrets
+    if ok and type(name) == "string" and secrets and secrets.CanRead
+        and secrets.CanRead(name) and name ~= "" then return name end
     return "无名"
 end
 
@@ -4462,10 +4484,16 @@ end
 -- 路径、其余返回文件 id 或 nil —— 三样都印出来，否则一屏全是"无名"，等于没探。
 local function probeArt(obj)
     local okA, atlas = pcall(obj.GetAtlas, obj)
-    if okA and type(atlas) == "string" and atlas ~= "" then return atlas end
+    -- 游戏返回值 → CanRead 前置：GetAtlas 在受限环境可能给机密串；先看可读再 `~= ""`。
+    local secrets = ns.Secrets
+    if okA and type(atlas) == "string" and secrets and secrets.CanRead
+        and secrets.CanRead(atlas) and atlas ~= "" then return atlas end
     local okT, tex = pcall(obj.GetTexture, obj)
     if okT then
-        if type(tex) == "string" and tex ~= "" then return (tex:gsub("[^\\/]*[\\/]", "")) end
+        -- 游戏返回值 → CanRead 前置：GetTexture 在受限环境可能给机密串；gsub 之前先看可读。
+        local secretsT = ns.Secrets
+        if type(tex) == "string" and secretsT and secretsT.CanRead
+            and secretsT.CanRead(tex) and tex ~= "" then return (tex:gsub("[^\\/]*[\\/]", "")) end
         if type(tex) == "number" then return "id:" .. tex end
     end
     return "-"
