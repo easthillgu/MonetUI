@@ -1597,9 +1597,15 @@ function Skin:ControlState(control, opts)
         end
 
         if not enabled then
-            local r, g, b = Color:GetNeutral()
-            bg:SetBackdropBorderColor(r, g, b, opts.disabledAlpha or 0.3)
-            if bg.SetBackdropColor then pcall(bg.SetBackdropColor, bg, 0, 0, 0, opts.disabledBgAlpha or 0.25) end
+            -- 禁用靠**明度**读出来（美术提升 ⑤/⑥）：底色走命名 surface `disabled`
+            -- （比 panel 低一档、neutral 色相），边框 neutral 保留可见 alpha，
+            -- 不再把底压成纯黑 0.25、也不靠 alpha 0.3 把整块抹成透明残片。
+            local r, g, b = Color:GetSurface("disabled")
+            if bg.SetBackdropColor then
+                pcall(bg.SetBackdropColor, bg, r, g, b, opts.disabledBgAlpha or opts.bgAlpha or 0.9)
+            end
+            r, g, b = Color:GetNeutral()
+            bg:SetBackdropBorderColor(r, g, b, opts.disabledAlpha or opts.alpha or 1)
             return
         end
 
