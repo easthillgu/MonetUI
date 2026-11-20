@@ -67,18 +67,8 @@ local function TipEnter(button)
     -- 再挡一层：安全按钮一受限，IsVisible 直接抛（HoverWatch 的守卫之外，读按钮前先问）。
     if not Widget:Readable(button) then return end
 
-    -- 战斗中禁用是默认。必须读**运行期设置**（配置面板写进 ns:DB().tooltip），
-    -- 不能读 DEFAULTS —— 否则勾选后永远不生效（静态闸门抓不到这种逻辑错）。
-    -- Tooltip 模块没加载时退回 DEFAULTS；走本模块 InCombat()（ns:InCombat() 单源）。
-    if InCombat() then
-        local tipModule = ns:GetModule("Tooltip")
-        local enabled = tipModule and tipModule:GetSetting("groupTipInCombat")
-        if enabled == nil then
-            local tt = ns.DEFAULTS and ns.DEFAULTS.tooltip
-            enabled = tt and tt.groupTipInCombat
-        end
-        if not enabled then return end
-    end
+    -- 战斗中的显隐由 Tooltip 模块的全局开关 hideInCombat 统一管（每帧 PlaceTick 里 Hide），
+    -- 这里不再单独判 —— 否则两处口径会打架（配置打开"战斗中仍显示"时这里却提前 return）。
 
     -- unit 是 MapButtons 写在按钮上的普通字段；这里**不读 GetAttribute**（受限时可能机密）。
     -- 值级前置先过 CanRead，身份的可读性再问 CanReadIdentity；SetUnit 另有 pcall 兜底。

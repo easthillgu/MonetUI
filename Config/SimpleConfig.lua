@@ -1600,11 +1600,13 @@ function SimpleConfig:Build()
                 tooltip:Apply()
             end)
 
-        -- 此键不由 Tooltip 的 Apply 消费（Groups 轮询时现读），故 setter 不调 Apply。
-        MakeCheckbox(content, "队伍框提示：战斗中仍显示（默认关，战斗机密数据不可读）", row(T.rowH),
-            function() return tooltip:GetSetting("groupTipInCombat") end,
+        -- 战斗中禁用全部提示：战斗中提示数据多是机密值，默认关掉最稳；
+        -- 开 = 战斗中照常显示。setter 走 Apply，让 PlaceTick 的缓存立刻读到新值。
+        MakeCheckbox(content, "战斗中禁用全部鼠标提示（默认开；关掉则战斗中照常显示）", row(T.rowH),
+            function() return tooltip:GetSetting("hideInCombat") end,
             function(value)
-                tooltip:Settings().groupTipInCombat = value and true or false
+                tooltip:Settings().hideInCombat = value and true or false
+                tooltip:Apply()
             end)
 
         Hint(content, row, "用鼠标＝跟手（贴屏幕右/上边缘自动翻边）；用小地图＝提示框右下角对齐小地图面板右上角（面板临时隐藏时保持原位，只有小地图模块关掉才退回跟随）。边框与底色在上方「界面美化 → 系统 → 鼠标提示边框」。")

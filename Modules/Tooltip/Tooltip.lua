@@ -72,6 +72,7 @@ local EDGE_H = 320
 local CONTENT_INTERVAL_MS = 250
 
 local mode, enrich, idsByAlt, neutralText   -- 设置缓存（每帧要读，别去翻 DB）：mode = cursor / minimap / off
+local hideInCombat                 -- 战斗中禁用全部提示（默认 true）；每帧 PlaceTick 读缓存
 local cursorKey, mmKey
 --- 我们上一次写给提示框的锚点（point / rel / relPoint / x / y）。去重键记的是"输入"，
 --- 这份记的是"写出去的结果"：别人把锚点改回去时，只有它能发现（见文件头）。
@@ -790,6 +791,15 @@ local function PlaceTick()
     local tip, visible = TooltipVisible()
     if not tip then return end
 
+    -- 战斗中禁用全部提示（美术提升配套开关，默认开）：不写 GameTooltip 的方法槽 / 脚本槽，
+    -- 只在已有的每帧轮询里 Hide；战斗一结束，下一次悬停走正常流程自然出提示。
+    -- 用 ns:InCombat() 单源（登录当拍 InCombatLockdown 会给假 false）。
+    if hideInCombat and ns:InCombat() and visible then
+        pcall(tip.Hide, tip)
+        if wasShown then wasShown = false; Reset(tip) end
+        return
+    end
+
     if not visible then
         if wasShown then
             wasShown = false
@@ -1092,6 +1102,7 @@ local function ReadSettings(self)
     enrich      = self:GetSetting("enrich") and true or false
     idsByAlt    = self:GetSetting("idsByAlt") and true or false
     neutralText = self:GetSetting("neutralText") and true or false
+    hideInCombat = self:GetSetting("hideInCombat") ~= false   -- 缺省/旧存档都当 true（战斗中禁用）
 end
 
 function M:Apply()
