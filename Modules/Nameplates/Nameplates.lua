@@ -419,15 +419,15 @@ local function Build(base)
 
     local nameSize = ns.Media:SnapSize(Setting("nameSize"))
 
-    plate.name = Widget:Font(plate, nameSize, "pixel", { r = 1, g = 1, b = 1 }, "LEFT")
+    -- 白字一律走 "white" 颜色键（Widget:PaletteColor 的恒定纯白档），不再手写 {1,1,1}。
+    plate.name = Widget:Font(plate, nameSize, "pixel", "white", "LEFT")
     plate.name:SetPoint("BOTTOMLEFT", plate, "TOPLEFT", 0, TEXT_GAP)
     plate.name:SetWordWrap(false)
 
     plate.level = Widget:Font(plate, nameSize, "pixel", "neutral", "RIGHT")
     plate.level:SetPoint("BOTTOMRIGHT", plate, "TOPRIGHT", 0, TEXT_GAP)
 
-    plate.percent = Widget:Font(health, nameSize, "pixel",
-        { r = 1, g = 1, b = 1 }, "RIGHT")
+    plate.percent = Widget:Font(health, nameSize, "pixel", "white", "RIGHT")
     plate.percent:SetPoint("RIGHT", health, "RIGHT", -3, 0)
 
     local castHeight = Setting("castHeight") or 13
@@ -447,16 +447,52 @@ local function Build(base)
     local timer = Widget:Font(cast, nameSize, "pixel", "neutral", "RIGHT")
     timer:SetPoint("RIGHT", cast, "RIGHT", -3, 0)
 
-    local text = Widget:Font(cast, nameSize, "pixel",
-        { r = 1, g = 1, b = 1 }, "LEFT")
+    local text = Widget:Font(cast, nameSize, "pixel", "white", "LEFT")
     text:SetPoint("LEFT", icon, "RIGHT", 3, 0)
     text:SetPoint("RIGHT", timer, "LEFT", -3, 0)
     text:SetWordWrap(false)
+
+    -- B3 打断/失败短文字：红闪期间顶替法术名居中显示（同宽约束，不遮图标/倒计时位）。
+    local flashText = Widget:Font(cast, nameSize, "pixel", "danger", "CENTER")
+    flashText:SetPoint("LEFT", icon, "RIGHT", 3, 0)
+    flashText:SetPoint("RIGHT", timer, "LEFT", -3, 0)
+    flashText:SetWordWrap(false)
+    flashText:Hide()
+
+    -- B2 不可打断盾徽：复用 monet_combat_shield 灰阶模具，压在图标右下角，
+    -- 法术名从图标右缘 +3 起画，盾徽不会遮到它。
+    local shield = cast:CreateTexture(nil, "OVERLAY", nil, 3)
+    shield:SetTexture(ns.Media:Texture("monet_combat_shield"))
+    shield:SetVertexColor(0.92, 0.92, 0.95, 1)
+    shield:SetSize(iconSize * 0.7, iconSize * 0.7)
+    shield:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", 1, -1)
+    shield:Hide()
+
+    -- B1 三角火花：复用 CastBar.lua 的双层模具机制（monet_spark_up 尖端在贴图顶边），
+    -- 挂在条下沿、尖端顶住填充前沿；位置由现有 CastTick 驱动，不新增每帧驱动。
+    local mult = ns.Media:Mult() or 1
+    local spark = CreateFrame("Frame", nil, cast)
+    spark:SetSize(6 * mult, 3 * mult)
+    local sparkEdge = spark:CreateTexture(nil, "OVERLAY", nil, 1)
+    sparkEdge:SetTexture(ns.Media:Texture("monet_spark_up"))
+    sparkEdge:SetVertexColor(0.10, 0.03, 0.03, 1)
+    sparkEdge:SetAllPoints()
+    local sparkFill = spark:CreateTexture(nil, "OVERLAY", nil, 2)
+    sparkFill:SetTexture(ns.Media:Texture("monet_spark_up"))
+    sparkFill:SetVertexColor(1, 1, 1, 1)
+    sparkFill:SetPoint("CENTER", spark, "CENTER", 0, 0)
+    sparkFill:SetSize(4 * mult, 2 * mult)   -- 芯比描边小一圈（同 CastBar.lua 的比例）
+    spark.edge, spark.fill = sparkEdge, sparkFill
+    spark:SetPoint("TOP", cast, "BOTTOMLEFT", BORDER, 1)
+    spark:Hide()
 
     cast.fill = fill
     cast.icon = icon
     cast.text = text
     cast.timer = timer
+    cast.flashText = flashText
+    cast.shield = shield
+    cast.spark = spark
     cast:Hide()
 
     plate.cast = cast
@@ -491,6 +527,14 @@ local function Layout(plate)
     plate.cast:SetSize(width, castHeight)
     Widget:SyncBarFill(plate.cast.fill, castHeight - BORDER * 2)
     plate.cast.icon:SetSize(castHeight - BORDER * 2, castHeight - BORDER * 2)
+    -- 火花/盾徽随重排同步：火花按物理像素定尺寸并钉回起点，盾徽按图标比例。
+    local mult = ns.Media:Mult() or 1
+    plate.cast.spark:SetSize(6 * mult, 3 * mult)
+    plate.cast.spark.edge:SetSize(6 * mult, 3 * mult)
+    plate.cast.spark.fill:SetSize(4 * mult, 2 * mult)
+    plate.cast.spark:ClearAllPoints()
+    plate.cast.spark:SetPoint("TOP", plate.cast, "BOTTOMLEFT", BORDER, 1)
+    plate.cast.shield:SetSize((castHeight - BORDER * 2) * 0.7, (castHeight - BORDER * 2) * 0.7)
     plate.cast:Hide()
 
     -- The name stops where the level starts, so a long name never runs under it.
@@ -622,16 +666,75 @@ local function RestoreBlizzardPlate(base, plate)
     return uf ~= nil
 end
 
+-- UpdateBorder 定义在后面（仇恨/目标描边）；红闪到期要请它恢复边框色，先前向声明这个 local，
+-- 否则 CastTick 里引用的是全局 nil（AGENTS：helper 必须在依赖的 local 之后）。
+local UpdateBorder
+
+--- B1 火花染色：普通=白芯+深描边，不可打断=中性灰（与灰色填充同一信号）。
+--- 只依赖我们自己的旁表状态 plate.castNotInt（UpdateCast 里经 Secrets.Bool 落定的普通布尔）。
+local function TintCastSpark(plate)
+    local spark = plate.cast and plate.cast.spark
+    if not spark then return end
+    local r, g, b = 1, 1, 1
+    if plate.castNotInt then r, g, b = Color:GetNeutral() end
+    spark.fill:SetVertexColor(r, g, b, 1)
+    spark.edge:SetVertexColor(0.10, 0.03, 0.03, 1)
+end
+
+local function HideCast(plate)
+    local cast = plate.cast
+    if not cast then return end
+    plate.castActive = nil
+    plate.castEndClock = nil
+    plate.castStartClock = nil
+    -- B3/B4 的状态时间戳一并清掉：plate 会被池子复用，残留的 flash 会在下一只怪身上诈尸。
+    plate.castFlashUntil = nil
+    plate.castDelayUntil = nil
+    plate.castNotInt = nil
+    plate:SetScript("OnUpdate", nil)
+    cast.flashText:Hide()
+    cast.spark:Hide()
+    cast.shield:Hide()
+    cast:Hide()
+end
+
 -- The fill computes only with GetTime() (our own plain number) and hands SetValue a value the
 -- client clamps against the secret start/end; the timer text needs math, only when end came plain.
 local function CastTick(plate)
     local cast = plate.cast
-    if not cast or not plate.castActive then return end
+    if not cast then return end
+    local now = GetTime()
 
-    pcall(cast.fill.SetValue, cast.fill, GetTime() * 1000)
+    -- B3：打断/失败红闪期间驱动保持挂载（StartCastFlash 负责挂上）；
+    -- 边框约 5Hz 红闪，到期恢复主题描边并走原隐藏路径。纯时间戳，不用 C_Timer。
+    if plate.castFlashUntil then
+        if now < plate.castFlashUntil then
+            local lit = (math.floor(now * 10) % 2) == 0
+            cast:SetBackdropBorderColor(0.95, 0.16, 0.12, lit and 1 or 0.35)
+            return
+        end
+        plate.castFlashUntil = nil
+        UpdateBorder(plate)
+        HideCast(plate)
+        return
+    end
+
+    -- B4：受击退条的尾闪（0.25s 琥珀亮芯），机密期火花钉在起点也照样闪。
+    if plate.castDelayUntil then
+        if now < plate.castDelayUntil then
+            cast.spark.fill:SetVertexColor(1, 0.82, 0.30, 1)
+        else
+            plate.castDelayUntil = nil
+            TintCastSpark(plate)   -- 到期恢复常规染色
+        end
+    end
+
+    if not plate.castActive then return end
+
+    pcall(cast.fill.SetValue, cast.fill, now * 1000)
 
     if plate.castEndClock then
-        local left = plate.castEndClock - GetTime()
+        local left = plate.castEndClock - now
         if left < 0 then left = 0 end
         if left < 10 then
             cast.timer:SetText(string.format("%.1f", left))
@@ -641,20 +744,43 @@ local function CastTick(plate)
     else
         cast.timer:SetText("")
     end
+
+    -- B1：火花沿填充前沿移动。进度公式与引擎 StatusBar 的 (value-min)/(max-min) 同形，
+    -- 引导（start>end）自然从 1 退到 0，不需要分支；宽度取设置值（普通数），不读框体几何。
+    -- 机密施法值时 start/end 钟不存在 → 钉在起点（CastBar.lua:162 先例）。
+    local s, e = plate.castStartClock, plate.castEndClock
+    local x = BORDER
+    if s and e and e ~= s then
+        local frac = (now - s) / (e - s)
+        if frac < 0 then frac = 0 elseif frac > 1 then frac = 1 end
+        x = BORDER + ((Setting("width") or 120) - BORDER * 2) * frac
+    end
+    cast.spark:SetPoint("TOP", cast, "BOTTOMLEFT", x, 1)
 end
 
 -- 投射条驱动只在"有条在走"的那段时间挂在 plate 上（HideCast 摘掉），常驻订阅会让空闲
 -- 名板也每帧空转。所以它走外部账：所有 plate 共用一个 key，账合成一路。
+-- B3 的红闪期也算"有条"：StartCastFlash 同样挂这个壳，/mui perf 里仍是 nameplates:cast 一路。
 local CastTickTracked = ns.Scheduler and ns.Scheduler:Profile("nameplates:cast", "名板投射条", CastTick)
     or CastTick
 
-local function HideCast(plate)
+--- B3：打断/失败不再瞬时藏条 —— 置 0.5s 红闪时间戳，渲染与收尾都交给现有 CastTick。
+--- 条没在显示（showCast 关 / 本来就没条）时不闪，直接走原隐藏路径。
+local function StartCastFlash(plate, label)
     local cast = plate.cast
-    if not cast then return end
+    if not cast or not cast:IsShown() then return HideCast(plate) end
     plate.castActive = nil
     plate.castEndClock = nil
-    plate:SetScript("OnUpdate", nil)
-    cast:Hide()
+    plate.castStartClock = nil
+    plate.castDelayUntil = nil
+    plate.castFlashUntil = GetTime() + 0.5
+    cast.spark:Hide()
+    cast.shield:Hide()
+    cast.text:Hide()
+    cast.timer:Hide()
+    cast.flashText:SetText(label)
+    cast.flashText:Show()
+    plate:SetScript("OnUpdate", CastTickTracked)
 end
 
 --- Read the cast tuple without letting a restricted call break the plate; `type(name) == "nil"`
@@ -690,6 +816,12 @@ local function UpdateCast(plate)
     end
     if type(name) == "nil" then return HideCast(plate) end
 
+    -- 新施法开始：上一轮可能还挂着红闪（打断后立刻再施法），先收掉闪烁状态。
+    plate.castFlashUntil = nil
+    plate.cast.flashText:Hide()
+    plate.cast.text:Show()
+    plate.cast.timer:Show()
+
     -- Name and texture go straight to the widgets: SetText / SetTexture accept a secret.
     plate.cast.text:SetText(name)
     if type(texture) ~= "nil" then
@@ -713,14 +845,27 @@ local function UpdateCast(plate)
     -- Plain end => a real countdown; hidden end => bar moves, number blank (see 4.6 in MonetUI.md).
     local endClock = Secrets.Number(endMS)
     plate.castEndClock = endClock and (endClock / 1000) or nil
+    -- B1：起点钟也只在两端都是普通数时存（机密不做算术）；缺任一端火花钉起点。
+    local startClock = Secrets.Number(startMS)
+    plate.castStartClock = (startClock and plate.castEndClock) and (startClock / 1000) or nil
 
-    if Secrets.Bool(notInterruptible, false) then
+    -- B2：不可打断判定只落一次普通布尔，灰填充与盾徽共用；机密落回"可打断"（Secrets.Bool 契约）。
+    local notInt = Secrets.Bool(notInterruptible, false)
+    plate.castNotInt = notInt
+    plate.cast.shield:SetShown(notInt)
+    if notInt then
         plate.cast.fill:SetStatusBarColor(Color:GetNeutral())
     elseif channel then
         plate.cast.fill:SetStatusBarColor(0.62, 0.62, 0.92)
     else
         plate.cast.fill:SetStatusBarColor(Color:GetResource())
     end
+
+    -- B1：火花随条显示（引导也显示），先钉起点，CastTick 每拍把它推到填充前沿。
+    TintCastSpark(plate)
+    plate.cast.spark:ClearAllPoints()
+    plate.cast.spark:SetPoint("TOP", plate.cast, "BOTTOMLEFT", BORDER, 1)
+    plate.cast.spark:Show()
 
     plate.cast:Show()
     plate:SetScript("OnUpdate", CastTickTracked)
@@ -817,7 +962,8 @@ end
 --- The border says what the unit is doing to you: threat first, then "this is my target".
 --- UnitThreatSituation / UnitIsUnit can be secret, so each keeps its previous answer
 --- instead of flickering (AGENTS: 受限时保留上次状态).
-local function UpdateBorder(plate)
+--- （赋值给文件前部前向声明的 local：CastTick 的红闪到期要调它恢复边框。）
+function UpdateBorder(plate)
     local unit = plate.unit
     local r, g, b = Color:GetBorder()
 
@@ -1014,12 +1160,19 @@ local function OnPlateEvent(plate, event)
     if not plate.unit or not plates[plate.unit] then return end
 
     if CAST_EVENTS[event] then
-        if event == "UNIT_SPELLCAST_STOP" or event == "UNIT_SPELLCAST_CHANNEL_STOP"
-            or event == "UNIT_SPELLCAST_FAILED" or event == "UNIT_SPELLCAST_INTERRUPTED" then
+        if event == "UNIT_SPELLCAST_INTERRUPTED" or event == "UNIT_SPELLCAST_FAILED" then
+            -- B3：不再瞬时藏条 —— 0.5s 红闪 + 短文字，到期由 CastTick 走原隐藏路径。
+            -- 刚结束的施法可能读回旧值，所以文案来自事件本身，不做新查询。
+            StartCastFlash(plate, event == "UNIT_SPELLCAST_INTERRUPTED" and "被打断" or "失败")
+        elseif event == "UNIT_SPELLCAST_STOP" or event == "UNIT_SPELLCAST_CHANNEL_STOP" then
             -- The cast that just ended can still read back stale, so the end comes from the
             -- event, not a fresh query.
             HideCast(plate)
         else
+            if event == "UNIT_SPELLCAST_DELAYED" and plate.cast and plate.cast:IsShown() then
+                -- B4：退条只记一个 0.25s 尾闪时间戳；不读 delayTimeMs（第 11 返回是机密）。
+                plate.castDelayUntil = GetTime() + 0.25
+            end
             UpdateCast(plate)
         end
         return
@@ -1081,11 +1234,10 @@ local function Removed(unit)
     plates[unit] = nil
     plate.unit = nil
     plate:UnregisterAllEvents()
-    plate:SetScript("OnUpdate", nil)
-    plate.castActive = nil
-    plate.castEndClock = nil
+    -- HideCast 一并清掉施法状态与 B1-B4 新增键（spark/shield/flashText 随框隐藏），
+    -- plate 被池子换给下一只单位时不带残留。
+    HideCast(plate)
     plate:Hide()
-    plate.cast:Hide()
     M:SyncGuard()
     return true
 end
@@ -1208,9 +1360,8 @@ function M:SetEnabled(enabled)
         if plate.base then RestoreBlizzardPlate(plate.base, plate) end
         plate.unit = nil
         plate:UnregisterAllEvents()
-        plate:SetScript("OnUpdate", nil)
+        HideCast(plate)   -- 模块关闭同样清干净施法状态（含红闪/尾闪时间戳）
         plate:Hide()
-        plate.cast:Hide()
         plates[unit] = nil
     end
 

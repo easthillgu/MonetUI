@@ -1161,6 +1161,12 @@ local function EditFadeStep(_, dt)
     if not alive then EDIT_FADE_FRAME:Hide() end
 end
 
+-- 按需挂/摘的每帧驱动进 /mui perf 外部账（AGENTS 2026-11-07）：Profile 壳**不改实参**，
+-- SetScript 投的仍是 (self, elapsed)，所以签名保持 (_, dt)（nameplates:cast 先例同款）。
+-- 模块级稳定引用，只包一次；摘除侧照旧 Hide 帧即停，不需要 Unregister。
+local EditFadeTracked = ns.Scheduler and ns.Scheduler:Profile("social:inputfade", "聊天:输入框渐隐", EditFadeStep)
+    or EditFadeStep
+
 function ChatBand:EnsureEditFadeFrame()
     -- 桩环境（回归探针）没有 CreateFrame：不建帧，fade 档退化成"保持 shown、alpha 不动"，
     -- 静态断言与显隐断言都还能验，只是不会真的插值。
@@ -1171,7 +1177,7 @@ function ChatBand:EnsureEditFadeFrame()
     end
     local f = CreateFrame("Frame")
     f:Hide()
-    f:SetScript("OnUpdate", EditFadeStep)
+    f:SetScript("OnUpdate", EditFadeTracked) -- Profile 壳：挂上期间每拍记一笔外部账
     EDIT_FADE_FRAME = f
     f:Show()
 end
@@ -1553,6 +1559,32 @@ function ChatBand:SyncChrome()
     if ok and type(cur) == "number" then self:ApplyChromeAlpha(cur) end
 end
 
+--- 页签渐隐驱动：从 FadeTo 里的闭包提成**模块级稳定引用**（Profile 记账要求）。
+--- 状态本就在模块级 CHAT_FADE_TARGET / CHAT_FADE_FRAME（全局唯一一条 GDM 曲线，
+--- 不是按页签各一份），无需旁表。Profile 壳不改实参，SetScript 投 (self, elapsed)，
+--- self 是承载插值的私有帧 —— 签名保持 (self, dt)，与 nameplates:cast 先例一致。
+local function TabFadeStep(self, dt)
+    local tgt = CHAT_FADE_TARGET
+    if not tgt then self:Hide(); return end
+    local g = Skin:Need("GeneralDockManager")
+    if not g then self:Hide(); CHAT_FADE_TARGET = nil; return end
+    local ok2, c = pcall(g.GetAlpha, g)
+    c = (ok2 and type(c) == "number") and c or tgt
+    local step = (dt or 0) / ChatBand:FadeTime()   -- self 是帧，不是 ChatBand；必须显式用表名调
+    if tgt > c then c = math.min(tgt, c + step) else c = math.max(tgt, c - step) end
+    -- 页签容器 + 按钮框写同一条曲线（§8.95）：只写 GDM 会看到"页签淡掉了、喇叭还亮着"。
+    ChatBand:ApplyChromeAlpha(c)
+    if math.abs(c - tgt) < 0.01 then
+        ChatBand:ApplyChromeAlpha(tgt)
+        CHAT_FADE_TARGET = nil
+        self:Hide()
+    end
+end
+
+-- 按需挂/摘的每帧驱动进 /mui perf 外部账；所有页签共用一条 GDM 曲线，一个 key 合成一路。
+local TabFadeTracked = ns.Scheduler and ns.Scheduler:Profile("social:tabfade", "聊天:页签渐隐", TabFadeStep)
+    or TabFadeStep
+
 --- 页签淡入淡出（B，借鉴 Chattynator 的 fadeInterpolator）。
 --- 真帧挂 OnUpdate 做线性插值；桩环境 / 极端情况下没有可挂脚本的帧（`SetScript` 不存在），
 --- 直接落到离散目标，行为不变 —— 这样回归桩依旧走硬切换、62 项不破。
@@ -1575,23 +1607,8 @@ function ChatBand:FadeTo(show)
     if not CHAT_FADE_FRAME then
         CHAT_FADE_FRAME = CreateFrame("Frame")
         CHAT_FADE_FRAME:Hide()
-        CHAT_FADE_FRAME:SetScript("OnUpdate", function(self, dt)
-            local tgt = CHAT_FADE_TARGET
-            if not tgt then self:Hide(); return end
-            local g = Skin:Need("GeneralDockManager")
-            if not g then self:Hide(); CHAT_FADE_TARGET = nil; return end
-            local ok2, c = pcall(g.GetAlpha, g)
-            c = (ok2 and type(c) == "number") and c or tgt
-            local step = (dt or 0) / ChatBand:FadeTime()   -- 闭包里 self 是帧，不是 ChatBand；必须显式用表名调
-            if tgt > c then c = math.min(tgt, c + step) else c = math.max(tgt, c - step) end
-            -- 页签容器 + 按钮框写同一条曲线（§8.95）：只写 GDM 会看到"页签淡掉了、喇叭还亮着"。
-            ChatBand:ApplyChromeAlpha(c)
-            if math.abs(c - tgt) < 0.01 then
-                ChatBand:ApplyChromeAlpha(tgt)
-                CHAT_FADE_TARGET = nil
-                self:Hide()
-            end
-        end)
+        -- 驱动换成模块级 TabFadeStep 的 Profile 壳（原闭包提成稳定引用，逻辑逐句不变）。
+        CHAT_FADE_FRAME:SetScript("OnUpdate", TabFadeTracked)
     end
     CHAT_FADE_FRAME:Show()
 end

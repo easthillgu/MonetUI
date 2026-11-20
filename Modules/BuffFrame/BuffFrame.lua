@@ -88,7 +88,10 @@ local function CollectAuras(unit, filter)
     return list, complete
 end
 
-local function CreateAuraButton(parent, size)
+--- 图标钮的视觉底座（光环行 / 武器附魔行共用同一套规格）：
+--- 尺寸、内缩 1px 边框、裁切图标、Cooldown 计时、右下角堆叠数。
+--- 脚本（提示 / 右键）由各自的工厂补，数据源不同。
+local function CreateIconButton(parent, size)
     local button = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     button:SetSize(size, size)
     button.size = size
@@ -117,10 +120,17 @@ local function CreateAuraButton(parent, size)
         cooldowns:StyleCooldown(button.cooldown, 12, true, "pixel")
     end
 
-    button.count = Widget:Font(button, 12, "pixel", { r = 1, g = 1, b = 1 }, "RIGHT")
+    -- HUD 堆叠数恒纯白、不随主题：走 "white" 颜色键（Widget:PaletteColor 唯一键表）。
+    button.count = Widget:Font(button, 12, "pixel", "white", "RIGHT")
     button.count:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -1, 1)
 
     Widget:Theme(button, { thickness = 1, bgAlpha = 0.6 })
+
+    return button
+end
+
+local function CreateAuraButton(parent, size)
+    local button = CreateIconButton(parent, size)
 
     -- 自绘的按钮没有暴雪那套提示与右键：自己写一份。
     -- 提示给名字、层数、剩余时间，并说明右键可以取消。
@@ -173,9 +183,10 @@ local function CreateAuraButton(parent, size)
     return button
 end
 
-local function EnsureButtons(list, parent, needed, size)
+local function EnsureButtons(list, parent, needed, size, factory)
+    factory = factory or CreateAuraButton
     for i = #list + 1, needed do
-        list[i] = CreateAuraButton(parent, size)
+        list[i] = factory(parent, size)
     end
     for i = needed + 1, #list do
         list[i]:Hide()
@@ -488,6 +499,230 @@ local function SetCombatContainersAlpha(alpha)
     if combatDebuffs then pcall(combatDebuffs.SetAlpha, combatDebuffs, alpha) end
 end
 
+-- ============================================================================
+-- A1 脱战武器附魔行（磨刀石 / 毒 / 元素磨刀石等临时增强）
+-- ----------------------------------------------------------------------------
+-- 本客户端的临时附魔由暴雪 BuffFrame 内嵌 auraType="TempEnchant" 按钮绘制，而我们
+-- 脱战把 BuffFrame 整体 alpha 0、自绘行只读 C_UnitAuras 的 HELPFUL/HARMFUL ⇒ 附魔
+-- 两头都看不见。这里补一条专用行：数据源 C_Item.GetWeaponEnchantInfo（1.60 文档，
+-- 返回 WeaponEnchantInfo 数组，timeLeft 单位**毫秒**），图标直接用 enchantIconID
+-- （fileID）。本客户端没有 TempEnchantFrame、GetInventoryItem* 全族不存在，不许用。
+-- 战斗跟随 combatMode 隐藏（战斗中能否读该 API 未实测，A2 待实机另行拍板）。
+-- ============================================================================
+
+local ENCHANT_SIZE = BUFF_SIZE   -- 附魔属有益临时增强，沿用 buff/proc 行的 28px 规格
+-- 语义紫：临时附魔 = 紫。**固定语义色，不随主题变**（先例：debuff 红边走 Color:GetDanger，
+-- 也是语义优先于主题）；换主题后 Update 重涂时这里照旧染紫。
+local ENCHANT_PURPLE = { r = 0.67, g = 0.42, b = 0.98 }
+local ENCHANT_MAX_AGE = 30 * 86400 -- 剩余 > 30 天当读不到（AGENTS 冷却判例：毫秒/秒混算防线）
+
+local enchantButtons = {}
+local enchantContainer
+local enchantSubId = nil        -- Scheduler 订阅号，模块级局部防重复注册
+local enchantActive = false     -- 模块启用旗：右键取消路径的守门之一
+local enchantApiWarned = false  -- API 缺失一次性警告
+local enchantIconWarned = false -- enchantIconID 缺失一次性警告
+-- M:Update 每轮记下的三行实际高度：附魔行锚点按它累加，**绝不锚在可能为空的行上**
+-- （空容器被 FitContainer 压成 0×0 后 GetLeft() 返回 nil —— AGENTS 判例）。
+local lastRowHeights = { buff = 0, proc = 0, debuff = 0 }
+
+--- 三个武器槽。Enum.WeaponSlot（1.60 文档 TYPES.md：MainHand=0 / OffHand=1 / Ranged=2）
+--- 优先读客户端枚举，缺席时退回文档值。
+local function WeaponSlots()
+    local e = _G.Enum and _G.Enum.WeaponSlot
+    if type(e) == "table" and e.MainHand ~= nil and e.OffHand ~= nil and e.Ranged ~= nil then
+        return { e.MainHand, e.OffHand, e.Ranged }
+    end
+    return { 0, 1, 2 }
+end
+
+--- 逐槽读附魔。返回 nil = API 不存在（整行隐藏 + 一次性警告）；否则返回
+--- { slot, enchant } 数组（可能为空）。hasEnchant 过 Secrets.Bool：机密时落回
+--- false = 隐藏该格，绝不对机密值做真值测试。
+local function CollectEnchants()
+    local C = _G.C_Item
+    if not C or type(C.GetWeaponEnchantInfo) ~= "function" then return nil end
+    local list = {}
+    for _, slot in ipairs(WeaponSlots()) do
+        local ok, enchants = pcall(C.GetWeaponEnchantInfo, slot)
+        if ok and type(enchants) == "table" then
+            for i = 1, #enchants do
+                local e = enchants[i]
+                if type(e) == "table" and Secrets.Bool(e.hasEnchant, false) then
+                    list[#list + 1] = { slot = slot, enchant = e }
+                end
+            end
+        end
+    end
+    return list
+end
+
+local function CreateEnchantButton(parent, size)
+    local button = CreateIconButton(parent, size)
+
+    -- enchantIconID 为 nil/0 时的降级小片：不画图标，只画"附魔"文字 + 计时
+    -- （计时仍由 Cooldown 模块渲染，规格与其它行一致）。
+    button.label = Widget:Font(button, 10, "pixel", "white", "CENTER")
+    button.label:SetPoint("TOP", button, "TOP", 0, -3)
+    button.label:SetText("附魔")
+    button.label:Hide()
+
+    button:EnableMouse(true)
+    -- 提示只显示能安全读到的：附魔名没有可查的 API（enchantID 不拿去 concat/format），
+    -- 名字查不到就不显示名字，别猜 API。剩余/次数用 ShowEnchant 存下的明文快照。
+    button:SetScript("OnEnter", function(self)
+        local tip = _G.GameTooltip
+        if not tip or self.slot == nil then return end
+        pcall(tip.SetOwner, tip, self, "ANCHOR_RIGHT")
+        pcall(tip.SetText, tip, "武器附魔")
+        if self.secLeft then
+            pcall(tip.AddLine, tip, "剩余：" .. Math:DurationText(self.secLeft), 1, 1, 1)
+        end
+        if self.chargesShown and self.chargesShown > 0 then
+            pcall(tip.AddLine, tip, "次数：" .. tostring(self.chargesShown), 1, 1, 1)
+        end
+        pcall(tip.AddLine, tip, "右键取消", 0.6, 0.6, 0.6)
+        pcall(tip.Show, tip)
+    end)
+    button:SetScript("OnLeave", function()
+        local tip = _G.GameTooltip
+        if tip then pcall(tip.Hide, tip) end
+    end)
+    -- 右键取消：机制同暴雪 TempEnchant 按钮（C_Spell.CancelItemTempEnchantment(slot, type)），
+    -- 只取机制不抄代码。受限 API ⇒ 调用前战斗/受限守门；enchantType 过 Secrets.Number。
+    -- 取消成功后下一拍轮询自然刷新。写法沿用本模块光环行的 OnMouseDown（Frame 无 OnClick）。
+    button:SetScript("OnMouseDown", function(self, mouseButton)
+        if mouseButton ~= "RightButton" then return end
+        if not enchantActive or self.slot == nil then return end
+        if InCombat() then return end
+        if type(ns.IsRestricted) == "function" and ns:IsRestricted() then return end
+        local C = _G.C_Spell
+        if not C or type(C.CancelItemTempEnchantment) ~= "function" then return end
+        local etype = Secrets.Number(self.enchantTypeRaw) or 0
+        pcall(C.CancelItemTempEnchantment, self.slot, etype)
+    end)
+
+    button:Hide()
+    return button
+end
+
+local function ShowEnchant(button, entry, index)
+    local size = button.size
+    local perRow = PerRow(size)
+    local stride = size + ICON_GAP
+    local column = (index - 1) % perRow
+    local row = math.floor((index - 1) / perRow)
+
+    button:ClearAllPoints()
+    button:SetPoint("TOPLEFT", button:GetParent(), "TOPLEFT",
+        column * stride, -row * stride)
+    button:Show()
+
+    local e = entry.enchant
+    -- 图标 = enchantIconID（fileID 直接 SetTexture，同光环行写法）。nil/0 → 文字小片。
+    local iconID = Secrets.Number(e.enchantIconID)
+    if iconID and iconID > 0 then
+        button.icon:SetTexture(iconID)
+        button.icon:Show()
+        button.label:Hide()
+    else
+        button.icon:Hide()
+        button.label:Show()
+        if not enchantIconWarned then
+            enchantIconWarned = true
+            ns:Print("武器附魔缺少图标ID（enchantIconID），已改用文字小片显示。")
+        end
+    end
+
+    -- 次数（charges）> 0 时右下角堆叠数，沿用光环行堆叠画法。
+    local charges = Secrets.Number(e.charges)
+    button.chargesShown = charges
+    if charges and charges > 0 then
+        button.count:SetText(charges)
+        button.count:Show()
+    else
+        button.count:Hide()
+    end
+
+    -- timeLeft 是**毫秒**（1.60 文档）→ /1000 成秒；> 30 天当读不到。
+    local ms = Secrets.Number(e.timeLeft)
+    local sec = ms and (ms / 1000) or nil
+    if sec and sec > ENCHANT_MAX_AGE then sec = nil end
+    button.secLeft = sec
+    if sec and sec > 0 then
+        local expire = GetTime() + sec
+        -- 同一附魔持续期间不每秒重设冷却（避免 swipe 每拍回跳）：换槽 / 换附魔 /
+        -- 到期时刻漂移 > 2s 才重设，其余交给 Cooldown 自己走。
+        if button.slot ~= entry.slot or not button.expireAt
+            or math.abs(expire - button.expireAt) > 2 then
+            if not pcall(button.cooldown.SetCooldown, button.cooldown, GetTime(), sec) then -- TAINT-OK: 与光环行同源——Secrets.Number 明文秒数、combatMode 早退仅脱战执行、pcall 兜底；武器附魔无 DurationObject 可用
+                pcall(button.cooldown.Clear, button.cooldown)
+            end
+            button.expireAt = expire
+        end
+    else
+        pcall(button.cooldown.Clear, button.cooldown)
+        button.expireAt = nil
+    end
+
+    -- 语义紫边框（见 ENCHANT_PURPLE 注释）：1px 边框机制沿用 Widget:Theme，只换色。
+    if button.SetBackdropBorderColor then
+        button:SetBackdropBorderColor(ENCHANT_PURPLE.r, ENCHANT_PURPLE.g, ENCHANT_PURPLE.b, 0.9)
+    end
+
+    button.slot = entry.slot
+    button.enchantTypeRaw = e.enchantType
+end
+
+--- 附魔行落点：UIParent + 三行实际高度累加（buff 底 +4 proc、proc 底 +8 debuff、
+--- debuff 底 +8 附魔），与 debuff 行同款"不锚空行"写法。
+local function AnchorEnchantRow()
+    if not enchantContainer then return end
+    local h = lastRowHeights
+    enchantContainer:ClearAllPoints()
+    enchantContainer:SetPoint("TOPLEFT", UIParent, "TOPLEFT", AURA_GAP,
+        -(AURA_GAP + h.buff + 4 + h.proc + 8 + h.debuff + 8))
+end
+
+--- 附魔行刷新：1s 轮询与 M:Update（脱战路径）共用。战斗模式由 SetCombatMode 藏行，
+--- 这里直接早退。所有游戏返回值已过 Secrets.Bool/Number，机密格隐藏/降级。
+local function UpdateEnchants()
+    if not enchantContainer then return end
+    if combatMode then return end
+
+    local list = CollectEnchants()
+    if not list then
+        if not enchantApiWarned then
+            enchantApiWarned = true
+            ns:Print("本客户端没有 C_Item.GetWeaponEnchantInfo，武器附魔行不可用（整行隐藏）。")
+        end
+        for i = 1, #enchantButtons do enchantButtons[i]:Hide() end
+        enchantContainer:Hide()
+        return
+    end
+
+    EnsureButtons(enchantButtons, enchantContainer, #list, ENCHANT_SIZE, CreateEnchantButton)
+    for index = 1, #list do
+        Secrets.Measure(ShowEnchant, enchantButtons[index], list[index], index)
+    end
+    FitContainer(enchantContainer, #list, ENCHANT_SIZE)
+    enchantContainer:SetShown(#list > 0)
+    AnchorEnchantRow()
+end
+
+local function StartEnchantPoll()
+    if enchantSubId then return end
+    -- 签名 fn(elapsed)：UpdateEnchants 不收参，调度器投 elapsed 也无碍（形参 ≤1）。
+    enchantSubId = Scheduler:Every(1000, UpdateEnchants, "光环:武器附魔")
+end
+
+local function StopEnchantPoll()
+    if enchantSubId then
+        Scheduler:Unregister(enchantSubId)
+        enchantSubId = nil
+    end
+end
+
 --- 两套显示互斥切换。进战斗 → 引擎容器（我们的皮肤）；不可用时 → 暴雪原生框。脱战 → 自绘。
 local function SetCombatMode(on)
     if on == combatMode then
@@ -499,11 +734,13 @@ local function SetCombatMode(on)
     if on then
         -- 自绘那套退场：只清按钮，buffContainer 本身留着 —— 它是 QueueUpdate 的 OnUpdate 驱动帧，
         -- 隐藏的帧不跑 OnUpdate，藏起来就再也收不到下一次刷新了。
-        for _, list in ipairs({ buffButtons, procButtons, debuffButtons }) do
+        for _, list in ipairs({ buffButtons, procButtons, debuffButtons, enchantButtons }) do
             for i = 1, #list do list[i]:Hide() end
         end
         HideContainer(procContainer)
         HideContainer(debuffContainer)
+        -- 附魔行战斗跟随隐藏（A1 只做脱战；战斗中 GetWeaponEnchantInfo 可读性未实测）。
+        HideContainer(enchantContainer)
         combatMode = true
         -- **战斗中绝不创建容器**（引擎会给出空容器，且可能产生拦截）。容器由脱战路径
         -- 提前建好；真没有就退回暴雪原生框（SuppressBlizzard 里按 EngineCombatReady 判断）。
@@ -561,13 +798,19 @@ function M:Update()
         if count <= 0 then return 0 end
         return math.ceil(count / PerRow(size)) * (size + ICON_GAP) - ICON_GAP
     end
+    lastRowHeights.buff   = RowHeight(#auras, BUFF_SIZE)
+    lastRowHeights.proc   = RowHeight(#procs, BUFF_SIZE)
+    lastRowHeights.debuff = RowHeight(#debuffs, DEBUFF_SIZE)
     debuffContainer:ClearAllPoints()
     debuffContainer:SetPoint("TOPLEFT", UIParent, "TOPLEFT", AURA_GAP,
-        -(AURA_GAP + RowHeight(#auras, BUFF_SIZE) + 4 + RowHeight(#procs, BUFF_SIZE) + 8))
+        -(AURA_GAP + lastRowHeights.buff + 4 + lastRowHeights.proc + 8))
 
     -- buffContainer 常显（空的时候被 FitContainer 压成 0 高，什么都不画），只切换后两块。
     procContainer:SetShown(#procs > 0)
     debuffContainer:SetShown(#debuffs > 0)
+
+    -- 附魔行：数据刷新 + 按上面记下的实际行高累加锚点（同样不锚可能为空的行）。
+    UpdateEnchants()
 end
 
 --- Throttled update: UNIT_AURA can fire very often during combat.
@@ -628,6 +871,14 @@ function M:Initialize()
     debuffContainer = Widget:CreateFrame("MonetUIDebuffFrame", UIParent, 1, 1)
     debuffContainer:SetPoint("TOPLEFT", procContainer, "BOTTOMLEFT", 0, -8)
 
+    -- A1 武器附魔行：排在 debuff 行之后。锚点走 AnchorEnchantRow（UIParent + 行高累加，
+    -- 不锚可能为空的行）；无附魔时整行 Hide、不占高。1s 轮询驱动数据（见 UpdateEnchants）。
+    enchantContainer = Widget:CreateFrame("MonetUIEnchantFrame", UIParent, 1, 1)
+    AnchorEnchantRow()
+    enchantContainer:Hide()
+    enchantActive = true
+    StartEnchantPoll()
+
     SuppressBlizzard()
 
     -- 引擎容器**必须在登录/脱战时建好**（ArcAuras 同款纪律：战斗里 CreateFrame 出来的容器
@@ -667,11 +918,19 @@ function M:SetEnabled(enabled)
         -- 引擎容器可能早就建好了（`EnsureCombatAuras` 命中 :426 那句直接 return true），
         -- 这一路不会再走到装载处的销/建，所以开模块时自己把这一组建回来。
         SetExternalAuraFit(true)
+        -- 附魔行：恢复右键路径 + 重挂轮询（防重复），self:Update() 里会立即刷一次。
+        enchantActive = true
+        StartEnchantPoll()
         self:Update()
     else
         -- buffContainer 也藏起来的话，QueueUpdate 的 OnUpdate 驱动就停了，所以只清按钮。
         if procContainer then procContainer:Hide() end
         if debuffContainer then debuffContainer:Hide() end
+        -- 附魔行完整退场：藏行清钮、注销轮询、右键路径失效（enchantActive 守门）。
+        enchantActive = false
+        StopEnchantPoll()
+        if enchantContainer then enchantContainer:Hide() end
+        for _, button in ipairs(enchantButtons) do button:Hide() end
         -- 引擎容器保持 Show 状态（引擎才会持续喂数据），用 alpha 关掉可见性。
         if combatBuffs then pcall(combatBuffs.SetAlpha, combatBuffs, 0) end
         if combatDebuffs then pcall(combatDebuffs.SetAlpha, combatDebuffs, 0) end
@@ -695,6 +954,13 @@ local function CountKids(frame)
     local ok, kids = pcall(frame.GetChildren, frame)
     if not ok or type(kids) ~= "table" then return nil end
     return #kids
+end
+
+--- 探针用的安全 stringify：机密值不进 concat/format（AGENTS：先判再 tostring）。
+local function SafeSecretStr(v)
+    if v == nil then return "nil" end
+    if Secrets.IsSecret(v) then return "机密" end
+    return tostring(v)
 end
 
 function M:HandleCommand(rest)
@@ -722,13 +988,74 @@ function M:HandleCommand(rest)
     end
 
     local _, moduleEnabled = pcall(function() return ns.IsModuleEnabled and ns:IsModuleEnabled("BuffFrame") end)
+
+    -- A1 武器附魔探针：API 存在性 + 每槽 hasEnchant / timeLeft(秒) / charges / iconID。
+    -- 每个值先过 Secrets.Bool/Number，拿不到明文才 SafeSecretStr（机密只标"机密"，
+    -- 绝不进 concat/format）。逐槽 pcall：战斗中该 API 可读性未实测，读不出就如实报。
+    local enchApi = type(_G.C_Item) == "table" and type(_G.C_Item.GetWeaponEnchantInfo) == "function"
+    local enchSlots, enchTotal = {}, 0
+    if enchApi then
+        for _, slot in ipairs(WeaponSlots()) do
+            local ok, enchants = pcall(_G.C_Item.GetWeaponEnchantInfo, slot)
+            local parts = {}
+            if not ok then
+                parts[#parts + 1] = "读不出:" .. SafeSecretStr(enchants)
+            elseif type(enchants) ~= "table" then
+                parts[#parts + 1] = "无数据"
+            else
+                for i = 1, #enchants do
+                    local e = enchants[i]
+                    if type(e) == "table" then
+                        local has = Secrets.Bool(e.hasEnchant, false)
+                        if has then enchTotal = enchTotal + 1 end
+                        local ms = Secrets.Number(e.timeLeft)
+                        local sec = ms and math.floor(ms / 1000) or nil
+                        local charges = Secrets.Number(e.charges)
+                        local icon = Secrets.Number(e.enchantIconID)
+                        parts[#parts + 1] = string.format("has=%s timeLeft=%s charges=%s icon=%s",
+                            tostring(has),
+                            sec and (tostring(sec) .. "s") or SafeSecretStr(e.timeLeft),
+                            charges and tostring(charges) or SafeSecretStr(e.charges),
+                            icon and tostring(icon) or SafeSecretStr(e.enchantIconID))
+                    end
+                end
+                if #parts == 0 then parts[#parts + 1] = "空" end
+            end
+            enchSlots[#enchSlots + 1] = { slot = slot, text = table.concat(parts, "; ") }
+        end
+    end
+    local enchRowShown = (enchantContainer and enchantContainer:IsShown()) and true or false
+    local enchIcons = 0
+    for i = 1, #enchantButtons do
+        if enchantButtons[i]:IsShown() then enchIcons = enchIcons + 1 end
+    end
+    local enchVerdict
+    if not enchApi then
+        enchVerdict = "API缺失：附魔行整行隐藏（已一次性警告）"
+    elseif not moduleEnabled then
+        enchVerdict = "模块已禁用：附魔行按设计隐藏"
+    elseif combatMode then
+        enchVerdict = "战斗中：附魔行按设计隐藏（A2 待实机拍板）"
+    elseif enchTotal == 0 then
+        enchVerdict = "当前无武器附魔：上磨刀石/毒后 1 秒内应出图标"
+    elseif enchRowShown and enchIcons >= enchTotal then
+        enchVerdict = "正常：脱战附魔行在画"
+    else
+        enchVerdict = "异常：有附魔但行未显示/格数不符，查轮询与锚点"
+    end
+    local enchReport = {
+        api = enchApi, total = enchTotal, rowShown = enchRowShown, icons = enchIcons,
+        pollId = enchantSubId, active = enchantActive, slots = enchSlots, verdict = enchVerdict,
+    }
+
     local report = {
         when = (type(_G.date) == "function") and (select(2, pcall(_G.date, "%Y-%m-%d %H:%M:%S"))) or nil,
         moduleEnabled = moduleEnabled and true or false,
         lockdown = inLockdown and true or false,
         inCombat = (type(ns.InCombat) == "function" and ns:InCombat()) and true or false,
         frames = out,
-        note = "只数 GetChildren 的个数，不读 aura 字段；children=nil 表示帧不存在或读不出。",
+        enchant = enchReport,
+        note = "只数 GetChildren 的个数，不读 aura 字段；children=nil 表示帧不存在或读不出。附魔段逐值过 Secrets，机密只标'机密'。",
     }
     local saved = false
     if type(ns.DB) == "function" then
@@ -748,6 +1075,14 @@ function M:HandleCommand(rest)
     end
     ns:Print(string.format("战斗标志 lockdown=%s ns:InCombat=%s",
         tostring(report.lockdown), tostring(report.inCombat)))
+    -- 附魔段：一行式总览 + 每槽明细 + 判读结论。
+    ns:Print(string.format("buffframe probe 附魔 api=%s 行shown=%s 图标=%d 轮询id=%s active=%s",
+        tostring(enchApi), tostring(enchRowShown), enchIcons,
+        tostring(enchantSubId), tostring(enchantActive)))
+    for _, r in ipairs(enchSlots) do
+        ns:Print(string.format("buffframe probe slot%d %s", r.slot, r.text))
+    end
+    ns:Print("buffframe probe 附魔判读：" .. enchVerdict)
     ns:Print(saved
         and "全量已存 MonetUIDB.buffProbe —— 写入比 /reload 晚 1–2 分钟，别立刻读（登出后再读最稳）。"
         or "账本没打开，只有聊天框这几行。")

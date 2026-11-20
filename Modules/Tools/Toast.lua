@@ -310,6 +310,7 @@ local function NewPanel(index)
     p.icon:SetPoint("LEFT", frame, "LEFT", ACCENT + PAD, 0)
     p.icon:Hide()
 
+    -- section 档（12/edge）：通知标题 = 分区头语义；本文件无 Skin 引用，用 Widget 等价调用保持。
     p.title = Widget:Font(frame, 12, "pixel", "edge", "LEFT", nil, Media.outlineFlags)
     p.title:SetWordWrap(false)
     p.title:SetPoint("TOPLEFT", frame, "TOPLEFT", ACCENT + PAD, -8)

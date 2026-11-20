@@ -455,6 +455,8 @@ local function BuildPanel()
     panel:EnableMouseWheel(true)
 
     local title = Widget:Font(panel, 12, "pixel", "bright", "LEFT")
+    -- section 档（12）+ bright 覆盖：深底亮字，TextTier 的 edge 会把它压暗，必须补回 bright。
+    if ns.Skin then ns.Skin:TextTier(title, "section"); ns.Skin:ColorText(title, "bright") end
     title:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -8)
     title:SetText("货币监控")
 

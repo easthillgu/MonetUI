@@ -232,7 +232,8 @@ local function StyleButton(button, cfg)
     end
 
     if not button.name and widget then
-        button.name = widget:Font(button, 10, "pixel", { r = 1, g = 1, b = 1 }, "LEFT")
+        -- white 键：首领框名字压血条恒纯白（HUD 语义）；10px 功能字号不动。
+        button.name = widget:Font(button, 10, "pixel", "white", "LEFT")
         button.name:SetWordWrap(false)
         if button.name.SetShadowColor then
             button.name:SetShadowColor(0, 0, 0, 1)

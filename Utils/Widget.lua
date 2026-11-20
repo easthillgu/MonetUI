@@ -1284,7 +1284,7 @@ end
 --- 是 0.41/0.47/0.53，一看就是 edge 的色）。新增键只改这里，两处一起生效。
 ---
 --- 认的键：table{r,g,b,a} / "edge" / "ambient" / "highlight" / "border" / "health" /
---- "resource" / "danger" / "neutral" / "bright"
+--- "resource" / "danger" / "neutral" / "bright" / "white"
 function Widget:PaletteColor(colorKey)
     if type(colorKey) == "table" then
         return colorKey.r, colorKey.g, colorKey.b, colorKey.a or 1
@@ -1309,6 +1309,11 @@ function Widget:PaletteColor(colorKey)
         local nr, ng, nb = Color:GetNeutral()
         local k = 0.62
         return nr + (1 - nr) * k, ng + (1 - ng) * k, nb + (1 - nb) * k, 1
+    end
+    if colorKey == "white" then
+        -- 清单#1：HUD 数字/计时等必须纯白、不随主题变的文字。bright 是 neutral 推白 62%，
+        -- 不是纯白；这一档是恒定 1,1,1,1，专给"永远白字"的场景。
+        return 1, 1, 1, 1
     end
     return nil
 end

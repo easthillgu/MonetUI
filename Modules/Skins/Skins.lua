@@ -414,6 +414,47 @@ function M:SweepDeep(frame, controlOpts, withInfo, rowDepth)
     fd.deepSweep = true
     Widget:PollWatch(frame, sweep)
 
+    -- 清单#4：深扫补上下拉 chevron 与输入框。以前这两类只有法术书/世界地图/LFG 三处
+    -- 显式补扫，其余深扫窗口的下拉一直是暴雪原样箭头。复用同一套 helper 与去重标记：
+    --   * 下拉走 `Skin:DropdownsIn`（atlas 认脸，DropdownButtonArt 自带 muiDropdownBtn
+    --     幂等 + Readable 守卫），**只扫直接子层**（WalkFrames depth=1，与 SkinButtonsIn
+    --     默认口径一致），不引入全树递归；
+    --   * 输入框走 as="editbox" 的同一个 dresser（IsAnyType 认 EditBox/SearchBox），
+    --     模块旁表标记去重，只处理直接子控件。
+    -- 1 秒一趟、不挤 0.2s 的 sweep 热路径：这两类控件懒建但不每帧变（SkinTemplates
+    -- 把 ExtrasIn 放 2 秒档是同一条理由）；模板层 ExtrasIn 仍照旧兜更深层，
+    -- Skin:EditBox 内部 Fade/Strip/ControlBg 自带幂等守卫，两边重叠也只是一次查表。
+    if not fd.deepControls then
+        fd.deepControls = true
+        local controls = function()
+            if not M.active then return end
+            local ok, err = pcall(function()
+                Skin:DropdownsIn(frame, { depth = 1 })
+                local okKids, kids = pcall(function() return { frame:GetChildren() } end)
+                if okKids and type(kids) == "table" then
+                    for i = 1, #kids do
+                        local child = kids[i]
+                        -- forbidden 子件上连 GetObjectType 都会抛（SkinButtonsIn 同款），pcall。
+                        local okKind, kind = pcall(child.GetObjectType, child)
+                        if okKind and (kind == "EditBox" or kind == "SearchBox") then
+                            local cfd = GetFFD(child)
+                            if not cfd.deepEditBox then
+                                cfd.deepEditBox = true
+                                DRESSERS.editbox(child, { control = controlOpts })
+                            end
+                        end
+                    end
+                end
+            end)
+            if not ok then
+                Skin:WarnOnce("deepControls:" .. Widget:FrameLabel(frame),
+                    ("下拉/输入框补扫 %s 失败: %s"):format(Widget:FrameLabel(frame), tostring(err)))
+            end
+        end
+        controls()
+        Widget:PollWatch(frame, controls, 1)
+    end
+
     M:SweepTemplates(frame, controlOpts)
 end
 
@@ -945,6 +986,11 @@ end
 
 local hooksInstalled = false
 
+-- 清单#5：两趟全局滚动扫描之间的最小间隔（秒）。登录四趟（+1/+3/+6/+10）保留不动、
+-- 只记时间戳；包加载补扫（ArtRescan）落在间隔内就跳过 —— LoD 突发不再把
+-- EnumerateFrames 全量扫描一遍又一遍地触发。Async 切片与 cancel 守卫在 Skin 侧，不动。
+local lastArtScan = 0
+
 local function InstallHooks()
     if hooksInstalled then return end
     hooksInstalled = true
@@ -967,7 +1013,12 @@ local function InstallHooks()
         rescanPending = true
         C_Timer.After(1, function()
             rescanPending = false
-            if M.active and Skin.ScanScrollArrows then Skin:ScanScrollArrows() end
+            if not M.active then return end
+            -- 清单#5：距上一趟（含登录四趟）不足 5 秒 ⇒ 跳过本趟包加载补扫。
+            local now = GetTime() or 0
+            if now - lastArtScan < 5 then return end
+            lastArtScan = now
+            if Skin.ScanScrollArrows then Skin:ScanScrollArrows() end
         end)
     end
 
@@ -1015,7 +1066,10 @@ local function InstallHooks()
         C_Timer.After(4, pass)
         -- 滚动条细把手 / 上下箭头：ScrollBox 懒创建，多扫几遍兜底（只扫存在的帧）。
         local function scanScrolls()
-            if M.active and Skin.ScanScrollArrows then Skin:ScanScrollArrows() end
+            if M.active and Skin.ScanScrollArrows then
+                lastArtScan = GetTime() or 0   -- 清单#5：登录四趟不受节流，只记时间戳
+                Skin:ScanScrollArrows()
+            end
         end
         C_Timer.After(1, scanScrolls)
         C_Timer.After(3, scanScrolls)

@@ -169,29 +169,35 @@ end
 -- 而顺序同时在表达"哪个窗口在上"，两件事被塞进一个序号里。后果是任务用的消耗品
 -- 会被 `use` 抢走（`use` 排在 `quest` 前面），装备方案里的装备也压不过 `gear`。
 --
--- 判定优先级（rank 由小到大）：
+-- 判定优先级（rank 由小到大，**与窗口顺序无关**）：
 --   垃圾 0 > 新物品 1 > 任务 3 > 传送 4 > 消耗品 10 > 套装 20 > 战团绑 21 >
 --   装备 22 > 容器 23 > 材料 30 > 收藏 40 > 心能 50 > 其他 99
 --
+-- 窗口显示顺序（order 由小到大 = 从上到下；2026-11-20 作者指定）：
+--   新物品 / 战团绑 / 容器 / 收藏 / 心能 / **垃圾 / 材料 / 传送 / 其他 / 消耗品 / 任务 / 装备 / 剩余空间**
+--   底部往上 = 剩余空间 → 装备 → 任务 → 消耗品 → 其他 → 传送 → 材料 → 垃圾；
+--   前面五类作者未点名，保持原有相对次序、放在指定块上方。
+--   ⚠ 玩家拖过的窗口走 RestoreDragged 单独还原，不随 order 变；要回默认顺序需清掉那些位置。
+--
 local CATEGORIES = {
     -- 灰色**且有卖价**（无卖价的灰装不混进可卖垃圾，与 RealUI:Filters.lua:251 同口径）
-    { key = "junk",  label = "垃圾",   rank = 0,  order = 1,
+    { key = "junk",  label = "垃圾",   rank = 0,  order = 6,
       match = function(it) return it.quality == Q_POOR and (it.sellPrice or 0) > 0 end },
 
     -- 新物品：C_NewItems 的标记只在背包格子上存在，不能从 itemID 推
-    { key = "new",   label = "新物品", rank = 1,  order = 2,
+    { key = "new",   label = "新物品", rank = 1,  order = 1,
       match = function(it) return it.isNew == true end },
 
     -- 任务优先于消耗品/材料：任务要交的东西多数也是消耗品或材料（旧版的顺序把它分错了）
-    { key = "quest", label = "任务",   rank = 3,  order = 3,
+    { key = "quest", label = "任务",   rank = 3,  order = 11,
       match = function(it) return it.isQuest or it.classID == IC.Questitem end },
 
     -- 传送类：炉石 / 传送卷轴 / 传送器 / 传送披风戒指等。这类物品的 classID 五花八门
     -- （消耗品 / 玩具 / 装备），从 classID 推不出来，只能靠白名单 + 名字模式。
-    { key = "travel", label = "传送",  rank = 4,  order = 4,
+    { key = "travel", label = "传送",  rank = 4,  order = 8,
       match = function(it) return IsTravelItem(it) end },
 
-    { key = "use",   label = "消耗品", rank = 10, order = 5,
+    { key = "use",   label = "消耗品", rank = 10, order = 10,
       match = function(it) return it.classID == IC.Consumable or it.classID == IC.ItemEnhancement end },
 
     -- 装备方案里的装备：**这一类暂不做**。RealUI 用
@@ -201,30 +207,30 @@ local CATEGORIES = {
     -- 解不开位置就只能按 itemID 匹配 —— 那会把背包里的同名装备误判成套装件。
     -- 所以等有可靠解码方式再加，宁可少一个窗口。
     -- 战团绑定（12.x 的"装备前战团绑定"）：能寄给小号、不能卖
-    { key = "warbound", label = "战团绑", rank = 21, order = 7,
+    { key = "warbound", label = "战团绑", rank = 21, order = 2,
       match = function(it) return it.isWarboundUntilEquip == true end },
 
     -- 装备：按**装备位**判，不按 classID —— 职业工具 / 可装备法术 / 圣物都在这条路上
-    { key = "gear",  label = "装备",   rank = 22, order = 8,
+    { key = "gear",  label = "装备",   rank = 22, order = 12,
       match = function(it) return it.isEquippable == true end },
 
     -- 空背包 / 箭袋这类"容器"本身
-    { key = "containers", label = "容器", rank = 23, order = 9,
+    { key = "containers", label = "容器", rank = 23, order = 3,
       match = function(it) return it.isContainer == true end },
 
-    { key = "goods", label = "材料",   rank = 30, order = 10,
+    { key = "goods", label = "材料",   rank = 30, order = 7,
       match = function(it) return it.classID == IC.Tradegoods or it.classID == IC.Reagent end },
 
-    { key = "pets",  label = "收藏",   rank = 40, order = 11,
+    { key = "pets",  label = "收藏",   rank = 40, order = 4,
       match = function(it)
           return it.classID == IC.Battlepet
               or (it.classID == IC.Miscellaneous and (it.subClassID == 2 or it.subClassID == 5))
       end },
 
-    { key = "anima", label = "心能",   rank = 50, order = 12,
+    { key = "anima", label = "心能",   rank = 50, order = 5,
       match = function(it) return it.isAnima == true end },
 
-    { key = "other", label = "其他",   rank = 99, order = 13,
+    { key = "other", label = "其他",   rank = 99, order = 9,
       match = function() return true end },
 }
 
@@ -236,7 +242,7 @@ for _, cat in ipairs(CATEGORIES) do CATEGORY_BY_KEY[cat.key] = cat end
 --- 混进去等于"所有物品都归剩余空间"（而且它没有 match 函数，pcall 直接报错吞掉）。
 --- 它只借窗口机制：有 label 就有一扇窗、`order` 最大就排在最后、`LayoutWindows` 一列堆下来，
 --- 不必为它另写一套建窗/排版/存档的代码。
-local FREE_CAT = { key = "free", label = "剩余空间", order = 100 }
+local FREE_CAT = { key = "free", label = "剩余空间", order = 100 }  -- 底部（order 最大）
 CATEGORY_BY_KEY[FREE_CAT.key] = FREE_CAT
 
 --- 显示顺序：按 `order` 排，**和分类优先级（rank）无关**。
@@ -495,7 +501,8 @@ local function AcquireButton(parent)
     -- 物品数量：**我们自己画**。模板的 SetItemButtonCount 写的是它自己的 Count 字体串，
     -- 而 FlattenSlotArt 把图标抬到 OVERLAY 7 层 —— 计数被图标整个盖住（玩家 2026-10-27 报的
     -- "数量不显示"）。这里补一条 OVERLAY 9 层的白字，位置与模板默认一致（右下角内缩）。
-    local count = Widget:Font(btn, 12, "pixel", { r = 1, g = 1, b = 1 }, "RIGHT", "OVERLAY")
+    -- white 键：堆叠数恒纯白、不随主题变（HUD 数字语义）；字号 12 是功能档，不动。
+    local count = Widget:Font(btn, 12, "pixel", "white", "RIGHT", "OVERLAY")
     count:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 2)
     count:SetDrawLayer("OVERLAY", 9)
     Mark(shell, "countF", count)
@@ -710,7 +717,8 @@ local function EnsureWindow(key)
     win.catKey = key
     Widget:Theme(win, { thickness = 1, bgAlpha = 0.92 })
 
-    win.title = Widget:Font(win, 12, "pixel", "edge", "LEFT")
+    win.title = Widget:Font(win, 15, "pixel", "edge", "LEFT")
+    Skin:TextTier(win.title, "title") -- title 档（15/edge）：背包/银行窗题字短，原散写 12 收进档位
     win.title:SetPoint("TOPLEFT", win, "TOPLEFT", 18, -5)  -- clear of the TL ornament
     -- 两套窗同屏，标题必须分得开：银行那几扇挂"银行 · "前缀。
     win.title:SetText((isBank and "银行 · " or "") .. (cat and cat.label or BaseKey(key)))
@@ -730,7 +738,8 @@ local function EnsureWindow(key)
         currency:Hide()
         win.currencyText = currency
         -- 图标模式用它实测短数量文字宽度：隐藏、不设锚点、不占布局，只借字体度量。
-        local measure = Widget:Font(win, 11, "pixel", "bright", "LEFT")
+        -- 字号必须与 EnsureCurrencyCell 的 cell.text 同档（caption 10），不同步会量错宽。
+        local measure = Widget:Font(win, 10, "pixel", "bright", "LEFT")
         measure:SetWordWrap(false)
         measure:Hide()
         win.currencyMeasure = measure
@@ -853,7 +862,9 @@ local function EnsureCurrencyCell(win, index)
 
     cell.icon = Widget:Icon(cell, CURRENCY_ICON)
     cell.icon:SetPoint("LEFT", cell, "LEFT", 0, 0)
-    cell.text = Widget:Font(cell, 11, "pixel", "bright", "LEFT")
+    cell.text = Widget:Font(cell, 10, "pixel", "bright", "LEFT")
+    Skin:TextTier(cell.text, "caption") -- caption 档（10）：货币计数是小字，原 11 是禁档
+    Skin:ColorText(cell.text, "bright") -- 深底亮字：caption 的 neutral 会压暗，保留 bright 覆盖
     cell.text:SetPoint("LEFT", cell.icon, "RIGHT", CURRENCY_IGAP, 0)
     cell.text:SetWordWrap(false)
 
@@ -891,7 +902,7 @@ local function RenderCurrencyIcons(win, entries, C, avail, rightX)
         pcall(measureFS.SetText, measureFS, text)
         local ok, w = pcall(measureFS.GetStringWidth, measureFS)
         w = ok and Secrets.Number(w) or nil
-        -- 隐藏的 FontString 在个别客户端可能量不出宽度；按 11px 点阵字保守估算，
+        -- 隐藏的 FontString 在个别客户端可能量不出宽度；按 10px 点阵字保守估算，
         -- 宁可少放一格，也不能让数字画出格外跟下一格叠在一起。
         if not w or w <= 0 then return #tostring(text) * 7 end
         return w

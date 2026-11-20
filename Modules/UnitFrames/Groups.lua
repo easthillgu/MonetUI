@@ -246,7 +246,8 @@ end
 --- 名字 + 血量文字（原 241-269 行）。
 local function StyleTexts(button, cfg, small, inner)
     if not button.name then
-        button.name = Widget:Font(button.overlay, NameBaseSize(small), "pixel", { r = 1, g = 1, b = 1 }, "LEFT")
+        -- white 键：名字压在血条上恒纯白（HUD 语义），硬阴影兜对比度；字号走 NameBaseSize 不动。
+        button.name = Widget:Font(button.overlay, NameBaseSize(small), "pixel", "white", "LEFT")
         -- 名字压在血条上：小框放不下一行独立的名字，加硬阴影保证亮色血条上也读得清
         if button.name.SetShadowColor then
             button.name:SetShadowColor(0, 0, 0, 1)
@@ -267,7 +268,8 @@ local function StyleTexts(button, cfg, small, inner)
 
     -- 血量文字：压在血条右侧。none 模式也建好（只写空串），切模式不用重建 region。
     if not button.healthText then
-        local fs = Widget:Font(button.overlay, small and 9 or 10, "pixel", { r = 1, g = 1, b = 1 }, "RIGHT")
+        -- white 键：血量数字恒纯白、不随主题变（HUD 数字语义）；9/10 功能字号不动。
+        local fs = Widget:Font(button.overlay, small and 9 or 10, "pixel", "white", "RIGHT")
         if fs.SetShadowColor then
             fs:SetShadowColor(0, 0, 0, 1)
             fs:SetShadowOffset(1, -1)

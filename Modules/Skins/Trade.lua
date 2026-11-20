@@ -498,7 +498,7 @@ local function SkinBank()
         window = true, inset = true, panel = { bgAlpha = 0.96 },
         -- 现代框架的包裹格挂在 BankPanel（PanelTemplate）名下 —— 同一套凹槽语言收它
         -- （Strip 含 NineSlice）。实机核对后再定去留。
-        wells = { BankPanel = true },
+        wells = { BankPanel = { weave = 0.14 } },
     })
 end
 

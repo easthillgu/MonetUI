@@ -460,6 +460,7 @@ function M:Skin()
     handle:SetScript("OnDragStop", SavePosition)
 
     local headText = Widget:Font(tracker, 12, "pixel", "edge", "LEFT", nil, Media.outlineFlags)
+    ns.Skin:TextTier(headText, "section") -- section 档（12/edge）：追踪框头 = 分区头，走统一入口
     headText:SetPoint("TOPLEFT", tracker, "TOPLEFT", PAD, -3)
     headText:SetText("任务追踪")
 

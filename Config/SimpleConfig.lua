@@ -194,6 +194,7 @@ end
 local function Group(parent, cursor, caption)
     local y = cursor(T.capH)
     local fs = Widget:Font(parent, 12, "pixel", "edge", "LEFT")
+    if ns.Skin then ns.Skin:TextTier(fs, "section") end -- section 档（12/edge）：组名 = 分区头，统一入口
     fs:SetPoint("TOPLEFT", parent, "TOPLEFT", T.padX, y - 4)
     fs:SetText(caption)
     HLine(parent, { y = y - T.capH + 5, alpha = 0.3 })
@@ -472,11 +473,13 @@ function SimpleConfig:Build()
     Widget:Size(logo, 22, 22)
     logo:SetPoint("LEFT", titleBar, "LEFT", T.padX, 0)
 
-    local title = Widget:Font(titleBar, 20, "pixel", "edge", "LEFT")
+    local title = Widget:Font(titleBar, 15, "pixel", "edge", "LEFT")
+    if ns.Skin then ns.Skin:TextTier(title, "title") end -- title 档（15/edge）：主标题原 20 是禁档，收进档位
     title:SetPoint("LEFT", logo, "RIGHT", 10, 0)
     title:SetText("MonetUI")
 
-    local subtitle = Widget:Font(titleBar, 12, "pixel", "neutral", "RIGHT")
+    local subtitle = Widget:Font(titleBar, 10, "pixel", "neutral", "RIGHT")
+    if ns.Skin then ns.Skin:TextTier(subtitle, "caption") end -- caption 档（10/neutral）：版本副标题是小字
     subtitle:SetPoint("RIGHT", titleBar, "RIGHT", -(T.padX + 22), 0)
     subtitle:SetWordWrap(false)
     subtitle:SetText("v" .. ns.version .. " · 印象派自适应界面")
@@ -489,7 +492,9 @@ function SimpleConfig:Build()
     Widget:Shadow(panel, { size = 7, alpha = 0.5 })
     Widget:Corners(panel, { omit = { "TOPRIGHT" } })
 
-    HLine(titleBar, { y = -T.titleH, inset = 14, alpha = 0.45 })
+    -- 标题下一笔手绘笔刷（2026-11-20 A4）：monet_brush_stroke 保留美术色、只调 alpha；
+    -- Widget:Rule 靠 Marked(panel,"rule") 幂等，重复开面板不会越叠越多；一屏只此一条。
+    Widget:Rule(titleBar, title, { alpha = 0.9 })
 
     -- ---- ② 主菜单：横向按钮，点一个只显示那一页 --------------------------------------
     tabBar = CreateFrame("Frame", nil, panel)
@@ -650,7 +655,8 @@ function SimpleConfig:Build()
     -- 在屏幕上长得一模一样。这一行把两件事分开：左边当前区域名 + 右边阶梯四档实色块，
     -- 缺数据时另外标一句。纯 UI：数据全走 Color（GetZoneInfo 查表、GetSurface 读阶梯）。
     local yZone = row(T.subH)
-    local zoneCaption = Widget:Font(content, 12, "pixel", "neutral", "LEFT")
+    local zoneCaption = Widget:Font(content, 10, "pixel", "neutral", "LEFT")
+    if ns.Skin then ns.Skin:TextTier(zoneCaption, "caption") end -- caption 档（10/neutral）：区域配色标签是小字
     zoneCaption:SetPoint("TOPLEFT", content, "TOPLEFT", T.padX, yZone - 4)
     zoneCaption:SetWidth(96)
     zoneCaption:SetWordWrap(false)

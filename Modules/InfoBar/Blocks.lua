@@ -345,8 +345,20 @@ local function MemoryUsage()
     return total > 0 and total or nil
 end
 
+--- 玩家机器的现实时间（24h HH:MM，定宽）。本客户端没有 os 表，date 是全局；
+--- 全局可能缺席，缺席就不显示这一格，不让整条信息栏报错。
+local function LocalClock()
+    if type(date) ~= "function" then return nil end
+    local ok, value = pcall(date, "%H:%M")
+    if not ok or type(value) ~= "string" then return nil end
+    return value
+end
+
 local function SystemUpdate(block)
     local parts = {}
+
+    local clock = LocalClock()
+    if clock then parts[#parts + 1] = clock end
 
     local latency = Latency()
     if latency then parts[#parts + 1] = string.format("%dms", latency) end
@@ -387,6 +399,8 @@ local function SystemTooltip(block)
     if not tip then return end
 
     pcall(tip.AddLine, tip, "系统", 0.6, 0.8, 1)
+    local clock = LocalClock()
+    if clock then pcall(tip.AddDoubleLine, tip, "现实时间", clock, 1, 1, 1, 1, 1, 1) end
     local latency = Latency()
     if latency then pcall(tip.AddDoubleLine, tip, "延迟", latency .. " ms", 1, 1, 1, 1, 1, 1) end
     local fps = Framerate()
@@ -398,7 +412,7 @@ end
 
 M:RegisterBlock({
     key      = "system",
-    label    = "延迟 / 帧率 / 内存",
+    label    = "现实时间 / 延迟 / 帧率 / 内存",
     position = "CENTER",   -- 11-07 作者指示：放条中间（Relayout 对 CENTER 档整组居中）
     always   = true,       -- 11-07 作者指示：常显，不吃 mouseover 悬停淡出（判据在 ApplyColors）
     events   = { "PLAYER_ENTERING_WORLD" },
@@ -740,6 +754,8 @@ local function BuildStatsPanel()
 
     -- 标题
     local title = Widget:Font(frame, 12, "pixel", "bright", "LEFT")
+    -- section 档（12）+ bright 覆盖：深底亮字，TextTier 的 edge 会把它压暗，必须补回 bright。
+    if ns.Skin then ns.Skin:TextTier(title, "section"); ns.Skin:ColorText(title, "bright") end
     title:SetPoint("TOPLEFT",  frame, "TOPLEFT",  PANEL_PAD, -PANEL_PAD)
     title:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -PANEL_PAD * 3, -PANEL_PAD)
     title:SetText("属性")

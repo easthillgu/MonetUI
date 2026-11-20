@@ -56,9 +56,9 @@ local function SkinCollections()
         -- 宠物页的三块内容区（实机 2026-11-02 枚举确认）：左列表 / 右宠物卡 / 卡内详情，
         -- 独立全局名。挂在窗口级 wells 上走 Skin:Well（exact 全局名解析）。
         wells = {
-            PetJournalLeftInset = true,
-            PetJournalRightInset = true,
-            PetJournalPetCardInset = true,
+            PetJournalLeftInset = { weave = 0.08 },
+            PetJournalRightInset = { weave = 0.08 },
+            PetJournalPetCardInset = { weave = 0.08 },
         },
     })
     -- 子面板：剥原美术 + 挂底衬 + 深扫（收藏格子是带图标的按钮，LooksLikeItemButton 会跳过）。
@@ -241,7 +241,7 @@ local function SkinAchievements()
         window = true, inset = true, panel = { bgAlpha = 0.96 }, tabs = ACHIEVEMENT_TABS,
         -- 统计页的原生承托底（实机 2026-11-02 枚举）：纯剥离不挂板 —— 与下面
         -- ACHIEVEMENT_PANELS 的 noPanel 同一纪律（成就列表要贴着窗口背景读）。
-        wells = { AchievementFrameStatsBG = { panel = false } },
+        wells = { AchievementFrameStatsBG = { panel = false, weave = 0.08 } },
     })
     -- 这三块只剥原美术、不另挂底衬：成就列表要贴着窗口自己的背景读，多一层板子会把行距压脏。
     M:Dress(ACHIEVEMENT_PANELS, { noPanel = true, deep = true })

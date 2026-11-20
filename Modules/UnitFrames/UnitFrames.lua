@@ -857,7 +857,8 @@ local function BuildUnitTexts(frame, unit)
     end
 
     if layout.healthText then
-        frame.healthText = Widget:Font(frame, SMALL_SIZE, "pixel", { r = 1, g = 1, b = 1 }, "RIGHT")
+        -- white 键：血量数字恒纯白、不随主题变（HUD 数字语义）；SMALL_SIZE 功能字号不动。
+        frame.healthText = Widget:Font(frame, SMALL_SIZE, "pixel", "white", "RIGHT")
         -- Health% sits 2px left of Level (or right of Name if no Level).
         -- The level must exist first: this used to test frame.level before it was
         -- created, so every health text silently anchored after the name instead.

@@ -571,7 +571,10 @@ function Skin:AdoptTopTitle(frame)
         if not fs then return nil end
         Mark(frame, "topTitle", fs)
     end
-    self:Font(fs, 12, "pixel", "edge", "LEFT")
+    -- 清单#2：标题双轨收口 —— 与 Dress 主路径同走 TextTier("title")（15px + edge），
+    -- 不再写死 12。原调用还把 "edge"/"LEFT" 错塞进 flags/colorKey 槽位，这里一并归位；
+    -- LEFT 对齐仍由下方非战斗分支的 SetJustifyH 负责。
+    self:TextTier(fs, "title")
     if not InCombatLockdown() then
         local fW = select(2, pcall(function() return frame:GetWidth() end))
         pcall(fs.ClearAllPoints, fs)
@@ -946,8 +949,9 @@ function Skin:TabSystemArt(tsys)
                 local bliz = tab.Text or (tab.GetFontString and tab:GetFontString())
                 if bliz and bliz.SetTextColor then pcall(bliz.SetTextColor, bliz, 0, 0, 0, 0) end
                 Mark(tab, "tabBliz", bliz)
-                -- 4) 我们自己的居中文案（11px 像素字，跟随主题）。
-                local label = Widget:Font(tab, 11, "pixel", "neutral", "CENTER")
+                -- 4) 我们自己的居中文案（12px 像素字，跟随主题）。
+                -- 清单#3：11 是禁档（字号阶梯只有 15/12/10），归到正文档 12；颜色不变。
+                local label = Widget:Font(tab, 12, "pixel", "neutral", "CENTER")
                 label:SetPoint("CENTER", tab, "CENTER", 0, 0)
                 Mark(tab, "tabLabel", label)
             end
@@ -1275,6 +1279,15 @@ function Skin:Panel(frame, opts)
         Mark(bg, "panelTopExtend", topExtend)
     end
 
+    -- 装饰斜纹底（可选，2026-11-20）：挂在**我们自己的**背板上，走 Widget:BarWeave 的
+    -- 平铺口径（REPEAT + 1 texel/物理像素，45° 不歪）。数字 = alpha，true = 0.12。
+    -- 只写我们自己的 region，不碰暴雪对象；重复调用幂等（Marked "weave" 去重）。
+    if opts.weave and Widget and Widget.BarWeave then
+        pcall(Widget.BarWeave, Widget, bg, {
+            alpha = type(opts.weave) == "number" and opts.weave or 0.12,
+        })
+    end
+
     pcall(bg.Show, bg)
     return bg
 end
@@ -1470,7 +1483,16 @@ function Skin:Well(frame, region, opts)
     -- 背板挂到窗口本体（host = frame）而不是 region 名下：本客户端（70688）对"中间层容器里
     -- level 0 的子框"不渲染，挂窗口直下与根窗大板同父同级、创建在后，层次稳（见 Panel 注释）。
     -- opts.panel == false：纯剥离（比如 Bg 类原生承托美术 —— 它身后已有另一层的背板）。
-    if opts.panel == false then return region end
+    -- 2026-11-20：仍可单独要装饰斜纹（不挂板，避免多一层板压脏行距），织纹直接挂 region。
+    if opts.panel == false then
+        if opts.weave and Widget and Widget.BarWeave then
+            local ok, weave = pcall(Widget.BarWeave, Widget, region, {
+                alpha = type(opts.weave) == "number" and opts.weave or 0.12,
+            })
+            if ok and weave then Mark(weave, "art", true) end  -- 防后续的 Strip 把它当暴雪美术压掉
+        end
+        return region
+    end
     return self:Panel(region, {
         host        = frame,
         bgSurface   = opts.bgSurface or "lost",
@@ -1478,6 +1500,7 @@ function Skin:Well(frame, region, opts)
         borderKey   = opts.borderKey,
         borderAlpha = opts.borderAlpha,
         thickness   = opts.thickness or 1,
+        weave       = opts.weave,   -- 装饰斜纹底（可选，2026-11-20）：转给 Skin:Panel 挂在我们自己的背板上
         -- **留白**（作者口径 11-14）：凹槽的板往里退 2 —— 内容区与窗框之间留一条缝，
         -- 面板才有"呼吸"。只退我们自己的板，暴雪的布局一动不动。
         inset       = opts.inset or 4,
@@ -3762,6 +3785,30 @@ local function CropMasksOff(icon)
     end)
 end
 
+--- 清单#6：裁切按需写 —— 先读回 GetTexCoord（8 个角点）与目标矩形比较（容差 1e-4），
+--- 只有漂移（遮罩被暴雪回挂后 SetTexCoord 遭拒 / 换贴图把坐标重置回 0..1）才返回 true。
+--- 读不出 / 机密值 / 比较抛错一律按"漂移"处理 ⇒ 退回原来的无条件写，行为等价。
+--- 纵向允许两种上下口径（本仓 SetTexCoord 按 left,right,bottom,top 落，角点序按
+--- UL/LL/UR/LR 读）：只判"左列=左列、右列=右列、上行=上行、下行=下行 + 两轴取值集合
+--- 与目标一致"，不赌客户端的 y 方向。
+local function CropDrifted(icon, c)
+    if type(icon.GetTexCoord) ~= "function" then return true end
+    local okT, ulx, uly, llx, lly, urx, ury, lrx, lry = pcall(icon.GetTexCoord, icon)
+    if not okT or type(ulx) ~= "number" then return true end
+    local okC, same = pcall(function()
+        local eps = 1e-4
+        local function near(a, b) return math.abs(a - b) <= eps end
+        if not (near(ulx, llx) and near(urx, lrx) and near(uly, ury) and near(lly, lry)) then
+            return false
+        end
+        if not (near(ulx, c[1]) and near(urx, c[2])) then return false end
+        return (near(uly, c[3]) and near(lly, c[4]))
+            or (near(uly, c[4]) and near(lly, c[3]))
+    end)
+    if not okC then return true end
+    return not same
+end
+
 local function EnsureCropDriver()
     if cropId then return end
     cropId = Scheduler:Every(500, function()
@@ -3775,7 +3822,11 @@ local function EnsureCropDriver()
                     local okN, n = pcall(icon.GetNumMaskTextures, icon)
                     if okN and type(n) == "number" and n > 0 then CropMasksOff(icon) end
                 end
-                pcall(icon.SetTexCoord, icon, c[1], c[2], c[3], c[4])
+                -- 清单#6：坐标没漂移就不重压 —— 省掉常态下每 0.5s 对全部裁切图标的
+                -- 上百次无条件 SetTexCoord（行为等价：漂移时照旧写）。
+                if CropDrifted(icon, c) then
+                    pcall(icon.SetTexCoord, icon, c[1], c[2], c[3], c[4])
+                end
             end
         end
     end, "皮肤:裁切")
@@ -3937,7 +3988,8 @@ local function LocIsValid(loc) return loc:IsValidItem() end
 
 local function ResolveQuality(btn)
     local okLink, link = pcall(ReadLink, btn)
-    if okLink and type(link) == "string" and link ~= "" then
+    if okLink and type(link) == "string" and Secrets and Secrets.CanRead
+        and Secrets.CanRead(link) and link ~= "" then
         local q = QualityOf(link)
         if q then return q end
     end
@@ -3970,9 +4022,12 @@ end
 --- 等级数字与冷却都要吃它。返回 link 字符串或 itemID 数字，读不出 = nil。
 --- 只读字段 / pcall 方法，绝不往暴雪按钮写任何东西。
 local function ResolveItemKey(btn)
-    local okLink, link = pcall(function() return btn.link end)
-    if okLink and type(link) == "string" and link ~= "" then return link end
-    local okID, itemID = pcall(function() return btn.itemID end)
+    -- 清单#7：品质驱动每拍都要取一次键做缓存比较，改走上面已提好的 ReadLink/ReadItemID，
+    -- 不再每次调用现造闭包（与 ResolveQuality 头注是同一条口径）。
+    local okLink, link = pcall(ReadLink, btn)
+    if okLink and type(link) == "string" and Secrets and Secrets.CanRead
+        and Secrets.CanRead(link) and link ~= "" then return link end
+    local okID, itemID = pcall(ReadItemID, btn)
     if okID and type(itemID) == "number" and itemID > 0 then return itemID end
     if type(btn.GetItemID) == "function" then
         local ok, v = pcall(btn.GetItemID, btn)
@@ -4119,9 +4174,46 @@ local function BorderShown(border)
     return vis and true or false
 end
 
+--- 清单#7：格子的"几何指纹" = 绝对左/下 + 宽/高 + 有效缩放（SnapQualityBorder 的全部
+--- 输入）。父链原点按父框在**同一拍内** memo（origins）：同窗上百格共享一条父链，
+--- 只走一次 AbsRectUnits；窗口拖动 / UI 缩放改变绝对坐标或缩放 ⇒ 指纹变 ⇒ 照旧重算。
+--- 任一项读不出 / 机密 ⇒ 返回 nil，调用方退回原路径（行为等价）。
+--- 清单#7：数值可读性前置（提出去复用：驱动每 0.5s 扫全部可见格，不在调用里现造闭包，
+--- 与 ResolveQuality 头注同一条口径）。
+local function GeoReadable(v)
+    if type(v) ~= "number" then return false end
+    if Secrets and Secrets.CanRead and not Secrets.CanRead(v) then return false end
+    return true
+end
+
+local function QualityGeo(btn, origins)
+    local okS, s = pcall(btn.GetEffectiveScale, btn)
+    if not okS or not GeoReadable(s) or s <= 0 then return nil end
+    local okL, l = pcall(btn.GetLeft, btn)
+    local okB, b = pcall(btn.GetBottom, btn)
+    if not okL or not okB or not GeoReadable(l) or not GeoReadable(b) then return nil end
+    local okW, w = pcall(btn.GetWidth, btn)
+    local okH, h = pcall(btn.GetHeight, btn)
+    if not okW or not okH or not GeoReadable(w) or not GeoReadable(h) then return nil end
+    local okP, parent = pcall(btn.GetParent, btn)
+    if not okP or not parent then return nil end
+    local o = origins[parent]
+    if not o then
+        local ol, ob = AbsRectUnits(parent)
+        if not ol then return nil end
+        o = { ol, ob }
+        origins[parent] = o
+    end
+    -- 与 AbsRectUnits(btn) 逐位等价：它的第一圈就是 btn 自己的 GetLeft/GetBottom，
+    -- 其余各圈正是 AbsRectUnits(parent)。
+    return l + o[1], b + o[2], w, h, s
+end
+
 local function EnsureQualityDriver()
     if qualityId then return end
     qualityId = Scheduler:Every(500, function()
+        -- 清单#7：父链原点同一拍只算一次（见 QualityGeo）。
+        local origins = {}
         for btn, entry in pairs(qualityBorders) do
             local border = entry.frame
             if border and border.GetAlpha then
@@ -4132,19 +4224,41 @@ local function EnsureQualityDriver()
                 -- 下一拍（≤0.5 秒）补算一次。
                 local shown = BorderShown(border)
                 if shown then
-                    SnapQualityBorder(btn, border, entry)
-                    local q = ResolveQuality(btn)
-                    local color = Skin:QualityColor(q)
-                    if color ~= entry.last then
-                        entry.last = color
-                        if color then
-                            Widget:SetBorderState(border, color.r, color.g, color.b, 1)
-                        else
-                            Widget:SetBorderState(border, nil)
+                    -- 清单#7：矩形与物品标识都没变 ⇒ 跳过 SnapQualityBorder 与品质解析。
+                    -- 品质只在"上次真解析出来了"（qResolved）时才许跳过：未缓存的物品
+                    -- 键不变但品质会从 nil 变有值（GetItemInfo 缓存落地），不能冻成素边。
+                    -- 缓存键用 qKey，不占 UpdateSlotInfo 的 itemKey（那本账归等级数字）。
+                    local gl, gb, gw, gh, gs = QualityGeo(btn, origins)
+                    local key = ResolveItemKey(btn)
+                    -- 机密键不做 == 比较（AGENTS：机密值比较会抛）：读不出按 nil 记，
+                    -- 受限期保留上次状态，解除后键变可读 ⇒ 指纹不等 ⇒ 照旧重算。
+                    if key ~= nil and Secrets and Secrets.CanRead and not Secrets.CanRead(key) then
+                        key = nil
+                    end
+                    local unchanged = gl and entry.gl == gl and entry.gb == gb
+                        and entry.gw == gw and entry.gh == gh and entry.gs == gs
+                        and key == entry.qKey and entry.qResolved
+                    if not unchanged then
+                        entry.gl, entry.gb, entry.gw, entry.gh, entry.gs = gl, gb, gw, gh, gs
+                        entry.qKey = key
+                        SnapQualityBorder(btn, border, entry)
+                        local q = ResolveQuality(btn)
+                        -- 机密品质不算"解析成功"：否则受限那拍会把素边冻进缓存。
+                        entry.qResolved = type(q) == "number"
+                            and (not (Secrets and Secrets.CanRead) or Secrets.CanRead(q))
+                        local color = Skin:QualityColor(q)
+                        if color ~= entry.last then
+                            entry.last = color
+                            if color then
+                                Widget:SetBorderState(border, color.r, color.g, color.b, 1)
+                            else
+                                Widget:SetBorderState(border, nil)
+                            end
                         end
                     end
                     -- 等级 + 冷却只在显式开过格（CharacterFrame 的装备格）上跑：
                     -- 商人 / 邮件那些同走这条扫描的窗口一个字节都不多写。
+                    -- 冷却每拍都要重算（时长在走），不受上面的缓存短路影响。
                     if entry.ilvl or entry.cd then UpdateSlotInfo(btn, entry) end
                 end
             end
@@ -4276,7 +4390,9 @@ function Skin:TitleBar(frame, text, size)
     if not frame then return end
     local title = text or frame.TitleContainer and frame.TitleContainer.TitleText or frame.TitleText or frame.Title
     if title then
-        self:Font(title, size or 12, "pixel", nil, "edge")
+        -- 清单#2：默认改走 TextTier("title")（15px + edge），与 Dress 主路径一致；
+        -- 调用点显式传的 size（窄窗塞回小字号）继续生效。
+        self:TextTier(title, "title", size)
     end
 end
 

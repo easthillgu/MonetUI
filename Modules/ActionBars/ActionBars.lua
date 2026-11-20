@@ -532,7 +532,11 @@ local TEXT_BRIGHTEN = 0.35
 
 local function ButtonTextColor()
     local r, g, b = Color:GetBorder()
-    if not r then return { r = 1, g = 1, b = 1, a = 1 } end
+    -- white 键：边框槽读不到时回退纯白（HUD 文字不随主题变），与全局键表同源。
+    if not r then
+        local wr, wg, wb, wa = Widget:PaletteColor("white")
+        return { r = wr, g = wg, b = wb, a = wa }
+    end
     return {
         r = r + (1 - r) * TEXT_BRIGHTEN,
         g = g + (1 - g) * TEXT_BRIGHTEN,

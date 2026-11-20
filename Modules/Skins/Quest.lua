@@ -180,6 +180,12 @@ local QUESTLOG_BUTTONS = {
 
 local QUESTLOG_SCROLLS = { "QuestLogPopupDetailFrameScrollFrame" }
 
+--- 任务详情窗的正文凹槽斜纹（2026-11-20 A1）：与 QuestFrame 四块正文面板同一条语言。
+--- 这扇窗的 Inset 是懒建的，Dress 那一拍还不存在 ⇒ 走 HookShow 补（模块级稳定引用）。
+local function WeaveQuestLogDetail(frame)
+    Skin:InsetWell(frame, { bgAlpha = INSET_ALPHA, weave = 0.10 })
+end
+
 local function SkinQuestLog()
     M:Dress("QuestLogPopupDetailFrame", {
         window = true, inset = true, panel = { bgAlpha = READ_ALPHA }, deep = true,
@@ -189,6 +195,8 @@ local function SkinQuestLog()
     })
     M:Dress(QUESTLOG_BUTTONS, { as = "button" })
     M:Dress(QUESTLOG_SCROLLS, { as = "scroll" })
+    local detail = Skin.With("questlog", function() return Skin:Need("QuestLogPopupDetailFrame") end)
+    if detail then M:HookShow(detail, WeaveQuestLogDetail) end
 end
 
 -- `QuestFramePushQuestButton` 在 1.60 没有实名（11-05 实机，任务窗开过）⇒ 摘掉，其余五颗存在。
@@ -259,7 +267,8 @@ local function SkinObjectiveTracker()
     M:Controls(TRACKER_HEADERS, function(header)
         local text = header.Text or (type(header.GetName) == "function"
             and header:GetName() and _G[header:GetName() .. "Text"])
-        if text then ns.Skin:Font(text, 12, "pixel", nil, "edge") end
+        -- section 档（12/edge）：追踪框头是分区头语义，散写的 12/edge 收进统一入口。
+        if text then ns.Skin:TextTier(text, "section") end
     end)
 
     M:HookShow(tracker, RepressObjectiveTracker)
