@@ -112,6 +112,7 @@ M:RegisterBlock({
     key      = "gold",
     label    = "金钱",
     position = "LEFT",
+    trackSample = "999,999g 99s 99c",   -- 数字对齐轨（美术 ①）：位数增减不横跳
     events   = { "PLAYER_ENTERING_WORLD", "PLAYER_MONEY" },
     update   = GoldUpdate,
     tooltip  = GoldTooltip,
@@ -185,6 +186,7 @@ M:RegisterBlock({
     key      = "durability",
     label    = "耐久",
     position = "LEFT",
+    trackSample = "耐久 100%",
     events   = { "UPDATE_INVENTORY_DURABILITY", "PLAYER_ENTERING_WORLD" },
     update   = DurabilityUpdate,
     tooltip  = DurabilityTooltip,
@@ -414,6 +416,7 @@ M:RegisterBlock({
     key      = "system",
     label    = "现实时间 / 延迟 / 帧率 / 内存",
     position = "CENTER",   -- 11-07 作者指示：放条中间（Relayout 对 CENTER 档整组居中）
+    trackSample = "88:88 · 888ms · 88 FPS · 88.8M",
     always   = true,       -- 11-07 作者指示：常显，不吃 mouseover 悬停淡出（判据在 ApplyColors）
     events   = { "PLAYER_ENTERING_WORLD" },
     update   = SystemUpdate,
@@ -466,6 +469,7 @@ M:RegisterBlock({
     key      = "friends",
     label    = "好友",
     position = "RIGHT",
+    trackSample = "88 / 888",
     events   = { "FRIENDLIST_UPDATE", "PLAYER_ENTERING_WORLD" },
     update   = FriendsUpdate,
     tooltip  = FriendsTooltip,

@@ -282,6 +282,10 @@ function M:SetText(block, text)
 
     if value then
         local width = block.text:GetStringWidth() or 0
+        -- 数字对齐轨（美术提升 ①）：数值块量一次最大样本宽度（trackWidth），
+        -- 之后位数增减不再改帧宽 ⇒ Relayout 不跟着抖；CENTER 组也就不左右横跳。
+        -- 只作用于注册时显式声明 trackSample 的块（纯文字块保持原样）。
+        if block.trackWidth then width = math.max(width, block.trackWidth) end
         block.frame:SetWidth(math.max(width, MIN_WIDTH) + PADDING)
     end
 
@@ -534,9 +538,17 @@ local function BuildBlockFrame(block)
         end))
     end
 
-    local text = Widget:Font(frame, 12, "pixel", "border", "CENTER", nil, Media.outlineFlags)
-    text:SetPoint("CENTER", frame, "CENTER", 0, 0)
+    local align = block.trackSample and "RIGHT" or "CENTER"
+    local text = Widget:Font(frame, 12, "pixel", "border", align, nil, Media.outlineFlags)
+    text:SetPoint(align, frame, align, 0, 0)
     frame.text = text
+    -- 数字块在创建时量一次「最大样本」宽度并缓存（GetStringWidth 是纯读、不写暴雪对象）。
+    -- 样本取注册声明的 trackSample，如 system "999ms · 999 FPS · 99.9M"。
+    if block.trackSample then
+        pcall(text.SetText, text, block.trackSample)
+        block.trackWidth = text:GetStringWidth() or 0
+        pcall(text.SetText, text, "")
+    end
 
     -- Divider between neighbouring blocks (shown by Relayout only for blocks that have a
     -- visible predecessor on their own side).  1 physical pixel wide, 8 tall, centred.
