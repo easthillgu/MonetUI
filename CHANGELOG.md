@@ -3,6 +3,29 @@
 This file is used verbatim as the CurseForge release changelog (see `.pkgmeta`).
 Update the top section before tagging a new release.
 
+## 0.13.12 (2026-11-20)
+
+- Buffs: temporary weapon enchants are now shown in their own row with icon, duration,
+  charges and right-click cancellation, following the same combat rules as other auras.
+- Nameplates: cast bars gain a travelling spark, an uninterruptible shield badge, a short
+  red interrupt/failure flash and a pushback tail flash.
+- InfoBar: numeric blocks keep a fixed width and right alignment so changing digits no
+  longer shift the strip; the centre block now includes the local real-world time (HH:MM).
+- Bags: category windows stack bottom-up as free space / equipment / quest / consumables /
+  other / travel / materials / junk.
+- Art direction: section and caption text tiers are wired up, white HUD numbers use a single
+  palette key, window titles share one tier, and decorative weave / brush accents are applied
+  to quest details, bank, collections and the config title. A rejected enhancement proposal is
+  documented only; the shipped look stays unchanged.
+- Widgets: disabled controls use a dedicated dark surface instead of a faded alpha shell,
+  hover lifts fade in over 0.1s, and all animation timings come from one shared table.
+- Tooltip: party and raid buttons now show unit tooltips via polling; all tooltips can be
+  disabled in combat with a setting (on by default).
+- Performance: dropdown/editbox deep-sweep passes, throttled arrow scans, on-demand texture
+  updates, cached item quality checks, and hover fades all run through profiled drivers.
+- Fix: secret item links and atlas/name strings are now read-checked before comparison,
+  resolving combat-time errors in the LFG group window and related skin passes.
+
 ## 0.13.11 (2026-11-19)
 
 - Config: the settings panel is now paginated -- one page per main-menu entry, with a
