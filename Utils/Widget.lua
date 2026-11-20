@@ -1557,7 +1557,7 @@ end
 -- @return false 表示这个框没进过工厂（没登记），调用方自己退回原路径
 -- 悬停短过渡的按需驱动（美术提升 ⑦）：只在 hoverFade 框状态切换的那 0.1 秒里挂，
 -- 走 Profile 进 /mui perf 外部账；到端点自动摘掉，不在空闲时每帧空转。
-local HOVER_FADE_SEC = 0.10
+local HOVER_FADE_SEC = Math.FX.hoverFade
 local hoverTicker                      -- 复用同一个壳，避免每次 hover 都 CreateFrame
 local hoverActive = {}                 -- [frame] = true，正在过渡的框
 local function HoverStep(_, elapsed)

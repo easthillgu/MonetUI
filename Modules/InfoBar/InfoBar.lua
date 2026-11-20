@@ -23,7 +23,7 @@ local GAP       = 2     -- gap between neighbouring blocks
 local PADDING   = 16    -- horizontal breathing room inside a block
 local MIN_WIDTH = 40    -- a block never shrinks below this
 local FADE      = 4     -- backdrop / block alpha per second while fading
-local PULSE     = 1.6   -- combat pulse cycles per second
+local PULSE     = ns.Math.FX.pulseHz   -- 动效节奏收口（美术 ⑧）：全仓单一来源
 local PULSE_A0  = 0.35  -- 脉冲最暗（正弦绝对值）
 local PULSE_A1  = 1.00  -- 脉冲最亮
 

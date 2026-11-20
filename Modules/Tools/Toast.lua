@@ -32,8 +32,8 @@ local WIDTH      = 300    -- 横幅宽度
 local HEIGHT     = 44
 local PAD        = 10     -- 内边距
 local ACCENT     = 2      -- 左侧主题色竖条宽度
-local FADE_IN    = 0.15
-local FADE_OUT   = 0.25
+local FADE_IN    = Math.FX.fadeIn    -- 动效节奏收口（美术 ⑧）：全仓单一来源
+local FADE_OUT   = Math.FX.fadeOut
 local TOP        = -64    -- 离屏幕上沿（信息栏在 0..14，往下让开）
 local GAP        = 10     -- 列间距
 

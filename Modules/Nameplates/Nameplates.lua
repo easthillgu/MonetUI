@@ -773,7 +773,7 @@ local function StartCastFlash(plate, label)
     plate.castEndClock = nil
     plate.castStartClock = nil
     plate.castDelayUntil = nil
-    plate.castFlashUntil = GetTime() + 0.5
+    plate.castFlashUntil = GetTime() + ns.Math.FX.castFlash
     cast.spark:Hide()
     cast.shield:Hide()
     cast.text:Hide()
@@ -1171,7 +1171,7 @@ local function OnPlateEvent(plate, event)
         else
             if event == "UNIT_SPELLCAST_DELAYED" and plate.cast and plate.cast:IsShown() then
                 -- B4：退条只记一个 0.25s 尾闪时间戳；不读 delayTimeMs（第 11 返回是机密）。
-                plate.castDelayUntil = GetTime() + 0.25
+                plate.castDelayUntil = GetTime() + ns.Math.FX.castDelay
             end
             UpdateCast(plate)
         end

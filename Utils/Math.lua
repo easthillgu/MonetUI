@@ -7,6 +7,19 @@ local ADDON_NAME, ns = ...
 local Math = {}
 ns.Math = Math
 
+--- 动效时长的单一来源（美术提升 ⑧）：出现 / 停留 / 消失三段节奏收在一张表里，
+--- 各模块引用它、不再自写魔法数；数值就是各模块现役值，收口这一步零视觉变化。
+--- 颜色不在这里 —— 一律从 Color 的主题槽取（DESIGN-LANGUAGE §3）。
+Math.FX = {
+    fadeIn      = 0.15,  -- Toast 淡入
+    fadeOut     = 0.25,  -- Toast 淡出
+    hold        = 8.0,   -- Toast 默认停留（DEFAULTS.toast.duration 的兜底，仍由设置覆盖）
+    pulseHz     = 1.6,   -- 信息栏战斗脉冲周期（次/秒）
+    castFlash   = 0.5,   -- 名板打断 / 失败红闪
+    castDelay   = 0.25,  -- 名板退条尾闪
+    hoverFade   = 0.10,  -- 自绘背板悬停淡入
+}
+
 function Math:Lerp(a, b, t)
     return a + (b - a) * t
 end
