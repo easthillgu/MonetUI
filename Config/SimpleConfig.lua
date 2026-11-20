@@ -475,7 +475,7 @@ function SimpleConfig:Build()
 
     local title = Widget:Font(titleBar, 15, "pixel", "edge", "LEFT")
     if ns.Skin then ns.Skin:TextTier(title, "title") end -- title 档（15/edge）：主标题原 20 是禁档，收进档位
-    title:SetPoint("LEFT", logo, "RIGHT", 10, 0)
+    title:SetPoint("LEFT", logo, "RIGHT", Media:SnapUnit(10), 0)
     title:SetText("MonetUI")
 
     local subtitle = Widget:Font(titleBar, 10, "pixel", "neutral", "RIGHT")
@@ -580,8 +580,8 @@ function SimpleConfig:Build()
     -- (the client's own scrollbar art is not part of the Monet look).  上下贴 view 那一段，
     -- 主菜单换行 / 底部带变高都自动让位 —— 以前是写死的 -50 / 58，一改标题行高度就对不上。
     scrollTrack = panel:CreateTexture(nil, "ARTWORK")
-    scrollTrack:SetPoint("TOPRIGHT", view, "TOPRIGHT", -10, 0)
-    scrollTrack:SetPoint("BOTTOMRIGHT", view, "BOTTOMRIGHT", -10, 0)
+    scrollTrack:SetPoint("TOPRIGHT", view, "TOPRIGHT", -Media:SnapUnit(10), 0)
+    scrollTrack:SetPoint("BOTTOMRIGHT", view, "BOTTOMRIGHT", -Media:SnapUnit(10), 0)
     Widget:Width(scrollTrack, 4)
 
     scrollThumb = CreateFrame("Button", nil, panel)

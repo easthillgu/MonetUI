@@ -32,7 +32,9 @@ local Widget = {}
 -- bgAlpha **不**收进来：0.9 / 0.92 / 0.85 / 0.55 / 0.6 / 0.25 各处是按表面语义挑的
 -- （面板 bg、施法条 bg、条底、按钮底），合并会悄悄改视觉。
 Widget.BORDER   = 1   -- 1px Monet 发丝边（框 / 条 / 牌 / 按钮的内嵌边）
-Widget.TEXT_GAP = 3   -- 文字行与条顶边之间的空隙
+-- 文字行与条顶边之间的空隙。单一来源：Nameplates/UnitFrames 都读它（美术提升 ② 口径），
+-- 别在调用点再写裸 3 —— 那是分散的第二份真值。
+Widget.TEXT_GAP = 3
 
 -- 弱键：自建框体被丢弃后条目跟着回收（以前是强引用，永不释放）。
 local hoverWatch, hoverId = setmetatable({}, { __mode = "k" }), nil
