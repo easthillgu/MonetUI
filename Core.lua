@@ -353,6 +353,8 @@ local DEFAULTS = {
         enrich   = true,      -- 单位提示追加「目标: 谁」一行
         idsByAlt = true,      -- 按住 Alt 显示 ID（NPC / 物品 / 法术）
         neutralText = true,   -- 正文归一：通用说明文字（白 / 灰 / 纯黄）染成主题 neutral，品质与职业色不碰
+        -- 队伍框单位提示：true=战斗中仍显示；false=战斗中禁用（默认，战斗机密数据不可读）。
+        groupTipInCombat = false,
     },
     -- 光标拖尾 / 速度星芒 (Modules/Cursor)：纯装饰，拖尾跟主题边框色，星芒用高光色。
     cursor = {

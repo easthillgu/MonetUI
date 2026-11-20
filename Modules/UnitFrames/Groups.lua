@@ -49,6 +49,56 @@ local function InCombat()
     return type(InCombatLockdown) == "function" and InCombatLockdown()
 end
 
+-- ---------------------------------------------------------------------------
+-- 单位提示（队伍 / 团队按钮）
+-- ---------------------------------------------------------------------------
+-- 安全头生成的按钮是 SecureUnitButtonTemplate 安全按钮：本客户端的模板不自带 OnEnter
+-- tooltip，而**不能**照暴雪 XML 那样往按钮写 OnEnter/OnLeave —— 写脚本槽等于把这个安全按钮
+-- 标脏（AGENTS 污染模型）。Widget:UnitTooltip 内部就是 SetScript，这里也不能用。
+-- 全部走 Widget:HoverWatch 轮询：回调只收到 frame，内部 VisibilityOf 已挡住 forbidden 框。
+-- GameTooltip 的摆位由 Modules/Tooltip 全权接管（TooltipDataProcessor + 每帧摆位），
+-- 我们只做 SetOwner → SetUnit → Show，绝不算锚点 / 不写 SetPoint。
+local function TipHide()
+    local tip = _G.GameTooltip
+    if tip then pcall(tip.Hide, tip) end
+end
+
+local function TipEnter(button)
+    -- 再挡一层：安全按钮一受限，IsVisible 直接抛（HoverWatch 的守卫之外，读按钮前先问）。
+    if not Widget:Readable(button) then return end
+
+    -- 战斗中禁用是默认。必须读**运行期设置**（配置面板写进 ns:DB().tooltip），
+    -- 不能读 DEFAULTS —— 否则勾选后永远不生效（静态闸门抓不到这种逻辑错）。
+    -- Tooltip 模块没加载时退回 DEFAULTS；走本模块 InCombat()（ns:InCombat() 单源）。
+    if InCombat() then
+        local tipModule = ns:GetModule("Tooltip")
+        local enabled = tipModule and tipModule:GetSetting("groupTipInCombat")
+        if enabled == nil then
+            local tt = ns.DEFAULTS and ns.DEFAULTS.tooltip
+            enabled = tt and tt.groupTipInCombat
+        end
+        if not enabled then return end
+    end
+
+    -- unit 是 MapButtons 写在按钮上的普通字段；这里**不读 GetAttribute**（受限时可能机密）。
+    -- 值级前置先过 CanRead，身份的可读性再问 CanReadIdentity；SetUnit 另有 pcall 兜底。
+    local unit = button.unit
+    if not unit or not Secrets.CanRead(unit) or not Secrets.CanReadIdentity(unit) then
+        TipHide()
+        return
+    end
+
+    local tip = _G.GameTooltip
+    if not tip then return end
+    if not pcall(tip.SetOwner, tip, button, "ANCHOR_RIGHT") then TipHide(); return end
+    if not pcall(tip.SetUnit, tip, unit) then TipHide(); return end
+    pcall(tip.Show, tip)
+end
+
+local function TipLeave()
+    TipHide()
+end
+
 --- 一个按钮的高度：上下边 + 血条 + 1px 分隔 + 能量条（没有能量条就不留分隔）。
 local function FrameHeight(cfg)
     local power = cfg.power or 0
@@ -787,6 +837,14 @@ local function CreateHeader(name, parent, cfg, count)
 
         StyleButton(button, cfg, (cfg.width or 72) < 100)
         button.nameCap = NameCap(cfg)
+
+        -- 单位提示：initialConfigFunction 每颗按钮只在出生时跑一次，挂这里天然幂等；
+        -- StyleButton 会被 Restyle* 反复调用，所以标记也留着，防将来有人把绑定挪过去。
+        -- 绝不 SetScript / Widget:UnitTooltip —— 那会污染安全按钮（见 TipEnter 上方注释）。
+        if not ns:Marked(button, "unitTip") then
+            ns:Mark(button, "unitTip", true)   -- 旁表去重，绝不往安全按钮写字段
+            Widget:HoverWatch(button, TipEnter, TipLeave)
+        end
 
         if not button.monetListed then
             button.monetListed = true
