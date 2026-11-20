@@ -50,8 +50,9 @@ local FALLBACK = {
 -- hover 那一档是"鼠标压在这块底衬上"：panel +3 L*（2026-11-02 真像素候选实测，正文 neutral 对比度
 -- 5.72 → 5.38，仍在 4.5 线内；天花板实测在 +10）。它必须是一档**命名**的阶梯，
 -- 不是调用点现算的乘数 —— 见 docs/DESIGN-LANGUAGE.md §3。
-local SURFACE_KEYS = { "panel", "hover", "lost", "weave", "fill" }
+local SURFACE_KEYS = { "disabled", "panel", "hover", "lost", "weave", "fill" }
 local SURFACE_STEPS = {
+    disabled = 7,   -- 禁用控件底（美术提升 ⑥）：比 panel 低一档，靠明度读"不可用"，不靠压 alpha
     panel = 10,   -- 窗口底衬：近乎无光，只负责承托内容
     hover = 13,   -- 悬停底衬：只比面板亮 3 L*，读作"亮了一点"而不是"换了一块板"
     lost  = 28,   -- 掉血空槽：比面板亮一档，"少了的那截血"要看得出来
@@ -61,11 +62,11 @@ local SURFACE_STEPS = {
 
 -- 每档吃哪个色相。fill 不在表里 = 走 edge 的 RGB 反相（保持"反色血条"的招牌识别）。
 -- hover 和 panel 同色相（ambient）：悬停只许动亮度，动色相就成了"你的颜色"，那是 §7-a 的边界。
-local SURFACE_HUE = { panel = "ambient", hover = "ambient", lost = "neutral", weave = "neutral" }
+local SURFACE_HUE = { disabled = "neutral", panel = "ambient", hover = "ambient", lost = "neutral", weave = "neutral" }
 
 -- 引擎没带 1.2.0 工具函数（老 vendored 副本）时的回退乘数：就是这层之前各调用点自己写死的那几个数，
 -- 逐位一致，所以缺工具函数只是"回到旧观感"，不会算出别的颜色。
-local SURFACE_MUL_LEGACY = { panel = 0.35, hover = 0.40, lost = 0.32, weave = 1, fill = 1 }
+local SURFACE_MUL_LEGACY = { disabled = 0.22, panel = 0.35, hover = 0.40, lost = 0.32, weave = 1, fill = 1 }
 
 local theme
 local surface
