@@ -11,6 +11,7 @@ local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
 local Marked = function(o, k) return ns:Marked(o, k) end
 local Color = ns.Color
 local Media = ns.Media
+local Math = ns.Math           -- Math.lua 在本文件之前加载（见 Utils.xml）
 local EventBus = ns.EventBus
 local Secrets = ns.Secrets      -- Secrets.lua 在本文件之前加载（见 Utils.xml）
 local Scheduler = ns.Scheduler  -- Scheduler.lua 在本文件之前加载（见 Utils.xml）
@@ -1480,7 +1481,17 @@ function Widget:Refresh(frame, opts)
         -- 的正文凹槽悬停时不降档，那一块只动边框。
         local base = opts.bgSurface or "panel"
         local hovered = opts.hovered and true or false
-        local pr, pg, pb = Color:GetSurface(hovered and base == "panel" and "hover" or base)
+        local pr, pg, pb
+        -- 悬停短过渡（美术提升 ⑦）：登记了 hoverFade 的框按 hoverMix (0..1) 在 panel↔hover
+        -- 两档间插值；未登记（全仓默认）走原来的瞬时切档，逐位不变。只写我们自己的背板。
+        local mix = opts.hoverMix
+        if mix and mix > 0 and mix < 1 and base == "panel" then
+            local ar, ag, ab = Color:GetSurface("panel")
+            local br, bg2, bb = Color:GetSurface("hover")
+            pr, pg, pb = Math:Lerp(ar, br, mix), Math:Lerp(ag, bg2, mix), Math:Lerp(ab, bb, mix)
+        else
+            pr, pg, pb = Color:GetSurface(hovered and base == "panel" and "hover" or base)
+        end
         -- **通透度**（作者口径 11-14："很多大块的灰色，不够通透"）：乘在调用点 alpha 上的
         -- 按档位系数。只作用于**底衬**（SetBackdropColor），不碰条填充 / 织纹 / 文字 / 边框。
         -- 为什么只在这一处能改干净：`bgAlpha = 0.96` 散在 ~40 个调用点上，逐点改既漏又难回退；
@@ -1544,6 +1555,44 @@ end
 -- 背板（surface `hover`）和边框（highlight）一起动，调用点不用各写一份。
 -- 只吃命名档，不在这里现算乘数（DESIGN-LANGUAGE §3）。
 -- @return false 表示这个框没进过工厂（没登记），调用方自己退回原路径
+-- 悬停短过渡的按需驱动（美术提升 ⑦）：只在 hoverFade 框状态切换的那 0.1 秒里挂，
+-- 走 Profile 进 /mui perf 外部账；到端点自动摘掉，不在空闲时每帧空转。
+local HOVER_FADE_SEC = 0.10
+local hoverTicker                      -- 复用同一个壳，避免每次 hover 都 CreateFrame
+local hoverActive = {}                 -- [frame] = true，正在过渡的框
+local function HoverStep(_, elapsed)
+    local done = true
+    for frame in pairs(hoverActive) do
+        local opts = themed[frame]
+        if not opts then
+            hoverActive[frame] = nil
+        else
+            local target = (opts.hovered and true or false) and 1 or 0
+            local cur = opts.hoverMix or 0
+            local step = (elapsed or 0) / HOVER_FADE_SEC
+            local nextMix = cur + Math:Clamp(target - cur, -step, step)
+            if math.abs(target - nextMix) < 0.001 then
+                nextMix = target
+                hoverActive[frame] = nil
+            else
+                done = false
+            end
+            opts.hoverMix = nextMix
+            Widget:Refresh(frame, opts)
+        end
+    end
+    if done and hoverTicker then hoverTicker:SetScript("OnUpdate", nil) end
+end
+
+--- 给**我们自己**的背板登记「悬停短过渡」（美术提升 ⑦）。只认 Widget:Theme 登过记的框，
+--- 暴雪控件拿不到 themed 条目 ⇒ 返回 false、行为逐位不变。
+function Widget:EnableHoverFade(frame)
+    local opts = frame and themed[frame]
+    if not opts then return false end
+    opts.hoverFade = true
+    return true
+end
+
 function Widget:SetHoverLift(frame, on)
     local opts = frame and themed[frame]
     if not opts then return false end
@@ -1551,7 +1600,21 @@ function Widget:SetHoverLift(frame, on)
     local hovered = on and true or false
     if (opts.hovered and true or false) == hovered then return true end
     opts.hovered = hovered or nil
-    Widget:Refresh(frame, opts)
+    if opts.hoverFade and frame.CreateTexture then
+        -- 只登记被自己工厂 Theme 过的框；暴雪框体走原来的瞬时切档（零写入、零过渡）。
+        if not hoverTicker then
+            hoverTicker = CreateFrame("Frame", nil, _G.UIParent)
+        end
+        -- 每次进入过渡都确认驱动挂着（到端点会自摘，不能只在 CreateFrame 那一拍挂）。
+        if not hoverTicker:GetScript("OnUpdate") then
+            hoverTicker:SetScript("OnUpdate", Scheduler:Profile("widget:hover", "控件:悬停过渡", HoverStep))
+        end
+        hoverActive[frame] = true
+        opts.hoverMix = opts.hoverMix or 0
+    else
+        opts.hoverMix = nil
+        Widget:Refresh(frame, opts)
+    end
     return true
 end
 

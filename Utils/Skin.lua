@@ -1553,7 +1553,11 @@ function Skin:HoverHighlight(control, opts)
     opts = opts or {}
 
     local function plate()
-        return Marked(control, "skinBg") or Marked(control, "controlBg")
+        local bg = Marked(control, "skinBg") or Marked(control, "controlBg")
+        -- 悬停短过渡（美术提升 ⑦）：只给我们自己 Theme 过的背板登记，暴雪框的背板拿不到条目、
+        -- 保持瞬时切档；登记一次即可（Widget:EnableHoverFade 幂等）。
+        if bg then Widget:EnableHoverFade(bg) end
+        return bg
     end
 
     Widget:HoverWatch(control, function()
