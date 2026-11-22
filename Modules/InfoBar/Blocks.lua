@@ -139,14 +139,13 @@ local function AverageDurability()
         if type(numSlotsFn) ~= "function" then break end
         
         local okSlots, numSlots = pcall(numSlotsFn, bagIndex)
-        if not okSlots or not numSlots or numSlots < 1 then break end
-        numSlots = Secrets.Number(numSlots)
+        numSlots = okSlots and Secrets.Number(numSlots) or nil
         if not numSlots or numSlots < 1 then break end
         
         -- 遍历背包内的每个槽位
         for slotIndex = 1, numSlots do
             local ok, current, maximum = pcall(api.GetContainerItemDurability, bagIndex, slotIndex)
-            if ok and current and maximum then
+            if ok then
                 current, maximum = Secrets.Number(current), Secrets.Number(maximum)
                 if current and maximum and maximum > 0 then
                     sum = sum + current / maximum

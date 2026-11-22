@@ -154,10 +154,33 @@ function M:Apply(entry)
     end
 end
 
+--- 全量换肤。一次性跑完 47 档实测要 350–500ms、卡主线程半秒（2026-11-21 实测，
+--- 其中 playerspells/professions/character 三家占 65%，且多数 LoD 窗还没出生、钱烧在
+--- Need 查找而非真画）。有 Async 任务器时改按帧预算切片：每帧最多 12ms，空闲摘驱动；
+--- 没有任务器（离线 harness / 老构建）退回同步循环，行为逐位不变。
+--- 防重入：重复触发先 Cancel 上一片再起新的（和 Skin:ScanScrollArrows 同一条纪律）。
+local applyAllJob
+
 function M:ApplyAll()
-    for i = 1, #self.registry do
-        self:Apply(self.registry[i])
+    local Async = ns.Async
+    if not (Async and type(Async.Each) == "function") then
+        for i = 1, #self.registry do
+            self:Apply(self.registry[i])
+        end
+        return
     end
+    if applyAllJob then
+        pcall(applyAllJob.Cancel)
+        applyAllJob = nil
+    end
+    local self_ref = self
+    local job
+    job = Async:Each(self.registry, function(entry)
+        self_ref:Apply(entry)
+    end, function()
+        if applyAllJob == job then applyAllJob = nil end
+    end, "Skins:ApplyAll")
+    applyAllJob = job
 end
 
 --- Collapse a burst of calls into a single pass on the next frame (C_Timer.After(0)); wrap repaint hooks in this so a burst costs one repaint, not dozens.
@@ -1107,6 +1130,11 @@ function M:SetEnabled(enabled)
         self:ApplyAll()
     else
         self.active = false
+        -- 关掉时若还有切片没跑完，先 Cancel：否则后半段会在 Rollback 之后把美术又涂回来。
+        if applyAllJob then
+            pcall(applyAllJob.Cancel)
+            applyAllJob = nil
+        end
         Skin:Rollback()
         Skin:HideAdded()
     end

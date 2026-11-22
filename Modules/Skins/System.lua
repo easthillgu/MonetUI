@@ -44,6 +44,9 @@ local function SkinPopups()
                     "StaticPopup" .. index .. "Button1",
                     "StaticPopup" .. index .. "Button2",
                     "StaticPopup" .. index .. "Button3",
+                    -- 死亡弹窗的「摘要」是 button4（GameDialogDefs DEATH.dialog.button4），
+                    -- 以前只列到 3，于是它是满屏唯一的暴雪红按钮。
+                    "StaticPopup" .. index .. "Button4",
                 },
                 control = { bgAlpha = 0.9 },
             })

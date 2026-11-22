@@ -92,11 +92,21 @@ local ROLE_GLYPH_ATLAS = {
 -- 已经 6 层；再深就到 Tooltip / VoiceChat 那种"我们的手够不着"的子树，收手。
 local LFG_WALK_MAX_DEPTH = 7
 
+--- 游戏返回的 atlas/name 在受限环境可能是**机密串**（type() 照样答 "string"），
+--- 直接 `atlas:lower()` / 当表键 / `~=` 会抛 `attempt to index a secret string`（11-22 实机
+--- Forever.lua:177）。与 d5b0f7c 的 Skin.lua 同族：先过 CanRead 再动字符串。
+--- 调用时取 ns.Secrets（本文件加载期早于 Secrets.lua，顶部那个 local 可能是 nil）。
+local function ReadableString(value)
+    if type(value) ~= "string" then return false end
+    local secrets = ns.Secrets
+    return secrets ~= nil and type(secrets.CanRead) == "function" and secrets.CanRead(value)
+end
+
 local function SwapRoleAtlas(tex)
     if not tex or type(tex.GetAtlas) ~= "function" then return end
     if type(tex.SetTexture) ~= "function" then return end
     local okA, atlas = pcall(tex.GetAtlas, tex)
-    if not okA or type(atlas) ~= "string" then return end
+    if not okA or not ReadableString(atlas) then return end
     local key = ROLE_ATLASES[atlas]
     if not key then return end
     local Media = ns.Media
@@ -173,7 +183,7 @@ local LFG_ART = {
     "^ui%-lfg%-roleicon%-.*%-background$",
 }
 local function IsLfgArt(atlas)
-    if type(atlas) ~= "string" then return false end
+    if not ReadableString(atlas) then return false end
     local low = atlas:lower()
     for i = 1, #LFG_ART do
         if low:find(LFG_ART[i]) then return true end
@@ -321,7 +331,7 @@ local function LfgControlWalk(host, depth)
         local isDropdown, isSearch = false, false
         for _, r in ipairs(RegionsOf(host) or {}) do
             local okA, a = pcall(r.GetAtlas, r)
-            if okA and type(a) == "string" then
+            if okA and ReadableString(a) then
                 local low = a:lower()
                 if low:find("^common%-dropdown%-") then isDropdown = true end
                 if low:find("icon%-search", 1, true) then isSearch = true end
@@ -470,7 +480,7 @@ end
 --- 所以多数时候碰不到；但只要有一次 Apply 落在开页之后，横幅就会没了（11-14 的同类隐患）。
 local function LfgKeepBanner(region)
     local okA, atlas = pcall(region.GetAtlas, region)
-    if not okA or type(atlas) ~= "string" then return false end
+    if not okA or not ReadableString(atlas) then return false end
     local low = atlas:lower()
     return low:find("^groupfinder%-button%-") ~= nil and low:find("cover", 1, true) == nil
 end
