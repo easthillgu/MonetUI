@@ -23,6 +23,11 @@ end
 
 local ICON_GAP    = 4
 local MAX_AURAS   = 32
+-- 折叠：与暴雪同一条 90 秒门槛（AuraUtil.BUFF_DURATION_WARNING_TIME），机密期只读暴雪自己
+-- 算好的 numHideableBuffs，不碰光环字段。战斗里引擎容器按这个上限收窄到短时 buff。
+local COLLAPSE_THRESHOLD  = 90
+local COLLAPSE_VISIBLE_CAP = 4
+local COLLAPSE_GROUP_KEY  = "monetPlayerCombatBuffs"
 
 -- A full buff row (10*32-4) and debuff row (8*40-4) both land on 316px so their right edges line up; per-row counts derive from that budget, never hardcoded.
 local BUFF_SIZE   = 28
@@ -53,6 +58,79 @@ end
 
 local buffButtons, procButtons, debuffButtons = {}, {}, {}
 local buffContainer, procContainer, debuffContainer
+local combatBuffs   -- 前置声明：折叠上限的 helper 在容器创建之前就引用它
+local collapseButton
+
+local function Collapsed()
+    local db = ns:DB()
+    if type(db.buffFrame) ~= "table" then return true end
+    return db.buffFrame.collapsed ~= false
+end
+
+local function SetCollapsed(on)
+    local db = ns:DB()
+    if type(db.buffFrame) ~= "table" then db.buffFrame = {} end
+    db.buffFrame.collapsed = on and true or false
+end
+
+--- 战斗容器的显示上限：折叠时只留短时 buff + 附魔槽，展开时恢复满格。
+local function ApplyCombatCap()
+    if not combatBuffs then return end
+    local cap = Collapsed() and COLLAPSE_VISIBLE_CAP or (MAX_AURAS - 3)
+    pcall(combatBuffs.SetAuraGroupMaxFrameCount, combatBuffs, COLLAPSE_GROUP_KEY, cap)
+end
+
+--- "+N" / "-" 按钮：收起时显示 "+N"（点击展开），展开且存在可折叠 buff 时显示 "-"（点击收回）。
+--- 位置按**当前显示的格数**推算（不锚引擎容器，它的矩形在机密期读不出来）。
+local function UpdateCollapseButton(visible, hidden, foldable)
+    if not collapseButton then return end
+    -- 没有任何可折叠的 buff（永久 / 长时 / 读不出）就整颗藏起来：展开态下没东西可收。
+    if (foldable or 0) <= 0 or visible < 0 then
+        collapseButton:Hide()
+        return
+    end
+    if hidden > 0 then
+        collapseButton.text:SetText("+" .. tostring(hidden))
+    else
+        collapseButton.text:SetText("-")
+    end
+    local perRow = PerRow(BUFF_SIZE)
+    local row = math.floor(visible / perRow)
+    local col = visible % perRow
+    local stride = BUFF_SIZE + ICON_GAP
+    collapseButton:ClearAllPoints()
+    collapseButton:SetPoint("TOPLEFT", UIParent, "TOPLEFT",
+        AURA_GAP + col * stride, -(AURA_GAP + row * stride))
+    collapseButton:Show()
+end
+
+local function CreateCollapseButton()
+    -- kind 必须是 "Button"：Frame 不支持 OnClick 脚本（2026-11-22 重载实判：
+    -- "script type not supported by this object"，BuffFrame 整个模块初始化中断）。
+    local b = Widget:CreateFrame("MonetUICollapseButton", UIParent, BUFF_SIZE, BUFF_SIZE, nil, "Button")
+    b.text = Widget:Font(b, 12, "pixel", "white", "CENTER")
+    b.text:SetAllPoints()
+    b:EnableMouse(true)
+    b:RegisterForClicks("AnyUp")
+    b:SetScript("OnClick", function()
+        SetCollapsed(not Collapsed())
+        ApplyCombatCap()
+        M:Update()
+    end)
+    b:SetScript("OnEnter", function(self)
+        local tip = _G.GameTooltip
+        if not tip then return end
+        pcall(tip.SetOwner, tip, self, "ANCHOR_RIGHT")
+        pcall(tip.SetText, tip, Collapsed() and "展开增益" or "折叠增益")
+        pcall(tip.Show, tip)
+    end)
+    b:SetScript("OnLeave", function()
+        local tip = _G.GameTooltip
+        if tip then pcall(tip.Hide, tip) end
+    end)
+    b:Hide()
+    return b
+end
 local pending
 -- 上一轮成功渲染的结果：读取被机密光环打断时用它兜底，免得整块 Buff 跟着 proc 一起闪没。
 local lastBuffs, lastDebuffs = {}, {}
@@ -142,6 +220,23 @@ local function CreateAuraButton(parent, size)
         if not tip then return end
         pcall(tip.SetOwner, tip, self, "ANCHOR_RIGHT")
 
+        -- 提示内容按**这一颗按钮绑定的 auraInstanceID** 问客户端，哪怕光环表被换肤 / 重排过，
+        -- 名字、层数、说明也永远和图标是同一条（NDui Forever 与暴雪引擎同款口径）。
+        -- self.aura 只作兜底：老索引查不到时才用自拼文字。
+        local id = Secrets.Number(aura.auraInstanceID)
+        if id then
+            local ok
+            if self.auraFilter == "HARMFUL" and type(tip.SetUnitDebuffByAuraInstanceID) == "function" then
+                ok = pcall(tip.SetUnitDebuffByAuraInstanceID, tip, "player", id)
+            elseif type(tip.SetUnitAuraByAuraInstanceID) == "function" then
+                ok = pcall(tip.SetUnitAuraByAuraInstanceID, tip, "player", id, "HELPFUL")
+            end
+            if ok then
+                pcall(tip.Show, tip)
+                return
+            end
+        end
+
         local name = aura.name
         if not name then
             local spellId = Secrets.Number(aura.spellId)
@@ -193,7 +288,7 @@ local function EnsureButtons(list, parent, needed, size, factory)
     end
 end
 
-local function ShowAura(button, aura, index)
+local function ShowAura(button, aura, index, filter)
     local size = button.size
     local perRow = PerRow(size)
     local stride = size + ICON_GAP
@@ -242,14 +337,15 @@ local function ShowAura(button, aura, index)
 
     button.auraInstanceID = aura.auraInstanceID
     button.aura = aura
+    button.auraFilter = filter or "HELPFUL"
 end
 
-local function UpdateRow(list, parent, auras, size)
+local function UpdateRow(list, parent, auras, size, filter)
     local needed = math.min(#auras, MAX_AURAS)
     EnsureButtons(list, parent, needed, size)
 
     for index = 1, needed do
-        Secrets.Measure(ShowAura, list[index], auras[index], index)
+        Secrets.Measure(ShowAura, list[index], auras[index], index, filter)
     end
 end
 
@@ -329,7 +425,7 @@ end
 --   * 引擎容器不可用时（建不出来）自动退回一期方案：暴雪原生 Buff 框 alpha 1 顶上。
 -- ============================================================================
 
-local combatBuffs, combatDebuffs
+local combatDebuffs
 local combatMode = false
 local combatWarned = false
 local SuppressBlizzard   -- 前置声明：SetCombatMode / SuppressBlizzard 互引用
@@ -390,8 +486,25 @@ local function CreateCombatAura(frameName, key, filter, size, kind)
     container:SetSize(1, 1)
     ApplyCombatFlow(container, size)
 
+    local styleButton = function(button)
+        pcall(function()
+            if type(ns.AuraButtonStyle) == "function" then
+                local pad = ns.Media and ns.Media:Mult() or 1
+                if type(pad) ~= "number" or pad <= 0 then pad = 1 end
+                ns.AuraButtonStyle(button, kind, {
+                    width = size, height = size,
+                    crop = { 0.08, 0.92, 0.08, 0.92 },
+                    iconInset = pad,
+                    textSize = 12,
+                    fontKey = "pixel",
+                    borderInside = true,
+                })
+            end
+        end)
+    end
     local opts = {
-        maxFrameCount = MAX_AURAS,
+        -- 三个附魔槽会额外占格，预留出来，免得一排塞满后换行把 debuff 行顶偏。
+        maxFrameCount = MAX_AURAS - (kind == "buff" and 3 or 0),
         candidateFilters = {},              -- 空表 = 不设白名单，引擎自己决定显示什么
         layout = {
             elementSpacing = ICON_GAP,
@@ -401,22 +514,7 @@ local function CreateCombatAura(frameName, key, filter, size, kind)
             layoutIndex    = 1,
         },
         -- 按钮样式与目标框共用。关键：StyleAuraButton 现在**必需件先注册**，装饰失败不影响图标。
-        initializeFrame = function(button)
-            pcall(function()
-                if type(ns.AuraButtonStyle) == "function" then
-                    local pad = ns.Media and ns.Media:Mult() or 1
-                    if type(pad) ~= "number" or pad <= 0 then pad = 1 end
-                    ns.AuraButtonStyle(button, kind, {
-                        width = size, height = size,
-                        crop = { 0.08, 0.92, 0.08, 0.92 },
-                        iconInset = pad,
-                        textSize = 12,
-                        fontKey = "pixel",
-                        borderInside = true,
-                    })
-                end
-            end)
-        end,
+        initializeFrame = styleButton,
     }
     local sortMethod = _G.AuraContainerSortMethod
     if type(sortMethod) == "table" then
@@ -433,6 +531,31 @@ local function CreateCombatAura(frameName, key, filter, size, kind)
     local okAdd, err = pcall(container.AddAuraGroup, container, key, filter, opts)
     if not okAdd then
         return nil, "AddAuraGroup 失败: " .. tostring(err)
+    end
+
+    -- 临时附魔（磨刀石 / 毒 / 符文）在机密期读不到 C_Item.GetWeaponEnchantInfo，
+    -- 我们那条自绘行只能隐藏。把三个武器槽交给引擎：它用 C_PaperDollInfo 读机密数据、
+    -- 用 secretwrap 写图标 / 冷却 / 层数；我们只提供同样的 initializeFrame 样式。
+    -- （NDui Forever 与暴雪 BuffFrame 同款机制；只取机制，不抄它的代码。）
+    if kind == "buff" and type(container.AddItemEnchantment) == "function" then
+        local slots = _G.AuraContainerItemEnchantmentSlot
+        if type(slots) == "table" then
+            for _, slot in pairs(slots) do
+                if type(slot) == "number" then
+                    pcall(container.AddItemEnchantment, container, slot, {
+                        hidePermanent = true,
+                        initializeFrame = styleButton,
+                    })
+                end
+            end
+            if type(container.SetItemEnchantmentLayout) == "function" then
+                pcall(container.SetItemEnchantmentLayout, container, {
+                    elementWidth  = size, elementHeight = size,
+                    elementSpacing = ICON_GAP, lineSpacing = ICON_GAP,
+                    layoutIndex = 1,
+                })
+            end
+        end
     end
 
     pcall(container.SetUnit, container, "player")
@@ -476,6 +599,7 @@ local function EnsureCombatAuras()
     end
 
     combatBuffs, combatDebuffs = buffs, debuffs
+    ApplyCombatCap()
     combatBuffs:SetPoint("TOPLEFT", UIParent, "TOPLEFT", AURA_GAP, -AURA_GAP)
     combatDebuffs:SetPoint("TOPLEFT", combatBuffs, "BOTTOMLEFT", 0, -8)
     -- 回场：这两个容器上的按钮才是真正要给补扫干活的那一批。
@@ -756,6 +880,22 @@ local function SetCombatMode(on)
     end
 end
 
+--- 机密期只从暴雪自己的 BuffFrame 账本取**数量**：它仍在后台更新 auraInfo /
+--- numHideableBuffs，我们既不读光环字段也不碰它的脚本，所以不会触发机密拦截。
+--- 返回 总格数, 可折叠数（numHideableBuffs 与折叠状态无关，始终是"可折叠"的计数）。
+local function CombatCollapseCounts()
+    local b = _G.BuffFrame
+    if not b then return 0, 0 end
+    local okTotal, total = pcall(function() return b.auraInfo and #b.auraInfo or 0 end)
+    local okHidden, hidden = pcall(function() return b.numHideableBuffs end)
+    if not okTotal or not okHidden or type(total) ~= "number" or type(hidden) ~= "number" then
+        return 0, 0
+    end
+    if Secrets.IsSecret(total) or Secrets.IsSecret(hidden) then return 0, 0 end
+    hidden = math.max(0, math.min(hidden, total))
+    return total, hidden
+end
+
 function M:Update()
     if not buffContainer then return end
 
@@ -765,6 +905,12 @@ function M:Update()
         -- 不是"返回机密字段"，是整个 API 直接拒。所以战斗显示只能交给客户端自己：
         -- 首选引擎 AuraContainer（我们的皮肤，见 CreateCombatAura），不可用时退回暴雪原生框。
         SetCombatMode(true)
+        local total, hideable = CombatCollapseCounts()
+        if Collapsed() then
+            UpdateCollapseButton(math.max(0, total - hideable), hideable, hideable)
+        else
+            UpdateCollapseButton(total, 0, hideable)
+        end
         return
     end
     SetCombatMode(false)
@@ -781,13 +927,40 @@ function M:Update()
     if buffsComplete then lastBuffs = buffs end
     if debuffsComplete then lastDebuffs = debuffs end
 
+    -- 脱战折叠：与暴雪同款 90 秒门槛，长时增益收进 "+N"，短时 / 临时 buff 照常显示。
+    local hiddenBuffs = {}
+    if Collapsed() then
+        local visibleBuffs = {}
+        for i = 1, #buffs do
+            local aura = buffs[i]
+            local duration = Secrets.Number(aura.duration)
+            local expiration = Secrets.Number(aura.expirationTime)
+            -- 初始 true：永久光环（duration==0）与读不出数值的按"可折叠"处理，
+            -- 与 SplitBuffs 的 foldable 判据保持同一口径（暴雪 hideUnlessExpanded 同款）。
+            local longer = true
+            if duration ~= nil and expiration ~= nil then -- TAINT-OK: Secrets.Number 已过 canaccessvalue
+                if duration > 0 then
+                    if expiration > 0 then
+                        longer = (expiration - GetTime()) > COLLAPSE_THRESHOLD
+                    end
+                end
+            end
+            if longer then
+                hiddenBuffs[#hiddenBuffs + 1] = aura
+            else
+                visibleBuffs[#visibleBuffs + 1] = aura
+            end
+        end
+        buffs = visibleBuffs
+    end
+
     local auras, procs = SplitBuffs(buffs)
 
-    UpdateRow(buffButtons, buffContainer, auras, BUFF_SIZE)
+    UpdateRow(buffButtons, buffContainer, auras, BUFF_SIZE, "HELPFUL")
     FitContainer(buffContainer, #auras, BUFF_SIZE)
-    UpdateRow(procButtons, procContainer, procs, BUFF_SIZE)
+    UpdateRow(procButtons, procContainer, procs, BUFF_SIZE, "HELPFUL")
     FitContainer(procContainer, #procs, BUFF_SIZE)
-    UpdateRow(debuffButtons, debuffContainer, debuffs, DEBUFF_SIZE)
+    UpdateRow(debuffButtons, debuffContainer, debuffs, DEBUFF_SIZE, "HARMFUL")
     FitContainer(debuffContainer, #debuffs, DEBUFF_SIZE)
 
     -- debuff 行自己算落点，**不锚在 proc 行上**：proc 行空的时候被 FitContainer 压成 0×0
@@ -808,6 +981,10 @@ function M:Update()
     -- buffContainer 常显（空的时候被 FitContainer 压成 0 高，什么都不画），只切换后两块。
     procContainer:SetShown(#procs > 0)
     debuffContainer:SetShown(#debuffs > 0)
+    -- 收起态：foldable = 被收进 "+N" 的数量；展开态：foldable = 光环行数量（SplitBuffs 已按
+    -- 同一条 90 秒/永久门槛分出 auras）。没有可折叠的 buff 时按钮整颗隐藏。
+    local foldableTotal = Collapsed() and #hiddenBuffs or #auras
+    UpdateCollapseButton(#auras + #procs, #hiddenBuffs, foldableTotal)
 
     -- 附魔行：数据刷新 + 按上面记下的实际行高累加锚点（同样不锚可能为空的行）。
     UpdateEnchants()
@@ -879,6 +1056,9 @@ function M:Initialize()
     enchantActive = true
     StartEnchantPoll()
 
+    collapseButton = CreateCollapseButton()
+    ApplyCombatCap()
+
     SuppressBlizzard()
 
     -- 引擎容器**必须在登录/脱战时建好**（ArcAuras 同款纪律：战斗里 CreateFrame 出来的容器
@@ -930,6 +1110,7 @@ function M:SetEnabled(enabled)
         enchantActive = false
         StopEnchantPoll()
         if enchantContainer then enchantContainer:Hide() end
+        if collapseButton then collapseButton:Hide() end
         for _, button in ipairs(enchantButtons) do button:Hide() end
         -- 引擎容器保持 Show 状态（引擎才会持续喂数据），用 alpha 关掉可见性。
         if combatBuffs then pcall(combatBuffs.SetAlpha, combatBuffs, 0) end
