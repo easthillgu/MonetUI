@@ -143,6 +143,9 @@ local DEFAULTS = {
         -- petHover：宠物单位框只在"鼠标悬停"或"宠物被选中（当前目标/焦点）"时 alpha 1，
         -- 其余时间 alpha 0（帧仍是显示状态，靠 visibility 驱动决定有没有宠物，见 UnitFrames）。
         petHover = true,
+        -- 目标 / 焦点 / 目标的目标上显示暴雪团队标记。索引直接交给 Texture:SetSpriteSheetCell
+        -- （客户端允许机密值传入），不在 Lua 里比较，因此战斗中照样画得出来。
+        showRaidIcon = true,
         -- Target auras: reparent Blizzard's own TargetFrame aura list onto our target frame (Andromeda's layout, growing up) and anchor it above.  Only the position is borrowed, never the data -- C_UnitAuras is hidden mid-fight, so this is the same ForeverUI trick the Nameplates module uses.
         showTargetAuras = true,
         targetAuraGap   = 22,
@@ -239,6 +242,8 @@ local DEFAULTS = {
         showName     = true,
         showLevel    = true,
         showPercent  = true,
+        -- 姓名板右侧显示暴雪团队标记（机密索引直接交给 SetSpriteSheetCell，战斗中不失效）。
+        showRaidIcon = true,
         truncate     = true,
         nameLength   = 16,
 

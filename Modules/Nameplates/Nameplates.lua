@@ -36,6 +36,10 @@ local Marked = function(o, k) return ns:Marked(o, k) end
 local BORDER   = Widget.BORDER   -- 1px Monet 发丝边（单一来源见 Utils/Widget.lua）
 local TEXT_GAP = Widget.TEXT_GAP -- the gap the unit frames keep above their bars
 local CAST_GAP = 4
+-- 团队标记用暴雪自带的 4×4 图标表：索引原样交给 SetSpriteSheetCell，不在 Lua 里比较。
+local RAID_ICON_SIZE   = 14
+local RAID_ICON_SHEET  = "Interface\\TargetingFrame\\UI-RaidTargetingIcons"
+local RAID_SHEET_CELLS = 4
 -- 当前目标的固定标识：金色描边 + 1.1 倍。金色**不跟主题走** —— 它回答的是"这是我的目标"，
 -- 而不是"这个单位现在对我什么威胁"（后者是仇恨色，优先级更高，见 UpdateBorder）。
 local TARGET_GOLD  = { 1.00, 0.84, 0.28 }
@@ -427,6 +431,14 @@ local function Build(base)
     plate.level = Widget:Font(plate, nameSize, "pixel", "neutral", "RIGHT")
     plate.level:SetPoint("BOTTOMRIGHT", plate, "TOPRIGHT", 0, TEXT_GAP)
 
+    -- 挂在牌子右侧、等级之外：不遮名字 / 等级，也不跟下面的施法条抢地方。
+    local raidIcon = plate:CreateTexture(nil, "OVERLAY", nil, 2)
+    raidIcon:SetTexture(RAID_ICON_SHEET)
+    raidIcon:SetSize(ns.Media:SnapUnit(RAID_ICON_SIZE), ns.Media:SnapUnit(RAID_ICON_SIZE))
+    raidIcon:SetPoint("BOTTOMLEFT", plate, "TOPRIGHT", 4, TEXT_GAP)
+    raidIcon:Hide()
+    plate.raidIcon = raidIcon
+
     plate.percent = Widget:Font(health, nameSize, "pixel", "white", "RIGHT")
     plate.percent:SetPoint("RIGHT", health, "RIGHT", -3, 0)
 
@@ -523,6 +535,11 @@ local function Layout(plate)
     plate.level:SetFont(ns.Media:FontFor("pixel", nameSize), nameSize, ns.Media:EffectiveFlags(ns.Media.fontFlags, nameSize))
     plate.percent:SetFont(ns.Media:FontFor("pixel", nameSize), nameSize, ns.Media:EffectiveFlags(ns.Media.fontFlags, nameSize))
     plate.percent:SetShown(Setting("showPercent") ~= false)
+
+    local iconSize = ns.Media:SnapUnit(RAID_ICON_SIZE)
+    plate.raidIcon:SetSize(iconSize, iconSize)
+    plate.raidIcon:ClearAllPoints()
+    plate.raidIcon:SetPoint("BOTTOMLEFT", plate, "TOPRIGHT", 4, TEXT_GAP)
 
     plate.cast:SetSize(width, castHeight)
     Widget:SyncBarFill(plate.cast.fill, castHeight - BORDER * 2)
@@ -959,6 +976,35 @@ local function UpdateText(plate)
     end
 end
 
+--- 团队标记：索引**原样**交给客户端的 SetSpriteSheetCell（帧索引允许机密值传入），
+--- Lua 里不比较、不做表键。机密数字的 type() 仍是 "number"，所以类型门不会把它判掉；
+--- 只有普通数字才做 1..8 的范围检查（拿机密值和字面量比大小会抛）。
+local function UpdateRaidIcon(plate)
+    local tex = plate.raidIcon
+    if not tex then return end
+    if Setting("showRaidIcon") == false then tex:Hide(); return end
+
+    local ok, index = pcall(GetRaidTargetIndex, plate.unit)
+    if not ok or type(index) ~= "number" then tex:Hide(); return end
+    if not Secrets.IsSecret(index) and (index < 1 or index > RAID_SHEET_CELLS * RAID_SHEET_CELLS) then
+        tex:Hide()
+        return
+    end
+
+    if type(tex.SetSpriteSheetCell) == "function" then
+        if pcall(tex.SetSpriteSheetCell, tex, index, RAID_SHEET_CELLS, RAID_SHEET_CELLS) then
+            tex:Show()
+            return
+        end
+    elseif type(SetRaidTargetIconTexture) == "function" then
+        if pcall(SetRaidTargetIconTexture, tex, index) then
+            tex:Show()
+            return
+        end
+    end
+    tex:Hide()
+end
+
 --- The border says what the unit is doing to you: threat first, then "this is my target".
 --- UnitThreatSituation / UnitIsUnit can be secret, so each keeps its previous answer
 --- instead of flickering (AGENTS: 受限时保留上次状态).
@@ -1112,6 +1158,7 @@ local function UpdatePlate(plate)
     plate:Show()
     UpdateHealth(plate)
     UpdateText(plate)
+    UpdateRaidIcon(plate)
     UpdateBorder(plate)
     UpdateCast(plate)
     return true
@@ -1266,6 +1313,12 @@ function M:RegisterEvents()
             if plate.blizzardHidden and plate.base then KeepBlizzardHidden(plate) end
             UpdateBorder(plate)
         end
+    end)
+
+    -- 团队标记事件没有载荷；牌子的单位令牌不变，所以全量重画一次就够。
+    EventBus:Register("RAID_TARGET_UPDATE", function()
+        if not M.active then return end
+        M:UpdateAll()
     end)
 
     EventBus:Register("PLAYER_ENTERING_WORLD", function()

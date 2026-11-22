@@ -1085,6 +1085,13 @@ function SimpleConfig:Build()
             RefreshUnitFrames()
         end)
 
+    MakeCheckbox(content, "显示暴雪团队标记（目标 / 焦点 / 目标的目标）", row(T.rowH),
+        function() return ns:DB().unitFrames.showRaidIcon ~= false end,
+        function(value)
+            ns:DB().unitFrames.showRaidIcon = value
+            RefreshUnitFrames()
+        end)
+
     local NUMBER_ITEMS = {
         { value = "auto", text = "自动 (K / M / B)" },
         { value = "cn",   text = "中文 (万 / 亿)" },
@@ -1365,6 +1372,7 @@ function SimpleConfig:Build()
     MakeCheckbox(content, "显示名称", row(T.rowH), NameplateCheckbox("showName"))
     MakeCheckbox(content, "显示等级 / 精英标记", row(T.rowH), NameplateCheckbox("showLevel"))
     MakeCheckbox(content, "显示血量百分比", row(T.rowH), NameplateCheckbox("showPercent"))
+    MakeCheckbox(content, "显示暴雪团队标记", row(T.rowH), NameplateCheckbox("showRaidIcon"))
     MakeCheckbox(content, "显示施法条", row(T.rowH), NameplateCheckbox("showCast"))
     MakeCheckbox(content, "职业 / 阵营着色", row(T.rowH), NameplateCheckbox("classColor"))
     MakeCheckbox(content, "仇恨描边", row(T.rowH), NameplateCheckbox("showThreat"))

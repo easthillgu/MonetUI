@@ -72,6 +72,10 @@ local TEXT_LAYOUT = {
 local TEXT_GAP   = Widget.TEXT_GAP   -- gap between the frame's top edge and the text row
 local NAME_SIZE  = 10
 local SMALL_SIZE = 10
+-- 团队标记：暴雪自带的 4×4 图标表，索引原样交给 SetSpriteSheetCell（允许机密值）。
+local RAID_ICON_SIZE   = 14
+local RAID_ICON_SHEET  = "Interface\\TargetingFrame\\UI-RaidTargetingIcons"
+local RAID_SHEET_CELLS = 4
 
 -- 暴雪单位框的压制/归还已拆到 Modules/UnitFrames/Blizzard.lua（P5）：
 -- 对外仍是 M:SuppressBlizzard(enable) / M:HideBlizzardCastBars(enable)，调用点不变。
@@ -936,6 +940,18 @@ local function CreateUnitFrame(unit, position)
 
     BuildUnitTexts(frame, unit)
 
+    -- 暴雪只在目标 / 焦点 / 目标的目标上画团队标记；图标挂在框体右上之外，
+    -- 不遮名字，也不和目标光环（框体正上方）抢位置。
+    if unit == "target" or unit == "focus" or unit == "targettarget" then
+        local size = Media:SnapUnit(RAID_ICON_SIZE)
+        local raidIcon = frame:CreateTexture(nil, "OVERLAY", nil, 2)
+        raidIcon:SetTexture(RAID_ICON_SHEET)
+        raidIcon:SetSize(size, size)
+        raidIcon:SetPoint("BOTTOMLEFT", frame, "TOPRIGHT", 4, TEXT_GAP)
+        raidIcon:Hide()
+        frame.raidIcon = raidIcon
+    end
+
     FinishUnitFrame(frame, unit, position, border)
 
     return frame
@@ -977,6 +993,34 @@ function M:UpdateUnit(unit, kind, powerType)
     end
 end
 
+--- 团队标记：索引原样交给客户端，Lua 不比较、不做表键。机密数字的 type() 仍是
+--- "number"，所以类型门不会把它判掉；范围检查只给普通数字（机密值与字面量比大小会抛）。
+local function UpdateRaidIcon(frame)
+    local tex = frame.raidIcon
+    if not tex then return end
+    if Shared("showRaidIcon") == false then tex:Hide(); return end
+
+    local ok, index = pcall(GetRaidTargetIndex, frame.unit)
+    if not ok or type(index) ~= "number" then tex:Hide(); return end
+    if not Secrets.IsSecret(index) and (index < 1 or index > RAID_SHEET_CELLS * RAID_SHEET_CELLS) then
+        tex:Hide()
+        return
+    end
+
+    if type(tex.SetSpriteSheetCell) == "function" then
+        if pcall(tex.SetSpriteSheetCell, tex, index, RAID_SHEET_CELLS, RAID_SHEET_CELLS) then
+            tex:Show()
+            return
+        end
+    elseif type(SetRaidTargetIconTexture) == "function" then
+        if pcall(SetRaidTargetIconTexture, tex, index) then
+            tex:Show()
+            return
+        end
+    end
+    tex:Hide()
+end
+
 --- Show / hide a frame for the unit and refresh all of its parts.
 --- 显隐本身不在这里做：visibility 驱动负责（战斗中 Show/Hide 是受保护的），
 --- 这里只把内容刷成当前单位的值。
@@ -992,6 +1036,7 @@ local function RefreshUnit(unit)
         end
         -- 施法条也要收：这块框可能马上被换给另一个单位，留着的三角会"挂"在新目标上。
         if M.castbar then M.castbar.HideCast(frame) end
+        if frame.raidIcon then frame.raidIcon:Hide() end
         return
     end
 
@@ -999,6 +1044,7 @@ local function RefreshUnit(unit)
     UpdatePower(frame)
     M.classpower.UpdateClassPower(frame)
     UpdateName(frame)
+    UpdateRaidIcon(frame)
     UpdateThreat(frame)
     -- 施法条跟着一起对齐：框重新出现时（切目标 / 登录 / 换区域）按"现在真的在打什么"摆，
     -- 不依赖下一次施法事件 —— 否则中途接手的施法会一直不显示，或者残留旧状态。
@@ -1100,6 +1146,9 @@ function M:RegisterEvents()
         RefreshUnit("target")
         RefreshUnit("targettarget")
     end)
+
+    -- 标记变化事件没有单位载荷，重刷一遍受支持的框即可。
+    EventBus:Register("RAID_TARGET_UPDATE", function() M:UpdateAll() end)
 
     EventBus:Register("UNIT_TARGET", function(_, unit)
         if unit == "target" then RefreshUnit("targettarget") end
