@@ -1053,6 +1053,16 @@ end
 
 function Skin()
     if not active then return false end
+    -- 只挡真正的战斗窗口：登录/重载当拍 InCombatLockdown() 给假 false，故叠 UnitAffectingCombat。
+    -- **不能用 ns:IsRestricted() 当门**（2026-11-22 实机）：副本里 Map 限制恒为 true，
+    -- 但 Minimap / MinimapCluster 的 IsProtected() 都是 false，换肤写它们根本不会被拦；
+    -- 一挡就把整个 Skin 连我们自己的框都挡掉（holder / panel / overlay 全 nil，主菜单露出来），
+    -- 队列又只等下一次脱战，于是副本里永远补不回来。
+    if (type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown())
+        or (type(_G.UnitAffectingCombat) == "function" and _G.UnitAffectingCombat("player")) then
+        Queue("skin")
+        return false
+    end
     local minimap = _G.Minimap
     if not minimap then return false end
 
