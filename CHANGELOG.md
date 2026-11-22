@@ -3,6 +3,28 @@
 This file is used verbatim as the CurseForge release changelog (see `.pkgmeta`).
 Update the top section before tagging a new release.
 
+## 0.13.13 (2026-11-22)
+
+- Nameplates / unit frames: Blizzard raid target markers now show on nameplates and on the
+  target / focus / targettarget frames. The index goes straight into SetSpriteSheetCell, so
+  secret indices keep rendering in combat; both can be turned off in the settings.
+- BuffFrame: long and permanent buffs can be collapsed again. A "+N" button holds them,
+  clicking expands and swaps in a "-" button to collapse; in combat the engine aura
+  container is capped to the short-duration buffs and the count comes from Blizzard's own
+  ledger, so nothing secret is read.
+- BuffFrame: temporary weapon enchants (poison, sharpening stones) now stay visible in
+  combat through the engine's item-enchantment slots, and aura tooltips resolve the aura by
+  instance ID so the text matches the icon after sorting.
+- Tweaks: two new spell-density switches (graphicsSpellDensity / raidGraphicsSpellDensity),
+  both defaulting to "all", so ground spell effects render in dungeons and raids again.
+- Minimap: fixed the in-instance skin gate. Map restriction is permanently active inside
+  instances while the minimap itself is not protected, so the old gate left it unskinned
+  and the main menu exposed.
+- Skins: atlas / name strings are read-checked before comparison (secret strings in
+  restricted content), the full skin pass is sliced to a 12ms per-frame budget, and the
+  death recap button is skinned.
+- InfoBar: durability averaging guards bag slot counts and item durability as secret values.
+
 ## 0.13.12 (2026-11-20)
 
 - Buffs: temporary weapon enchants are now shown in their own row with icon, duration,
