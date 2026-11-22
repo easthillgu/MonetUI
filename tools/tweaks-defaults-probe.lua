@@ -39,6 +39,9 @@ C("brightness",                        "50", "50")
 C("contrast",                          "50", "50")
 C("ResampleAlwaysSharpen",             "0", "0")
 C("particleDensity",                   "100", "100")
+-- 2026-11-22：法术密度两档（团队/副本那条出厂实测是 0，要在探针里被开关写成 2）
+C("graphicsSpellDensity",              "2", "1")
+C("raidGraphicsSpellDensity",          "0", "1")
 C("volumefog",                         "1", "1")
 C("ffxGlow",                           "1", "1")
 C("ffxDeath",                          "1", "1")
@@ -139,6 +142,7 @@ local function LiveSwitches()
         cameraZoom = true, combatText = true, questGlow = true,
         noDeathGray = true, sharpen = false, noWeather = true,
         fewParticles = false, noFog = false, damageTextOnly = true,
+        spellDensity = true, raidSpellDensity = true,
     }
 end
 
@@ -150,15 +154,16 @@ local s1 = M1:Settings()
 local SEEDED = {
     "cameraZoom", "combatText", "questGlow", "noDeathGray", "sharpen",
     "noWeather", "fewParticles", "noFog", "damageTextOnly",
+    "spellDensity", "raidSpellDensity",
 }
 local on, total = 0, 0
 for _, key in ipairs(SEEDED) do
     if s1[key] then on = on + 1 end
 end
 for _ in pairs(s1) do total = total + 1 end
-check("新存档 9 条默认开关全部打开（2026-11-16 作者实机对齐）", on == 9, tostring(on) .. "/9")
-check("新存档没多写别的键", total == 9, tostring(total))
-check("新存档记下种子版本", DB.tweakSeed == 2, tostring(DB.tweakSeed))
+check("新存档 11 条默认开关全部打开（11-22 加法术密度两档）", on == 11, tostring(on) .. "/11")
+check("新存档没多写别的键", total == 11, tostring(total))
+check("新存档记下种子版本", DB.tweakSeed == 3, tostring(DB.tweakSeed))
 
 -- 老存档 = 本机制之前就在的那批。稀疏存里「键不存在」既可能是「关掉」也可能是「没见过」，
 -- 所以只有 SEED_ADDITIONS 点过名的新键才允许补；玩家拨过的（combatText = false）绝不回滚。
@@ -169,7 +174,9 @@ check("老存档不顶掉玩家拨过的键", s2.sharpen == true and s2.combatTe
     tostring(s2.sharpen) .. "/" .. tostring(s2.combatText))
 check("老存档没见过的旧键不补（cameraZoom 仍是 nil）", s2.cameraZoom == nil, tostring(s2.cameraZoom))
 check("老存档补上本版新增的 damageTextOnly", s2.damageTextOnly == true, tostring(s2.damageTextOnly))
-check("老存档也记下种子版本", DB.tweakSeed == 2, tostring(DB.tweakSeed))
+check("老存档补上第 3 版新增的法术密度两档", s2.spellDensity == true and s2.raidSpellDensity == true,
+    tostring(s2.spellDensity) .. "/" .. tostring(s2.raidSpellDensity))
+check("老存档也记下种子版本", DB.tweakSeed == 3, tostring(DB.tweakSeed))
 
 -- 种子标记已是最新时不许再补：否则玩家关掉它之后，每次登录都会被自己开回来。
 s2.damageTextOnly = nil
@@ -200,6 +207,9 @@ check("brightness 拉回 55", CVARS.brightness.value == "55", CVARS.brightness.v
 check("contrast 拉回 75", CVARS.contrast.value == "75", CVARS.contrast.value)
 check("ffxGlow 拉回 0", CVARS.ffxGlow.value == "0", CVARS.ffxGlow.value)
 check("gamma 拉回 1", CVARS.gamma.value == "1", CVARS.gamma.value)
+check("法术密度两档都拉到「所有」", CVARS.graphicsSpellDensity.value == "2"
+    and CVARS.raidGraphicsSpellDensity.value == "2",
+    CVARS.graphicsSpellDensity.value .. "/" .. CVARS.raidGraphicsSpellDensity.value)
 
 -- 快照只裁决「插件不管」的 CVar：被开关管住的一律不进 vision，
 -- 否则关掉开关的玩家会被快照写回 0（等于插件替他关），而且开关开时那些数永远不下发。

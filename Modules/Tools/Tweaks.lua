@@ -66,6 +66,11 @@ local TWEAKS = {
     { key = "sharpen",     cvar = "ResampleAlwaysSharpen",                 value = "1", label = "画面锐化（仅渲染比例 <100% 时有效）" },
     { key = "noWeather",   cvar = "weatherDensity",                        value = "0", label = "关闭雨雪天气（画面干净、帧数更稳）" },
     { key = "fewParticles",cvar = "particleDensity",                       value = "0", label = "降低法术粒子" },
+    -- 2026-11-22 实机：`raidGraphicsSpellDensity=0`（默认 1）让团队/副本里的地面法术效果全部消失；
+    -- 普通场景那条本来是 2，但两条都要由开关接管，免得快照 / 游戏内设置再和它互相顶。
+    -- 0 = 只显示重要法术、1 = 减少、2 = 所有（`Graphics.lua` 的 GetSpellDensityOptions）。
+    { key = "spellDensity",     cvar = "graphicsSpellDensity",     value = "2", label = "法术密度：所有（普通场景，含地面效果）" },
+    { key = "raidSpellDensity", cvar = "raidGraphicsSpellDensity", value = "2", label = "法术密度：所有（团队/副本，含地面效果）" },
     { key = "noFog",       cvar = "volumefog",                             value = "0", label = "去体积雾（远景不蒙灰）" },
 }
 
@@ -122,6 +127,7 @@ local DEFAULT_SWITCHES = {
     noDeathGray = true, sharpen = true, noWeather = true,
     fewParticles = true, noFog = true,
     damageTextOnly = true,
+    spellDensity = true, raidSpellDensity = true,
 }
 
 -- 出厂默认的「增量」版本号。新存档铺一遍 DEFAULT_SWITCHES 就记成当前版本；
@@ -131,11 +137,13 @@ local DEFAULT_SWITCHES = {
 -- （老存档早于这个开关），也可能是「玩家自己关掉了」。两者不能靠 `== nil` 区分，
 -- 所以**新增的默认开条目必须逐版本点名**：只有这里记过的键才允许被补成 true，
 -- 其余一个都不碰（否则玩家亲手关掉的开关会被每次登录重新打开）。
-local SEED_VERSION = 2
+local SEED_VERSION = 3
 
 local SEED_ADDITIONS = {
     -- 版本 2（2026-11-13）：浮动战斗文字只留伤害数字。配合 combatText 的目标值 2 → 0.5。
     [2] = { "damageTextOnly" },
+    -- 版本 3（2026-11-22）：法术密度两档都拉到「所有」（团队/副本那条实机是 0）。
+    [3] = { "spellDensity", "raidSpellDensity" },
 }
 
 -- 每个 CVar 一行账，`/mui tweaks status` 读的就是它。
@@ -475,6 +483,8 @@ local VISION = {
     { cvar = "contrast",              key = nil,            note = "对比度：偏低 = 黑的不黑、画面糊成一片灰" },
     { cvar = "ResampleAlwaysSharpen", key = "sharpen",      note = "强制锐化重采样：只在渲染比例 <100%（发生重采样）时起作用；100% 下开关无差异" },
     { cvar = "particleDensity",       key = "fewParticles", note = "粒子密度：0 = 光效/尘埃/萤火全灭，画面发平" },
+    { cvar = "graphicsSpellDensity",  key = "spellDensity",     note = "法术密度（普通）：0 = 只显示重要法术，地面法术效果消失" },
+    { cvar = "raidGraphicsSpellDensity", key = "raidSpellDensity", note = "法术密度（团队/副本）：0 = 地面法术效果消失" },
     { cvar = "volumefog",             key = "noFog",        note = "体积雾：关掉失去大气透视，远景发平" },
     { cvar = "ffxGlow",               key = nil,            note = "全屏泛光：关掉亮部不再溢光，画面发闷发灰" },
     { cvar = "ffxDeath",              key = "noDeathGray",  note = "死亡灰度（0 = 复活不灰屏）" },
