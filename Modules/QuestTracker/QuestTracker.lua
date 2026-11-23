@@ -456,7 +456,12 @@ function M:Skin()
     handle:SetPoint("TOPRIGHT", lockBtn, "LEFT", -4, 0)
     handle:SetHeight(HEADER_H)
     handle:RegisterForDrag("LeftButton")
-    handle:SetScript("OnDragStart", function() tracker:StartMoving() end)
+    -- 锁定时必须先判 locked：本客户端对不可移动的框调 StartMoving 会**抛错**
+    -- （"Frame is not movable"，2026-11-22 实机），不是静默拒绝。注释见 ApplyLock。
+    handle:SetScript("OnDragStart", function()
+        if not not (ns:DB().questTracker or {}).locked then return end
+        tracker:StartMoving()
+    end)
     handle:SetScript("OnDragStop", SavePosition)
 
     local headText = Widget:Font(tracker, 12, "pixel", "edge", "LEFT", nil, Media.outlineFlags)

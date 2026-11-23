@@ -3,6 +3,24 @@
 This file is used verbatim as the CurseForge release changelog (see `.pkgmeta`).
 Update the top section before tagging a new release.
 
+## 0.13.14 (2026-11-23)
+
+- Nameplates: debuffs now come from Blizzard's own aura container and show only auras cast by
+  you. The row sits above the name, left-aligned, grows right then up, and uses the same
+  24x18 rectangular crop as the target-frame auras.
+- Nameplates: cast-bar countdown, health colour and the "casting on you" cue now use the
+  client's own engine bindings, so they keep working while secret values are locked down.
+- Group frames: the raid frames sit to the right of the minimap with 48px units so all eight
+  groups fit; party frames stay hidden while you are in a raid. Narrow raid units show the
+  first three characters of a name instead of compressing it into an unreadable squiggle.
+- Group frames: clicking a member re-suppresses Blizzard's newly created target-highlight
+  regions, so the stray yellow box no longer appears next to the minimap.
+- Action bars: the drop catcher no longer writes to its protected button while in combat,
+  removing the "interface action blocked" spam. Quest tracker no longer errors when dragging
+  a locked header.
+- Auras: engine-written icons get their texture coordinates set exactly once; addon-owned
+  icons keep the existing crop driver. A new nameplate checkbox controls the aura row.
+
 ## 0.13.13 (2026-11-22)
 
 - Nameplates / unit frames: Blizzard raid target markers now show on nameplates and on the

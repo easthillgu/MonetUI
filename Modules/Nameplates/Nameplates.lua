@@ -40,6 +40,44 @@ local CAST_GAP = 4
 local RAID_ICON_SIZE   = 14
 local RAID_ICON_SHEET  = "Interface\\TargetingFrame\\UI-RaidTargetingIcons"
 local RAID_SHEET_CELLS = 4
+
+-- ============================================================================
+-- 引擎时长 / 曲线（NDui 同源机制，2026-11-22 引入）
+-- ----------------------------------------------------------------------------
+-- 战斗中施法数据是机密：时间戳相减、`if endTime` 都会被拦，所以倒计时与填充交给客户端：
+--   * StatusBar:SetTimerDuration(durationObject) —— 引擎自己逐帧推进；
+--   * C_DurationUtil 的 DurationTextBinding —— 自己把文字刷进 FontString（机密期照走）。
+-- 名字颜色同理：UnitHealthPercent(unit, true, 我们自己的颜色曲线) 返回已求值的颜色对象，
+-- 直接 SetTextColor，不做算术。
+-- 全部特性探测：构建没有这些 API 时整条退回原来的时钟算法。
+local castFormatter
+if type(_G.C_StringUtil) == "table" and type(C_StringUtil.CreateSecondsFormatter) == "function" then
+    local ok, f = pcall(C_StringUtil.CreateSecondsFormatter)
+    if ok and f then
+        castFormatter = f
+        local E = _G.Enum
+        if E and E.SecondsFormatterAbbreviation and E.SecondsFormatterAbbreviation.OneLetter then
+            pcall(f.SetDefaultAbbreviation, f, E.SecondsFormatterAbbreviation.OneLetter)
+        end
+        pcall(f.SetMillisecondsThreshold, f, 60)
+    end
+end
+
+-- 名字血量曲线：满血绿 → 半血黄 → 低血红。曲线必须在**加载期**建（运行期建曲线在受限环境会被拒）。
+local healthCurve
+if type(_G.C_CurveUtil) == "table" and type(C_CurveUtil.CreateColorCurve) == "function" then
+    local ok, curve = pcall(C_CurveUtil.CreateColorCurve)
+    if ok and curve then
+        local E = _G.Enum
+        if E and E.LuaCurveType and E.LuaCurveType.Linear then
+            pcall(curve.SetType, curve, E.LuaCurveType.Linear)
+        end
+        pcall(curve.AddPoint, curve, 0, CreateColor(1, 0.25, 0.25))
+        pcall(curve.AddPoint, curve, 0.6, CreateColor(1, 0.85, 0.30))
+        pcall(curve.AddPoint, curve, 1, CreateColor(0.35, 0.95, 0.45))
+        healthCurve = curve
+    end
+end
 -- 当前目标的固定标识：金色描边 + 1.1 倍。金色**不跟主题走** —— 它回答的是"这是我的目标"，
 -- 而不是"这个单位现在对我什么威胁"（后者是仇恨色，优先级更高，见 UpdateBorder）。
 local TARGET_GOLD  = { 1.00, 0.84, 0.28 }
@@ -459,15 +497,41 @@ local function Build(base)
     local timer = Widget:Font(cast, nameSize, "pixel", "neutral", "RIGHT")
     timer:SetPoint("RIGHT", cast, "RIGHT", -3, 0)
 
+    -- 引擎倒计时：DurationTextBinding 自己把剩余秒数刷进 timer（战斗机密期照常走；
+    -- 旧路径要 endTime - GetTime()，机密时只能空白）。特性探测，缺 API 时退回原时钟算法。
+    if type(_G.C_DurationUtil) == "table" and type(C_DurationUtil.CreateDurationTextBinding) == "function" then
+        local okB, binding = pcall(C_DurationUtil.CreateDurationTextBinding)
+        if okB and binding and type(binding.SetFontString) == "function" then
+            local E = _G.Enum
+            if castFormatter and E and E.DurationTextBindingProperty and type(binding.SetTextFormat) == "function" then
+                pcall(binding.SetTextFormat, binding, "{}", {
+                    { property = E.DurationTextBindingProperty.RemainingDuration, formatter = castFormatter },
+                })
+            elseif castFormatter and type(binding.SetFormatter) == "function" then
+                pcall(binding.SetFormatter, binding, castFormatter)
+            end
+            if pcall(binding.SetFontString, binding, timer) then
+                pcall(binding.SetEnabled, binding, false)
+                timer.binding = binding
+            end
+        end
+    end
+
+    -- 「对你施法」：布尔交给 SetAlphaFromBoolean（允许污染代码传机密），战斗里不做真值测试。
+    local isYou = Widget:Font(cast, nameSize, "pixel", "danger", "RIGHT")
+    isYou:SetPoint("RIGHT", timer, "LEFT", -3, 0)
+    isYou:SetText("对你")
+    isYou:SetAlpha(0)
+
     local text = Widget:Font(cast, nameSize, "pixel", "white", "LEFT")
     text:SetPoint("LEFT", icon, "RIGHT", 3, 0)
-    text:SetPoint("RIGHT", timer, "LEFT", -3, 0)
+    text:SetPoint("RIGHT", isYou, "LEFT", -3, 0)
     text:SetWordWrap(false)
 
     -- B3 打断/失败短文字：红闪期间顶替法术名居中显示（同宽约束，不遮图标/倒计时位）。
     local flashText = Widget:Font(cast, nameSize, "pixel", "danger", "CENTER")
     flashText:SetPoint("LEFT", icon, "RIGHT", 3, 0)
-    flashText:SetPoint("RIGHT", timer, "LEFT", -3, 0)
+    flashText:SetPoint("RIGHT", isYou, "LEFT", -3, 0)
     flashText:SetWordWrap(false)
     flashText:Hide()
 
@@ -502,6 +566,7 @@ local function Build(base)
     cast.icon = icon
     cast.text = text
     cast.timer = timer
+    cast.isYou = isYou
     cast.flashText = flashText
     cast.shield = shield
     cast.spark = spark
@@ -516,6 +581,7 @@ end
 
 --- Re-apply geometry and fonts (settings can change at any moment), off the per-event path:
 --- a plate lays out only when just built or the player changed a setting (layoutDirty).
+local SyncPlateAuraLayout
 local function Layout(plate)
     local width, height = PlateWidth(), PlateHeight()
     local nameSize = ns.Media:SnapSize(Setting("nameSize"))
@@ -560,6 +626,7 @@ local function Layout(plate)
     plate.name:SetPoint("BOTTOMLEFT", plate, "TOPLEFT", 0, TEXT_GAP)
     plate.level:SetPoint("BOTTOMRIGHT", plate, "TOPRIGHT", 0, TEXT_GAP)
     plate.name:SetPoint("RIGHT", plate.level, "LEFT", -4, 0)
+    if SyncPlateAuraLayout then SyncPlateAuraLayout(plate) end
 end
 
 local function BlizzardUnitFrame(base)
@@ -708,7 +775,13 @@ local function HideCast(plate)
     plate.castFlashUntil = nil
     plate.castDelayUntil = nil
     plate.castNotInt = nil
+    plate.castEngine = nil
+    plate.castEngineText = nil
     plate:SetScript("OnUpdate", nil)
+    -- 引擎倒计时/「对你」一起收掉：绑定停用后保留的最后一帧文字要清空，不然下次 Show 会带旧秒数。
+    if cast.timer and cast.timer.binding then pcall(cast.timer.binding.SetEnabled, cast.timer.binding, false) end
+    if cast.timer then cast.timer:SetText("") end
+    if cast.isYou then cast.isYou:SetAlpha(0) end
     cast.flashText:Hide()
     cast.spark:Hide()
     cast.shield:Hide()
@@ -748,9 +821,14 @@ local function CastTick(plate)
 
     if not plate.castActive then return end
 
-    pcall(cast.fill.SetValue, cast.fill, now * 1000)
+    -- 引擎在跑（SetTimerDuration）时不再写值：条由客户端自己推进，我们写 SetValue 会和它打架。
+    if not plate.castEngine then
+        pcall(cast.fill.SetValue, cast.fill, now * 1000)
+    end
 
-    if plate.castEndClock then
+    if plate.castEngineText then
+        -- 秒数由 DurationTextBinding 逐帧刷新（战斗机密期也有；旧路径在机密时只能空白）
+    elseif plate.castEndClock then
         local left = plate.castEndClock - now
         if left < 0 then left = 0 end
         if left < 10 then
@@ -781,6 +859,22 @@ end
 local CastTickTracked = ns.Scheduler and ns.Scheduler:Profile("nameplates:cast", "名板投射条", CastTick)
     or CastTick
 
+--- 打断者名字：事件载荷给的是 GUID（受限时也可能是机密串）。逐级 pcall；
+--- 名字若读成机密就不拼文案（SetText 吃得下机密串，concat 吃不下）—— 宁可只显示「被打断」。
+local function InterrupterName(guid)
+    if type(guid) == "nil" then return nil end
+    local ok, _, _, _, _, name = pcall(GetPlayerInfoByGUID, guid)
+    if not ok then return nil end
+    if type(name) == "nil" then
+        local okT, token = pcall(UnitTokenFromGUID, guid)
+        if okT and type(token) ~= "nil" then
+            local okN, unitName = pcall(UnitName, token)
+            if okN then name = unitName end
+        end
+    end
+    return name
+end
+
 --- B3：打断/失败不再瞬时藏条 —— 置 0.5s 红闪时间戳，渲染与收尾都交给现有 CastTick。
 --- 条没在显示（showCast 关 / 本来就没条）时不闪，直接走原隐藏路径。
 local function StartCastFlash(plate, label)
@@ -795,6 +889,10 @@ local function StartCastFlash(plate, label)
     cast.shield:Hide()
     cast.text:Hide()
     cast.timer:Hide()
+    -- 红闪期间停掉引擎秒数（DurationTextBinding 自己会一直数下去），并收掉「对你」标记。
+    if cast.timer.binding then pcall(cast.timer.binding.SetEnabled, cast.timer.binding, false) end
+    if cast.isYou then cast.isYou:SetAlpha(0) end
+    plate.castEngine, plate.castEngineText = nil, nil
     cast.flashText:SetText(label)
     cast.flashText:Show()
     plate:SetScript("OnUpdate", CastTickTracked)
@@ -856,8 +954,8 @@ local function UpdateCast(plate)
     if not Secrets.IsSecret(to) then to = to or 1 end
     pcall(plate.cast.fill.SetMinMaxValues, plate.cast.fill, from, to)
     -- 只存"有条在走"这个普通布尔：存原始 endMS 会让 CastTick 每帧对它做真值测试。
-    -- 机密/读不到 end 时沿用旧行为 —— 不跑每帧 SetValue，条保持静态（保留上次状态）。
-    plate.castActive = (not Secrets.IsSecret(endMS) and endMS ~= nil)
+    -- 引擎时长可用时条由客户端自己推进；否则机密/读不到 end 维持旧行为（静态条，保留上次状态）。
+    plate.castActive = nil   -- 下面引擎块 / 旧路径判定后落定
 
     -- Plain end => a real countdown; hidden end => bar moves, number blank (see 4.6 in MonetUI.md).
     local endClock = Secrets.Number(endMS)
@@ -876,6 +974,46 @@ local function UpdateCast(plate)
         plate.cast.fill:SetStatusBarColor(0.62, 0.62, 0.92)
     else
         plate.cast.fill:SetStatusBarColor(Color:GetResource())
+    end
+
+    -- B5：引擎时长对象 —— 战斗里客户端自己读机密施法数据并推进填充/倒计时。
+    -- 拿不到（旧构建 / 单位没在施法）就退回旧时钟算法；两条路互斥，绝不双写。
+    local durationObj
+    do
+        local fn = channel and _G.UnitChannelDuration or _G.UnitCastingDuration
+        if type(fn) == "function" then
+            local okD, d = pcall(fn, unit)
+            if okD then durationObj = d end
+        end
+    end
+    plate.castEngine, plate.castEngineText = nil, nil
+    if durationObj and type(plate.cast.fill.SetTimerDuration) == "function" then
+        local E = _G.Enum
+        local dir = channel and E and E.StatusBarTimerDirection and E.StatusBarTimerDirection.RemainingTime
+                            or E and E.StatusBarTimerDirection and E.StatusBarTimerDirection.ElapsedTime
+        if pcall(plate.cast.fill.SetTimerDuration, plate.cast.fill, durationObj, nil, dir) then
+            plate.castEngine = true
+            plate.cast.timer:SetText("")
+            local b = plate.cast.timer.binding
+            if b and type(b.SetDuration) == "function" then
+                pcall(b.SetEnabled, b, true)
+                if pcall(b.SetDuration, b, durationObj) then
+                    plate.castEngineText = true
+                end
+            end
+        end
+    end
+    plate.castActive = plate.castEngine or (not Secrets.IsSecret(endMS) and endMS ~= nil)
+
+    -- B6：「对你施法」标记。PlayerIsSpellTarget 返回机密布尔 → 只交给 SetAlphaFromBoolean。
+    local isYou = plate.cast.isYou
+    if isYou then
+        if type(PlayerIsSpellTarget) == "function" and type(isYou.SetAlphaFromBoolean) == "function" then
+            local okY, you = pcall(PlayerIsSpellTarget, unit)
+            if okY then isYou:SetAlphaFromBoolean(you, 1, 0) else isYou:SetAlpha(0) end
+        else
+            isYou:SetAlpha(0)
+        end
     end
 
     -- B1：火花随条显示（引导也显示），先钉起点，CastTick 每拍把它推到填充前沿。
@@ -973,6 +1111,17 @@ local function UpdateText(plate)
         Widget:FitText(plate.name, name, maxWidth, nameSize, nil, 6)
     else
         Widget:FitText(plate.name, "", PlateWidth() * 0.70, nameSize, nil, 6)
+    end
+
+    -- B5：名字颜色 = 血量百分比曲线（满血绿 → 半血黄 → 低血红）。曲线在加载期建好，
+    -- UnitHealthPercent 返回的是**已求值的颜色对象**（不做算术、机密期也算得出来），
+    -- 直接把 RGB 交给 SetTextColor（NDui 同款机制）。
+    if healthCurve and type(UnitHealthPercent) == "function" then
+        local okP, col = pcall(UnitHealthPercent, unit, true, healthCurve)
+        if okP and col then
+            local okR, r, g, b = pcall(col.GetRGB, col)
+            if okR and r then plate.name:SetTextColor(r, g, b) end
+        end
     end
 end
 
@@ -1117,6 +1266,195 @@ function M:SyncGuard()
     end
 end
 
+-- ============================================================================
+-- 姓名板光环（引擎 AuraContainer，2026-11-23 接入，依据 HANDOFF §8.143）
+-- ----------------------------------------------------------------------------
+-- 战斗中客户端把光环数据标成机密、插件硬禁读（`C_UnitAuras.GetAuraDataByIndex` 直接抛），
+-- 唯一能画实时 debuff 的是客户端自己：引擎按 `nameplateN` 单位**自己**解析 / 布局 / 分配按钮，
+-- 连战斗窗口里都照常跑（§8.143 v7 指纹：4 个 HARMFUL 光环、宽度是 SECRET）。
+-- 三件事必须按原样做，错一件就整块空白且零报错：
+--   ① 绑定用**事件载荷令牌**（`plate.unit` 就是 `nameplateN`），不能从框体名反推大小写；
+--   ② 容器出生就要 `SetEnabled(true)` + `UpdateAllAuras`，并且给一个可渲染的 1×1 矩形；
+--   ③ 换单位不是换光环 —— 池子复用后引擎不会自己重读，必须 `SetUnit(新令牌)` + `UpdateAllAuras`。
+-- 容器**永不销毁**（重建会留下上一世代被引擎驱动的容器，战斗里连环拦截）：模块关闭只是
+-- `plate:Hide()` 连子树一起藏，外加把共享 fit 账摘掉；开关用 alpha，不用 Hide（引擎会停更）。
+-- ============================================================================
+
+local AURA_OWNER = "monetNameplateAuras"
+local AURA_GAP   = 2
+local AURA_MAX   = 12
+local AURA_W     = 24
+local AURA_H     = 18
+-- 与 UnitFrames 的目标框同一套矩形裁切：左右不裁，上下各 3/24（AuraIconTexCoord）。
+local AURA_TEX   = { 0, 1, 3 / 24, 1 - 3 / 24 }
+local auraWarned = false
+local auraStyleErr = nil      -- 最近一次换肤异常（探针读它，别再被 pcall 吞掉）
+
+--- 一排能放几个：与暴雪同名公式一致，只是行宽取玩家设的姓名板宽度。
+local function AuraPerRow(width)
+    return math.max(1, math.floor((PlateWidth() + AURA_GAP) / (width + AURA_GAP)))
+end
+
+--- AuraContainer 属于 LoD 插件，没加载时 CreateFrame 拿不到那个模板。
+local function EnsureAuraContainerAddOn()
+    local C = _G.C_AddOns
+    if not C or type(C.LoadAddOn) ~= "function" then return false end
+    local ok, loaded = pcall(C.IsAddOnLoaded, "Blizzard_AuraContainer")
+    if not ok then return false end
+    if not loaded and not pcall(C.LoadAddOn, "Blizzard_AuraContainer") then return false end
+    return true
+end
+
+-- 两代 API：Flow* 是新名字，AuraLayout* 是旧名字；新名优先、旧名兜底、都没有就跳过。
+local function AuraFlowCall(container, newName, oldName, ...)
+    local f = container[newName]
+    if type(f) ~= "function" and oldName then f = container[oldName] end
+    if type(f) ~= "function" then return false end
+    return pcall(f, container, ...)
+end
+
+--- 贴左下、向右长、满行往上换行（名字上方那一簇的标准朝向）。
+local function ApplyPlateAuraFlow(container, width)
+    local perRow = AuraPerRow(width)
+    -- 引擎判换行时会多算一个 elementSpacing，所以行宽要多给一格间距（同 UnitFrames 的注释）。
+    local lineSize = perRow * width + perRow * AURA_GAP
+
+    AuraFlowCall(container, "SetFlowLayoutAnchorPoint", "SetAuraLayoutAnchorPoint", "BOTTOMLEFT")
+    local flow = _G.AnchorUtil and _G.AnchorUtil.FlowDirection
+    local grown = false
+    if type(flow) == "table" and flow.Right ~= nil and flow.Up ~= nil then
+        grown = AuraFlowCall(container, "SetFlowLayoutGrowthDirection", "SetAuraLayoutGrowthDirection",
+            flow.Right, flow.Up)
+    end
+    if not grown then
+        AuraFlowCall(container, "SetFlowLayoutGrowthDirection", "SetAuraLayoutGrowthDirection", "RIGHT", "UP")
+    end
+    local axes = _G.AnchorUtil and _G.AnchorUtil.FlowLayoutAxis
+    if axes and type(container.SetFlowLayoutAxis) == "function" then
+        pcall(container.SetFlowLayoutAxis, container, axes.Horizontal)
+    end
+    AuraFlowCall(container, "SetFlowLayoutElementSpacing", "SetAuraLayoutElementSpacing", AURA_GAP)
+    AuraFlowCall(container, "SetFlowLayoutLineSpacing", "SetAuraLayoutLineSpacing", AURA_GAP)
+    AuraFlowCall(container, "SetFlowLayoutMaximumLineSize", "SetAuraLayoutRowWidth", lineSize)
+end
+
+-- 容器的锚点与换行都挂在名字行的左上角；姓名板宽度变了要重算每行个数，所以重排时重跑一次。
+SyncPlateAuraLayout = function(plate)
+    local container = plate.auraContainer
+    if not container then return end
+    ApplyPlateAuraFlow(container, ns.Media:SnapUnit(AURA_W))
+    container:ClearAllPoints()
+    container:SetPoint("BOTTOMLEFT", plate.name, "TOPLEFT", 0, AURA_GAP)
+end
+
+local function AuraWarn(reason)
+    if auraWarned then return end
+    auraWarned = true
+    ns:Print("姓名板光环：引擎容器不可用（" .. tostring(reason) .. "），本会话不再尝试。")
+end
+
+--- 一块牌子一个容器，挂在**我们自己的牌子**下面（随牌子一起显隐、随模块关闭一起消失）。
+--- 只在首次建，建好不再动结构：战斗里建容器对姓名板是允许的（§8.143 v7 实测），
+--- 所以不走 AfterCombat 队列 —— 排队反而会让第一块牌子整场没有 debuff。
+local function CreatePlateAuraContainer(plate)
+    if not EnsureAuraContainerAddOn() then
+        AuraWarn("Blizzard_AuraContainer 未加载")
+        return nil
+    end
+    local iconW, iconH = ns.Media:SnapUnit(AURA_W), ns.Media:SnapUnit(AURA_H)
+    local ok, container = pcall(CreateFrame, "AuraContainer", nil, plate, "CustomAuraContainerTemplate")
+    if not ok or type(container) ~= "table" then
+        AuraWarn("CreateFrame(AuraContainer) 失败（模板可能不存在）")
+        return nil
+    end
+
+    -- 引擎要一个可渲染的矩形才会跑第一次布局。
+    container:SetSize(1, 1)
+    ApplyPlateAuraFlow(container, iconW)
+
+    local styleButton = function(button)
+        if type(ns.AuraButtonStyle) ~= "function" then return end
+        local pad = ns.Media and ns.Media:Mult() or 1
+        if type(pad) ~= "number" or pad <= 0 then pad = 1 end
+        -- texCoordOnce：图标贴图由引擎写（SetIcon 交进去的就是这颗纹理）。texcoord **只写一次**
+        -- 且不进 0.5s 裁切驱动 —— 驱动每拍对它 SetTexCoord 等于反复往引擎自有贴图上写，实机把
+        -- 整排图标写成空白方块；而一次都不写 texcoord 时引擎画不出图标（2026-11-22 实机：只剩
+        -- 黄色时长数字、没有方块）。同 NDui 在本客户端"SetIcon 之前写一次 texcoord"的做法。
+        -- AURA_TEX = 目标框那套 24×18 裁切（上/下各去 3/24 → 4:3 横向矩形，不改图标内容）。
+        local ok, err = pcall(ns.AuraButtonStyle, button, "debuff", {
+            width = iconW, height = iconH,
+            crop = false,
+            texCoordOnce = AURA_TEX,
+            iconInset = pad,
+            textSize = 10,
+            fontKey = "pixel",
+            borderInside = true,
+        }, AURA_OWNER)
+        if not ok then auraStyleErr = tostring(err) end
+    end
+    local opts = {
+        maxFrameCount = AURA_MAX,
+        -- 空表 = 不设白名单；只看 filter 里的 PLAYER token（玩家自己施放）。
+        candidateFilters = {},
+        layout = {
+            elementSpacing = AURA_GAP,
+            lineSpacing    = AURA_GAP,
+            elementWidth   = iconW,
+            elementHeight  = iconH,
+            layoutIndex    = 1,
+        },
+        -- 必需件先注册（Auras.lua 的 StyleAuraButton 内部保证），装饰失败不影响图标。
+        initializeFrame = styleButton,
+    }
+    local sortMethod = _G.AuraContainerSortMethod
+    if type(sortMethod) == "table" then sortMethod = sortMethod.Expiration or sortMethod.Default end
+    if type(sortMethod) == "number" then opts.sortMethod = sortMethod end
+    local sortDirection = _G.AuraContainerSortDirection
+    if type(sortDirection) == "table" then sortDirection = sortDirection.Normal end
+    if type(sortDirection) == "number" then opts.sortDirection = sortDirection end
+
+    -- PLAYER token = 玩家自己施放（NDui 在同客户端用它区别 isFromPlayerOrPlayerPet=任意玩家）。
+    -- 不加 !CROWD_CONTROL：作者要的是"玩家放的 debuff"全集，控制技也算。
+    local okAdd, err = pcall(container.AddAuraGroup, container, "debuffs", "HARMFUL|PLAYER", opts)
+    if not okAdd then
+        AuraWarn("AddAuraGroup 失败: " .. tostring(err))
+        return nil
+    end
+
+    pcall(container.SetUnit, container, plate.unit)
+    -- 出生就 Enable，让引擎把它纳入自己的刷新流程（出生后 Show/Hide 不影响）。
+    if type(container.SetEnabled) == "function" then pcall(container.SetEnabled, container, true) end
+    pcall(container.UpdateAllAuras, container)
+    if type(container.SetMouseClickEnabled) == "function" then pcall(container.SetMouseClickEnabled, container, false) end
+    pcall(container.EnableMouse, container, false)
+
+    -- 锚在名字行的左上角：名字的 BOTTOMLEFT 就是牌子的 TOPLEFT + TEXT_GAP，
+    -- 所以名字的 TOPLEFT 正好是"牌子左边缘、名字正上方"，与重排时的 SyncPlateAuraLayout 同一条。
+    container:ClearAllPoints()
+    container:SetPoint("BOTTOMLEFT", plate.name, "TOPLEFT", 0, AURA_GAP)
+    -- 与 BuffFrame 不同：姓名板上这块容器**就是功能本身**，alpha 保持 1、保持 Show。
+    pcall(container.SetAlpha, container, 1)
+    pcall(container.Show, container)
+    plate.auraContainer = container
+    return container
+end
+
+--- 绑定 / 重绑：同一块牌子被池子换给另一个单位时，引擎不会自己重读，必须显式换绑。
+--- 幂等 —— 牌子对象（连同容器）活过模块关闭 / 重开，重开时容器已经在了。
+local function BindPlateAuras(plate)
+    if not plate or not plate.unit then return end
+    local container = plate.auraContainer
+    if not container then
+        -- 时长染色曲线必须由**非安全调用方**先建好，否则第一次在机密窗口里建会被拒并永久缓存 false。
+        if type(ns.PrepareAuraStyle) == "function" then pcall(ns.PrepareAuraStyle) end
+        container = CreatePlateAuraContainer(plate)
+        if not container then return end
+    end
+    pcall(container.SetUnit, container, plate.unit)
+    pcall(container.UpdateAllAuras, container)
+    pcall(container.Show, container)
+end
+
 local function UpdatePlate(plate)
     local unit = plate.unit
     if not unit or not Secrets.Bool(Query(UnitExists, unit), false) then
@@ -1203,14 +1541,23 @@ local UNIT_EVENTS = {
     "UNIT_SPELLCAST_NOT_INTERRUPTIBLE",
 }
 
-local function OnPlateEvent(plate, event)
+local function OnPlateEvent(plate, event, ...)
     if not plate.unit or not plates[plate.unit] then return end
 
     if CAST_EVENTS[event] then
         if event == "UNIT_SPELLCAST_INTERRUPTED" or event == "UNIT_SPELLCAST_FAILED" then
             -- B3：不再瞬时藏条 —— 0.5s 红闪 + 短文字，到期由 CastTick 走原隐藏路径。
             -- 刚结束的施法可能读回旧值，所以文案来自事件本身，不做新查询。
-            StartCastFlash(plate, event == "UNIT_SPELLCAST_INTERRUPTED" and "被打断" or "失败")
+            local label = event == "UNIT_SPELLCAST_INTERRUPTED" and "被打断" or "失败"
+            if event == "UNIT_SPELLCAST_INTERRUPTED" then
+                -- B6：载荷 unitTarget, castGUID, spellID, interruptedBy。
+                local _, _, _, interruptedBy = ...
+                local who = InterrupterName(interruptedBy)
+                if type(who) == "string" and not Secrets.IsSecret(who) then
+                    label = label .. " > " .. who
+                end
+            end
+            StartCastFlash(plate, label)
         elseif event == "UNIT_SPELLCAST_STOP" or event == "UNIT_SPELLCAST_CHANNEL_STOP" then
             -- The cast that just ended can still read back stale, so the end comes from the
             -- event, not a fresh query.
@@ -1254,6 +1601,7 @@ local function Added(unit)
     end
 
     plate.unit = unit
+    if Setting("showAuras") ~= false then BindPlateAuras(plate) end
     plate:ClearAllPoints()
     plate:SetPoint("CENTER", base, "CENTER", 0, 0)
     plate:SetFrameLevel(base:GetFrameLevel() + 1)
@@ -1371,6 +1719,16 @@ function M:Apply()
         if plate.blizzardHidden and plate.base then
             RestoreBlizzardPlate(plate.base, plate)
         end
+        -- 光环开关改了就当场落地：关 = 连容器一起藏（不销毁），开 = 重绑并显示。
+        if plate.auraContainer then
+            if Setting("showAuras") ~= false then
+                BindPlateAuras(plate)
+            else
+                pcall(plate.auraContainer.Hide, plate.auraContainer)
+            end
+        elseif Setting("showAuras") ~= false and plate.unit then
+            BindPlateAuras(plate)
+        end
     end
 
     self:ApplyCVars()
@@ -1405,6 +1763,7 @@ function M:SetEnabled(enabled)
         self:AbsorbExisting()
         self:UpdateAll()
         self:SyncGuard()
+        if type(ns.AuraFitMounted) == "function" then pcall(ns.AuraFitMounted, true, AURA_OWNER) end
         return
     end
 
@@ -1419,6 +1778,8 @@ function M:SetEnabled(enabled)
     end
 
     self:SyncGuard()      -- 一块牌都不剩：摘掉回压订阅，Scheduler 主框跟着隐藏
+    -- 容器不销毁（重建会让引擎驱动的旧世代容器留在场），只把共享 fit 账摘掉。
+    if type(ns.AuraFitMounted) == "function" then pcall(ns.AuraFitMounted, false, AURA_OWNER) end
     self:RestoreCVars()
     self:RestorePlateSize()
 end
@@ -1584,6 +1945,147 @@ function M:ProbeSiblings()
         or "账本没打开，只有聊天框这几行。")
 end
 
+--- 实机探针（`/mui nameplates auras`）：只读清点每块牌子的引擎光环容器 —— 存在与否、
+--- 绑到哪个单位、子框数、宽度。判别法（§8.143）：**子框 0 个 = 引擎从没分配过**（绑定写错 /
+--- 容器没被纳入刷新），**宽度是 SECRET = 引擎真的排版过**。全部读数走 Query / Text 漏斗。
+--- 引擎那三行 `SetTexture` 的可判读出口是 `GetTextureFilePath`（引擎在 `auraData.icon` 为 nil 时
+--- 写 `QUESTION_MARK_ICON`，见 `Blizzard_AuraContainerUtil.lua` 的 `SetIconTextureForAura`）——
+--- 但这条在**姓名板上两头都读不出内容**（见下），所以分档只对能读到路径的框体有意义。
+---
+--- **1.60 / 71037 实测（2026-11-23）**：引擎写过的姓名板图标，`GetTextureFilePath` 在**两种执行
+--- 上下文里都拿不到内容** —— `try`/`run`（ForceTaint_Strong 污染）里返回**机密字符串**，未污染的
+--- `/mui` 路径里直接**读不到**（nil / forbidden / 抛错）。同一批纹理两种读数相反，说明「机密」只代表
+--- 「这条读数来自被污染的调用」，**不是**「引擎写了图标」的证据（对照：`try` 下 机密 10 / 读不到 0，
+--- `/mui` 下 机密 0 / 读不到 10）。⇒ 真/问号/空三档对姓名板不可达；图标有没有画出来只认
+--- `显`（图标纹理 IsShown）、`子框`（引擎池大小）、`宽=机密`（引擎排版过）和截图。
+local function IconReport(container, limit)
+    local kids = Query(function() return { container:GetChildren() } end)
+    if not kids then return "子框读不到" end
+    local seen, shown, shownUnread = 0, 0, 0
+    local real, question, blank, secret, forbidden = 0, 0, 0, 0, 0
+    local samples = {}
+    for i = 1, #kids do
+        local button = kids[i]
+        local icon = Marked(button, "auraIcon")
+        if icon then
+            seen = seen + 1
+            local vis = Query(icon.IsShown, icon)
+            if vis == nil or Secrets.IsSecret(vis) then
+                shownUnread = shownUnread + 1
+            elseif Secrets.Bool(vis, false) then
+                shown = shown + 1
+            end
+            local path = Query(icon.GetTextureFilePath, icon)
+            local tag
+            if Secrets.IsSecret(path) then
+                secret = secret + 1
+                tag = "机密"
+            elseif type(path) ~= "string" then
+                forbidden = forbidden + 1
+                tag = "读不到"
+            elseif path == "" then
+                blank = blank + 1
+                tag = "空"
+            elseif string.upper(path):find("QUESTIONMARK", 1, true) then
+                question = question + 1
+                tag = "问号"
+            else
+                real = real + 1
+                -- 只留文件名尾巴，整条路径太长会把聊天行挤断。
+                tag = path:match("([^\\/]+)$") or path
+            end
+            if seen <= limit then samples[#samples + 1] = tag end
+        end
+    end
+    if seen == 0 then return "无图标纹理", samples end
+    return string.format("图标 %d（显 %d / 显?%d / 真 %d / 问号 %d / 空 %d / 机密 %d / 读不到 %d）",
+        seen, shown, shownUnread, real, question, blank, secret, forbidden), samples
+end
+
+function M:ProbeAuras()
+    local stamp
+    if type(_G.date) == "function" then
+        local okDate, s = pcall(_G.date, "%Y-%m-%d %H:%M:%S")
+        if okDate then stamp = s end
+    end
+
+    local rows, total, bound, laidOut, missing = {}, 0, 0, 0, 0
+    for unit, plate in pairs(plates) do
+        total = total + 1
+        local container = plate.auraContainer
+        if not container then
+            missing = missing + 1
+            rows[#rows + 1] = { unit = Text(unit), container = false, kids = 0 }
+        else
+            bound = bound + 1
+            local kids = Query(function() return { container:GetChildren() } end)
+            local kidCount = kids and #kids or -1
+            local width = Query(container.GetWidth, container)
+            local alpha = Query(container.GetAlpha, container)
+            local shown = Query(container.IsShown, container)
+            local secretWidth = Secrets.IsSecret(width)
+            if secretWidth or (type(width) == "number" and width > 1) then laidOut = laidOut + 1 end
+            local iconText, samples = IconReport(container, 6)
+            rows[#rows + 1] = {
+                unit = Text(unit), container = true, kids = kidCount,
+                width = Text(width), secretWidth = secretWidth,
+                alpha = Text(alpha), shown = Text(shown),
+                plateShown = Text(Query(plate.IsShown, plate)),
+                icons = iconText, iconSamples = samples,
+            }
+        end
+    end
+
+    local enabled = Setting("showAuras") ~= false
+    local report = {
+        when = stamp,
+        showAuras = enabled,
+        plates = total,
+        withContainer = bound,
+        withoutContainer = missing,
+        engineLaidOut = laidOut,
+        auraWarned = auraWarned or nil,
+        auraStyleError = auraStyleErr or nil,
+        rows = rows,
+        note = "只读。子框 0 = 引擎没分配过；宽度=机密 或 >1 = 引擎已排版（§8.143 判别法）。" ..
+               " 图标：显 = 图标纹理 IsShown（能读到就有意义）；真/问号/空 只在路径读得到时才可能命中；" ..
+               "机密 = 读数来自被污染调用（ForceTaint_Strong），不是「引擎写了图标」的证据；" ..
+               "读不到 = nil/forbidden/抛错。1.60/71037 上姓名板图标路径两头都读不出内容，别拿它判断有无图标。",
+    }
+    local saved = false
+    if type(ns.DB) == "function" then
+        local okDb, db = pcall(function() return ns:DB() end)
+        if okDb and type(db) == "table" then
+            saved = pcall(function() db.nameplateAuras = report end) and true or false
+        end
+    end
+
+    ns:Print(string.format("姓名板光环：开关 %s · 牌 %d 块 · 有容器 %d / 无 %d · 引擎已排版 %d%s",
+        enabled and "开" or "关", total, bound, missing, laidOut,
+        auraWarned and " · 本会话建容器失败过" or ""))
+    if auraStyleErr then
+        ns:Print("  换肤抛错：" .. auraStyleErr)
+    end
+    for i = 1, math.min(#rows, 12) do
+        local r = rows[i]
+        if r.container then
+            ns:Print(string.format("  #%d %-12s 子框=%-3s 宽=%-6s α=%-5s 容器显=%-5s 牌显=%s",
+                i, r.unit, tostring(r.kids), r.width, r.alpha, r.shown, r.plateShown))
+            ns:Print(string.format("     %s%s", tostring(r.icons),
+                (r.iconSamples and #r.iconSamples > 0)
+                    and ("  " .. table.concat(r.iconSamples, " ")) or ""))
+        else
+            ns:Print(string.format("  #%d %-12s （没有容器）", i, r.unit))
+        end
+    end
+    if #rows > 12 then ns:Print(string.format("  …另有 %d 块只在账本里。", #rows - 12)) end
+    if total == 0 then
+        ns:Print("  当前没有牌 —— 走到怪边上（或战斗中）再跑一次，空转读数说明不了问题。")
+    end
+    ns:Print(saved and "全量已存 MonetUIDB.nameplateAuras（落盘比 /reload 晚 1–2 分钟）。"
+        or "账本没打开，只有聊天框这几行。")
+end
+
 function M:HandleCommand(rest)
     local sub = string.lower(rest or "")
 
@@ -1596,6 +2098,12 @@ function M:HandleCommand(rest)
     -- `/mui nameplates siblings`：只读清点 base 下的同级子框（真名 + alpha）→ 账本
     if sub:find("^siblings") or sub:find("^probe%s+siblings") then
         self:ProbeSiblings()
+        return true
+    end
+
+    -- `/mui nameplates auras`：只读清点引擎光环容器（存在 / 绑定 / 子框数 / 宽度）
+    if sub:find("^auras") or sub:find("^probe%s+auras") then
+        self:ProbeAuras()
         return true
     end
 

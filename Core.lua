@@ -167,11 +167,13 @@ local DEFAULTS = {
         hideBlizzard = true,
         showIncomingHeals = true,
         showAbsorbs = true,
-        -- 位置口径（2026-11-09 16:33 作者修订）：**只有团队框**贴小地图可见面板左侧，
+        -- 位置口径（2026-11-23 作者修订）：**只有团队框**贴小地图可见面板右侧，
         -- 小队框保持原来的屏幕位置（CENTER / UIParent / -330, 40），不跟着小地图跑。
         -- 团队锚的是 `MonetUIMinimapPanel` 而不是 `Minimap` 画布 —— 画布 256×256 上下各有
         -- 33 的透明带，锚它会高出一截。Mover 的 `ParentOf` 支持具名全局框；面板还没建 /
         -- 小地图模块关掉时按 fallback 落回屏幕（沿用团队原来的 300, 0）。
+        -- 右侧只有约 460px：单位宽从 72 收到 48、组间距 8→6，8 组总宽 426，
+        -- 面板右缘 2100 + 14 间隔 = 2114..2540，屏宽 2560 仍留 20px。
         -- 拖过的位置存在存档里、优先于这组默认值（项目惯例：不改玩家存过的位置），
         -- 想把团队贴回去用 `/mui groupframes minimap`；两者都回默认用 `defaults`。
         party = {
@@ -183,9 +185,9 @@ local DEFAULTS = {
         },
         raid = {
             enabled = true,
-            width = 72, health = 24, power = 3, spacing = 2, groupGap = 8,
+            width = 48, health = 24, power = 3, spacing = 2, groupGap = 6,
             healthText = "none",
-            point = "RIGHT", relativeTo = "MonetUIMinimapPanel", relativePoint = "LEFT", x = -14, y = 0,
+            point = "LEFT", relativeTo = "MonetUIMinimapPanel", relativePoint = "RIGHT", x = 14, y = 0,
             fallback = { point = "CENTER", relativePoint = "CENTER", x = 300, y = 0 },
         },
     },
@@ -249,6 +251,11 @@ local DEFAULTS = {
 
         showCast     = true,
         castHeight   = 13,
+
+        -- 姓名板减益光环行（§8.143）：引擎 AuraContainer 直接绑 nameplateN，
+        -- 我们只出容器 + 按钮样式（必需件先注册），图标/时长由引擎端到端绘制。
+        -- 不占独立版面键：没进 Config 面板时走 Setting() 的 DEFAULTS 兜底即可开关。
+        showAuras    = true,
 
         showThreat      = true,
         highlightTarget = true,

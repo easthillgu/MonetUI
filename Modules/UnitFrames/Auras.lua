@@ -272,7 +272,10 @@ end
 -- false = 不裁，{x0,x1,y0,y1} = 指定窗）。裁切原因见主函数 spec 注释（BuffFrame 的方形
 -- 行也要砍掉法术图标自带 8% 描边）。
 local function EnsureAuraIcon(button, spec)
-    local okIcon, icon = pcall(button.CreateTexture, button, "ARTWORK")
+    -- 首参是**名字**、不是层：写 "ARTWORK" 等于把每颗图标都注册成全局 `_G.ARTWORK`（实测具名
+    -- 纹理确实会建全局）。同名纹理之间互不失效（两帧对照实验：各自 stillValid、宽高正常），
+    -- 但没理由往全局塞几百个同名对象 —— 名字留空，层放第二位。
+    local okIcon, icon = pcall(button.CreateTexture, button, nil, "ARTWORK")
     if not okIcon or not icon then return nil end
     local iconInset = (type(spec) == "table" and spec.iconInset) or 0
     if type(iconInset) == "number" and iconInset > 0 then
@@ -281,14 +284,31 @@ local function EnsureAuraIcon(button, spec)
     else
         icon:SetAllPoints(button)
     end
-    local crop = type(spec) == "table" and spec.crop or nil
-    if crop == nil then
+    -- 不能写成 `type(spec) == "table" and spec.crop or nil`：`spec.crop = false` 会被 `or nil`
+    -- 吃掉，落回默认裁切分支。三种取值：
+    --   crop = {x0,x1,y0,y1} / 省略 → 走 Skin:CropIcon（登记进 0.5s 驱动，适合**我们自己的**贴图）；
+    --   crop = false 且给 texCoordOnce = {x0,x1,y0,y1} → texcoord 只写一次、不进驱动（引擎写内容的
+    --     图标用这个：驱动每拍 GetNumMaskTextures/SetTexCoord 是在往引擎机密贴图上写，会把图标写空）；
+    --   crop = false 且无 texCoordOnce → 一次 texcoord 都不写（2026-11-22 实测引擎画不出图标）。
+    local crop = nil
+    local once = nil
+    if type(spec) == "table" then crop = spec.crop; once = spec.texCoordOnce end
+    if type(once) == "table" then
+        -- 只写一次 texcoord、**不进裁切驱动**。给的是引擎自己写内容的图标（姓名板 debuff）：
+        -- 驱动每拍会 GetNumMaskTextures / SetTexCoord，那是在往引擎的机密贴图上写，实机把整排
+        -- 图标写空；而一次都不写 texcoord 时引擎那边一颗都画不出来（2026-11-22 实测，同 NDui
+        -- 在 SetIcon 之前写一次 texcoord 的做法）。
+        pcall(icon.SetTexCoord, icon, once[1], once[2], once[3], once[4])
+    elseif crop == nil then
         -- Crop the square spell art to the 3:4 (H:W) slot aspect.
         local x0, x1, y0, y1 = AuraIconTexCoord()
         ns.Skin:CropIcon(icon, x0, x1, y0, y1)
     elseif type(crop) == "table" then
         ns.Skin:CropIcon(icon, crop[1], crop[2], crop[3], crop[4])
     end
+    -- 记账：诊断要知道"引擎到底往这颗纹理里写了什么"（GetTextureFilePath 读得到，
+    -- 见 `/mui nameplates auras`）。只记在旁表，不碰按钮。
+    Mark(button, "auraIcon", icon)
     return icon
 end
 

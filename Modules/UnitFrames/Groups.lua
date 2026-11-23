@@ -111,19 +111,36 @@ end
 -- 按钮外观
 -- ============================================================================
 
--- 名字显示放宽（2026-10-27 玩家定 70% 规则）：
--- 旧的整段走 Math:Shorten(单一来源,review 2026-10-24 #4)截断，会把名字裁掉 —— 现在
--- 截断规则**暂不使用**，改走 Widget:FitText（超过框宽 70% 就缩字号、绝不裁字）；
--- 布局时仍登记 nameCap（保留设置，暂不读）。
+-- 名字显示（2026-11-23 作者定）：团队框窄版只放得下 3 个字，超长**截前 3 个字**；
+-- 小队框维持原样（不截，长名交给 Widget:FitText 缩字号）。
+-- 旧口径是"绝不裁字、只缩字号"，窄版 48px 上名字仍会挤成一团，故改为按 nameCap 截。
 
 --- 按钮名字的基础字号（FitText 的 baseSize 用；small 框 9 / 普通 10）。
 local function NameBaseSize(small) return small and 9 or 10 end
 
---- 名字最多几个字：中文一个字顶两个拉丁字宽，团队框只放得下三四个。
+--- 名字最多几个字：窄团队框 3；小队框仍按原来的宽松上限。
 local function NameCap(cfg)
     local wide = (cfg.width or 72) >= 100
-    if GetLocale() == "zhCN" then return wide and 7 or 4 end
-    return wide and 10 or 7
+    if GetLocale() == "zhCN" then return wide and 7 or 3 end
+    return wide and 10 or 3
+end
+
+--- UTF-8 安全的前 N 个字截取：本客户端没有 utf8 库，string.sub 按字节会切碎汉字。
+-- 只按首字节判该字符占 1..4 字节；非法字节按 1 字节走，不会抛错。
+local function HeadChars(text, limit)
+    if type(text) ~= "string" or limit == nil then return text end
+    local out, count, i, n = {}, 0, 1, #text
+    while i <= n and count < limit do
+        local b = string.byte(text, i)
+        local step = 1
+        if b >= 0xF0 then step = 4
+        elseif b >= 0xE0 then step = 3
+        elseif b >= 0xC0 then step = 2 end
+        out[#out + 1] = string.sub(text, i, math.min(i + step - 1, n))
+        i = i + step
+        count = count + 1
+    end
+    return table.concat(out)
 end
 
 --- 按钮模板没带 BackdropTemplate 时的退路：四边各一条 1px 贴图，颜色跟主题走。
@@ -298,8 +315,9 @@ local function StyleTexts(button, cfg, small, inner)
     Widget:SetFont(button.name, NameBaseSize(small), "pixel")
     -- 基础字号留在按钮上：名字缩字（FitText）要"从这一档往下缩"，绝不能拿缩过的当 base。
     button.nameSize = NameBaseSize(small)
-    -- 血量文字开着时名字给右侧让位（百分比 4 字符 / 当前值带千分位，32 够放）
-    local textReserve = ((cfg.healthText or "none") ~= "none") and 32 or 0
+    -- 窄版（团队框 48px）放不下"3 字名 + 百分比"：血量文字让位，姓名优先。
+    -- 小队框（≥100px）保持原来的右侧血量数字。
+    local textReserve = (not small and (cfg.healthText or "none") ~= "none") and 32 or 0
     local nameBoxW = inner - 6 - (small and 10 or 12) - textReserve
     button.nameBoxW = nameBoxW   -- FitText 的 boxWidth：自动宽度字串不能用 GetWidth 猜（见 Widget:FitText 注）
     button.name:SetSize(nameBoxW, small and 11 or 13)
@@ -319,7 +337,7 @@ local function StyleTexts(button, cfg, small, inner)
     Widget:SetFont(button.healthText, small and 9 or 10, "pixel")
     button.healthText:ClearAllPoints()
     button.healthText:SetPoint("RIGHT", button, "RIGHT", -(BORDER + 3), 0)
-    button.healthTextMode = cfg.healthText or "none"
+    button.healthTextMode = small and "none" or (cfg.healthText or "none")
 end
 
 --- 职责图标（原 271-278 行）。
@@ -427,8 +445,8 @@ local function DisplayName(button)
     local raw = button.unitName or ""
     local dash = string.find(raw, "-", 1, true)
     if dash then raw = string.sub(raw, 1, dash - 1) end
-    -- 截断停用（70% 缩字规则，见文件头）：只剥服务名后缀，长度交给 FitText 收。
-    return raw
+    -- 只截显示串，不改缓存的 button.unitName（UnitIsUnit / tooltip 仍要全名）。
+    return HeadChars(raw, button.nameCap)
 end
 
 --- 名字缩字：占按钮宽最多 70%，超了缩字号、绝不裁字（Widget:FitText 单一入口）。
@@ -1505,6 +1523,28 @@ local function MigratePartyAnchor(cfg)
     return true
 end
 
+--- 2026-11-23 口径修订：团队框从小地图左侧挪到右侧，并收窄单位宽（8 组要塞进 460px）。
+--- 存档里烘着旧默认（LEFT/72/8）时按新默认迁移；玩家自己拖出来 / 改过的宽度不碰。
+local function MigrateRaidAnchor(cfg)
+    local r = cfg and cfg.raid
+    local def = ns.DEFAULTS and ns.DEFAULTS.groupFrames and ns.DEFAULTS.groupFrames.raid
+    if not r or not def then return false end
+    if r.point ~= "RIGHT" or r.relativeTo ~= "MonetUIMinimapPanel"
+        or r.relativePoint ~= "LEFT" or r.x ~= -14 or r.y ~= 0
+        or r.width ~= 72 or r.groupGap ~= 8 then return false end
+    r.point, r.relativeTo, r.relativePoint = def.point, def.relativeTo, def.relativePoint
+    r.x, r.y = def.x, def.y
+    r.width, r.groupGap = def.width, def.groupGap
+    if type(def.fallback) == "table" then
+        local fb = {}
+        for k, v in pairs(def.fallback) do fb[k] = v end
+        r.fallback = fb
+    else
+        r.fallback = nil
+    end
+    return true
+end
+
 function M:Apply()
     local cfg = Config()
     if not cfg then return end
@@ -1518,6 +1558,7 @@ function M:Apply()
     end
 
     MigratePartyAnchor(cfg)   -- 旧存档里若烘着"小队也贴小地图"，先纠正回原位置
+    MigrateRaidAnchor(cfg)    -- 旧存档里若烘着"团队贴左侧 + 72 宽"，先纠正到右侧窄版
     local partyCfg, raidCfg = cfg.party, cfg.raid
     if not partyCfg or not raidCfg then return end
 
@@ -1525,7 +1566,9 @@ function M:Apply()
         if not party then BuildParty(partyCfg) end
         if party then
             RestyleParty(partyCfg)
-            SetDriver(party.header, "[group:party] show; hide", true)
+            -- `[group:party]` 在团队里也成立，单靠它会让小队框压在团队框上；
+            -- 先判 raid 显式 hide，再判 party show（作者 2026-11-23 要求：在团队中不显示小队）。
+            SetDriver(party.header, "[group:raid] hide; [group:party] show; hide", true)
             SyncHeaderShown(party.header, "party")
             party.anchor:Show()
             Mover:Register(party.anchor, "groupParty", {
@@ -1641,8 +1684,13 @@ function M:RegisterEvents()
     EventBus:Register("PLAYER_REGEN_ENABLED", ResyncAfterRestriction)
     EventBus:Register("MONETUI_RESTRICTION_CHANGED", ResyncAfterRestriction)
 
-    -- 选中目标边框：切目标只改四条边的 alpha，战斗里也能立刻跟上
-    EventBus:Register("PLAYER_TARGET_CHANGED", function() SyncSelection() end)
+    -- 选中目标边框：切目标只改四条边的 alpha，战斗里也能立刻跟上。
+    -- 点团队成员时暴雪会新建/点亮选中态子件（黄色描边），它们带 IgnoreParentAlpha，
+    -- 原先只能等 1s/5s ticker 才被 AlphaTree 归零 —— 当场补压一遍；受限窗口里只置脏。
+    EventBus:Register("PLAYER_TARGET_CHANGED", function()
+        SyncSelection()
+        if Restricted() then MarkMuteDirty() else ReparkBlizzardGroups() end
+    end)
 
     -- 战斗里排队的补做已交给 ns:AfterCombat（Core 统一注册 PLAYER_REGEN_ENABLED 排空）。
 
@@ -1694,8 +1742,8 @@ M.NameCap = NameCap
 M.UpdateHealthText = UpdateHealthText
 M.FrameHeight = FrameHeight
 
---- 位置命令（2026-11-09 16:33 口径）：`minimap` **只**把团队框贴回小地图左侧，
---- 小队框一律不动；`defaults` 把两者都恢复默认（小队回屏幕原位、团队贴小地图）。
+--- 位置命令（2026-11-23 口径）：`minimap` **只**把团队框贴回小地图右侧（窄版 48 宽），
+--- 小队框一律不动；`defaults` 把两者都恢复默认（小队回屏幕原位、团队贴小地图右侧）。
 --- 玩家拖过的位置存在存档里、优先于默认值（项目惯例：不静默改写），所以要显式跑命令才覆盖。
 function M:HandleCommand(rest)
     local sub = string.lower(rest or "")
@@ -1724,7 +1772,7 @@ function M:HandleCommand(rest)
     if not cfg or not defaults then return false end
 
     -- `minimap` 只动团队；`defaults` 两个都回默认。Mover 的 default 与 store 是同一张表，
-    -- 所以 fallback 也必须一起补齐，否则面板不可用时团队会带着 x=-14 落到 UIParent 右侧外。
+    -- 所以 fallback 也必须一起补齐，否则面板不可用时团队会带着 x=14 落到 UIParent 右侧外。
     local keys = (sub == "minimap") and { "raid" } or { "party", "raid" }
     local moved = 0
     for _, key in ipairs(keys) do
@@ -1734,6 +1782,9 @@ function M:HandleCommand(rest)
             target.relativeTo = def.relativeTo
             target.relativePoint = def.relativePoint
             target.x, target.y = def.x, def.y
+            if key == "raid" then
+                target.width, target.groupGap = def.width, def.groupGap
+            end
             if type(def.fallback) == "table" then
                 local fb = {}
                 for k, v in pairs(def.fallback) do fb[k] = v end
@@ -1750,9 +1801,9 @@ function M:HandleCommand(rest)
         pcall(function() Mover:Apply() end)
     end
     if sub == "minimap" then
-        ns:Print("[mui groupframes] 团队框已贴回小地图左侧（间隔 14、垂直中心对齐）；小队框保持原位")
+        ns:Print("[mui groupframes] 团队框已贴回小地图右侧（间隔 14、垂直中心对齐、单位 48 宽）；小队框保持原位")
     else
-        ns:Print("[mui groupframes] 已恢复默认：小队框回屏幕原位，团队框贴小地图左侧")
+        ns:Print("[mui groupframes] 已恢复默认：小队框回屏幕原位，团队框贴小地图右侧（单位 48 宽）")
     end
     return true
 end

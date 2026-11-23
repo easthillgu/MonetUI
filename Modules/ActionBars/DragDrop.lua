@@ -125,6 +125,14 @@ local function EnsureDropCatcher(bar)
     -- bar4 的接住器正好压在姿态条上，姿态那几格点下去变成"动作条第 1 格"。
     -- 所以每一拍都算出一个**期望状态**，和当前状态不一致就写过去（包括"关掉"）。
     catcher.subId = Scheduler:Every(100, function()
+        -- 战斗中**一个字节都不写**：接住器是 SecureActionButtonTemplate 建出来的受保护框，
+        -- 对它 EnableMouse 会被拦成 `ADDON_ACTION_BLOCKED MonetUI UNKNOWN()`（2026-11-22 实机，
+        -- taintLog=2 栈：DragDrop.lua:132 ← Scheduler:Invoke）。拖放本身也只能脱战做
+        -- （OnMouseUp/OnReceiveDrag 都有战斗门），战斗期保持现状即可。
+        if (type(InCombatLockdown) == "function" and InCombatLockdown())
+            or (type(UnitAffectingCombat) == "function" and UnitAffectingCombat("player")) then
+            return
+        end
         -- IsShown 在受限环境可能是机密值：走 Secrets.Bool，读不出来按"没显示"（= 关鼠标，更安全）。
         local active = Secrets.Bool(frame:IsShown(), false) and (GetCursorInfo() ~= nil)
         if active ~= catcher.holding then
