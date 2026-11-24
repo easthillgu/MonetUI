@@ -327,8 +327,27 @@ check('减益换皮代码不在了（DressDebuff* / AnchorDebuffs / borderSource
       !/DressDebuff|AnchorDebuffs|borderSource/.test(np));
 check('不给暴雪光环按钮挂 OnShow 钩子', !/HookScript,\s*child,\s*"OnShow"/.test(np));
 has(np, /local function FadeBlizzardSiblings\(base, keep\)/, 'FadeBlizzardSiblings 已定义');
-check('FadeBlizzardSiblings 扫 { base:GetChildren() }（多返回值别当表）',
-      /ipairs\(\{ base:GetChildren\(\) \}\)/.test(np));
+// 断言**代码**，不是注释。2026-11-03 的 71085819 把取子框改成 `local kids = base:GetChildren()`
+// + `for i = 1, #kids`：GetChildren 返回的是多返回值，kids 于是是**第一个子框**（userdata），
+// `#kids` 直接抛 —— 兄弟子框压暗整段从那天起就没跑过。而旧断言
+// `/ipairs\(\{ base:GetChildren\(\) \}\)/` 当时**是绿的**：它匹配到的是描述旧写法的那句注释。
+// 所以这里先把注释剥掉再判函数体（全仓同款形状另由 tools/audit-multireturn.js 兜）。
+const bodyOf = (src, sig) => {
+    const re = new RegExp(sig.replace(/[()]/g, '\\$&') + '[\\s\\S]*?\\r?\\nend\\r?\\n');
+    const m = src.match(re);
+    if (!m) return '';
+    return m[0].split(/\r?\n/)
+        .filter((l) => !l.trim().startsWith('--'))
+        .map((l) => l.replace(/\s--.*$/, ''))
+        .join('\n');
+};
+const wrappedKids = (body) => !/= *base:GetChildren\(\)/.test(body)
+    && !/ipairs\(base:GetChildren\(\)\)/.test(body)
+    && (/pcall\(ChildrenOf, base\)/.test(body) || /\{ *base:GetChildren\(\) *\}/.test(body));
+check('FadeBlizzardSiblings 把 GetChildren 的多返回值包成表（剥注释后判代码）',
+      wrappedKids(bodyOf(np, 'local function FadeBlizzardSiblings(base, keep)')));
+check('RestoreBlizzardSiblings 同样包成表（不是 ipairs(base:GetChildren())）',
+      wrappedKids(bodyOf(np, 'local function RestoreBlizzardSiblings(base)')));
 has(np, /pcall\(c\.SetAlpha, c, 0\)/, '兄弟子框压 alpha 0（不是 Hide，保住 C++ 点击区）');
 has(np, /local function RestoreBlizzardSiblings\(base\)/, '有还原创（模块关掉原样归还）');
 has(np, /FadeBlizzardSiblings\(base, plate\)/, 'HideBlizzardPlate 里真的调了');

@@ -513,6 +513,18 @@ end
 --- 为什么要走整棵子树：引擎给光环按钮配的是**它自己的**冷却帧，我们 `CreateFrame` 的那个
 --- 往往不是屏幕上显示的那个。实机 2026-11-01：目标框 8 个 buff 的冷却帧上，字体串还是
 --- `ARKai_T@17` 默认字体 —— 我们设的字体一个都没落到可见对象上。
+--- `GetRegions()` / `GetChildren()` 返回的都是**变长返回值**（不是表），所以必须收进一张表；
+--- 但收表这件事不该每次调用都新建一个闭包 —— 提成模块级函数，pcall 直接打它们。
+--- 这个遍历每秒对账上每个按钮跑一遍（姓名板光环接进来后账上是几百个按钮），
+--- 每节点一个闭包就是每秒几百次纯分配（表本身省不掉，见 `c2b6b2b` 的教训）。
+local function RegionsOf(frame)
+    return { frame:GetRegions() }
+end
+
+local function ChildrenOf(frame)
+    return { frame:GetChildren() }
+end
+
 local function StyleAuraCooldownTexts(button, fontKey, basePx, outline, depth)
     if not button or type(button.GetChildren) ~= "function" then return end
     depth = depth or 0
@@ -524,11 +536,16 @@ local function StyleAuraCooldownTexts(button, fontKey, basePx, outline, depth)
     -- 不能因此整段放弃 —— 那等于"战斗/副本里永远不上字体"。
     if not width or width <= 0 then width = TARGET_AURA_ICON_W end
 
-    for _, child in next, { button:GetChildren() } do
+    -- `GetChildren` 返回**多返回值**不是表，必须包成表（`c2b6b2b` 的同款教训）；
+    -- 包表这件事本身省不掉，能省的是每节点新建的那个闭包 —— 见上面 RegionsOf。
+    local okKids, kids = pcall(ChildrenOf, button)
+    if not okKids or type(kids) ~= "table" then return end
+    for i = 1, #kids do
+        local child = kids[i]
         local okK, kind = pcall(child.GetObjectType, child)
         if okK and kind == "Cooldown" then
-            local okR, regs = pcall(function() return { child:GetRegions() } end)
-            if okR then
+            local okR, regs = pcall(RegionsOf, child)
+            if okR and type(regs) == "table" then
                 for j = 1, #regs do
                     local rg = regs[j]
                     local okT, t = pcall(rg.GetObjectType, rg)

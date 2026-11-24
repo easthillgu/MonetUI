@@ -223,9 +223,20 @@ local function PlaceCursor(tip)
     if y0 < 0 then y0 = 0 end
 
     -- 去重：光标没动、尺寸没变就不写布局（静止悬停零开销）。
-    local key = string.format("%.1f:%.1f:%.1f:%.1f:%.2f", x, y, w, h, scale)
-    if key == cursorKey then return end
-    cursorKey = key
+    -- 判据存**数值**，不存拼出来的串：以前这里每帧 `string.format("%.1f:...", x, y, w, h, scale)`
+    -- 新建一个串再比 —— "零开销"那句话被这一行自己推翻了（悬停读一次物品 = 几百次串分配）。
+    -- 量化档位与原来逐位一致（x/y/w/h 取 0.1、scale 取 0.01），行为不变。
+    -- cursorKey 复用同一张表：四处 `cursorKey = nil` 的重置点照旧生效（下一拍重建一张）。
+    local kx, ky = math.floor(x * 10), math.floor(y * 10)
+    local kw, kh = math.floor(w * 10), math.floor(h * 10)
+    local ks = math.floor(scale * 100)
+    local ck = cursorKey
+    if type(ck) == "table" and ck[1] == kx and ck[2] == ky and ck[3] == kw
+        and ck[4] == kh and ck[5] == ks then
+        return
+    end
+    if type(ck) ~= "table" then ck = {} cursorKey = ck end
+    ck[1], ck[2], ck[3], ck[4], ck[5] = kx, ky, kw, kh, ks
 
     SetAnchor(tip, "BOTTOMLEFT", ui, "BOTTOMLEFT", x0, y0)
 end
@@ -254,12 +265,22 @@ local function PlaceMinimap(tip)
         -- 几何读不出（换主题 / 编辑模式 / 受限）：钉住，不改写锚点、不跟光标。
         -- 连缓存都没有就这一拍什么都不做，下一拍几何回来立即重贴。
         if lastGood and _G.UIParent then
-            local key = ("hold:%.2f:%.2f:%.2f"):format(lastGood.right, lastGood.top, lastGood.gap)
-            if key ~= mmKey then
-                mmKey = key
-                SetAnchor(tip, "BOTTOMRIGHT", _G.UIParent, "BOTTOMLEFT",
-                    lastGood.right, lastGood.top + lastGood.gap)
+            -- 同 PlaceCursor：判据存**量化后的数值**，不存每帧新拼的串。量化档位与原来的
+            -- `%.2f` 逐位一致 —— 几何读回来的浮点末位抖动不算"变了"，否则去重形同没有。
+            -- mode 字段把"钉住"这一支和下面正常摆位那一支分开（两支共用 mmKey，
+            -- 串时代靠前缀 "hold:" 区分）。
+            local h1 = math.floor(lastGood.right * 100)
+            local h2 = math.floor(lastGood.top * 100)
+            local h3 = math.floor(lastGood.gap * 100)
+            local hk = mmKey
+            if type(hk) == "table" and hk.mode == "hold"
+                and hk[1] == h1 and hk[2] == h2 and hk[3] == h3 then
+                return
             end
+            if type(hk) ~= "table" then hk = {} mmKey = hk end
+            hk.mode, hk[1], hk[2], hk[3] = "hold", h1, h2, h3
+            SetAnchor(tip, "BOTTOMRIGHT", _G.UIParent, "BOTTOMLEFT",
+                lastGood.right, lastGood.top + lastGood.gap)
         end
         return
     end
@@ -270,7 +291,10 @@ local function PlaceMinimap(tip)
     if Secrets.IsSecret(w) then w = 0 end
     if Secrets.IsSecret(h) then h = 0 end
 
-    lastGood = { right = right, top = top, gap = gap }
+    -- 复用同一张表：以前每帧 `lastGood = { ... }` 新建一张（提示框可见期间 60 张/秒）。
+    -- lastGood 全仓只有这一处赋值、从不置 nil，所以复用不改变"有没有缓存"的判据。
+    if not lastGood then lastGood = {} end
+    lastGood.right, lastGood.top, lastGood.gap = right, top, gap
 
     -- 面板对象换过（皮肤重建 / 模块重开）也要强制重贴：只比 right/top 看不出来，
     -- 而提示框还锚在旧面板上，位置会整个跑掉。
@@ -281,10 +305,21 @@ local function PlaceMinimap(tip)
 
     -- 上面放不下的判据也进 key：屏幕高度抖动时不能留着上一次那一支的锚点。
     local above = not (uiH and uiH > 0 and h > 0 and (top + gap + h > uiH))
-    local key = ("%.2f:%.2f:%.2f:%.2f:%.2f:%s"):format(
-        right, top, w, h, uiH or 0, above and "above" or "top")
-    if key == mmKey then return end
-    mmKey = key
+    -- 同上：判据存**量化后的数值**（right/top/w/h/uiH 都经 Secrets.Number 落成明文，
+    -- 可以 `==`；量化档位与原 `%.2f` 一致），不再每帧 format 一个六段串。
+    local q1 = math.floor(right * 100)
+    local q2 = math.floor(top * 100)
+    local q3 = math.floor(w * 100)
+    local q4 = math.floor(h * 100)
+    local q5 = math.floor((uiH or 0) * 100)
+    local mk = mmKey
+    if type(mk) == "table" and mk.mode == "panel"
+        and mk[1] == q1 and mk[2] == q2 and mk[3] == q3 and mk[4] == q4
+        and mk[5] == q5 and mk[6] == above then
+        return
+    end
+    if type(mk) ~= "table" then mk = {} mmKey = mk end
+    mk.mode, mk[1], mk[2], mk[3], mk[4], mk[5], mk[6] = "panel", q1, q2, q3, q4, q5, above
 
     if above or not ui then
         SetAnchor(tip, "BOTTOMRIGHT", panel, "TOPRIGHT", 0, gap)

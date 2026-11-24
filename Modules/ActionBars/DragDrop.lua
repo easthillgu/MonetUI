@@ -60,6 +60,58 @@ local function IndexAtCursor(bar)
     return nil
 end
 
+-- ---- 接住器的鼠标结算：一条共享轮询，不是每条动作栏一条 ------------------------
+-- 以前 `EnsureDropCatcher` 给每颗接住器各注册一条 `Scheduler:Every(100, ...)`，并且
+-- **从不注销**：`dropCatchers` 是弱键，但那条订阅的闭包抓着 catcher，条目实际永不回收。
+-- barCount 默认 3、上限 8 ⇒ 常驻 30–80 拍/秒，每拍都要 InCombatLockdown +
+-- UnitAffectingCombat + IsShown + GetCursorInfo —— 玩家从不拖东西时也照跑。
+-- 现在整个模块只有一条：战斗门只判一次，账空了就自己摘订阅（Scheduler 的主框随之隐藏，
+-- 空闲时一个回调都不跑），有新接住器再由 EnsurePoller 挂回来。
+local pollId = nil
+local PollCatchers, EnsurePoller
+
+PollCatchers = function()
+    -- 战斗中**一个字节都不写**：接住器是 SecureActionButtonTemplate 建出来的受保护框，
+    -- 对它 EnableMouse 会被拦成 `ADDON_ACTION_BLOCKED MonetUI UNKNOWN()`（2026-11-22 实机，
+    -- taintLog=2 栈：DragDrop.lua:132 ← Scheduler:Invoke）。拖放本身也只能脱战做
+    -- （OnMouseUp/OnReceiveDrag 都有战斗门），战斗期保持现状即可。
+    if (type(InCombatLockdown) == "function" and InCombatLockdown())
+        or (type(UnitAffectingCombat) == "function" and UnitAffectingCombat("player")) then
+        return
+    end
+
+    local any = false
+    local cursorHolding = nil    -- 懒算：一颗接住器都不显示时，这一拍根本不用问光标
+    for bar, catcher in pairs(dropCatchers) do
+        any = true
+        local frame = bar.frame
+        -- IsShown 在受限环境可能是机密值：走 Secrets.Bool，读不出来按"没显示"（= 关鼠标，更安全）。
+        -- **条隐藏着也要结算**（不能提前 return）：接住器压在条的矩形上、level 70，
+        -- 模板自带的事件会把它的鼠标打开；不给它结算就永远停在 mouse=true
+        -- （2026-10-26 实机：bar4 的接住器压在姿态条上，姿态那几格点下去变成"动作条第 1 格"）。
+        local active = false
+        if frame and Secrets.Bool(frame:IsShown(), false) then
+            if cursorHolding == nil then cursorHolding = (GetCursorInfo() ~= nil) end
+            active = cursorHolding
+        end
+        if active ~= catcher.holding then
+            catcher.holding = active
+            pcall(catcher.EnableMouse, catcher, active)
+        end
+    end
+
+    -- 账空了（模块关掉 / 条重建把弱键条目放掉）就摘订阅，别留一条空转的 10Hz。
+    if not any and pollId then
+        Scheduler:Unregister(pollId)
+        pollId = nil
+    end
+end
+
+EnsurePoller = function()
+    if pollId then return end
+    pollId = Scheduler:Every(100, PollCatchers, "动作条:拖放接收器")
+end
+
 local function EnsureDropCatcher(bar)
     if dropCatchers[bar] then return dropCatchers[bar] end
     local frame = bar.frame
@@ -124,23 +176,9 @@ local function EnsureDropCatcher(bar)
     -- 它就永远停在 mouse=true。实机后果（2026-10-26）：bar4..8 只有 3 组却开着接住器，
     -- bar4 的接住器正好压在姿态条上，姿态那几格点下去变成"动作条第 1 格"。
     -- 所以每一拍都算出一个**期望状态**，和当前状态不一致就写过去（包括"关掉"）。
-    catcher.subId = Scheduler:Every(100, function()
-        -- 战斗中**一个字节都不写**：接住器是 SecureActionButtonTemplate 建出来的受保护框，
-        -- 对它 EnableMouse 会被拦成 `ADDON_ACTION_BLOCKED MonetUI UNKNOWN()`（2026-11-22 实机，
-        -- taintLog=2 栈：DragDrop.lua:132 ← Scheduler:Invoke）。拖放本身也只能脱战做
-        -- （OnMouseUp/OnReceiveDrag 都有战斗门），战斗期保持现状即可。
-        if (type(InCombatLockdown) == "function" and InCombatLockdown())
-            or (type(UnitAffectingCombat) == "function" and UnitAffectingCombat("player")) then
-            return
-        end
-        -- IsShown 在受限环境可能是机密值：走 Secrets.Bool，读不出来按"没显示"（= 关鼠标，更安全）。
-        local active = Secrets.Bool(frame:IsShown(), false) and (GetCursorInfo() ~= nil)
-        if active ~= catcher.holding then
-            catcher.holding = active
-            pcall(catcher.EnableMouse, catcher, active)
-        end
-    end, "动作条:拖放接收器")
+    -- 这条轮询现在是**整个模块共用一条**（见上面 PollCatchers），不再每颗接住器各挂一条。
     dropCatchers[bar] = catcher
+    EnsurePoller()
     return catcher
 end
 

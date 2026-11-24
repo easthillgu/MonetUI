@@ -636,6 +636,31 @@ function M:RefreshBlock(key)
     UpdateBlock(self:GetBlock(key))
 end
 
+--- 事件路径统一去抖：同一个块在窗口里来几发事件，只刷一次。
+--- 为什么要这一层：高频块的 update 是**整批重算**，不是"改一个数"——
+--- 货币块每次要重枚举最多 400 行 C_CurrencyInfo（每行两次 pcall + 两张表），
+--- 耐久块每次要扫 5 个背包 ~110 个槽位；而 CURRENCY_DISPLAY_UPDATE /
+--- CHAT_MSG_CURRENCY / UPDATE_INVENTORY_DURABILITY 在拾取、制造、战斗掉耐久时
+--- 都是成串来的（一秒几发到十几发）。以前每发都直连 UpdateBlock，等于同一秒把
+--- 同样的整批重算做十几遍。
+--- 每块可自带 `eventDelay`（秒）；不给就是 0 = 下一帧合并（等价于帧级去重，
+--- ActionBars 的 ScheduleSlotFlush / Bags 的 EnsureCoalesce 同一条口径）。
+--- 直接调 M:RefreshBlock 的路径（onUpdate 慢刷、勾选面板、命令）不受影响，仍然即时。
+local blockPending = {}
+
+local function ScheduleBlockUpdate(block)
+    if not block or blockPending[block] then return end
+    if type(C_Timer) ~= "table" or type(C_Timer.After) ~= "function" then
+        if M.active then UpdateBlock(block) end
+        return
+    end
+    blockPending[block] = true
+    C_Timer.After(tonumber(block.eventDelay) or 0, function()
+        blockPending[block] = nil
+        if M.active then UpdateBlock(block) end
+    end)
+end
+
 function M:Initialize()
     self.active = true
 
@@ -649,7 +674,7 @@ function M:Initialize()
             for j = 1, #block.events do
                 local eventName = block.events[j]
                 EventBus:Register(eventName, function()
-                    if M.active then UpdateBlock(block) end
+                    if M.active then ScheduleBlockUpdate(block) end
                 end)
             end
         end

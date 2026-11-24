@@ -1667,6 +1667,26 @@ local COOLDOWN_EVENTS = {
     "PET_BAR_UPDATE_COOLDOWN",
 }
 
+-- 槽位事件是**成串**来的：ACTIONBAR_UPDATE_USABLE 在战斗里随 GCD / 换目标 / 资源变化连发，
+-- SPELLS_CHANGED 一次也能来几发；而 UpdateAll 是"所有条 × ~96 个按钮"的整量重画
+-- （每格 GetActionTexture + SetTexture、GetActionDisplayCount + SetText、GetActionText + SetText、
+--  PaintCooldown、3 次 GetFFD），末尾还要 RefreshRings + QueueRanges。
+-- 一事件一整画 = 同一帧里把同样的活做几遍。合并到帧级：一拍最多一次，跑完立刻摘订阅
+-- （不留常驻驱动帧 —— Scheduler 的主框只在有订阅时才醒）。Bags.lua 的 EnsureCoalesce
+-- 是同一条口径（那边记着 CURSOR_CHANGED 实测 ×298 的账）。
+-- 直接调 M:UpdateAll() 的路径（UPDATE_BINDINGS / CVAR_UPDATE / Apply）不受影响，仍然即时。
+local slotFlushJob = nil
+
+local function ScheduleSlotFlush()
+    if slotFlushJob then return end
+    slotFlushJob = Scheduler:EveryFrame(function()
+        local job = slotFlushJob
+        slotFlushJob = nil
+        Scheduler:Unregister(job)
+        M:UpdateAll()
+    end, "动作条:槽位合并")
+end
+
 function M:RegisterEvents()
     EventBus:Register("PLAYER_ENTERING_WORLD", function()
         M:Apply()
@@ -1693,7 +1713,7 @@ function M:RegisterEvents()
     end
 
     for _, event in ipairs(SLOT_EVENTS) do
-        EventBus:Register(event, function() M:UpdateAll() end)
+        EventBus:Register(event, function() ScheduleSlotFlush() end)
     end
 
     for _, event in ipairs(COOLDOWN_EVENTS) do

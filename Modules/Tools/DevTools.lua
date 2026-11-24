@@ -144,6 +144,17 @@ local function ReadFlipped(tex)
     return (flipU or flipV), nums, { u = flipU and true or nil, v = flipV and true or nil }
 end
 
+--- `frame:GetChildren()` 与 `GetRegions()` 一样返回**多返回值**，必须包成 table
+--- （本文件后面 `RegionsOf` 那条注释、`c2b6b2b`、Utils/Compat.lua:445 是同一条坑）。
+--- 直接 `pcall(frame.GetChildren, frame)` 只接到第一个子框，`type(kids) ~= "table"` 恒成立 →
+--- 子树遍历**只走根那一层**就 return，探针报出来的数全是"只数了顶层"的数。
+local function KidsOf(frame)
+    if type(frame) ~= "table" or type(frame.GetChildren) ~= "function" then return nil end
+    local ok, list = pcall(function() return { frame:GetChildren() } end)
+    if ok and type(list) == "table" then return list end
+    return nil
+end
+
 --- EnumerateFrames + 子树遍历（Compat:Find 同一条路）。visit 自己负责 pcall 之外的分类，
 --- 计数上限统一在这里管。
 local function Scan(visit)
@@ -155,8 +166,8 @@ local function Scan(visit)
         local ok, err = pcall(visit, frame, bag)
         if not ok then bag.errors = (bag.errors or 0) + 1 end
         if type(frame.GetChildren) ~= "function" then return end
-        local okK, kids = pcall(frame.GetChildren, frame)
-        if not okK or type(kids) ~= "table" then return end
+        local kids = KidsOf(frame)
+        if not kids then return end
         for i = 1, #kids do
             local c = kids[i]
             if c and not bag.done[c] then
@@ -399,8 +410,10 @@ function DevTools:SkinsInset()
                                 local eff, complete = EffAlpha(inset)
                                 local plates, plateLow, plateUnread = 0, 0, 0
                                 if type(obj.GetChildren) == "function" then
-                                    local okK, kids = pcall(obj.GetChildren, obj)
-                                    if okK and type(kids) == "table" then
+                                    -- 多返回值：`pcall(obj.GetChildren, obj)` 只接到第一个子框，
+                                    -- 这块 skinPlate 计数于是恒为 0（走 KidsOf 包表）。
+                                    local kids = KidsOf(obj)
+                                    if kids then
                                         for i = 1, #kids do
                                             local c = kids[i]
                                             if c and ns:Marked(c, "skinPlate") then

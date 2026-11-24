@@ -187,6 +187,10 @@ M:RegisterBlock({
     position = "LEFT",
     trackSample = "耐久 100%",
     events   = { "UPDATE_INVENTORY_DURABILITY", "PLAYER_ENTERING_WORLD" },
+    -- 战斗里每次掉耐久都发 UPDATE_INVENTORY_DURABILITY，而这个块的 update 是
+    -- "5 个背包 × 全部槽位"的整批扫描（~110 次 pcall + API）。0.25 秒窗口里的连发只算一次
+    -- （去抖在 InfoBar.lua 的 ScheduleBlockUpdate；显示的是一个百分比，慢 0.25 秒看不出来）。
+    eventDelay = 0.25,
     update   = DurabilityUpdate,
     tooltip  = DurabilityTooltip,
     -- 11-10 作者指示：只读格，取消点击（不注册 onClick、不弹角色小菜单）。
@@ -288,6 +292,11 @@ M:RegisterBlock({
     position   = "LEFT",
     rightClick = true,   -- 右键开货币勾选面板（BuildBlockFrame 会补注册 RightButtonUp）
     events     = { "CURRENCY_DISPLAY_UPDATE", "CHAT_MSG_CURRENCY", "PLAYER_MONEY", "PLAYER_ENTERING_WORLD" },
+    -- 拾取 / 采集 / 专业产出时 CHAT_MSG_CURRENCY 与 CURRENCY_DISPLAY_UPDATE 是成串来的，
+    -- 而这个块的 update 每次都要 `C:Snapshot()` —— 那是一次最多 400 行的 C_CurrencyInfo
+    -- 全量重枚举（每行 pcall + 两张表）。0.25 秒窗口里的连发只枚举一次；另有 2 秒慢刷兜底
+    -- （暴雪改「背包显示」不发事件，见 CurrencyOnUpdate 注释），所以慢半拍不会漏。
+    eventDelay = 0.25,
     update     = CurrencyUpdate,
     tooltip    = CurrencyTooltip,
     onUpdate   = CurrencyOnUpdate,

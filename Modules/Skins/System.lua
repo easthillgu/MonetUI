@@ -261,10 +261,28 @@ local function OpenMenu()
     if ok then return menu end
 end
 
+--- `GetRegions` / `GetChildren` 返回的都是**多返回值**不是表：必须包成表。直接
+--- `pcall(obj.GetRegions, obj)` 只接到第一个 region，随后 `#list` 要么恒为 0（空转）
+--- 要么直接抛（本仓 `c2b6b2b` 修过同款，Groups / Compat / BossFrames 各留了注释）。
+--- 包表的闭包提到模块级：这两条都挂在 0.5 秒的下拉轮询上，逐节点新建闭包是白花的。
+local function RawRegions(obj)
+    return { obj:GetRegions() }
+end
+
+local function RawKids(obj)
+    return { obj:GetChildren() }
+end
+
 local function RegionsOf(obj)
     if type(obj.GetRegions) ~= "function" then return nil end
-    local ok, list = pcall(function() return { obj:GetRegions() } end)
+    local ok, list = pcall(RawRegions, obj)
     if ok then return list end
+end
+
+local function KidsOf(obj)
+    if type(obj.GetChildren) ~= "function" then return nil end
+    local ok, list = pcall(RawKids, obj)
+    if ok and type(list) == "table" then return list end
 end
 
 local function RegionKind(rgn)
@@ -480,8 +498,12 @@ end
 --- 按钮进池复用、暴雪重建列表时可能重设原图，SwapArt 的一次性换图扛不住，
 --- 自建贴图 + `art` 标记才既认得出脸也盖不掉。幂等守卫记在按钮上（旁表）。
 local function DressDropdownArrows(list)
-    local ok, kids = pcall(list.GetChildren, list)
-    if not ok then return end
+    -- 以前这里是 `pcall(list.GetChildren, list)` + `for i = 1, #kids`：`kids` 拿到的是**第一个
+    -- 子框**（userdata），`#kids` 直接抛"attempt to get length of a userdata value"，而这一抛
+    -- 发生在下面那个逐按钮 pcall **之外** —— 整段箭头换装从来没跑过一行。这就是 §8.48
+    -- 认脸账本里这批一直是"无我们的图"（暴雪原生三角）的真正原因，不是换装做法不行。
+    local kids = KidsOf(list)
+    if not kids then return end
     local Widget, Color, Media = ns.Widget, ns.Color, ns.Media
     for i = 1, #kids do
         local button = kids[i]
@@ -492,8 +514,10 @@ local function DressDropdownArrows(list)
             local arrow = button.expandArrow
             if type(arrow) ~= "table" then
                 -- 老命名法：箭头是按钮名下的 region，只认名字结尾 ExpandArrow
-                local okR, regions = pcall(button.GetRegions, button)
-                if okR then
+                -- （同样多返回值：`pcall(button.GetRegions, button)` + `#regions` 会抛，
+                --  只是这一处抛在逐按钮 pcall 里面，被吞掉了，表现是"老命名法一个都认不出"。）
+                local regions = RegionsOf(button)
+                if regions then
                     for j = 1, #regions do
                         local reg = regions[j]
                         local okN, nm = pcall(reg.GetName, reg)

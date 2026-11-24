@@ -315,6 +315,10 @@ local function StyleTexts(button, cfg, small, inner)
     Widget:SetFont(button.name, NameBaseSize(small), "pixel")
     -- 基础字号留在按钮上：名字缩字（FitText）要"从这一档往下缩"，绝不能拿缩过的当 base。
     button.nameSize = NameBaseSize(small)
+    -- 上面那记 SetFont 把名字框的字号打回基准档，FitName 的缩档结果随之失效：清掉排版判据，
+    -- 否则下一次 FitName 认为"什么都没变"就整段跳过，长名字会以基准字号溢出而不是缩字号
+    -- （Nameplates 的 Layout 里是同款失效处理）。
+    button.fitNameText, button.fitNameLimit, button.fitNameSize, button.fitNameBox = nil, nil, nil, nil
     -- 窄版（团队框 48px）放不下"3 字名 + 百分比"：血量文字让位，姓名优先。
     -- 小队框（≥100px）保持原来的右侧血量数字。
     local textReserve = (not small and (cfg.healthText or "none") ~= "none") and 32 or 0
@@ -454,8 +458,29 @@ end
 -- 血量文字留位），所以这里只传 70% 限额。
 local function FitName(button, text)
     if not button.name then return end
-    Widget:FitText(button.name, text or "", (button:GetWidth() or 72) * 0.70,
-        button.nameSize or 9, nil, 6, button.nameBoxW)
+    text = text or ""
+    local limit = (button:GetWidth() or 72) * 0.70
+    local size = button.nameSize or 9
+    local box = button.nameBoxW
+    -- 排版判据全等就整段跳过：FitText 里是 SetFont + SetText + GetStringWidth，外加最坏
+    -- 12 档的"缩一号再量一次"循环。UpdateState 挂在 UNIT_HEALTH 上（一次团队掉血 =
+    -- 每个按钮一发），而显示名跟血量无关 —— 以前每发都重排一次名字。
+    -- **机密值不能进 `==`**（secret-compare 会被拦）：名字或宽度读成机密就不参与判据，
+    -- 照原样重跑 FitText（它内部对机密文本走"不测不缩"分支）。
+    local plain = not Secrets.IsSecret(text)
+        and type(limit) == "number" and not Secrets.IsSecret(limit)
+        and type(size) == "number" and not Secrets.IsSecret(size)
+    if plain and button.fitNameText == text and button.fitNameLimit == limit
+        and button.fitNameSize == size and button.fitNameBox == box then
+        return
+    end
+    if plain then
+        button.fitNameText, button.fitNameLimit = text, limit
+        button.fitNameSize, button.fitNameBox = size, box
+    else
+        button.fitNameText, button.fitNameLimit, button.fitNameSize, button.fitNameBox = nil, nil, nil, nil
+    end
+    Widget:FitText(button.name, text, limit, size, nil, 6, box)
 end
 
 local function UpdateHealth(button)
@@ -539,16 +564,21 @@ local function UpdateState(button)
     -- 机密布尔值级前置（同 UpdateRange 2026-10-25 修：issecretvalue 不触发客户端拦截，
     -- 真值测试才触发；机密时落回与 Bool 被拦后默认**逐位一致**的分支）。进战斗的一次
     -- 全池刷新会把这组测试放大成每次 ×4 的拦截波（UpdateState + UpdateHealthText ± 2）。
+    -- 每个 API **只调一次**再复用：原来 IsSecret 一遍、Bool 又一遍，同一次刷新里
+    -- UnitIsDeadOrGhost / UnitIsConnected 各跑两次（45 个按钮 = 多 90 次单位查询，
+    -- 受限窗口里还多一倍被拦的机会）。
+    local deadRaw = UnitIsDeadOrGhost(unit)
     local dead
-    if not Secrets.IsSecret(UnitIsDeadOrGhost(unit)) then
-        dead = Secrets.Bool(UnitIsDeadOrGhost(unit))
+    if not Secrets.IsSecret(deadRaw) then
+        dead = Secrets.Bool(deadRaw)
     end
+    local connRaw = UnitIsConnected(unit)
     local offline
-    if Secrets.IsSecret(UnitIsConnected(unit)) then
+    if Secrets.IsSecret(connRaw) then
         -- 连接状态未知 → 按在线处理（= Bool 默认 true）
         offline = false
     else
-        offline = not Secrets.Bool(UnitIsConnected(unit), true)
+        offline = not Secrets.Bool(connRaw, true)
     end
 
     if offline then
@@ -1624,6 +1654,53 @@ function M:Apply()
     pcall(Report)       -- 落一份锚点账本到 MonetUIDB.groupReport，离线可查；诊断绝不能打断主流程
 end
 
+-- 名册变更后的错峰补刷（判例见下面 RegisterEvents 里的注释）：0.05 / 0.3 / 1.0 三拍。
+-- 档位表提到模块级 —— 以前每次事件都新建一张 `{ 0.05, 0.3, 1.0 }` 和三个闭包。
+local ROSTER_REDELAYS = { 0.05, 0.3, 1.0 }
+local rosterChain = nil      -- 正在跑的错峰链；nil = 没有链
+
+--- 排一条错峰链，**同一时刻只允许一条**。
+--- 名册事件是成串来的（登录、进本、组队瞬间能连着来十几发），以前每发各排三条
+--- `C_Timer.After(全量 RefreshAll)`：十几发 = 几十次"45 个按钮 × 10 项子更新"叠在一起跑，
+--- 而后到的链和先到的链做的是同一件事。现在链在跑时再来事件只记一个"链尾再补一轮"，
+--- 补刷的判据（"属性配好后的那一拍"）仍然落在最后一次事件之后。
+local function ScheduleRosterRestagger()
+    if type(C_Timer) ~= "table" or type(C_Timer.After) ~= "function" then return end
+    if rosterChain then
+        rosterChain.again = true
+        return
+    end
+    local chain = { index = 1, again = false, reported = false }
+    rosterChain = chain
+
+    local function tick()
+        if rosterChain ~= chain then return end
+        -- RefreshAll 抛错也必须把这条链推进到底：C_Timer 的回调没人 pcall，一抛就断在这里，
+        -- 而 `rosterChain` 还指着这条死链 ⇒ 之后每发名册事件都只会被记成 `again=true`，
+        -- 错峰补刷整段静默失效到 reload。原来三发独立定时器互不拖累，这是合链带来的新风险。
+        local ok, err = pcall(M.RefreshAll, M)
+        if not ok and not chain.reported then
+            chain.reported = true
+            print("|cffff6b6b[MonetUI]|r 团队框名册补刷失败（同一条链只提示一次）: " .. tostring(err))
+        end
+        if chain.index < #ROSTER_REDELAYS then
+            chain.index = chain.index + 1
+            C_Timer.After(ROSTER_REDELAYS[chain.index], tick)
+            return
+        end
+        if chain.again then
+            -- 链跑完之前又来了名册事件：重开一轮（而不是把它的三拍叠在这条链上）
+            chain.again = false
+            chain.index = 1
+            C_Timer.After(ROSTER_REDELAYS[1], tick)
+            return
+        end
+        rosterChain = nil
+    end
+
+    C_Timer.After(ROSTER_REDELAYS[1], tick)
+end
+
 function M:RegisterEvents()
     local unitEvents = {
         UNIT_HEALTH       = "health",
@@ -1649,7 +1726,7 @@ function M:RegisterEvents()
     -- ConfigureChildren 还没跑（属性驱动，晚事件一帧），按钮 unit 未挂、未显示
     -- ——当场刷一遍扑空；之后队友血量/名字不再变，UNIT_* 不再来，框体一直空白
     -- 直到 reload（PLAYER_ENTERING_WORLD → RefreshAll 才补上）。错峰补刷几拍，
-    -- 属性配好后的那一拍会真正填充。
+    -- 属性配好后的那一拍会真正填充（同一时刻只排一条链，见 ScheduleRosterRestagger）。
     local rosterChanged = function()
         -- 受限窗口里名册变更后，安全头的 configureChildren 全被静默拒绝（见
         -- ResyncAfterRestriction 注释）；记下"欠一次补配"，解禁后由解禁钩子补做。
@@ -1659,11 +1736,7 @@ function M:RegisterEvents()
         end
         M:RefreshAll()
         ReparkBlizzardGroups()
-        for _, delay in ipairs({ 0.05, 0.3, 1.0 }) do
-            if type(C_Timer) == "table" and type(C_Timer.After) == "function" then
-                C_Timer.After(delay, function() M:RefreshAll() end)
-            end
-        end
+        ScheduleRosterRestagger()
     end
     EventBus:Register("GROUP_ROSTER_UPDATE", rosterChanged)
     EventBus:Register("GROUP_JOINED", rosterChanged)

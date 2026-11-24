@@ -626,6 +626,10 @@ local function Layout(plate)
     plate.name:SetPoint("BOTTOMLEFT", plate, "TOPLEFT", 0, TEXT_GAP)
     plate.level:SetPoint("BOTTOMRIGHT", plate, "TOPRIGHT", 0, TEXT_GAP)
     plate.name:SetPoint("RIGHT", plate.level, "LEFT", -4, 0)
+    -- 上面那记 SetFont 把名字框的字号打回基准档，UpdateText 里 FitText 缩档的结果随之失效：
+    -- 必须让排版缓存判据作废，否则下一次 UpdateText 认为"什么都没变"就跳过，
+    -- 长名字会以基准字号溢出（而不是按规则缩字号）。level 的文字 SetFont 不会清，判据留着。
+    plate.fitName, plate.fitLevel, plate.fitMaxW, plate.fitSize = nil, nil, nil, nil
     if SyncPlateAuraLayout then SyncPlateAuraLayout(plate) end
 end
 
@@ -664,11 +668,18 @@ end
 local siblingFaded = setmetatable({}, { __mode = "k" })   -- 还原时要知道哪些被我们压过
 local siblingAlpha = setmetatable({}, { __mode = "k" })   -- 它们被压之前自己的 alpha（交还要还原）
 
+--- `GetChildren` 返回的是**多返回值**不是表 —— 暴雪自己就写成 `{ frame:GetChildren() }`
+--- （FrameXML 转储里十几处都是这个形状），本仓 `c2b6b2b` 修过一次同款空转 bug
+--- （`pcall(frame.GetChildren, frame)` 只拿到第一个子框，随后 `#kids` 恒为 0）。
+--- 所以包表省不掉；能省的是每次调用新建的那个闭包 —— 提成模块级函数，守卫和交还共用。
+local function ChildrenOf(frame)
+    return { frame:GetChildren() }
+end
+
 local function FadeBlizzardSiblings(base, keep)
     if not base or type(base.GetChildren) ~= "function" then return end
-    -- `ipairs({ base:GetChildren() })` 里那层 `{}` 是白建的第二张表：GetChildren 本来就
-    -- 返回一张新表。守卫每拍每牌都走这里，40 块牌 × 4 次/秒 × 2 张表就是纯 GC 压力。
-    local kids = base:GetChildren()
+    local ok, kids = pcall(ChildrenOf, base)
+    if not ok or type(kids) ~= "table" then return end
     for i = 1, #kids do
         local c = kids[i]
         if c ~= keep and c.SetAlpha and NeedsFade(c) then
@@ -683,7 +694,10 @@ end
 
 local function RestoreBlizzardSiblings(base)
     if not base or type(base.GetChildren) ~= "function" then return end
-    for _, c in ipairs(base:GetChildren()) do
+    local ok, kids = pcall(ChildrenOf, base)
+    if not ok or type(kids) ~= "table" then return end
+    for i = 1, #kids do
+        local c = kids[i]
         if siblingFaded[c] then
             siblingFaded[c] = nil
             pcall(c.SetAlpha, c, siblingAlpha[c] or 1)
@@ -1091,7 +1105,13 @@ local function UpdateText(plate)
             if mark then parts[#parts + 1] = mark end
         end
     end
-    plate.level:SetText(table.concat(parts, " "))
+    local levelText = table.concat(parts, " ")
+    -- 写入守卫：level 段只在真变了的时候写。UpdatePlate 是每块牌子 UNIT_HEALTH 的处理函数，
+    -- 而等级/阶级符号跟血量无关 —— 以前每次跳血都重写一遍这个 FontString。
+    if plate.levelText ~= levelText then
+        plate.levelText = levelText
+        plate.level:SetText(levelText)
+    end
 
     -- 规则（2026-10-27 玩家定）：名字最多占牌子总宽 70%，超了**缩字号**、绝不截断 ——
     -- 统一走 Widget:FitText（机密名走它内部的"不测不缩"分支，原样显示）。
@@ -1099,20 +1119,39 @@ local function UpdateText(plate)
     -- level 段比剩余 30% 还宽时再收一档，免得两段挤在一起。
     local name = Query(UnitName, unit)
     local nameSize = ns.Media:SnapSize(Setting("nameSize"))
-    if type(name) == "string" then
-        local W = PlateWidth()
-        local maxWidth = W * 0.70
+    -- 名字可能是机密串：**机密值不能进 `==`**（secret-compare 会被拦），所以只有明文名字
+    -- 才参与下面的排版判据；机密名一律照原样重跑 FitText。
+    local namePlain = (type(name) == "string" and not Secrets.IsSecret(name)) and name or nil
+
+    local W = PlateWidth()
+    local maxWidth = W * 0.70
+    if namePlain then
         local levelW = plate.level:GetStringWidth()
         -- 宽度读回来也可能成机密（与 Widget:FitText 头部同一课：锚在机密几何上时
         -- GetStringWidth 会变机密）—— 对机密宽度比大小就是被拦调用。
         if type(levelW) == "number" and not Secrets.IsSecret(levelW) and levelW > 0 then
             maxWidth = math.min(maxWidth, W - levelW - 4)
         end
-        Widget:FitText(plate.name, name, maxWidth, nameSize, nil, 6)
-    else
-        Widget:FitText(plate.name, "", PlateWidth() * 0.70, nameSize, nil, 6)
     end
 
+    -- 排版判据全等就跳过整段测量：Widget:FitText 里是 SetFont + SetText + GetStringWidth，
+    -- 外加最坏 12 档的"缩一号再量一次"循环（Utils/Widget.lua:1269-1278）。副本里一次
+    -- 伤害跳字 = 一块牌子最多 13 次字体测量，而名字/等级/宽度一个都没变。
+    -- 名字**颜色**不在这段里（它跟血量百分比曲线走，见下），所以仍然每次都刷。
+    local cacheable = namePlain ~= nil
+        and type(maxWidth) == "number" and not Secrets.IsSecret(maxWidth)
+        and type(nameSize) == "number" and not Secrets.IsSecret(nameSize)
+    local fitSame = cacheable and plate.fitName == namePlain and plate.fitLevel == levelText
+        and plate.fitMaxW == maxWidth and plate.fitSize == nameSize
+    if not fitSame then
+        if cacheable then
+            plate.fitName, plate.fitLevel = namePlain, levelText
+            plate.fitMaxW, plate.fitSize = maxWidth, nameSize
+        else
+            plate.fitName, plate.fitLevel, plate.fitMaxW, plate.fitSize = nil, nil, nil, nil
+        end
+        Widget:FitText(plate.name, type(name) == "string" and name or "", maxWidth, nameSize, nil, 6)
+    end
     -- B5：名字颜色 = 血量百分比曲线（满血绿 → 半血黄 → 低血红）。曲线在加载期建好，
     -- UnitHealthPercent 返回的是**已求值的颜色对象**（不做算术、机密期也算得出来），
     -- 直接把 RGB 交给 SetTextColor（NDui 同款机制）。
@@ -1250,7 +1289,10 @@ end
 --- 常驻：`M.active` 为假时它照样每帧醒一次再早退（累加器省的是回调次数，省不下唤醒），
 --- 屏幕上一块牌都没有时也是。现在计数归零就摘掉订阅 —— `Utils/Scheduler` 的主框随之
 --- 隐藏，空闲时一个回调都不跑，全仓也少一个常驻驱动帧（8.26.7 第 1 条）。
---- 调用点 = 任何让 `blizzardHidden` 增减的地方：`UpdatePlate` / `Apply` / `SetEnabled`。
+--- 调用点 = 任何让 `blizzardHidden` 增减的地方：`HideBlizzardPlate` / `RestoreBlizzardPlate`
+--- 之后（`UpdatePlate` 的两支、`Removed`）与 `Apply` / `SetEnabled` 的整批还原。
+--- **不要**把它挂在每次 `UpdatePlate` 上：它按定义要重数整张表，而 UpdatePlate 是每牌的
+--- UNIT_HEALTH 处理函数。
 function M:SyncGuard()
     local n = 0
     for _, plate in pairs(plates) do
@@ -1465,19 +1507,26 @@ local function UpdatePlate(plate)
     if not M:ShouldShow(unit) then
         -- Filtered out: give the unit the plate the game would have drawn (widgets,
         -- soft-target icon, Blizzard's own look) and stand down.
-        if plate.blizzardHidden then RestoreBlizzardPlate(plate.base, plate) end
+        -- SyncGuard 只在**真交还了**的时候跑：它是整表重数，而 blizzardHidden 全仓只有
+        -- HideBlizzardPlate(:717) / RestoreBlizzardPlate(:746) 两处会翻。
+        if plate.blizzardHidden then
+            RestoreBlizzardPlate(plate.base, plate)
+            M:SyncGuard()
+        end
         plate:Hide()
         HideCast(plate)
-        M:SyncGuard()
         return false
     end
 
     if not plate.blizzardHidden then
         HideBlizzardPlate(plate.base, plate)
+        -- 同上：只有这一支可能把 blizzardHidden 从假变真。以前 SyncGuard 无条件挂在
+        -- UpdatePlate 末尾，而 UpdatePlate 是每块牌子 UNIT_HEALTH 的处理函数 ——
+        -- 一波 AoE = N 次事件 × 每次 O(N) 重数 = O(N²) 次表迭代，纯白做。
+        M:SyncGuard()
     else
         KeepBlizzardHidden(plate)
     end
-    M:SyncGuard()
 
     -- **接管失败就别画我们这块**（2026-10-25 实机：同一只怪出现两块牌子 —— 暴雪的牌子
     -- 右端显示冰冻陷阱，我们的牌子左上显示猎人标记）。拿不到暴雪 UnitFrame 时我们无法把它
@@ -1862,7 +1911,9 @@ function M:ProbeSiblings()
                 if okN then baseName = Text(raw) end
             end
             local uf = BlizzardUnitFrame(base)
-            local okKids, kids = pcall(base.GetChildren, base)
+            -- 多返回值：直接 `pcall(base.GetChildren, base)` 只接到第一个子框，
+            -- `type(kids) == "table"` 恒假 → 这份兄弟框报告永远 0 行（用 ChildrenOf 包表）。
+            local okKids, kids = pcall(ChildrenOf, base)
             if okKids and type(kids) == "table" and #kids > 0 then
                 for i = 1, #kids do
                     if #rows >= SIBLING_ROW_CAP then break end

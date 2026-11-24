@@ -318,8 +318,13 @@ local function EnsureHoverDriver()
             -- 一个回调都不跑（那些回调全是往这个框写东西，跑了也只是多一条拦截）。
             -- 复检到可读时按真实悬停重来一次 enter。
             -- **快照**：回调里可能自己 Unwatch（同一族坑，见 `Snapshot` 的注释）。
-            local list = Snapshot(readable and st.list or idleList)
+            -- 只在**真要跑回调**时才拷：稳定不悬停（inside=false 且状态没跳变）时这份拷贝
+            -- 一个回调都用不到，而它的代价是"每拍 × 每个在册框一张表"（10Hz，全仓 77 处登记点）。
             local inside = shown and MouseOver(frame)
+            local list
+            if inside or inside ~= st.inside then
+                list = Snapshot(readable and st.list or idleList)
+            end
             if inside ~= st.inside then
                 st.inside = inside
                 if inside then
@@ -611,6 +616,9 @@ local function MuteMouseTree(node, depth, on)
         end
     end
     if depth <= 0 then return end
+    -- `GetChildren` 返回的是**多返回值**不是表：直接 `pcall(node.GetChildren, node)` 只拿到
+    -- 第一个子框，随后 `type(kids) ~= "table"` 判掉 → 递归空转，整棵子树一个都关不掉
+    -- （`c2b6b2b` 修过同款，Groups.lua / Compat.lua 各留了一条注释）。必须包成表。
     local ok, kids = pcall(function() return { node:GetChildren() } end)
     if not ok or not kids then return end
     for i = 1, #kids do MuteMouseTree(kids[i], depth - 1, on) end

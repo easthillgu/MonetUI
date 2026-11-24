@@ -1132,7 +1132,10 @@ end
 -- 判据：我们的容器有子框 = 引擎在喂数据；0 或读不出 = 这一趟战斗显示是空的。
 local function CountKids(frame)
     if type(frame) ~= "table" then return nil end
-    local ok, kids = pcall(frame.GetChildren, frame)
+    -- `GetChildren` 返回**多返回值**不是表：`pcall(frame.GetChildren, frame)` 只接到第一个
+    -- 子框，`type(kids) ~= "table"` 于是恒成立 → 这个探针**永远返回 nil**，
+    -- 上线日验收读到的"读不出"其实是"数错了"（`c2b6b2b` 同款）。
+    local ok, kids = pcall(function() return { frame:GetChildren() } end)
     if not ok or type(kids) ~= "table" then return nil end
     return #kids
 end
