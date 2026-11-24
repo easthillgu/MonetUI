@@ -3,6 +3,28 @@
 This file is used verbatim as the CurseForge release changelog (see `.pkgmeta`).
 Update the top section before tagging a new release.
 
+## 0.13.15 (2026-11-24)
+
+- Nameplates: Blizzard's own nameplate is now really dimmed while ours is shown, and really
+  restored when the module is turned off. The walker never ran at all - `GetChildren` returns
+  multiple values rather than a table, so the loop was silently skipped.
+- Skins: dropdown expand arrows are dressed again. The same multiple-return-value mistake made
+  that walker throw before it reached a single button, which is why the arrows stayed Blizzard's.
+- Action bars: the drop catchers now share one 10 Hz mouse poll for the whole module instead of
+  one per bar - eight bars meant eighty ticks a second, forever, and none were ever unregistered.
+  The shared poll detaches itself when no catcher is left, so an idle addon costs nothing.
+- Action bars: slot events (`ACTIONBAR_UPDATE_USABLE` and friends) are coalesced to at most one
+  full redraw per frame. They arrive in bursts during combat and each one used to repaint every bar.
+- Nameplates / group frames: a name is only re-measured and re-fitted when the name, the available
+  width or the font size actually changed, instead of on every single health update.
+- Group frames: a roster change now schedules one re-stagger chain (0.05 / 0.3 / 1.0 s) instead of
+  three full refreshes per event, and each refresh asks for dead / connected state once per unit
+  rather than twice.
+- Info bar: the durability and currency blocks debounce event bursts by 0.25 s. Both recompute in
+  bulk (about 110 bag slots, up to 400 currency rows) and their events arrive in strings.
+- Tooltip: anchor placement keys are built from reused numeric tables instead of three
+  `string.format` calls every frame.
+
 ## 0.13.14 (2026-11-23)
 
 - Nameplates: debuffs now come from Blizzard's own aura container and show only auras cast by
