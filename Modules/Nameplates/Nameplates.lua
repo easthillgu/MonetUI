@@ -2028,6 +2028,32 @@ local function IndependentNameplateBases()
     return out
 end
 
+--- 在子树里找名字含 needle 的框（`BuffListFrame` 不一定挂在 base 直属层 —— 暴雪把它建在
+--- UnitFrame 下面时，只看 base:GetChildren() 会永远数到 0）。限深 4 层 / 节点预算 400。
+local function SubtreeNameHits(root, needle)
+    local hits, budget = 0, 400
+    local function walk(frame, depth)
+        if depth > 4 or budget <= 0 then return end
+        local ok, kids = pcall(ChildrenOf, frame)
+        if not ok or type(kids) ~= "table" then return end
+        for i = 1, #kids do
+            budget = budget - 1
+            if budget <= 0 then return end
+            local child = kids[i]
+            local name
+            if type(child.GetName) == "function" then
+                local okN, raw = pcall(child.GetName, child)
+                if okN then name = Text(raw) end
+            end
+            if name and name ~= "-" and name ~= "nil"
+                and string.find(string.lower(name), needle) then hits = hits + 1 end
+            walk(child, depth + 1)
+        end
+    end
+    walk(root, 0)
+    return hits
+end
+
 function M:ProbeSiblings()
     local stamp
     if type(_G.date) == "function" then
@@ -2036,7 +2062,7 @@ function M:ProbeSiblings()
     end
 
     local rows = {}
-    local plateCount, unreadable, buffListHits = 0, 0, 0
+    local plateCount, unreadable, buffListHits, buffListDeep = 0, 0, 0, 0
 
     for unit, plate in pairs(plates) do
         local base = plate and plate.base
@@ -2082,6 +2108,8 @@ function M:ProbeSiblings()
                 unreadable = unreadable + 1
                 rows[#rows + 1] = { unit = Text(unit), name = "（base 子树读不出）" }
             end
+            -- 直属层没命中不等于没有：暴雪常把光环容器建在 UnitFrame 下面（整棵子树再数一次）。
+            buffListDeep = buffListDeep + SubtreeNameHits(base, "bufflist")
         end
     end
 
@@ -2093,6 +2121,7 @@ function M:ProbeSiblings()
             if #rows >= SIBLING_ROW_CAP then break end
             local base = bases[i]
             independent = independent + 1
+            buffListDeep = buffListDeep + SubtreeNameHits(base, "bufflist")
             local uf = BlizzardUnitFrame(base)
             rows[#rows + 1] = {
                 unit  = "独立清点",
@@ -2140,6 +2169,7 @@ function M:ProbeSiblings()
         moduleEnabled  = moduleOn,
         unreadableBases = unreadable,
         buffListHits   = buffListHits,
+        buffListDeep   = buffListDeep,
         lockdown       = lockdown,
         truncated      = (#rows >= SIBLING_ROW_CAP) or nil,
         rows           = rows,
@@ -2177,10 +2207,10 @@ function M:ProbeSiblings()
     if #rows > SIBLING_PRINT then
         ns:Print(string.format("  …另有 %d 行只在账本里。", #rows - SIBLING_PRINT))
     end
-    ns:Print(string.format("判据：牌 %d 块 / 独立清点 %d 块 / 读不出 %d / buffList 命中 %d —— %s",
-        plateCount, independent, unreadable, buffListHits,
-        (buffListHits > 0) and "有同级光环容器，需确认压暗覆盖到它"
-            or "本趟没出现 BuffListFrame（不等于不存在，战斗里再跑一趟）"))
+    ns:Print(string.format("判据：牌 %d 块 / 独立清点 %d 块 / 读不出 %d / buffList 直属 %d · 子树 %d —— %s",
+        plateCount, independent, unreadable, buffListHits, buffListDeep,
+        (buffListDeep > 0) and "确有光环容器（子树里有 BuffList），需确认压暗覆盖到它及子框"
+            or "本趟子树里都没有 BuffListFrame（目标没光环，或客户端不建这个容器）"))
     local restore
     if moduleOn then
         restore = "模块开着：账面节点正被压暗，属正常"
