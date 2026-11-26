@@ -817,7 +817,12 @@ local CHAT_EXTRA_WINDOWS = { "ChannelFrame", "ChatConfigFrame" }
 --- 扩散污染（脏字段数不变、taint.log 空），而 SetPoint / SetClampRectInsets 会把帧标脏
 --- （见上方"贴底已移除"的说明）。所以只改**高度**，位置和宽度完全交给暴雪/玩家。
 local CHAT_INPUT_BAND = 32        -- 必须等于 EditBox 模板的 `<Size y="32"/>`
-local CHAT_TAB_LIFT   = 0         -- §8.92 页签容器相对 cf 顶的抬升量：0 = 落进输入带内、与 EditBox 同区
+--- §8.97（2026-11-27 作者定稿）：页签**挪到聊天框底边外侧**，不再与输入框同区。
+--- 起因：输入框已被作者要求"还给客户端"（锚回 `ChatFrame1` 顶边 0 偏移 = 客户端默认），
+--- 而原来的页签就落在同一条 32px 输入带上，视觉上"输入框压住页签"无可避免 —— 位置不是 bug，是排布。
+--- 现在页签容器 `GeneralDockManager` 钉到**我们聊天背板的底边**（页签顶边与框底边齐平），
+--- 输入带里只剩输入框；页签在底部不压任何文字、也不与输入框抢点击，因此**常显**（不再悬停淡入）。
+local CHAT_TAB_AT_BOTTOM = true   -- 页签落位：true = 框底外侧（常显）；false = 旧的输入带内（悬停淡入）
 local CHAT_INPUT_BOOST = 3        -- §8.92 聚焦时 EditBox 抬到 GDM 之上所需的层数（页签 Tab = GDM+1）
 local CHAT_TAB_FADE   = 0.18      -- 页签淡入淡出时长（秒），贴近 Chattynator 的 0.15（§8.90 改读配置）
 --- §8.96 输入框空闲渐隐（`chatEditBoxMode == "fade"` 档）。参考实现（千问给的 ChatEditFade.lua）
@@ -1233,16 +1238,15 @@ function ChatBand:PinLayout(name)
     if name == "ChatFrame1" then self:SyncChrome() end
 end
 
---- §8.94 页签在容器内的"落座"量：页签底 − 容器底（实测 ChatFrame4Tab 260 / GDM 259 ⇒ 1）。
---- 暴雪把页签挂在 GDM（或 GDM 的 ScrollFrameChild）里，页签比容器高 6、下沿还低 1，
---- 所以"容器底对齐框顶"会让页签底下留一条草地缝（作者 11-11 说"背景和边框不统一"时看到的那条）。
---- 这里现量，不写死数字；取不到可见页签就当 0（最多差 1 个单位）。
-local function TabSeat(gdm)
-    if not gdm or type(gdm.GetChildren) ~= "function" then return 0 end
-    local okG, gb = pcall(gdm.GetBottom, gdm)
-    if not okG or type(gb) ~= "number" then return 0 end
+--- §8.97 页签相对容器"冒头"量：页签顶 − 容器顶（实测 GDM 258..284 / Tab 258..290 ⇒ 6，
+--- 即页签比容器高 6、下沿还低 1）。页签落到底部时用它把页签**自己的顶边**贴到框底边，
+--- 否则会多出 6 个单位压进消息区。现量，不写死数字；取不到可见页签就按 6 兜底。
+local function TabOverhang(gdm)
+    if not gdm or type(gdm.GetChildren) ~= "function" then return 6 end
+    local okG, gt = pcall(gdm.GetTop, gdm)
+    if not okG or type(gt) ~= "number" then return 6 end
     local ok, kids = pcall(function() return { gdm:GetChildren() } end)
-    if not ok then return 0 end
+    if not ok then return 6 end
     local pool = {}
     for _, child in ipairs(kids) do
         pool[#pool + 1] = child
@@ -1255,19 +1259,20 @@ local function TabSeat(gdm)
         local okN, nm = pcall(tab.GetName, tab)
         if okN and type(nm) == "string" and nm:match("Tab%d+$") then
             local okS, shown = pcall(tab.IsShown, tab)
-            local okB, tb = pcall(tab.GetBottom, tab)
-            if okS and shown and okB and type(tb) == "number" then
-                return tb - gb
+            local okT, tb = pcall(tab.GetTop, tab)
+            if okS and shown and okT and type(tb) == "number" then
+                return tb - gt
             end
         end
     end
-    return 0
+    return 6
 end
 
---- 把页签容器钉到**我们自己的聊天背板上沿**（不是暴雪 `ChatFrameNBackground`）。
---- 那层暴雪背景比 cf 内缩 3（实测 bg1 顶 259 / cf 顶 256），锚它页签就永远悬在框顶上方；
---- `skinBg` 与 cf 精确同边（32..256），锚它页签底板才能真正压住框顶那条 1px 线。
---- 偏移再减 `seat`，页签**自己的底边**落上框顶线，中间不留缝。
+--- 把页签容器钉到**我们自己的聊天背板上沿 / 下沿**（不是暴雪 `ChatFrameNBackground`）。
+--- 那层暴雪背景比 cf 内缩 3（实测 bg1 顶 259 / cf 顶 256），锚它页签就永远离框沿差一条缝；
+--- `skinBg` 与 cf 精确同边（32..256），锚它页签底板才能真正压住框沿那条 1px 线。
+--- §8.97：落位由 `CHAT_TAB_AT_BOTTOM` 决定 —— 底部 = 页签顶边贴框底边（`TOPLEFT→BOTTOMLEFT`，
+--- 偏移 `-TabOverhang`）；旧档 = 页签底边贴框顶边（`BOTTOMLEFT→TOPLEFT`，偏移 −1 的落座缝）。
 --- `target` 为 nil（minimap 太矮、band 没激活）时不钉，避免把页签推离原位置。
 function ChatBand:PinDock()
     local target = self:TargetHeight()
@@ -1282,14 +1287,24 @@ function ChatBand:PinDock()
     if okParent and par then host = par end
     local bg = host and Marked(host, "skinBg") or nil
     local ref = bg or r1
-    local want = CHAT_TAB_LIFT - TabSeat(gdm)
-    local already = p1 == "BOTTOMLEFT" and r1 == ref and rp1 == "TOPLEFT"
+    local ptA, atA, ofsY
+    if CHAT_TAB_AT_BOTTOM then
+        -- 框底外侧：页签顶边 = 背板底边（多出的 TabOverhang 是页签相对容器的冒头量）
+        ptA, atA, ofsY = "TOPLEFT", "BOTTOMLEFT", -TabOverhang(gdm)
+    else
+        -- 旧档（输入带内）：页签底边贴框顶线，留 1 的落座缝（§8.94 实测 GDM 底 − 页签底 = 1）
+        ptA, atA, ofsY = "BOTTOMLEFT", "TOPLEFT", -1
+    end
+    local already = p1 == ptA and r1 == ref and rp1 == atA
         and math.abs((ReadNum(x1) or 99) - 0) < 0.6
-        and math.abs((ReadNum(y1) or 99) - want) < 0.6
+        and math.abs((ReadNum(y1) or 99) - ofsY) < 0.6
     if not already then
         pcall(gdm.ClearAllPoints, gdm)
-        pcall(gdm.SetPoint, gdm, "BOTTOMLEFT", ref, "TOPLEFT", 0, want)
-        pcall(gdm.SetPoint, gdm, "BOTTOMRIGHT", ref, "TOPRIGHT", 0, want)
+        pcall(gdm.SetPoint, gdm, ptA, ref, atA, 0, ofsY)
+        -- 第二个点跟着同一个角走（宽度由暴雪/玩家决定，这里只保证左右同边）。
+        local ptB = (ptA == "TOPLEFT") and "TOPRIGHT" or "BOTTOMRIGHT"
+        local atB = (atA == "BOTTOMLEFT") and "BOTTOMRIGHT" or "TOPRIGHT"
+        pcall(gdm.SetPoint, gdm, ptB, ref, atB, 0, ofsY)
     end
     return not already
 end
@@ -1631,6 +1646,12 @@ function ChatBand:Refresh()
     -- 悬停边沿同拍结算输入框鼠标开关（fade 档：离开聊天区就还给页签/世界）。
     for name in pairs(KNOWN_EB) do
         self:SyncEditMouse(name)
+    end
+    -- §8.97：页签落到框底外侧之后不再与输入框同区，也就没有"让位/淡隐"的必要 —— 常显。
+    if CHAT_TAB_AT_BOTTOM then
+        chatHideToken = chatHideToken + 1
+        self:FadeTo(true)
+        return
     end
     if not self:HoverEnabled() or self:AnyHover() then
         chatHideToken = chatHideToken + 1

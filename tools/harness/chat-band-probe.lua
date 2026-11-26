@@ -345,8 +345,10 @@ check("Skin:Need 缺对象时安全返回", ChatBand:PinEditBox("ChatFrame99") =
 -- ---------------------------------------------------------------- 页签容器抬升
 check("PinLayout 对 ChatFrame1 调 PinDock", band:find("self:PinDock()", 1, true) ~= nil)
 check("PinDock 只在 name==ChatFrame1 时调用", band:find('if name == "ChatFrame1" then', 1, true) ~= nil)
-check("PinDock 目标偏移 = CHAT_TAB_LIFT − 页签落座量（§8.94）",
-    band:find("local want = CHAT_TAB_LIFT - TabSeat(gdm)", 1, true) ~= nil)
+check("§8.97 页签落位开关存在（框底外侧 = 常显）",
+    band:find("local CHAT_TAB_AT_BOTTOM = true", 1, true) ~= nil)
+check("PinDock 目标偏移 = −页签冒头量（页签顶边贴框底边）",
+    band:find('ptA, atA, ofsY = "TOPLEFT", "BOTTOMLEFT", -TabOverhang(gdm)', 1, true) ~= nil)
 check("PinDock 锚我们自己的 skinBg（不锚内缩 3 的暴雪 Background）",
     band:find('Marked(host, "skinBg")', 1, true) ~= nil
     and band:find("local ref = bg or r1", 1, true) ~= nil)
@@ -373,26 +375,29 @@ local function DockPointY(i)
     local p = gdm.points[i]
     return p and p[5] or nil
 end
--- §8.92：页签与 EditBox 共用 32 带，目标偏移是 0。模拟暴雪把整条抹到 -32（掉进消息区）：
--- PinLayout 在 PinHeight 之后跑 PinDock ⇒ 应拉回 0。
-gdm.points = { { "BOTTOMLEFT", bg1, "TOPLEFT", 0, -32 }, { "BOTTOMRIGHT", bg1, "TOPRIGHT", 0, -32 } }
+-- §8.97：页签落到**框底外侧**（页签顶边贴背板底边），目标偏移 = −页签冒头量（桩里取不到页签 ⇒ 兜底 6）。
+-- 模拟暴雪把整条抹到 -32：PinLayout 在 PinHeight 之后跑 PinDock ⇒ 应拉回 -6。
+gdm.points = { { "TOPLEFT", bg1, "BOTTOMLEFT", 0, -32 }, { "TOPRIGHT", bg1, "BOTTOMRIGHT", 0, -32 } }
 ChatBand:PinLayout("ChatFrame1")
-check("PinLayout 把页签容器拉回输入带内（第一锚点偏移 0）",
-    DockPointY(1) == 0 and gdm.points[1][2] == bg1, DockPointY(1))
-check("页签容器第二锚点也回 0", DockPointY(2) == 0, DockPointY(2))
+check("§8.97 PinLayout 把页签容器钉到框底（第一锚点 TOPLEFT→BOTTOMLEFT，偏移 −6）",
+    DockPointY(1) == -6 and gdm.points[1][1] == "TOPLEFT" and gdm.points[1][2] == bg1
+    and gdm.points[1][3] == "BOTTOMLEFT", tostring(DockPointY(1)))
+check("§8.97 页签容器第二锚点同边（TOPRIGHT→BOTTOMRIGHT）",
+    DockPointY(2) == -6 and gdm.points[2][1] == "TOPRIGHT" and gdm.points[2][3] == "BOTTOMRIGHT",
+    tostring(DockPointY(2)))
 local dockCalls = gdm.setCalls
 ChatBand:PinDock()
 check("已到位时不重复写", gdm.setCalls == dockCalls, gdm.setCalls - dockCalls)
-gdm.points = { { "BOTTOMLEFT", bg1, "TOPLEFT", 0, -32 }, { "BOTTOMRIGHT", bg1, "TOPRIGHT", 0, -32 } }
-check("Blizzard 抹回偏移后自愈", ChatBand:PinDock() == true and DockPointY(1) == 0)
+gdm.points = { { "TOPLEFT", bg1, "BOTTOMLEFT", 0, -32 }, { "TOPRIGHT", bg1, "BOTTOMRIGHT", 0, -32 } }
+check("Blizzard 抹回偏移后自愈", ChatBand:PinDock() == true and DockPointY(1) == -6)
 gdm.points = { { "BOTTOMLEFT", bg1, "TOPLEFT", 0, 0 }, { "BOTTOMRIGHT", bg1, "TOPRIGHT", 0, 0 } }
 local callsBefore = gdm.setCalls
 ChatBand:PinLayout("ChatFrame2")
-check("非 primary 窗不抬页签容器", gdm.setCalls == callsBefore)
+check("非 primary 窗不钉页签容器", gdm.setCalls == callsBefore)
 minimap.height = 10
 local c = gdm.setCalls
 ChatBand:PinDock()
-check("minimap 过矮 band 未激活时不抬", gdm.setCalls == c)
+check("minimap 过矮 band 未激活时不钉", gdm.setCalls == c)
 minimap.height = 256
 
 -- ---------------------------------------------------------------- 几何重放
@@ -406,52 +411,42 @@ check("§8.93 输入框整条落在框顶外侧（骑在边框上）", ebBottom 
 check("§8.93 输入框带零遮字（底边不低于框顶）", ebBottom >= frameTop)
 check("§8.93 外框高度 = 小地图高 − 32（顶边落在上沿的前提）", bgTop - 31 == 224, bgTop - 31)
 
--- ---------------------------------------------------------------- 悬停显示
+-- ---------------------------------------------------------------- §8.97 页签常显
+-- 页签挪到框底外侧后不再与输入框同区，也就没有"让位/悬停淡入"的必要：一律常显。
 check("HoverEnabled：配置开 + chat 面板开", ChatBand:HoverEnabled() == true)
 db.skins.hoverChatTabs = false
-check("HoverEnabled：配置关", ChatBand:HoverEnabled() == false)
 ChatBand:Refresh()
-check("关掉开关立刻恢复页签常显", gdm.alpha == 1, gdm.alpha)
+check("§8.97 页签常显（悬停开关关也无所谓）", gdm.alpha == 1, gdm.alpha)
 db.skins.hoverChatTabs = true
 ChatBand:Refresh()
-check("无人悬停先排队延迟隐藏", #timers == 1 and gdm.alpha == 1, #timers)
-FlushTimers()
-check("延迟到期后页签隐藏（GDM alpha 0）", gdm.alpha == 0, gdm.alpha)
-local alphaWrites = gdm.alphaWrites
-check("重复隐藏不重复写 alpha", ChatBand:SetTabsVisible(false) == false
-    and gdm.alphaWrites == alphaWrites)
+check("§8.97 无人悬停也不排队隐藏（不再有延迟隐藏）", #timers == 0 and gdm.alpha == 1, #timers)
 ChatBand.Enter(cfs[1])
-check("鼠标进聊天框立刻显示页签", gdm.alpha == 1 and ChatBand:AnyHover() == true, gdm.alpha)
+check("§8.97 进聊天框仍是常显", gdm.alpha == 1 and ChatBand:AnyHover() == true, gdm.alpha)
 ChatBand.Leave(cfs[1])
-check("离开时先排队隐藏，不立刻灭", #timers == 1 and gdm.alpha == 1, #timers)
-ChatBand.Enter(gdm)   -- 跨 3px 缝进入页签条
+check("§8.97 离开聊天框也不灭", gdm.alpha == 1, gdm.alpha)
 FlushTimers()
-check("跨缝进页签：旧隐藏请求被 token 作废", gdm.alpha == 1, gdm.alpha)
-ChatBand.Leave(gdm)
-FlushTimers()
-check("真正离开后页签隐藏", gdm.alpha == 0, gdm.alpha)
+check("§8.97 计时器到期后依然不灭", gdm.alpha == 1, gdm.alpha)
 
 -- ---------------------------------------------------------------- §8.95 聊天镀铬
--- 作者 11-11："聊天框左上的社交按钮没有隐藏掉"。实机 ChatFrameNButtonFrame 的 alpha 我们从没管过，
--- 暴雪按窗口激活态写 1.00（1..4）或 0.20（5..10），所以页签淡到 0 了喇叭按钮还亮着。
-check("§8.95 页签隐藏时 ButtonFrame 一起归 0",
-    bfs[1].alpha == 0 and bfs[4].alpha == 0,
+-- §8.97 起页签常显，镀铬（ButtonFrame / 框外社交按钮）跟着 GDM 走 1 档，不再归 0。
+check("§8.97 页签常显时 ButtonFrame 同为 1",
+    bfs[1].alpha == 1 and bfs[4].alpha == 1,
     "bf1=" .. tostring(bfs[1].alpha) .. " bf4=" .. tostring(bfs[4].alpha))
-check("§8.95 未激活窗的 0.2 也统一到同一档", bfs[5].alpha == 0, bfs[5].alpha)
-check("§8.95 α0 时关掉鼠标（否则看不见但能点，会误弹频道菜单）",
-    bfs[1].mouse == false, tostring(bfs[1].mouse))
-bfs[2].alpha = 1                       -- 模拟暴雪在 CHAT_UPDATE / 窗口激活时写回 1.0
+check("§8.97 未激活窗的 0.2 也统一到同一档", bfs[5].alpha == 1, bfs[5].alpha)
+check("§8.97 常显时鼠标开着（页签要能点）",
+    bfs[1].mouse == true, tostring(bfs[1].mouse))
+bfs[2].alpha = 0.2                     -- 模拟暴雪在 CHAT_UPDATE / 窗口激活时写回 0.2
 ChatBand:SyncChrome()
-check("§8.95 暴雪改回 1.0 后 1 秒轮询纠回 0", bfs[2].alpha == 0, bfs[2].alpha)
+check("§8.95 暴雪写回 0.2 后 1 秒轮询纠回同一档", bfs[2].alpha == 1, bfs[2].alpha)
 bfs[3].alpha = 0.2
 check("§8.95 GDM 已达标时 SetTabsVisible 仍纠 ButtonFrame",
-    ChatBand:SetTabsVisible(false) == false and bfs[3].alpha == 0, bfs[3].alpha)
-check("§8.95 框外两枚社交按钮（QuickJoin / TTS）同样归 0 且关鼠标",
-    qj.alpha == 0 and qj.mouse == false and tts.alpha == 0 and tts.mouse == false,
+    ChatBand:SetTabsVisible(true) == false and bfs[3].alpha == 1, bfs[3].alpha)
+check("§8.97 框外两枚社交按钮（QuickJoin / TTS）同样常显可点",
+    qj.alpha == 1 and qj.mouse == true and tts.alpha == 1 and tts.mouse == true,
     "qj=" .. tostring(qj.alpha) .. "/" .. tostring(qj.mouse))
-qj.alpha = 1                           -- 暴雪给快速加入按钮做 toast 动画时会写回 1.0
+qj.alpha = 0.2                         -- 暴雪给快速加入按钮做 toast 动画时会写回低值
 ChatBand:SyncChrome()
-check("§8.95 QuickJoin 被暴雪写回后仍纠回 0", qj.alpha == 0, qj.alpha)
+check("§8.95 QuickJoin 被暴雪写回后仍纠回同一档", qj.alpha == 1, qj.alpha)
 ChatBand:SetTabsVisible(true)
 check("§8.95 显示时 ButtonFrame α1 且鼠标恢复",
     bfs[1].alpha == 1 and bfs[1].mouse == true,
@@ -534,7 +529,8 @@ cfs[1].height = 256   -- 模拟 bottom 遗留高度（不扣带），hidden 应�
 check("§8.91 PinHeight 写回 224", ChatBand:PinHeight(cfs[1]) == true and cfs[1].height == 224, cfs[1].height)
 gdm.points = { { "BOTTOMLEFT", bg1, "TOPLEFT", 0, 0 }, { "BOTTOMRIGHT", bg1, "TOPRIGHT", 0, 0 } }
 ChatBand:PinLayout("ChatFrame1")
-check("§8.91 hidden 时页签容器仍落带内（偏移 0，§8.92 同区）", DockPointY(1) == 0, DockPointY(1))
+check("§8.97 hidden 档页签同样在框底外侧（偏移 −6，与输入框位置档无关）",
+    DockPointY(1) == -6, tostring(DockPointY(1)))
 -- controlBg 背板桩与 env.Marked 覆盖已前移到第一次行为级 PinLayout 之前（见上文注）。
 ebs[1].focused = false
 ChatBand:HideEditBox("ChatFrame1")
