@@ -749,7 +749,11 @@ local function RestoreNativeBase(base)
         local want = rec and rec.alpha ~= nil and rec.alpha or 1
         local ok = pcall(obj.SetAlpha, obj, want)
         local after = AlphaOf(obj)
-        if ok and after ~= nil and after == want then
+        -- 读得出来才要求"写进去的值就在那儿"；**读不出来（机密 / 受限）不能当失败**
+        -- ——否则战斗中每块离场的牌都变成永远还不掉的重试账（2026-11-26 实机：待还原
+        -- 3→6 随打怪单调增长，而 GuardTick 每 0.25s 白试一次）。SetAlpha 成功就算还了，
+        -- 真被拒（pcall 失败）才留给守卫重试。
+        if ok and (after == nil or after == want) then
             fadedNodes[obj] = nil
         else
             failed = true
@@ -2140,7 +2144,8 @@ function M:ProbeSiblings()
         truncated      = (#rows >= SIBLING_ROW_CAP) or nil,
         rows           = rows,
         note           = "只读：GetName 过 Text() 防机密串，alpha 走 AlphaOf（nil=读不出）。"
-            .. "buffListHits>0 就是 BlizzardBasePlate 下确有同级光环容器，FadeBlizzardTree 的覆盖面判据。",
+            .. "buffListHits>0 就是 BlizzardBasePlate 下确有同级光环容器，FadeBlizzardTree 的覆盖面判据。"
+            .. "pendingRestores 只剩 SetAlpha 真被拒的欠账（读不出 alpha 不再算失败，见 RestoreNativeBase）。",
     }
 
     local saved = false
@@ -2184,8 +2189,8 @@ function M:ProbeSiblings()
     else
         restore = "还原未完成：仍有节点记在账上（等脱战或下一次补扫）"
     end
-    ns:Print(string.format("账本：压下节点 %d 个 / 待还原 %d 块牌 / 模块=%s —— %s",
-        fadedCount, pendingCount, moduleOn and "开" or "关", restore))
+    ns:Print(string.format("账本：压下节点 %d 个 / 待还原 %d 块牌 / 模块=%s / 战斗中=%s —— %s",
+        fadedCount, pendingCount, moduleOn and "开" or "关", lockdown and "是" or "否", restore))
     ns:Print(saved
         and "全量已存 MonetUIDB.nameplateSiblings —— 写入比 /reload 晚 1–2 分钟，别立刻读（登出后再读最稳）。"
         or "账本没打开，只有聊天框这几行。")
