@@ -264,10 +264,10 @@ end
 --- `TextStatusBar.lua:110` 的机密值比较并按 MonetUI 的名义记账。别再把它当"备用开关"加回来。
 ---
 --- 11-07 更新：**格子现在可点**（`Blocks.lua` 的 `BlockClick`，动作单源在 `MicroMenu.lua` 的 `M.actions`）：
---- 要开暴雪面板的格子走**代点坞**这条两击路线，其中耐久格走**定向小菜单**
---- （`MicroMenuSecure:OpenTarget`：贴着被点那格、只留「角色」一行），好友格是**作者批准的例外**
---- 直调 `_G.ToggleFriendsFrame()`（实测证据见 `MicroMenu.lua` 的 `OpenFriends` 头注）；
---- 任务 / 专精两格已按作者指示删除 —— 映射表见 `Blocks.lua` 头部。
+--- 要开暴雪面板的格子走**代点坞**这条两击路线（`MicroMenuSecure:OpenTarget`：贴着被点那格、
+--- 只留对应一行），好友格是**作者批准的例外**直调 `_G.ToggleFriendsFrame()`（实测证据见
+--- `MicroMenu.lua` 的 `OpenFriends` 头注）；任务 / 专精两格已按作者指示删除。
+--- **耐久格 11-10 起只读**（不注册 onClick），提示内容见 `Blocks.lua` 的 `DurabilityTooltip` —— 映射表见 `Blocks.lua` 头部。
 --- 信息栏本身**永远不能挂安全模板** —— 它是"内容驱动排版"的框，安全模板一进家族就全族被拒
 --- （§8.37 实测、§8.64 判定；上面 `BuildBlockFrame` 那段注释里两条失败写法仍是活教训）。
 --- 即将来的人：这条边界**不会**因为找到新写法而改变，别再试第三种。
@@ -875,9 +875,13 @@ function M:Diagnose()
         ns:Print(string.format("%d 个缺失：对应数据块会自动留空，不影响其它块。", missing))
     end
 
-    if self.durabilityMode then
+    -- 耐久取值形态由 `Modules/Tools/Durability.lua` 探测（同一份实现，信息栏只读结论）。
+    local durability = ns.Durability
+    local signature = (durability and type(durability.Signature) == "function")
+        and durability:Signature() or nil
+    if signature then
         ns:Print(("耐久取值签名已实测为: GetInventoryItemDurability(%s)")
-            :format(self.durabilityMode == "unit" and "unit, slot" or "slot"))
+            :format(signature == "unit" and "unit, slot" or "slot"))
     elseif self.active then
         ns:Print("耐久取值签名：尚未探测（装备上任意一件有耐久的装备后会自动判定）。")
     end

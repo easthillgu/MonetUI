@@ -1,9 +1,10 @@
 -- infobar-durability-probe.lua
--- 「耐久」格只读回归桩（11-10 作者指示：取消点击，只保留悬停显示平均耐久）。
+-- 「耐久」格回归桩（11-26 改口径：按**槽位**读身上那套，提示给「总评 → 最低 → 逐件」，
+-- 数据源统一走 `Modules/Tools/Durability.lua` 的 `M:Scan()`）。
 --   lua tools/harness/infobar-durability-probe.lua
 --
--- 动态部分抽取 Blocks.lua 里 AverageDurability / DurabilityUpdate / DurabilityTooltip
--- 三个函数的**线上原文**执行（不是照抄逻辑），静态部分钉住注册规格与注释口径。
+-- 动态部分抽取 Blocks.lua 里 DurabilityData / DurabilityLevelColor / DurabilityUpdate /
+-- DurabilityTooltip 四个函数的**线上原文**执行（不是照抄逻辑），静态部分钉住注册规格与口径。
 
 local function read(path)
     local f = assert(io.open(path, "rb"), "missing file: " .. path)
@@ -13,6 +14,7 @@ local function read(path)
 end
 
 local src = read("Modules/InfoBar/Blocks.lua")
+local toolsSrc = read("Modules/Tools/Durability.lua")
 local passed, failed = 0, 0
 local function check(name, ok, extra)
     if ok then
@@ -25,7 +27,7 @@ local function check(name, ok, extra)
 end
 
 -- ---------------------------------------------------------------------------
--- 静态：注册规格里不许再有 onClick，也不许再提「点开角色界面」。
+-- 静态：注册规格不注册 onClick；口径是槽位读取；探测只有 Tools 一份。
 -- ---------------------------------------------------------------------------
 local function codeOnly(s)
     local out = {}
@@ -41,94 +43,139 @@ check("注册规格不注册 onClick（注释不算）", spec:find("onClick") ==
 check("注册规格仍保留 update / tooltip",
     spec:find("update%s*=%s*DurabilityUpdate") ~= nil
     and spec:find("tooltip%s*=%s*DurabilityTooltip") ~= nil)
-check("不再代点角色界面动作", src:find('BlockClick("character")', 1, true) == nil)
-check("点击提示表不再有 character 项", src:find("character%s*=%s*\"打开角色界面\"") == nil)
+check("换装也触发刷新（PLAYER_EQUIPMENT_CHANGED）",
+    spec:find("PLAYER_EQUIPMENT_CHANGED") ~= nil)
+check("不再扫背包物品的耐久（C_Container.GetContainerItemDurability 已撤，注释不算）",
+    codeOnly(src):find("GetContainerItemDurability") == nil)
+check("数据源是 Tools 模块（一处判据一份实现）",
+    src:find("ns.Durability", 1, true) ~= nil and src:find("mod.Scan", 1, true) ~= nil)
+check("Tools 模块导出 Scan / ScanBags / Signature / SLOTS",
+    toolsSrc:find("function M:Scan()", 1, true) ~= nil
+    and toolsSrc:find("function M:ScanBags()", 1, true) ~= nil
+    and toolsSrc:find("function M:Signature()", 1, true) ~= nil
+    and toolsSrc:find("M.SLOTS = SLOTS", 1, true) ~= nil)
+check("兜底数据源写明是背包（本客户端没有已装备耐久 API）",
+    src:find("mod.ScanBags", 1, true) ~= nil
+    and toolsSrc:find('source = "bags"', 1, true) ~= nil)
+check("工具模块的背包扫描只认耐久列（不扫空格子）",
+    toolsSrc:find("GetContainerItemDurability", 1, true) ~= nil
+    and toolsSrc:find("if current and maximum and maximum > 0 then", 1, true) ~= nil)
+check("Tools 的形态探测要求读出数字（不再只认 pcall 成功）",
+    toolsSrc:find("if current then\n            mode = kind", 1, true) ~= nil)
 check("头注写明这格只读", src:find("取消点击，不弹小菜单", 1, true) ~= nil)
 check("MicroMenu 的 character 动作保留给微菜单",
     read("Modules/Minimap/MicroMenu.lua"):find("character%s*=%s*OpenCharacter") ~= nil)
 
 -- ---------------------------------------------------------------------------
--- 动态：抽取三个函数原文，装进桩环境执行。
+-- 动态：抽取四个函数原文，装进桩环境执行。
 -- ---------------------------------------------------------------------------
-local segStart = src:find("local function AverageDurability()", 1, true)
+local segStart = src:find("local function DurabilityData()", 1, true)
 local segEnd = src:find("M:RegisterBlock({", segStart or 1, true)
 check("能定位耐久度函数段", segStart ~= nil and segEnd ~= nil and segEnd > segStart)
 local segment = src:sub(segStart, segEnd - 1)
-check("函数段含三个目标函数",
-    segment:find("local function AverageDurability", 1, true) ~= nil
+check("函数段含四个目标函数",
+    segment:find("local function DurabilityData", 1, true) ~= nil
+    and segment:find("local function DurabilityLevelColor", 1, true) ~= nil
     and segment:find("local function DurabilityUpdate", 1, true) ~= nil
     and segment:find("local function DurabilityTooltip", 1, true) ~= nil)
 
-local chunk = "local M, Secrets, Tip = ...\n"
+local chunk = "local M, ns, Tip = ...\n"
     .. segment
-    .. "\nreturn AverageDurability, DurabilityUpdate, DurabilityTooltip"
+    .. "\nreturn DurabilityData, DurabilityLevelColor, DurabilityUpdate, DurabilityTooltip"
 local compiled, err = load(chunk, "durability-segment", "t")
 check("函数段可编译", compiled ~= nil, err)
 
 local texts, tipLines = {}, {}
 local M = { SetText = function(_, _, text) texts[#texts + 1] = text end }
-local Secrets = { Number = function(x) return type(x) == "number" and x or nil end }
+local ns = {
+    Color = {
+        GetDanger  = function() return 0.9, 0.2, 0.2 end,
+        GetPrimary = function() return 0.8, 0.65, 0.76 end,
+    },
+}
+-- 桩：Tools/Durability 按**背包兜底**给数据（本客户端的实际情形），
+-- 两件：旧头盔 50%（最低）/ 厚胸甲 100%，总评 75%。
+local bagScan = {
+    source = "bags", percent = 75, lowest = 50, lowestName = "旧头盔", count = 2,
+    items = {
+        { bag = 0, slot = 1, name = "旧头盔", pct = 50 },
+        { bag = 0, slot = 2, name = "厚胸甲", pct = 100 },
+    },
+}
+ns.Durability = {
+    Scan = function() return nil end,     -- 槽位 API 在本客户端不存在
+    ScanBags = function() return bagScan end,
+}
 _G.GameTooltip = {
     AddLine = function(_, text) tipLines[#tipLines + 1] = tostring(text) end,
+    AddDoubleLine = function(_, left, right) tipLines[#tipLines + 1] = tostring(left) .. " = " .. tostring(right) end,
 }
 local Tip = function() return _G.GameTooltip end
 
-local avgFn, updateFn, tooltipFn = compiled(M, Secrets, Tip)
-check("三个函数都导出", type(avgFn) == "function" and type(updateFn) == "function"
-    and type(tooltipFn) == "function")
+local dataFn, colorFn, updateFn, tooltipFn = compiled(M, ns, Tip)
+check("四个函数都导出", type(dataFn) == "function" and type(colorFn) == "function"
+    and type(updateFn) == "function" and type(tooltipFn) == "function")
 
-local function setBags(slots, durability)
-    _G.C_Container = {
-        GetContainerNumSlots = function(bag) return slots[bag] or 0 end,
-        GetContainerItemDurability = function(bag, slot)
-            local row = durability[bag]
-            local item = row and row[slot]
-            if not item then return nil end
-            return item[1], item[2]
-        end,
-    }
-end
-
--- 两件：50/100 与 100/100 ⇒ 平均 75%，取件数 2。
-setBags({ [0] = 2 }, { [0] = { { 50, 100 }, { 100, 100 } } })
-local avg, count = avgFn()
-check("平均耐久 = 75%（50% 与 100% 取件平均）", avg == 75 and count == 2,
-    "avg=" .. tostring(avg) .. " count=" .. tostring(count))
 local block = {}
 updateFn(block)
-check("条身显示 75%", texts[#texts] == "75%", texts[#texts])
-check("平均值与件数缓存在注册表上", block.avgPercent == 75 and block.avgCount == 2)
+check("条身显示总评 75%", texts[#texts] == "75%", texts[#texts])
+check("扫描结果缓存在注册表上（悬停不必再扫）", block.durData == bagScan)
+
 tipLines = {}
 tooltipFn(block)
 local tipText = table.concat(tipLines, " | ")
-check("悬停显示平均耐久与取件数", tipText:find("平均耐久 75%", 1, true) ~= nil
-    and tipText:find("2 件取件平均", 1, true) ~= nil, tipText)
+check("兜底时提示写明数据源是背包", tipText:find("数据源：背包内物品", 1, true) ~= nil, tipText)
+check("悬停给总评与件数", tipText:find("总评 75%", 1, true) ~= nil
+    and tipText:find("2 件取平均", 1, true) ~= nil, tipText)
+check("悬停单列最低那件", tipText:find("最低：旧头盔 = 50%", 1, true) ~= nil, tipText)
+check("悬停列出逐件（最该修的在前）",
+    tipText:find("旧头盔 = 50%", 1, true) ~= nil and tipText:find("厚胸甲 = 100%", 1, true) ~= nil
+    and tipText:find("旧头盔", 1, true) < tipText:find("厚胸甲", 1, true), tipText)
 check("悬停不再出现点击提示", tipText:find("点击：", 1, true) == nil, tipText)
 check("悬停仍有标题与修理说明",
     tipText:find("装备耐久", 1, true) ~= nil and tipText:find("修理越贵", 1, true) ~= nil)
 
--- 一件都读不出：条身清空、tooltip 给诚实降级。
-setBags({ [0] = 0 }, {})
-local avg2, count2 = avgFn()
-check("空背包返回 nil", avg2 == nil and count2 == nil)
+-- 槽位路径可用时不加「背包」那行（以后客户端若补回 API，提示自动变干净）。
+local slotScan = { source = "slots", percent = 80, lowest = 40, lowestName = "护腕", count = 1,
+    items = { { slot = 9, name = "护腕", pct = 40 } } }
+ns.Durability.Scan = function() return slotScan end
+block.durData = nil
+tipLines = {}
+tooltipFn(block)   -- 没有缓存 → 现场取一次（走 Scan）
+local slotText = table.concat(tipLines, " | ")
+check("槽位路径不再写「数据源：背包」", slotText:find("数据源：背包", 1, true) == nil, slotText)
+check("槽位路径照样列逐件", slotText:find("护腕 = 40%", 1, true) ~= nil, slotText)
+ns.Durability.Scan = function() return nil end
+
+-- 分级配色：<30 危险红 / <60 主色 / 其余白。
+local dr, dg = colorFn(20)
+local pr, pg = colorFn(45)
+local wr, wg = colorFn(90)
+check("20% 走危险红", dr == 0.9 and dg == 0.2, tostring(dr) .. "," .. tostring(dg))
+check("45% 走主题主色", pr == 0.8 and pg == 0.65, tostring(pr) .. "," .. tostring(pg))
+check("90% 走白", wr == 1 and wg == 1, tostring(wr) .. "," .. tostring(wg))
+
+-- 读不出：两条数据源都空 → 条身清空、tooltip 给诚实降级。
+ns.Durability.Scan = function() return nil end
+ns.Durability.ScanBags = function() return nil end
 texts = {}
 updateFn(block)
-check("空背包条身清空", texts[#texts] == "" and block.avgPercent == nil)
+check("读不出时条身清空", texts[#texts] == "" and block.durData == nil)
 tipLines = {}
 tooltipFn(block)
-check("空背包悬停显示「读不出」",
-    table.concat(tipLines, " | "):find("平均耐久：读不出", 1, true) ~= nil)
+check("读不出时悬停说「读不出」",
+    table.concat(tipLines, " | "):find("读不出耐久", 1, true) ~= nil)
 
--- API 缺失不抛。
-_G.C_Container = nil
-local okMissing, avg3 = pcall(avgFn)
-check("C_Container 缺失时安全返回 nil", okMissing and avg3 == nil, tostring(avg3))
-
--- 机密值：Secrets.Number 过滤掉非数字，不许当成 0 拉低平均。
-setBags({ [0] = 2 }, { [0] = { { {}, 100 }, { 100, 100 } } })
-local avg4, count4 = avgFn()
-check("机密 current 被过滤，只剩有效件", avg4 == 100 and count4 == 1,
-    "avg=" .. tostring(avg4) .. " count=" .. tostring(count4))
+-- 模块缺失 / 两条数据源都抛错都不许把格子带崩。
+ns.Durability = nil
+local okMissing, missingData = pcall(dataFn)
+check("Tools 模块缺失时安全返回 nil", okMissing and missingData == nil, tostring(missingData))
+ns.Durability = {
+    Scan = function() error("boom") end,
+    ScanBags = function() error("boom") end,
+}
+local okError, errorData = pcall(dataFn)
+check("两条数据源都抛错时被 pcall 兜住", okError and errorData == nil, tostring(errorData))
 
 print(failed == 0 and "ALL PASS" or (failed .. " FAILED"))
 os.exit(failed == 0 and 0 or 1)

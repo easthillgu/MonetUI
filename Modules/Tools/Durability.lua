@@ -18,6 +18,10 @@ ns.Durability = M
 
 -- 头 / 肩 / 胸 / 腿 / 脚 / 手腕 / 手 / 腰 / 主手 / 副手（同 InfoBar/Blocks.lua 的 DUR_SLOTS）
 local SLOTS = { 1, 3, 5, 6, 7, 8, 9, 10, 15, 16 }
+local SLOT_LABEL = {
+    [1] = "头部", [3] = "肩部", [5] = "胸甲", [6] = "腰带", [7] = "腿部",
+    [8] = "靴子", [9] = "手腕", [10] = "手套", [15] = "主手", [16] = "副手",
+}
 local HYSTERESIS = 5     -- 高出阈值这么多才算"修好了"，免得在阈值上下反复报警
 
 local mode               -- "slot" | "unit"：本会话用哪种参数形态，探测一次就定
@@ -36,22 +40,12 @@ function M:GetSetting(key)
     return value
 end
 
-local function DurabilityForSlot(slot)
+local function ReadSlotWith(kind, slot)
     local fn = _G.GetInventoryItemDurability
     if type(fn) ~= "function" then return nil end
 
-    if not mode then
-        if pcall(fn, slot) then
-            mode = "slot"
-        elseif pcall(fn, "player", slot) then
-            mode = "unit"
-        else
-            return nil
-        end
-    end
-
     local ok, current, maximum
-    if mode == "unit" then
+    if kind == "unit" then
         ok, current, maximum = pcall(fn, "player", slot)
     else
         ok, current, maximum = pcall(fn, slot)
@@ -61,6 +55,41 @@ local function DurabilityForSlot(slot)
     current, maximum = Secrets.Number(current), Secrets.Number(maximum)
     if not current or not maximum or maximum <= 0 then return nil end
     return current, maximum
+end
+
+local function DurabilityForSlot(slot)
+    if type(_G.GetInventoryItemDurability) ~= "function" then return nil end
+    if mode then return ReadSlotWith(mode, slot) end
+
+    -- 未定形：拿这件装备去试两种参数形态，**读出数字的那个**才算本会话形态。
+    -- 旧写法只认"pcall 没报错"——空槽位传 (slot) 也会"成功"并返回 nil, nil，
+    -- 形态就此定死成错的，之后每件都读不出（格子和提示永远空白，且不报错）。
+    for _, kind in ipairs({ "slot", "unit" }) do
+        local current, maximum = ReadSlotWith(kind, slot)
+        if current then
+            mode = kind
+            return current, maximum
+        end
+    end
+    return nil
+end
+
+--- 一件装备的名字：优先物品链接里的 `[名字]`，读不出（无链接 / 机密串 / 没有这个 API）时退回槽位名。
+--- 机密串连 `match` 都会抛（AGENTS：进 concat / 比较之前先 CanRead）。
+local function ItemName(slot)
+    local fn = _G.GetInventoryItemLink
+    local link
+    if type(fn) == "function" then
+        local ok, value = pcall(fn, "player", slot)
+        if not ok or type(value) ~= "string" or value == "" then
+            ok, value = pcall(fn, slot)
+        end
+        if ok and type(value) == "string" and value ~= "" and Secrets.CanRead(value) then
+            local okMatch, name = pcall(string.match, value, "%[(.-)%]")
+            if okMatch and type(name) == "string" and name ~= "" then link = name end
+        end
+    end
+    return link or SLOT_LABEL[slot]
 end
 
 --- 所有装备里最低的那件：返回百分比（0..100），没有可读数据时 nil。
@@ -76,10 +105,123 @@ local function Lowest()
     return worst
 end
 
+------------------------------------------------------------------------------
+-- 对外的读数（信息栏耐久格 `/mui` 探针都走这里，**不许在别处抄第二份槽位表 / 探测**）：
+--   M:Signature()  本会话定形的参数形态 "slot" / "unit"（还没定形时 nil）
+--   M:ReadSlot(s)  单件：current, maximum（无耐久 / 空槽 / 读不出 → nil）
+--   M:Scan()       全量：平均 + 最低 + 逐件清单（一次扫描，格子和提示共用）
+------------------------------------------------------------------------------
+
+function M:Signature() return mode end
+
+function M:ReadSlot(slot) return DurabilityForSlot(slot) end
+
+M.SLOTS = SLOTS
+
+--- 背包物品的名字：`C_Container.GetContainerItemLink` 的 `[名字]`；读不出（空位 / 机密串 / 没有链接）时 nil。
+--- （`GetInventoryItemLink` 属于本客户端不存在的 `GetInventoryItem*` 族，别拿它读装备名。）
+local function BagItemName(bag, slot)
+    local api = _G.C_Container
+    local fn = api and api.GetContainerItemLink
+    if type(fn) ~= "function" then return nil end
+    local ok, link = pcall(fn, bag, slot)
+    if not ok or type(link) ~= "string" or link == "" then return nil end
+    if not Secrets.CanRead(link) then return nil end
+    local okMatch, name = pcall(string.match, link, "%[(.-)%]")
+    if okMatch and type(name) == "string" and name ~= "" then return name end
+    return nil
+end
+
+-- 0 = 背包本体，1–4 = 普通包，5 = 材料包（BagIndex 枚举，见 docs/api/TYPES.md）。
+local BAG_INDEXES = { 0, 1, 2, 3, 4, 5 }
+
+--- **背包内物品**的耐久：本客户端读不到身上那套时的兜底数据源
+--- （`GetInventoryItem*` / `Pickup*` 全族不存在，见 HANDOFF 归档 §2.1）。
+--- 返回结构同 `M:Scan()`，另加 `source = "bags"`；一件都读不出时 nil。
+--- 只扫耐久列（每槽一次 pcall），闲置空格直接跳过，不会像旧实现那样无脑扫满 110 格。
+function M:ScanBags()
+    local api = _G.C_Container
+    if not api or type(api.GetContainerItemDurability) ~= "function"
+        or type(api.GetContainerNumSlots) ~= "function" then
+        return nil
+    end
+
+    local out = { count = 0, items = {}, source = "bags" }
+    local sum = 0
+
+    for i = 1, #BAG_INDEXES do
+        local bag = BAG_INDEXES[i]
+        local okSlots, numSlots = pcall(api.GetContainerNumSlots, bag)
+        numSlots = okSlots and Secrets.Number(numSlots) or nil
+        if numSlots and numSlots >= 1 then
+            for slot = 1, numSlots do
+                local ok, current, maximum = pcall(api.GetContainerItemDurability, bag, slot)
+                if ok then
+                    current, maximum = Secrets.Number(current), Secrets.Number(maximum)
+                    if current and maximum and maximum > 0 then
+                        local pct = current / maximum * 100
+                        if pct > 100 then pct = 100 end
+                        local name = BagItemName(bag, slot) or ("背包 " .. bag .. " · 槽 " .. slot)
+                        out.count = out.count + 1
+                        sum = sum + pct
+                        out.items[#out.items + 1] = {
+                            slot = slot, bag = bag, name = name, pct = pct,
+                            current = current, maximum = maximum,
+                        }
+                        if not out.lowest or pct < out.lowest then
+                            out.lowest, out.lowestName = pct, name
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if out.count == 0 then return nil end
+    out.percent = sum / out.count
+    table.sort(out.items, function(a, b) return a.pct < b.pct end)
+    return out
+end
+
+--- 全量扫描结果：
+--- `{ percent = 平均, lowest = 最低那件的百分比, lowestSlot, lowestName, count,
+---    items = { { slot, name, pct, current, maximum }, … } }`
+--- 一件都读不出（没穿带耐久的装备 / API 不可用）时 nil；`items` 按耐久从低到高排，
+--- 提示框直接照排 ⇒ 最该修的那件在第一行。
+function M:Scan()
+    local out = { count = 0, items = {}, source = "slots" }
+    local sum = 0
+
+    for i = 1, #SLOTS do
+        local slot = SLOTS[i]
+        local current, maximum = DurabilityForSlot(slot)
+        if current then
+            local pct = current / maximum * 100
+            if pct > 100 then pct = 100 end
+            local name = ItemName(slot)
+            out.count = out.count + 1
+            sum = sum + pct
+            out.items[#out.items + 1] = { slot = slot, name = name, pct = pct, current = current, maximum = maximum }
+            if not out.lowest or pct < out.lowest then
+                out.lowest, out.lowestSlot, out.lowestName = pct, slot, name
+            end
+        end
+    end
+
+    if out.count == 0 then return nil end
+    out.percent = sum / out.count
+    table.sort(out.items, function(a, b) return a.pct < b.pct end)
+    return out
+end
+
 local function Check()
     if not M.active then return end
     if M:GetSetting("warn") == false then return end
 
+    -- ⚠ 1.60 口径：`GetInventoryItem*` / `Pickup*` 全族在本客户端不存在（HANDOFF 归档 §2.1），
+    -- 所以"身上那套"的耐久在这里读不到 ⇒ 这个告警在 1.60 上**不会响**（不报错、不刷屏）。
+    -- 客户端哪天把这件 API 补回来，探测（`DurabilityForSlot`）要求"读出数字才定形"，
+    -- 告警会自动恢复；信息栏的耐久格另走 `M:ScanBags()` 背包兜底，显示不受这条影响。
     local pct = Lowest()
     if not pct then return end
 

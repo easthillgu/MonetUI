@@ -20,7 +20,7 @@ end
 --- 映射按"数据住在哪 / 面板有没有合法开口"来定，不是随手分配（11-07 晚间按作者指示定稿）：
 ---   金钱 / 货币 → **我们自己的背包窗**（钱数就显示在背包窗底部，代币的实物也在背包里）；
 ---   耐久 → **只读**（11-10 作者指示）：取消点击，不弹小菜单、不开角色界面。
----     这格只用来悬停看平均耐久；数据本身仍只能从背包物品读（见下方 1.60 API 注释）。
+---     这格只用来悬停看「总评 / 最低 / 逐件」（数据来自 `Modules/Tools/Durability.lua`，按槽位读身上那套）。
 ---     `MicroMenu.lua` 的 `character` 动作留给微菜单自己用，不再由信息栏格子触发。
 ---   延迟/帧率/内存 → **设置**（`Settings.OpenToCategory`，纯 C_*，无暴雪 Lua 链）；
 ---   好友 → **直开社交窗**（`friends` → `_G.ToggleFriendsFrame()`）：本客户端没有好友/社交的
@@ -119,66 +119,78 @@ M:RegisterBlock({
     onClick  = BlockClick("bags"),   -- 钱数就显示在背包窗底部
 })
 
--- 1.60 客户端的耐久 API 只支持背包物品：C_Container.GetContainerItemDurability(containerIndex, slotIndex)
--- containerIndex: 0-4（角色背包 + 4 个背包）
--- slotIndex: 背包内的槽位
--- 已装备物品的耐久无法直接查询，需要实机验证是否有其他 API。
---- 平均耐久（取件平均）：update 与 tooltip 共用一次计算，悬停不必再扫一遍背包。
---- 返回 (百分比, 件数)；API 不可用或一件都读不出时两个值都是 nil。
-local function AverageDurability()
-    local api = _G.C_Container
-    if not api or type(api.GetContainerItemDurability) ~= "function" then
-        return nil
+-- 装备耐久的数据层住在 `Modules/Tools/Durability.lua`（槽位表 / 参数形态探测 / 名字兜底都在那边，
+-- 这里不抄第二份 —— AGENTS：一处判据一份实现）：
+--   ① `M:Scan()`     —— 按槽位读**身上那套**（需要 `GetInventoryItemDurability`）；
+--   ② `M:ScanBags()` —— 兜底：读**背包内物品**（`C_Container.GetContainerItemDurability`，本客户端
+--      唯一有的耐久 API）。`GetInventoryItem*` / `Pickup*` 全族在本客户端不存在（HANDOFF 归档 §2.1），
+--      所以 ① 在 1.60 上通常拿不到东西，提示里会写明当前用的是哪个数据源。
+local function DurabilityData()
+    local mod = ns.Durability
+    if not mod then return nil end
+
+    if type(mod.Scan) == "function" then
+        local ok, data = pcall(mod.Scan, mod)
+        if ok and data then return data end
     end
-    
-    local sum, count = 0, 0
-    
-    -- 遍历 5 个背包（0 = 角色背包，1-4 = 额外背包）
-    for bagIndex = 0, 4 do
-        local numSlotsFn = api.GetContainerNumSlots
-        if type(numSlotsFn) ~= "function" then break end
-        
-        local okSlots, numSlots = pcall(numSlotsFn, bagIndex)
-        numSlots = okSlots and Secrets.Number(numSlots) or nil
-        if not numSlots or numSlots < 1 then break end
-        
-        -- 遍历背包内的每个槽位
-        for slotIndex = 1, numSlots do
-            local ok, current, maximum = pcall(api.GetContainerItemDurability, bagIndex, slotIndex)
-            if ok then
-                current, maximum = Secrets.Number(current), Secrets.Number(maximum)
-                if current and maximum and maximum > 0 then
-                    sum = sum + current / maximum
-                    count = count + 1
-                end
-            end
-        end
+    if type(mod.ScanBags) == "function" then
+        local ok, data = pcall(mod.ScanBags, mod)
+        if ok then return data end
     end
-    
-    if count == 0 then return nil end
-    return sum / count * 100, count
+    return nil
+end
+
+--- 提示框的分级配色：<30% 危险红 / <60% 主题主色 / 其余白（与战斗告警用的是同一组功能色）。
+local function DurabilityLevelColor(pct)
+    local color = ns.Color
+    if not pct then return 1, 1, 1 end
+    if pct < 30 then
+        local r, g, b = color:GetDanger()
+        return r, g, b
+    elseif pct < 60 then
+        local r, g, b = color:GetPrimary()
+        return r, g, b
+    end
+    return 1, 1, 1
 end
 
 local function DurabilityUpdate(block)
-    local avg, count = AverageDurability()
+    local data = DurabilityData()
     -- 缓存在注册表上：tooltip 挂在 OnEnter，早于下一次 update 也要能读到当前值。
-    block.avgPercent, block.avgCount = avg, count
-    M:SetText(block, avg and string.format("%.0f%%", avg) or "")
+    block.durData = data
+    M:SetText(block, data and string.format("%.0f%%", data.percent) or "")
 end
 
---- 只读格：悬停给出平均耐久与取件数；不注册 onClick ⇒ 信息栏也不再补「点击：」提示行。
+--- 只读格：悬停给「总评 → 最低那件 → 逐件清单（最该修的排最前）+ 修理说明」；
+--- 不注册 onClick ⇒ 信息栏也不再补「点击：」提示行。
 local function DurabilityTooltip(block)
     local tip = Tip()
     if not tip then return end
+
+    local data = (type(block) == "table" and block.durData) or DurabilityData()
+
     pcall(tip.AddLine, tip, "装备耐久", 0.6, 0.8, 1)
-    local avg = block and block.avgPercent
-    if avg then
-        pcall(tip.AddLine, tip, string.format("平均耐久 %.0f%%（%d 件取件平均）",
-            avg, block.avgCount or 0), 1, 1, 1)
-    else
-        pcall(tip.AddLine, tip, "平均耐久：读不出", 0.8, 0.8, 0.8)
+    if not data then
+        pcall(tip.AddLine, tip, "读不出耐久（没穿带耐久的装备，背包里也没有），或本客户端没有这件 API", 0.8, 0.8, 0.8)
+        return
     end
-    pcall(tip.AddLine, tip, "数值越低修理越贵。", 0.8, 0.8, 0.8)
+
+    if data.source == "bags" then
+        pcall(tip.AddLine, tip, "数据源：背包内物品（本客户端读不到已装备耐久）", 0.8, 0.8, 0.8)
+    end
+    pcall(tip.AddLine, tip, string.format("总评 %.0f%%（%d 件取平均）", data.percent, data.count), 1, 1, 1)
+    if data.lowest then
+        local r, g, b = DurabilityLevelColor(data.lowest)
+        pcall(tip.AddDoubleLine, tip, "最低：" .. tostring(data.lowestName or "-"),
+            string.format("%.0f%%", data.lowest), 1, 1, 1, r, g, b)
+    end
+    for i = 1, #data.items do
+        local item = data.items[i]
+        local r, g, b = DurabilityLevelColor(item.pct)
+        pcall(tip.AddDoubleLine, tip, item.name, string.format("%.0f%%", item.pct),
+            0.75, 0.75, 0.75, r, g, b)
+    end
+    pcall(tip.AddLine, tip, "数值越低修理越贵；低于阈值会提醒修理（阈值在设置里可调）。", 0.8, 0.8, 0.8)
 end
 
 M:RegisterBlock({
@@ -186,10 +198,11 @@ M:RegisterBlock({
     label    = "耐久",
     position = "LEFT",
     trackSample = "耐久 100%",
-    events   = { "UPDATE_INVENTORY_DURABILITY", "PLAYER_ENTERING_WORLD" },
-    -- 战斗里每次掉耐久都发 UPDATE_INVENTORY_DURABILITY，而这个块的 update 是
-    -- "5 个背包 × 全部槽位"的整批扫描（~110 次 pcall + API）。0.25 秒窗口里的连发只算一次
-    -- （去抖在 InfoBar.lua 的 ScheduleBlockUpdate；显示的是一个百分比，慢 0.25 秒看不出来）。
+    events   = { "UPDATE_INVENTORY_DURABILITY", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_ENTERING_WORLD" },
+    -- 战斗中每次掉耐久都发 UPDATE_INVENTORY_DURABILITY，而这个块的 update 是一次
+    -- "有耐久的格子"扫描（槽位路径每槽 1–2 次 pcall；背包兜底只查耐久列，不扫空格子）；
+    -- 0.25 秒窗口里的连发只算一次（去抖在 InfoBar.lua 的 ScheduleBlockUpdate；
+    -- 显示的是一个百分比，慢 0.25 秒看不出来）。
     eventDelay = 0.25,
     update   = DurabilityUpdate,
     tooltip  = DurabilityTooltip,
