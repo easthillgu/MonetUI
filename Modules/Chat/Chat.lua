@@ -386,6 +386,40 @@ local function InputPosDrifted(pos)
     return false
 end
 
+-- 每帧守护（2026-11-27 实测定案）：客户端在它自己的布局路径里会把输入框重新锚回
+-- `ChatFrame1` 顶上（采样 8 秒就抓到一次 `点=2 left=34 bottom=258`，下一拍又被我们拉回来），
+-- 1 秒的复查来不及 —— 玩家看到的就是"位置不停被拉回去"。做法：只在**有存档位置**时挂一个极轻的
+-- 每帧检查（paused 于拖动期间），每帧只问一次 `GetNumPoints`：不是 1 就整段重摆，是 1 就什么都不做。
+-- 完整比对（点方向/参照框/偏移）仍留给 1 秒那条，省得每帧读 6 个返回值。
+local guardFrame, guardTick
+local function GuardInputPos()
+    if not active or drag then return end
+    local pos = StoredInputPos()
+    if not pos then return end
+    local eb = NativeEditBox()
+    if not eb then return end
+    local ok, count = pcall(eb.GetNumPoints, eb)
+    if not ok or count == 1 then return end
+    ApplyInputPos(pos)
+end
+
+local function AttachGuard()
+    if not guardFrame then
+        guardFrame = CreateFrame("Frame", "MonetUIChatInputGuard", UIParent)
+        guardFrame:SetSize(1, 1)
+        guardFrame:SetAlpha(0)
+    end
+    if not guardTick then
+        guardTick = Scheduler:Profile("chat:guardinput", "聊天:输入框守护", GuardInputPos)
+    end
+    guardFrame:SetScript("OnUpdate", guardTick)
+    guardFrame:Show()
+end
+
+local function DetachGuard()
+    if guardFrame then guardFrame:SetScript("OnUpdate", nil) end
+end
+
 local function SaveInputPos(x, y)
     local db = ns:DB()
     local chat = db and db.chat
@@ -399,6 +433,7 @@ local function ResetInputPos()
     local db = ns:DB()
     local chat = db and db.chat
     if chat and chat.positions then chat.positions[INPUT_STORE_KEY] = nil end
+    DetachGuard()
     local eb = NativeEditBox()
     local host = _G.ChatFrame1
     if not eb or not host then return false end
@@ -453,6 +488,7 @@ local function StopDrag()
     drag = nil
     frame:SetScript("OnUpdate", nil)
     SaveInputPos(x, y)
+    AttachGuard()
 end
 
 
@@ -557,6 +593,7 @@ function M:Initialize()
     RegisterEvents()
     RefreshChannels()
     ApplyInputPos(StoredInputPos())
+    if StoredInputPos() then AttachGuard() end
     if not followId then
         followId = Scheduler:Every(1000, FollowWidth, "聊天:细条宽度")
     end
@@ -578,6 +615,7 @@ function M:SetEnabled(value)
         self:Initialize()
     else
         frame:Hide()
+        DetachGuard()
         if followId then
             Scheduler:Unregister(followId)
             followId = nil
@@ -598,6 +636,7 @@ function M:HandleCommand(rest)
         chat.positions[INPUT_STORE_KEY] = { mode = "bars", gap = INPUT_BAR_GAP }
         local x, y = ResolveInputPos(StoredInputPos())
         ApplyInputPos(StoredInputPos())
+        AttachGuard()
         ns:Print(("聊天输入框已对齐到动作条上方（居中，间距 %d px，落点 %d,%d）。"):format(
             INPUT_BAR_GAP, x or -1, y or -1))
         return true
