@@ -193,6 +193,8 @@ local STRIP_SLOTS = {
     { key = "WORLD",   chatType = "CHANNEL", label = "世界" },
 }
 local STRIP_PAINT, STRIP_HIT = 3, 6
+-- 细条/输入框的最小宽度：玩家把聊天窗拖得极窄时兜一下，免得输入区没地方。
+local MIN_BAR_WIDTH = 260
 local STRIP_ALPHA_IDLE, STRIP_ALPHA_OFF = 0.55, 0.18
 local STRIP_FALLBACK = {
     SAY = { 1, 1, 1 }, YELL = { 1, 0.25, 0.25 }, WHISPER = { 1, 0.5, 1 },
@@ -261,8 +263,9 @@ local function Render()
         else
             seg.tex:SetAlpha(STRIP_ALPHA_IDLE)
         end
-        seg:EnableMouse(available)
+        seg:EnableMouse(true)
     end
+    -- 不可用的格子也要收鼠标（右键拖动得通），左键点击在 OnClick 里按 usable 挡掉。
     FollowWidth()
 end
 
@@ -295,6 +298,118 @@ local function RefreshChannels()
     Render()
 end
 
+-- ------------------------------------------------------------------ 输入框位置（右键拖细条）
+-- 玩家问"输入窗能否移动"（2026-11-27）：能 —— 清掉 `ChatFrame1EditBox` 原来那两条
+-- （`BOTTOMLEFT/BOTTOMRIGHT → ChatFrame1:TOPLEFT/TOPRIGHT`）锚点、改成 UIParent 锚点，
+-- 实测 5 秒内不会被客户端拽回去（见提交记录里的探针读数）。
+-- 交互：**右键按住细条任意一格拖动**（左键仍是切频道，不吃冲突），松手落盘。
+-- 注意 ①位置是我们直接写客户端框的锚点，重载后会回默认 ⇒ 存档 + 每秒复查，被拽回就补一次；
+--      ②细条锚在输入框顶边，所以输入框一走，细条自己就跟上了。
+local INPUT_STORE_KEY = "ChatInput"
+local drag = nil
+
+local function StoredInputPos()
+    local db = ns:DB()
+    local chat = db and db.chat
+    local store = chat and chat.positions
+    local pos = store and store[INPUT_STORE_KEY]
+    if type(pos) == "table" and type(pos.x) == "number" and type(pos.y) == "number" then
+        return pos
+    end
+    return nil
+end
+
+local function ApplyInputPos(pos)
+    local eb = NativeEditBox()
+    if not eb or not pos then return end
+    pcall(eb.ClearAllPoints, eb)
+    pcall(eb.SetPoint, eb, "BOTTOMLEFT", UIParent, "BOTTOMLEFT", pos.x, pos.y)
+    pcall(eb.SetWidth, eb, frame and frame:GetWidth() or MIN_BAR_WIDTH)
+end
+
+--- 客户端有没有把输入框拽回它自己的锚点（点方向 / 参照框 / 偏移任一不符就算）。
+local function InputPosDrifted(pos)
+    local eb = NativeEditBox()
+    if not eb or not pos then return false end
+    local okN, count = pcall(eb.GetNumPoints, eb)
+    if not okN or count ~= 1 then return true end
+    local okP, point, relative, _, x, y = pcall(eb.GetPoint, eb, 1)
+    if not okP or point ~= "BOTTOMLEFT" or relative ~= UIParent then return true end
+    if math.abs((tonumber(x) or 0) - pos.x) >= 1 then return true end
+    if math.abs((tonumber(y) or 0) - pos.y) >= 1 then return true end
+    return false
+end
+
+local function SaveInputPos(x, y)
+    local db = ns:DB()
+    local chat = db and db.chat
+    if not chat then return end
+    chat.positions = chat.positions or {}
+    chat.positions[INPUT_STORE_KEY] = { x = math.floor(x + 0.5), y = math.floor(y + 0.5) }
+end
+
+--- `/mui chat reset`：把输入框还给客户端（清存档 + 恢复它原来那两条锚点）。
+local function ResetInputPos()
+    local db = ns:DB()
+    local chat = db and db.chat
+    if chat and chat.positions then chat.positions[INPUT_STORE_KEY] = nil end
+    local eb = NativeEditBox()
+    local host = _G.ChatFrame1
+    if not eb or not host then return false end
+    pcall(eb.ClearAllPoints, eb)
+    pcall(eb.SetPoint, eb, "BOTTOMLEFT", host, "TOPLEFT", 0, 0)
+    pcall(eb.SetPoint, eb, "BOTTOMRIGHT", host, "TOPRIGHT", 0, 0)
+    return true
+end
+
+local function DragStep()
+    local eb = NativeEditBox()
+    if not drag or not eb then return end
+    local scale = UIParent:GetEffectiveScale()
+    local cx, cy = GetCursorPosition()
+    cx, cy = cx / scale, cy / scale
+    local w = eb:GetWidth()
+    local x = cx - drag.dx
+    local y = cy - drag.dy
+    -- 夹在屏幕里，别拖出画面
+    local maxX = math.max(0, UIParent:GetWidth() - w)
+    local maxY = math.max(0, UIParent:GetHeight() - 31)
+    if x < 0 then x = 0 elseif x > maxX then x = maxX end
+    if y < 0 then y = 0 elseif y > maxY then y = maxY end
+    drag.x, drag.y = x, y
+    pcall(eb.ClearAllPoints, eb)
+    pcall(eb.SetPoint, eb, "BOTTOMLEFT", UIParent, "BOTTOMLEFT", x, y)
+    pcall(eb.SetWidth, eb, frame and frame:GetWidth() or MIN_BAR_WIDTH)
+end
+
+local DragTick   -- Scheduler:Profile 的壳，Build 之后才建
+
+local function StartDrag()
+    local eb = NativeEditBox()
+    if not eb or drag then return end
+    local scale = UIParent:GetEffectiveScale()
+    local cx, cy = GetCursorPosition()
+    cx, cy = cx / scale, cy / scale
+    local okL, l = pcall(eb.GetLeft, eb)
+    local okB, b = pcall(eb.GetBottom, eb)
+    if not okL or not okB or not l or not b then return end
+    drag = { dx = cx - l, dy = cy - b, x = l, y = b }
+    if not DragTick then
+        DragTick = Scheduler:Profile("chat:draginput", "聊天:拖动输入框", DragStep)
+    end
+    frame:SetScript("OnUpdate", DragTick)
+    frame:Show()
+end
+
+local function StopDrag()
+    if not drag then return end
+    local x, y = drag.x, drag.y
+    drag = nil
+    frame:SetScript("OnUpdate", nil)
+    SaveInputPos(x, y)
+end
+
+
 function M:Refresh()
     if active then RefreshChannels() end
 end
@@ -304,7 +419,6 @@ end
 -- 而聊天窗是 430（默认存档的宽度，玩家还能自己拖窄拖宽）—— 两边一旦不一致，条就伸到窗外面。
 -- 做法（参照同机 easyChat）：**不写死宽度**，向聊天窗实测宽度看齐，1s 复查一次
 -- （玩家拖宽聊天窗、换布局、重载都能跟上），再兜一个最小宽度。
-local MIN_BAR_WIDTH = 260
 local followId, highlightId
 local function ChatWindowWidth()
     local win = _G.ChatFrame1
@@ -322,6 +436,13 @@ FollowWidth = function()
     if not w then return end
     if w < MIN_BAR_WIDTH then w = MIN_BAR_WIDTH end
     if math.abs(frame:GetWidth() - w) >= 1 then frame:SetWidth(w) end
+    -- 输入框被搬到别处时（右键拖过），宽度也跟聊天窗走，并且每秒复查一次锚点：
+    -- 客户端自己的布局（FCF 更新、改窗口尺寸）可能把它拽回 `ChatFrame1` 顶上，拽回就补一次。
+    local pos = StoredInputPos()
+    if not pos then return end
+    if InputPosDrifted(pos) then ApplyInputPos(pos) return end
+    local eb = NativeEditBox()
+    if eb and math.abs(eb:GetWidth() - w) >= 1 then pcall(eb.SetWidth, eb, w) end
 end
 
 local function OnEvent(_, event)
@@ -370,7 +491,14 @@ local function Build()
         seg:SetScript("OnLeave", function()
             if type(_G.GameTooltip) == "table" then GameTooltip:Hide() end
         end)
-        seg:EnableMouse(false)
+        -- 右键按住拖 = 搬输入框（左键留给切频道，两者不抢）。
+        seg:SetScript("OnMouseDown", function(_, button)
+            if button == "RightButton" then StartDrag() end
+        end)
+        seg:SetScript("OnMouseUp", function()
+            StopDrag()
+        end)
+        seg:EnableMouse(true)
         strips[index] = seg
     end
     FollowWidth()
@@ -381,6 +509,7 @@ function M:Initialize()
     active = true
     RegisterEvents()
     RefreshChannels()
+    ApplyInputPos(StoredInputPos())
     if not followId then
         followId = Scheduler:Every(1000, FollowWidth, "聊天:细条宽度")
     end
@@ -414,6 +543,14 @@ function M:SetEnabled(value)
 end
 
 function M:HandleCommand(rest)
+    if rest == "reset" then
+        if ResetInputPos() then
+            ns:Print("聊天输入框已还给客户端（存档位置已清）。")
+        else
+            ns:Print("找不到 ChatFrame1 / ChatFrame1EditBox，没法还原。")
+        end
+        return true
+    end
     if rest ~= "status" then return false end
     local api = _G.C_ChatInfo
     local fn = api and api.InChatMessagingLockdown
