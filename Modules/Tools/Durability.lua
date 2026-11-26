@@ -5,8 +5,9 @@
 -- 只读装备耐久，不改任何东西：事件由 UPDATE_INVENTORY_DURABILITY / PLAYER_EQUIPMENT_CHANGED /
 -- PLAYER_ENTERING_WORLD 驱动，平时没有 OnUpdate。没有 Toast 模块时退化成聊天框一行提示。
 --
--- `GetInventoryItemDurability` 在 1.60 手册里没有条目，而且参数形态和零售不同（本客户端是
--- (slot)，零售是 (unit, slot)）—— 和 InfoBar/Blocks.lua 用同一套"第一次调用成功就定形"的探测。
+-- `GetInventoryItemDurability` 在 1.60 **实测存在**（2026-11-26 / build 71139，签名就是 `(slot)`；
+-- 归档 §2.1 那句"`GetInventoryItem*` 全族不存在"是 11-04 取物品等级的语境，对耐久不成立）。
+-- 参数形态仍保留"第一次读出数字才定形"的探测，因为零售是 `(unit, slot)`、这套客户端是 `(slot)`。
 
 local ADDON_NAME, ns = ...
 
@@ -16,11 +17,13 @@ local Secrets  = ns.Secrets
 local M = { name = "Durability" }
 ns.Durability = M
 
--- 头 / 肩 / 胸 / 腿 / 脚 / 手腕 / 手 / 腰 / 主手 / 副手（同 InfoBar/Blocks.lua 的 DUR_SLOTS）
-local SLOTS = { 1, 3, 5, 6, 7, 8, 9, 10, 15, 16 }
+-- 头 / 肩 / 胸 / 腰 / 腿 / 靴 / 腕 / 手 / 主手 / 副手 / 远程（= InventorySlotId 1…18 里带耐久的那些）。
+-- ⚠ 槽位号是**客户端枚举**，不许按名字猜：15 = 披风（无耐久）、16 = 主手、17 = 副手、18 = 远程。
+-- 11-26 之前这里写成"15 主手 / 16 副手"，副手（17）从来没被读过（拿双手武器时看不出来）。
+local SLOTS = { 1, 3, 5, 6, 7, 8, 9, 10, 16, 17, 18 }
 local SLOT_LABEL = {
     [1] = "头部", [3] = "肩部", [5] = "胸甲", [6] = "腰带", [7] = "腿部",
-    [8] = "靴子", [9] = "手腕", [10] = "手套", [15] = "主手", [16] = "副手",
+    [8] = "靴子", [9] = "手腕", [10] = "手套", [16] = "主手", [17] = "副手", [18] = "远程",
 }
 local HYSTERESIS = 5     -- 高出阈值这么多才算"修好了"，免得在阈值上下反复报警
 
@@ -119,7 +122,7 @@ function M:ReadSlot(slot) return DurabilityForSlot(slot) end
 M.SLOTS = SLOTS
 
 --- 背包物品的名字：`C_Container.GetContainerItemLink` 的 `[名字]`；读不出（空位 / 机密串 / 没有链接）时 nil。
---- （`GetInventoryItemLink` 属于本客户端不存在的 `GetInventoryItem*` 族，别拿它读装备名。）
+--- （装备名走 `ItemName` 的 `GetInventoryItemLink`，那条 1.60 实测存在，与背包这条是两套 API。）
 local function BagItemName(bag, slot)
     local api = _G.C_Container
     local fn = api and api.GetContainerItemLink
@@ -135,8 +138,7 @@ end
 -- 0 = 背包本体，1–4 = 普通包，5 = 材料包（BagIndex 枚举，见 docs/api/TYPES.md）。
 local BAG_INDEXES = { 0, 1, 2, 3, 4, 5 }
 
---- **背包内物品**的耐久：本客户端读不到身上那套时的兜底数据源
---- （`GetInventoryItem*` / `Pickup*` 全族不存在，见 HANDOFF 归档 §2.1）。
+--- **背包内物品**的耐久：槽位路径读不出时的兜底数据源（例如没穿带耐久的装备、或 API 被临时限制）。
 --- 返回结构同 `M:Scan()`，另加 `source = "bags"`；一件都读不出时 nil。
 --- 只扫耐久列（每槽一次 pcall），闲置空格直接跳过，不会像旧实现那样无脑扫满 110 格。
 function M:ScanBags()
@@ -218,10 +220,9 @@ local function Check()
     if not M.active then return end
     if M:GetSetting("warn") == false then return end
 
-    -- ⚠ 1.60 口径：`GetInventoryItem*` / `Pickup*` 全族在本客户端不存在（HANDOFF 归档 §2.1），
-    -- 所以"身上那套"的耐久在这里读不到 ⇒ 这个告警在 1.60 上**不会响**（不报错、不刷屏）。
-    -- 客户端哪天把这件 API 补回来，探测（`DurabilityForSlot`）要求"读出数字才定形"，
-    -- 告警会自动恢复；信息栏的耐久格另走 `M:ScanBags()` 背包兜底，显示不受这条影响。
+    -- 1.60.1 · 71139 实测 `GetInventoryItemDurability(slot)` 存在且可用（7 件全读得出），
+    -- 所以这条告警现在是**真能响**的，不再是"写了等于没写"。
+    -- 客户端哪天又把它收回，`DurabilityForSlot` 的"读出数字才定形"会让它自动静默失效，不报错。
     local pct = Lowest()
     if not pct then return end
 
