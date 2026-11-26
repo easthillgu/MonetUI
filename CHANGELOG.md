@@ -3,6 +3,38 @@
 This file is used verbatim as the CurseForge release changelog (see `.pkgmeta`).
 Update the top section before tagging a new release.
 
+## 0.13.16 (2026-11-27)
+
+- Chat: the button row is replaced by a channel strip - one bar as wide as the chat frame, 3px
+  tall, split into seven equal cells (say / yell / whisper / party / raid / guild / world). Each
+  cell takes its colour from `ChatTypeInfo`, dims when that channel is unavailable, brightens
+  when it is the active one, and clicking it switches the client's own edit box to that channel.
+- Chat: the addon no longer keeps its own edit box. Everything you type goes through the
+  client's `ChatFrame1EditBox` again, so `/commands`, whispers and item links behave normally.
+- Chat: the edit box is handed back to the client untouched - the addon writes no geometry on it
+  at all, so it stays wherever the client puts it and never gets pulled back.
+- Chat: chat tabs now sit along the bottom edge of the chat frame and stay visible, instead of
+  sharing the input row and hiding behind the edit box.
+- Chat: custom channels did not appear at all - `Enum.PermanentChatChannelType` is a table, not a
+  value, so every custom channel was filtered out. BigFoot's world channel and the local defence
+  channels now show up in the strip.
+- Minimap: third-party addon buttons are collected into the addon drawer, so no second ring of
+  icons is left around the minimap.
+- Info bar: the friends block now counts Battle.net friends (`C_FriendList` returns an empty
+  roster on this client), and shows blank instead of a fake 0/0 before the roster loads.
+- Info bar: new guild block (online / total, from `GetGuildInfo`, verified on 1.60).
+- Info bar: durability shows an overall verdict plus the lowest item and a per-slot list,
+  `/mui infobar dura` prints the live readings, and the slot table follows `InventorySlotId`
+  (17 = off-hand, 18 = ranged; 15 was the cloak).
+- Info bar: clicking the money / currency cell again closes the bags, the per-second refresh is
+  one shared 1s tick, and the bar no longer eats mouse input across the whole screen width.
+- Nameplates: turning the module off now walks Blizzard's own plates independently and reports
+  what it restored; a restore is only marked failed when `SetAlpha` was really refused.
+- Merchant: empty slots no longer get a plate and a quality border.
+- Tools: `/mui compat legacy` lists what is left of the old global families, and a new
+  `asserted-api-audit` gate checks every "this API does not exist" note in the code against the
+  local API snapshot - two of them (GetPetActionInfo, LFGParentFrame) were already wrong.
+
 ## 0.13.15 (2026-11-24)
 
 - Nameplates: Blizzard's own nameplate is now really dimmed while ours is shown, and really
