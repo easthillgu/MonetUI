@@ -2006,6 +2006,24 @@ end
 local SIBLING_ROW_CAP = 400
 local SIBLING_PRINT   = 8
 
+--- 模块关掉时 `plates` 是空的，探针仍要能独立清点暴雪牌 —— 否则"还原有没有做"根本无从验
+--- （2026-11-26 实机：关模块后 `/mui nameplates siblings` 只回"没有牌"，看不出还原结果）。
+local function IndependentNameplateBases()
+    local out = {}
+    local api = _G.C_NamePlate
+    local fn = api and api.GetNamePlates
+    if type(fn) == "function" then
+        local ok, list = pcall(fn)
+        if ok and type(list) == "table" then
+            for i = 1, #list do
+                local base = list[i]
+                if base then out[#out + 1] = base end
+            end
+        end
+    end
+    return out
+end
+
 function M:ProbeSiblings()
     local stamp
     if type(_G.date) == "function" then
@@ -2063,6 +2081,46 @@ function M:ProbeSiblings()
         end
     end
 
+    -- 模块关掉 / 我们的牌还没建时，独立清点暴雪牌：base 与 UnitFrame 的 alpha 就是"还原"的直接读数。
+    local independent = 0
+    if plateCount == 0 then
+        local bases = IndependentNameplateBases()
+        for i = 1, #bases do
+            if #rows >= SIBLING_ROW_CAP then break end
+            local base = bases[i]
+            independent = independent + 1
+            local uf = BlizzardUnitFrame(base)
+            rows[#rows + 1] = {
+                unit  = "独立清点",
+                base  = "暴雪牌 " .. i,
+                index = i,
+                name  = "（暴雪牌 base）",
+                alpha = AlphaOf(base),
+            }
+            if uf and #rows < SIBLING_ROW_CAP then
+                local rec = fadedNodes[uf]
+                rows[#rows + 1] = {
+                    unit      = "独立清点",
+                    base      = "暴雪牌 " .. i,
+                    index     = i,
+                    name      = "UnitFrame",
+                    alpha     = AlphaOf(uf),
+                    unitFrame = true,
+                    priorAlpha = rec and rec.alpha,
+                    fadedByUs = (rec and rec.base == base) or nil,
+                }
+            end
+        end
+    end
+
+    local fadedCount, pendingCount = 0, 0
+    for _ in pairs(fadedNodes) do fadedCount = fadedCount + 1 end
+    for _ in pairs(pendingRestores) do pendingCount = pendingCount + 1 end
+    local moduleOn = true
+    if type(ns.IsModuleEnabled) == "function" then
+        moduleOn = ns:IsModuleEnabled("Nameplates") and true or false
+    end
+
     local lockdown = false
     if type(InCombatLockdown) == "function" then
         local okL, v = pcall(InCombatLockdown)
@@ -2072,6 +2130,10 @@ function M:ProbeSiblings()
     local report = {
         when           = stamp,
         plates         = plateCount,
+        independentBases = independent,
+        fadedNodes     = fadedCount,
+        pendingRestores = pendingCount,
+        moduleEnabled  = moduleOn,
         unreadableBases = unreadable,
         buffListHits   = buffListHits,
         lockdown       = lockdown,
@@ -2091,22 +2153,39 @@ function M:ProbeSiblings()
     end
 
     if plateCount == 0 then
-        ns:Print("姓名板 siblings：当前没有牌（不在战斗中/没姓名板可见）——空转，账本已写 plates=0。")
+        if independent > 0 then
+            ns:Print(string.format(
+                "姓名板 siblings：我们的牌 0 块 —— 改为独立清点暴雪牌 %d 块（模块=%s）。",
+                independent, moduleOn and "开" or "关"))
+        else
+            ns:Print("姓名板 siblings：既没有我们的牌、也看不到暴雪牌（不在战斗中/附近没有红名）——空转，账本已写。")
+        end
     end
     for i = 1, math.min(#rows, SIBLING_PRINT) do
         local r = rows[i]
         local tag = r.ours and "（我们自绘）" or (r.unitFrame and "（暴雪 UnitFrame）") or ""
-        ns:Print(string.format("  #%d %-28s α=%-6s%s%s",
+        local prior = r.priorAlpha and string.format("（原 %.2f）", r.priorAlpha) or ""
+        ns:Print(string.format("  #%d %-28s α=%-6s%s%s%s",
             i, r.name, (r.alpha and string.format("%.2f", r.alpha)) or "读不出",
-            tag, r.fadedByUs and " [我们压过]" or ""))
+            tag, r.fadedByUs and " [我们压过]" or "", prior))
     end
     if #rows > SIBLING_PRINT then
         ns:Print(string.format("  …另有 %d 行只在账本里。", #rows - SIBLING_PRINT))
     end
-    ns:Print(string.format("判据：牌 %d 块 / 读不出 %d / buffList 命中 %d —— %s",
-        plateCount, unreadable, buffListHits,
+    ns:Print(string.format("判据：牌 %d 块 / 独立清点 %d 块 / 读不出 %d / buffList 命中 %d —— %s",
+        plateCount, independent, unreadable, buffListHits,
         (buffListHits > 0) and "有同级光环容器，需确认压暗覆盖到它"
             or "本趟没出现 BuffListFrame（不等于不存在，战斗里再跑一趟）"))
+    local restore
+    if moduleOn then
+        restore = "模块开着：账面节点正被压暗，属正常"
+    elseif fadedCount == 0 and pendingCount == 0 then
+        restore = "还原完成：模块关闭后账本已清空"
+    else
+        restore = "还原未完成：仍有节点记在账上（等脱战或下一次补扫）"
+    end
+    ns:Print(string.format("账本：压下节点 %d 个 / 待还原 %d 块牌 / 模块=%s —— %s",
+        fadedCount, pendingCount, moduleOn and "开" or "关", restore))
     ns:Print(saved
         and "全量已存 MonetUIDB.nameplateSiblings —— 写入比 /reload 晚 1–2 分钟，别立刻读（登出后再读最稳）。"
         or "账本没打开，只有聊天框这几行。")
