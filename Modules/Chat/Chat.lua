@@ -298,142 +298,20 @@ local function RefreshChannels()
     Render()
 end
 
--- ------------------------------------------------------------------ 输入框位置（右键拖细条）
--- 玩家问"输入窗能否移动"（2026-11-27）：能 —— 清掉 `ChatFrame1EditBox` 原来那两条
--- （`BOTTOMLEFT/BOTTOMRIGHT → ChatFrame1:TOPLEFT/TOPRIGHT`）锚点、改成 UIParent 锚点，
--- 实测 5 秒内不会被客户端拽回去（见提交记录里的探针读数）。
--- 交互：**右键按住细条任意一格拖动**（左键仍是切频道，不吃冲突），松手落盘。
--- 注意 ①位置是我们直接写客户端框的锚点，重载后会回默认 ⇒ 存档 + 每秒复查，被拽回就补一次；
---      ②细条锚在输入框顶边，所以输入框一走，细条自己就跟上了。
-local INPUT_STORE_KEY = "ChatInput"
-local INPUT_BAR_GAP = 6         -- 对齐模式：输入框底边离动作条最高沿的间距
-local drag = nil
+-- ------------------------------------------------------------------ 输入框归还客户端（一次性迁移）
+-- 玩家最后决定（2026-11-27）："把这个输入窗还给客户端自己吧，我们只添加 bar 条"。
+-- ⇒ 本模块**不再搬输入框、不再改它的锚点和宽度**：位置、宽度、显隐一律由客户端自己管，
+-- 我们只做贴在它上沿的那条彩色细条（细条锚在输入框顶边，客户端把框挪回默认位它自己就跟着回去）。
+-- 下面这段只为清掉前几版留下的痕迹：存档里若还有 `chat.positions.ChatInput`（拖动或"对齐动作条"模式），
+-- 把客户端原来那两条锚点装回去，再把键删掉 —— 重载一次就干净，之后这段永远不干活。
+local LEGACY_STORE_KEY = "ChatInput"
 
--- 对齐模式的参照：这几条「屏幕下方的条」里取最靠上的 top。
--- 姿态条（StanceBar）在有形态时才显示，所以只认「此刻可见」的那些；
--- 显隐读的是受保护框的 IsShown（战斗中可能是机密布尔）⇒ 走 Secrets.Bool 兜默认值，
--- 整段 pcall 包住，任何一条读不出来就跳过（宁少算不高估，否则输入框会被顶到半屏）。
-local BAR_FRAMES = { "MainActionBar", "MultiBarBottomLeft", "MultiBarBottomRight", "StanceBar", "PetActionBar" }
-
-local function FrameTop(name)
-    local f = _G[name]
-    if type(f) ~= "table" or type(f.GetTop) ~= "function" then return nil end
-    local okS, shown = pcall(f.IsShown, f)
-    if okS and not Secrets.Bool(shown, true) then return nil end
-    local okT, top = pcall(f.GetTop, f)
-    if not okT or type(top) ~= "number" then return nil end
-    top = Secrets.Number(top)
-    if not top then return nil end
-    if top <= 0 or top > UIParent:GetHeight() * 0.5 then return nil end   -- 异常高度直接扔掉
-    return top
-end
-
---- 动作条区块的最高沿（没有可读的条时退回 0）。
-local function BarsTop()
-    local top = 0
-    for _, name in ipairs(BAR_FRAMES) do
-        local value = FrameTop(name)
-        if value and value > top then top = value end
-    end
-    return top
-end
-
-local function StoredInputPos()
+local function RestoreClientInput()
     local db = ns:DB()
     local chat = db and db.chat
     local store = chat and chat.positions
-    local pos = store and store[INPUT_STORE_KEY]
-    if type(pos) ~= "table" then return nil end
-    if pos.mode == "bars" then return pos end
-    if type(pos.x) == "number" and type(pos.y) == "number" then return pos end
-    return nil
-end
-
---- 把存档解成实际的 (x, y)：对齐模式每次现算（换分辨率、动作条换位置都能跟上）。
-local function ResolveInputPos(pos)
-    if not pos then return nil end
-    if pos.mode == "bars" then
-        local w = frame and frame:GetWidth() or MIN_BAR_WIDTH
-        local x = math.floor((UIParent:GetWidth() - w) / 2)
-        local y = math.floor(BarsTop() + (tonumber(pos.gap) or INPUT_BAR_GAP))
-        return x, y
-    end
-    return pos.x, pos.y
-end
-
-local function ApplyInputPos(pos)
-    local eb = NativeEditBox()
-    if not eb or not pos then return end
-    local x, y = ResolveInputPos(pos)
-    if not x or not y then return end
-    pcall(eb.ClearAllPoints, eb)
-    pcall(eb.SetPoint, eb, "BOTTOMLEFT", UIParent, "BOTTOMLEFT", x, y)
-    pcall(eb.SetWidth, eb, frame and frame:GetWidth() or MIN_BAR_WIDTH)
-end
-
---- 客户端有没有把输入框拽回它自己的锚点（点方向 / 参照框 / 偏移任一不符就算）。
-local function InputPosDrifted(pos)
-    local eb = NativeEditBox()
-    if not eb or not pos then return false end
-    local x, y = ResolveInputPos(pos)
-    if not x or not y then return false end
-    local okN, count = pcall(eb.GetNumPoints, eb)
-    if not okN or count ~= 1 then return true end
-    local okP, point, relative, _, px, py = pcall(eb.GetPoint, eb, 1)
-    if not okP or point ~= "BOTTOMLEFT" or relative ~= UIParent then return true end
-    if math.abs((tonumber(px) or 0) - x) >= 1 then return true end
-    if math.abs((tonumber(py) or 0) - y) >= 1 then return true end
-    return false
-end
-
--- 每帧守护（2026-11-27 实测定案）：客户端在它自己的布局路径里会把输入框重新锚回
--- `ChatFrame1` 顶上（采样 8 秒就抓到一次 `点=2 left=34 bottom=258`，下一拍又被我们拉回来），
--- 1 秒的复查来不及 —— 玩家看到的就是"位置不停被拉回去"。做法：只在**有存档位置**时挂一个极轻的
--- 每帧检查（paused 于拖动期间），每帧只问一次 `GetNumPoints`：不是 1 就整段重摆，是 1 就什么都不做。
--- 完整比对（点方向/参照框/偏移）仍留给 1 秒那条，省得每帧读 6 个返回值。
-local guardFrame, guardTick
-local function GuardInputPos()
-    if not active or drag then return end
-    local pos = StoredInputPos()
-    if not pos then return end
-    local eb = NativeEditBox()
-    if not eb then return end
-    local ok, count = pcall(eb.GetNumPoints, eb)
-    if not ok or count == 1 then return end
-    ApplyInputPos(pos)
-end
-
-local function AttachGuard()
-    if not guardFrame then
-        guardFrame = CreateFrame("Frame", "MonetUIChatInputGuard", UIParent)
-        guardFrame:SetSize(1, 1)
-        guardFrame:SetAlpha(0)
-    end
-    if not guardTick then
-        guardTick = Scheduler:Profile("chat:guardinput", "聊天:输入框守护", GuardInputPos)
-    end
-    guardFrame:SetScript("OnUpdate", guardTick)
-    guardFrame:Show()
-end
-
-local function DetachGuard()
-    if guardFrame then guardFrame:SetScript("OnUpdate", nil) end
-end
-
-local function SaveInputPos(x, y)
-    local db = ns:DB()
-    local chat = db and db.chat
-    if not chat then return end
-    chat.positions = chat.positions or {}
-    chat.positions[INPUT_STORE_KEY] = { x = math.floor(x + 0.5), y = math.floor(y + 0.5) }
-end
-
---- `/mui chat reset`：把输入框还给客户端（清存档 + 恢复它原来那两条锚点）。
-local function ResetInputPos()
-    local db = ns:DB()
-    local chat = db and db.chat
-    if chat and chat.positions then chat.positions[INPUT_STORE_KEY] = nil end
-    DetachGuard()
+    if not (store and store[LEGACY_STORE_KEY]) then return false end
+    store[LEGACY_STORE_KEY] = nil
     local eb = NativeEditBox()
     local host = _G.ChatFrame1
     if not eb or not host then return false end
@@ -442,56 +320,6 @@ local function ResetInputPos()
     pcall(eb.SetPoint, eb, "BOTTOMRIGHT", host, "TOPRIGHT", 0, 0)
     return true
 end
-
-local function DragStep()
-    local eb = NativeEditBox()
-    if not drag or not eb then return end
-    local scale = UIParent:GetEffectiveScale()
-    local cx, cy = GetCursorPosition()
-    cx, cy = cx / scale, cy / scale
-    local w = eb:GetWidth()
-    local x = cx - drag.dx
-    local y = cy - drag.dy
-    -- 夹在屏幕里，别拖出画面
-    local maxX = math.max(0, UIParent:GetWidth() - w)
-    local maxY = math.max(0, UIParent:GetHeight() - 31)
-    if x < 0 then x = 0 elseif x > maxX then x = maxX end
-    if y < 0 then y = 0 elseif y > maxY then y = maxY end
-    drag.x, drag.y = x, y
-    pcall(eb.ClearAllPoints, eb)
-    pcall(eb.SetPoint, eb, "BOTTOMLEFT", UIParent, "BOTTOMLEFT", x, y)
-    pcall(eb.SetWidth, eb, frame and frame:GetWidth() or MIN_BAR_WIDTH)
-end
-
-local DragTick   -- Scheduler:Profile 的壳，Build 之后才建
-
-local function StartDrag()
-    local eb = NativeEditBox()
-    if not eb or drag then return end
-    local scale = UIParent:GetEffectiveScale()
-    local cx, cy = GetCursorPosition()
-    cx, cy = cx / scale, cy / scale
-    local okL, l = pcall(eb.GetLeft, eb)
-    local okB, b = pcall(eb.GetBottom, eb)
-    if not okL or not okB or not l or not b then return end
-    drag = { dx = cx - l, dy = cy - b, x = l, y = b }
-    if not DragTick then
-        DragTick = Scheduler:Profile("chat:draginput", "聊天:拖动输入框", DragStep)
-    end
-    frame:SetScript("OnUpdate", DragTick)
-    frame:Show()
-end
-
-local function StopDrag()
-    if not drag then return end
-    local x, y = drag.x, drag.y
-    drag = nil
-    frame:SetScript("OnUpdate", nil)
-    SaveInputPos(x, y)
-    AttachGuard()
-end
-
-
 function M:Refresh()
     if active then RefreshChannels() end
 end
@@ -518,14 +346,6 @@ FollowWidth = function()
     if not w then return end
     if w < MIN_BAR_WIDTH then w = MIN_BAR_WIDTH end
     if math.abs(frame:GetWidth() - w) >= 1 then frame:SetWidth(w) end
-    -- 输入框被搬到别处时（右键拖过），宽度也跟聊天窗走，并且每秒复查一次锚点：
-    -- 客户端自己的布局（FCF 更新、改窗口尺寸）可能把它拽回 `ChatFrame1` 顶上，拽回就补一次。
-    local pos = StoredInputPos()
-    if pos and not drag then
-        if InputPosDrifted(pos) then ApplyInputPos(pos) return end
-    end
-    local eb = NativeEditBox()
-    if eb and math.abs(eb:GetWidth() - w) >= 1 then pcall(eb.SetWidth, eb, w) end
 end
 
 local function OnEvent(_, event)
@@ -574,13 +394,6 @@ local function Build()
         seg:SetScript("OnLeave", function()
             if type(_G.GameTooltip) == "table" then GameTooltip:Hide() end
         end)
-        -- 右键按住拖 = 搬输入框（左键留给切频道，两者不抢）。
-        seg:SetScript("OnMouseDown", function(_, button)
-            if button == "RightButton" then StartDrag() end
-        end)
-        seg:SetScript("OnMouseUp", function()
-            StopDrag()
-        end)
         seg:EnableMouse(true)
         strips[index] = seg
     end
@@ -592,8 +405,8 @@ function M:Initialize()
     active = true
     RegisterEvents()
     RefreshChannels()
-    ApplyInputPos(StoredInputPos())
-    if StoredInputPos() then AttachGuard() end
+    -- 前一版把输入框搬走过就还原一次（见文件中部「输入框归还客户端」那段），之后永远不干活。
+    RestoreClientInput()
     if not followId then
         followId = Scheduler:Every(1000, FollowWidth, "聊天:细条宽度")
     end
@@ -615,7 +428,6 @@ function M:SetEnabled(value)
         self:Initialize()
     else
         frame:Hide()
-        DetachGuard()
         if followId then
             Scheduler:Unregister(followId)
             followId = nil
@@ -628,24 +440,11 @@ function M:SetEnabled(value)
 end
 
 function M:HandleCommand(rest)
-    if rest == "bars" or rest == "center" then
-        local db = ns:DB()
-        local chat = db and db.chat
-        if not chat then return false end
-        chat.positions = chat.positions or {}
-        chat.positions[INPUT_STORE_KEY] = { mode = "bars", gap = INPUT_BAR_GAP }
-        local x, y = ResolveInputPos(StoredInputPos())
-        ApplyInputPos(StoredInputPos())
-        AttachGuard()
-        ns:Print(("聊天输入框已对齐到动作条上方（居中，间距 %d px，落点 %d,%d）。"):format(
-            INPUT_BAR_GAP, x or -1, y or -1))
-        return true
-    end
     if rest == "reset" then
-        if ResetInputPos() then
-            ns:Print("聊天输入框已还给客户端（存档位置已清）。")
+        if RestoreClientInput() then
+            ns:Print("输入框已还给客户端（存档里的旧位置已清）。")
         else
-            ns:Print("找不到 ChatFrame1 / ChatFrame1EditBox，没法还原。")
+            ns:Print("输入框本来就是客户端自己的，没有要还原的旧存档。")
         end
         return true
     end
