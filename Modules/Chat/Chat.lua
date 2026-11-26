@@ -5,6 +5,7 @@ local ADDON_NAME, ns = ...
 local M = {}
 local Widget, Skin, Mover = ns.Widget, ns.Skin, ns.Mover
 local Color, EventBus, Secrets = ns.Color, ns.EventBus, ns.Secrets
+local Scheduler = ns.Scheduler
 
 local WIDTH, HEIGHT = 520, 30
 local HOME = _G.LE_PARTY_CATEGORY_HOME or 1
@@ -20,6 +21,9 @@ local frame, editBox, customButton, customIndex = nil, nil, nil, 1
 local fixedButtons, buttonLabels = {}, {}
 local customChannels, cycle, selected, watching = {}, {}, nil, false
 local active = false
+-- 前向声明：`Render()`（在本文件靠前处）末尾也要调它；直接写成后面的 `local function`
+-- 会让 Render 里的名字解析成全局 nil（AGENTS「静态闸门抓不到」那条）。
+local FollowWidth
 
 local function ReadText(value)
     if type(value) ~= "string" or not Secrets.CanRead(value) then return nil end
@@ -231,6 +235,7 @@ local function Render()
     editBox:SetPoint("LEFT", frame, "LEFT", x, 0)
     editBox:SetPoint("RIGHT", frame, "RIGHT", -6, 0)
     editBox:SetHeight(22)
+    FollowWidth()
 end
 
 local function RefreshChannels()
@@ -405,6 +410,34 @@ local function Send()
     editBox:SetText("")
 end
 
+-- ------------------------------------------------------------------ 宽度跟随聊天框
+-- 报障（2026-11-27）："聊天条比聊天框宽出来一截"。聊天条是独立框（`WIDTH = 520` 写死），
+-- 而聊天窗是 430（默认存档的宽度，玩家还能自己拖窄拖宽）—— 两边一旦不一致，条就伸到窗外面。
+-- 做法（参照同机 easyChat）：**不写死宽度**，向聊天窗实测宽度看齐，1s 复查一次
+-- （玩家拖宽聊天窗、换布局、重载都能跟上）。easyChat 那条按钮条是"按内容算宽 + 锚在
+-- GeneralDockManager"，它永远不会比窗口宽；我们这条里有输入框，所以选"跟随窗口宽度"，
+-- 再兜一个最小宽度，免得把窗拖得极窄时输入区被按钮挤没。
+-- 只在非受限窗口写我们自己的框，不受保护约束。
+local MIN_BAR_WIDTH = 260
+local followId
+local function ChatWindowWidth()
+    local win = _G.ChatFrame1
+    if type(win) ~= "table" or type(win.GetWidth) ~= "function" then return nil end
+    local ok, w = pcall(win.GetWidth, win)
+    if not ok or type(w) ~= "number" then return nil end
+    w = Secrets.Number(w)
+    if not w or w < 120 then return nil end
+    return w
+end
+
+FollowWidth = function()
+    if not frame then return end
+    local w = ChatWindowWidth()
+    if not w then return end
+    if w < MIN_BAR_WIDTH then w = MIN_BAR_WIDTH end
+    if math.abs(frame:GetWidth() - w) >= 1 then frame:SetWidth(w) end
+end
+
 local function OnEvent(_, event)
     if not active then return end
     if event == "MONETUI_THEME_CHANGED" then Render() else RefreshChannels() end
@@ -487,6 +520,7 @@ local function Build()
         isVisible = function() return active end,
     })
     selected = BY_KEY.SAY
+    FollowWidth()
 end
 
 function M:Initialize()
@@ -494,6 +528,10 @@ function M:Initialize()
     active = true
     RegisterEvents()
     RefreshChannels()
+    FollowWidth()
+    if not followId then
+        followId = Scheduler:Every(1000, FollowWidth, "聊天:宽度跟随")
+    end
     frame:Show()
     return true
 end
@@ -509,6 +547,10 @@ function M:SetEnabled(value)
     else
         editBox:ClearFocus()
         frame:Hide()
+        if followId then
+            Scheduler:Unregister(followId)
+            followId = nil
+        end
     end
 end
 
