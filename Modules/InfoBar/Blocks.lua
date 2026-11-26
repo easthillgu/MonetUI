@@ -498,6 +498,115 @@ M:RegisterBlock({
 })
 
 -- =========================================================================
+-- 公会（Guild）—— 2026-11-26 新增（`/mui compat legacy` 实测 `GetGuildInfo` /
+-- `GetNumGuildMembers` / `GetGuildRosterInfo` 在本客户端都还活着，才敢开这一格）。
+-- -------------------------------------------------------------------------
+-- 口径：只显示"在线 / 总数"两个数（公会名太长，塞进 14px 的条体只会挤掉别人），
+-- 名字与军衔放悬停提示；点击走 `friends` 动作 = 直开社交窗（公会页签就在里面）。
+-- 名册**没请求过就是 0**：登录时补一次 `GuildRoster()`（一局一次，有公会才发），
+-- 之后只靠 GUILD_ROSTER_UPDATE / PLAYER_GUILD_UPDATE 刷新，不轮询。
+local guildRosterAsked = false
+
+--- 名册没落地时请求一次（`GetNumGuildMembers` 在没名册时恒 0，不是"空公会"）。
+local function EnsureGuildRoster()
+    if guildRosterAsked then return end
+    guildRosterAsked = true
+    local fn = _G.GuildRoster
+    if type(fn) ~= "function" then return end
+    -- 没有公会时请求名册没有意义（也免得每次登录都发一次没用的请求）。
+    local gi = _G.GetGuildInfo
+    local okG, name = false, nil
+    if type(gi) == "function" then okG, name = pcall(gi, "player") end
+    if not okG or type(name) ~= "string" or name == "" then return end
+    pcall(fn)
+end
+
+--- 在线/总数：`GetNumGuildMembers` 的返回序两边客户端不同，**两个返回值都收**，
+--- 只回了一个就当作总数（在线数缺席时整块改显" N 人"，不拿 0 去冒充）。
+local function GuildCounts()
+    local fn = _G.GetNumGuildMembers
+    if type(fn) ~= "function" then return nil end
+    local ok, a, b = pcall(fn)
+    if not ok then return nil end
+    a, b = Secrets.Number(a), Secrets.Number(b)
+    if a and b then return a, b end     -- 老序：总数, 在线
+    if a then return a, nil end
+    return nil
+end
+
+local function GuildUpdate(block)
+    local gi = _G.GetGuildInfo
+    local name
+    if type(gi) == "function" then
+        local ok, value = pcall(gi, "player")
+        if ok then name = value end
+    end
+
+    local first, second = GuildCounts()
+    if (not name or name == "") and (not first or first <= 0) then
+        M:SetText(block, "")   -- 没公会（或名册/公会 API 都读不出）⇒ 整块留空，不显示 "0 / 0"
+        return
+    end
+
+    EnsureGuildRoster()
+
+    -- 两个返回值可能是 (总数, 在线) 也可能是 (在线, 总数)：**取"较大的当总数"**，
+    -- 这条判据不依赖返回序，且两种序下都成立（在线永远 ≤ 总数）。
+    local total, online
+    if second then
+        total, online = math.max(first, second), math.min(first, second)
+    else
+        total = first
+    end
+
+    if online then
+        M:SetText(block, string.format("%d / %d", online, total))
+    elseif total and total > 0 then
+        M:SetText(block, string.format("%d 人", total))
+    else
+        M:SetText(block, "")
+    end
+end
+
+local function GuildTooltip(block)
+    local tip = Tip()
+    if not tip then return end
+
+    local gi = _G.GetGuildInfo
+    local name, rank
+    if type(gi) == "function" then
+        local ok, a, b = pcall(gi, "player")
+        if ok then name, rank = a, b end
+    end
+    local okName = type(name) == "string" and name ~= "" and Secrets.CanRead(name)
+    pcall(tip.AddLine, tip, (okName and name) or "公会", 0.6, 0.8, 1)
+    if type(rank) == "string" and rank ~= "" and Secrets.CanRead(rank) then
+        pcall(tip.AddDoubleLine, tip, "我的军衔", rank, 1, 1, 1, 1, 1, 1)
+    end
+    local first, second = GuildCounts()
+    if second then
+        local total = math.max(first, second)
+        local online = math.min(first, second)
+        pcall(tip.AddDoubleLine, tip, "在线 / 总数",
+            string.format("%d / %d", online, total), 1, 1, 1, 1, 1, 1)
+    elseif first then
+        pcall(tip.AddDoubleLine, tip, "成员", tostring(first), 1, 1, 1, 1, 1, 1)
+    end
+    pcall(tip.AddLine, tip, "左键打开社交窗（公会页）", 0.8, 0.8, 0.8)
+end
+
+M:RegisterBlock({
+    key      = "guild",
+    label    = "公会",
+    position = "RIGHT",
+    trackSample = "888 / 888",
+    events   = { "PLAYER_GUILD_UPDATE", "GUILD_ROSTER_UPDATE", "PLAYER_ENTERING_WORLD" },
+    update   = GuildUpdate,
+    tooltip  = GuildTooltip,
+    onClick  = BlockClick("friends"),   -- 社交窗（公会页）；与好友格同一个动作，不新增暴雪 Lua 调用
+})
+
+-- =========================================================================
 -- 属性（Stats）
 -- =========================================================================
 -- 按职业 + 专精把玩家归到三类之一，分别显示对应的四项：

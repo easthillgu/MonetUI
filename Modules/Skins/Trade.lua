@@ -142,10 +142,75 @@ local function CropToolIcon(btn)
     end
 end
 
+-- ---- 空槽处理（2026-11-26 加，玩家报"商人只卖两样，屏幕上摆着十二个空方框"这类质量问题的正解）----
+-- 判据用**格子自己的图标**，不猜 `GetMerchantItemInfo` 的分页语义：
+--   商人翻页时 `GetMerchantItemInfo(i)` 的 i 是"本页第几格"还是"全量第几件"两边客户端不一样，
+--   按它裁剪会整页错位；而引擎给空槽就是 `icon:SetTexture(nil)`，这是**框体自己的事实**。
+-- 读不出（图标还没落地 / forbidden）时返回 nil ⇒ 保持现状，宁可多画一格，绝不误删有货的格。
+local merchantSlots = {}    -- [i] = 商品格按钮（表尾那段 DressMerchantSlots 收进来的）
+local merchantTileBg = {}   -- [i] = 我们给 MerchantItem<i> 铺的底衬（Skin:Panel 的返回背板）
+local merchantRoot          -- MerchantFrame：LoD 登录那拍可能还是 nil，靠 MERCHANT_SHOW/每次 Apply 补上
+
+--- 12 格商品 + 回购格的**底衬**（Strip 原生圆角美术 → 挂我们的方形 lost 底）。
+--- 抽成函数是因为它依赖 `merchantRoot`：Apply 那拍 root 可能还是 nil，MERCHANT_SHOW 时才有。
+--- host=root 是 2026-11-02 渲染判例：中间容器名下 level 0 的背板不渲染，必须挂窗口本体。
+local function DressMerchantTiles()
+    local root = merchantRoot
+    if not root then return end
+    for i = 1, 12 do
+        local tile = Skin:Need("MerchantItem" .. i)
+        if tile then
+            Skin:Strip(tile)
+            merchantTileBg[i] = Skin:Panel(tile, {
+                bgSurface = "lost", bgAlpha = 0.96, thickness = 1, borderAlpha = 0, host = root,
+            })
+        end
+    end
+    local buyback = Skin:Need("MerchantBuyBackItem")
+    if buyback then
+        Skin:Strip(buyback)
+        Skin:Panel(buyback, {
+            bgSurface = "lost", bgAlpha = 0.96, thickness = 1, borderAlpha = 0, host = root,
+        })
+    end
+end
+
+local function SlotHasIcon(slot)
+    local icon = slot and (slot.icon or slot.Icon)
+    if type(icon) ~= "table" or type(icon.GetTexture) ~= "function" then return nil end
+    local ok, tex = pcall(icon.GetTexture, icon)
+    if not ok then return nil end
+    if tex == nil then return false end
+    return true
+end
+
+--- 按"格子里有没有货"开关我们那层底衬与品质边框（**只动我们自己的子框**，不碰暴雪控件字段）。
+local function SyncMerchantSlots()
+    for i = 1, 12 do
+        local present = SlotHasIcon(merchantSlots[i])
+        if present ~= nil then
+            local bg = merchantTileBg[i]
+            if bg then pcall(bg.SetShown, bg, present) end
+            local slot = merchantSlots[i]
+            if slot and type(slot.GetChildren) == "function" then
+                local okKids, kids = pcall(function() return { slot:GetChildren() } end)
+                if okKids then
+                    for _, child in ipairs(kids) do
+                        if ns:Marked(child, "qualityBorder") then pcall(child.SetShown, child, present) end
+                    end
+                end
+            end
+        end
+    end
+end
+
 local function DressMerchantSlots()
     for i = 1, 12 do
         local slot = Skin:Need(("MerchantItem%dItemButton"):format(i))
-        if slot then Skin:ItemQualityBorder(slot) end
+        if slot then
+            Skin:ItemQualityBorder(slot)
+            merchantSlots[i] = slot
+        end
     end
     -- **三颗工具钮也要有同一套格子边框（11-05 作者实测："三颗工具钮小一些，边框是暴雪材质"）**：
     -- 量出来暴雪的按钮框我们确实压掉了（`r1 BACKGROUND 64x64 a=0.00 我们压过`），
@@ -240,11 +305,7 @@ local function SkinMerchant()
     -- `MerchantBuyBackItemItemButton`（物品格）与 `MerchantBuyBackItemMoneyFrame`。
     -- **只剥容器自己的原生底、不碰子件** —— 上一批 MoneyInset 那圈剥子件是安全的（子件是钱框），
     -- 这里的子件是物品按钮，Strip 下去会把物品图标一起压掉（AGENTS「必需件先注册、装饰件各自 pcall」）。
-    local buyback = Skin:Need("MerchantBuyBackItem")
-    if buyback and root then
-        Skin:Strip(buyback)
-        Skin:Panel(buyback, { bgSurface = "lost", bgAlpha = 0.96, thickness = 1, borderAlpha = 0, host = root })
-    end
+    -- 它的 Strip + 底衬现在和 12 格商品一起走 `DressMerchantTiles()`（见下），这里不再重复一遍。
 
     -- **格子边框 + 回购格小图（11-05 作者报"回购物品的按钮比修理/全修/出售大"）**：
     -- 量出来不是尺寸问题（回购格 37×37、三颗按钮 36×36，`GetEffectiveScale` 都是 0.6400
@@ -253,29 +314,16 @@ local function SkinMerchant()
     -- 抽成 `DressMerchantSlots()` 是因为商人格**首次显示才创建**（11-05 实测：登录 Apply 时
     -- `Skin:Need("MerchantItem1ItemButton")` 拿不到 ⇒ 循环空跑，既不报错也没边框），
     -- 所以除了 Apply 这一次，还要挂 `M:HookShow(MerchantFrame)` 在每次开窗时补。
+    -- 顺序要紧：先有底衬（DressMerchantTiles）再同步空槽显隐（DressMerchantSlots 里的 Sync）。
+    merchantRoot = root or merchantRoot
+    DressMerchantTiles()
     DressMerchantSlots()
 
     -- 每格的文字衬底（2026-11-02 实机判例）：MerchantItem<N> 格自带两块**圆角**美术
-    -- （fileID 130766 / 136423，α1.00 原样），四角不是方形，与凹槽语言不统一。
-    -- Strip 后给整格挂方形 lost 底；host=root——2026-11-02 渲染判例，中间容器名下
-    -- level 0 的背板不渲染，必须挂窗口本体。回购格同模板，一并处理。
-    -- borderAlpha=0：行格是控件底语义（12 行格都描边会太吵），与金钱两框同档。
-    for i = 1, 12 do
-        local tile = Skin:Need("MerchantItem" .. i)
-        if tile and root then
-            Skin:Strip(tile)
-            Skin:Panel(tile, { bgSurface = "lost", bgAlpha = 0.96, thickness = 1, borderAlpha = 0, host = root })
-        end
-    end
-    local buyback = Skin:Need("MerchantBuyBackItem")
-    if buyback and root then
-        Skin:Strip(buyback)
-        Skin:Panel(buyback, { bgSurface = "lost", bgAlpha = 0.96, thickness = 1, borderAlpha = 0, host = root })
-    end
-
-    -- 商品格是**首次显示才创建**的（11-05 实测：登录 Apply 时 `MerchantItem1ItemButton` 还不存在，
-    -- 边框那趟循环空跑）⇒ 每次开窗补一次。`DressMerchantSlots` 是模块级函数 = 稳定引用，
-    -- `M:HookShow` 自带幂等；在 Apply 里现造闭包会每开一次窗多挂一条（AGENTS 明文）。
+    -- （fileID 130766 / 136423、α1.00 原样），四角不是方形，与凹槽语言不统一 ⇒ 底衬统一在
+    -- `DressMerchantTiles()` 里 Strip + 挂方形 lost 底（host=root，borderAlpha=0 是控件底语义）。
+    -- 商品格 + 边框是**首次显示才创建**的（11-05 实测：Apply 时 `MerchantItem1ItemButton` 还不存在）
+    -- ⇒ 每次开窗补一次；`DressMerchantSlots` 是模块级函数 = 稳定引用，`M:HookShow` 自带幂等。
     M:HookShow(root, DressMerchantSlots)
 end
 
@@ -519,6 +567,8 @@ M:Panel("merchant", { label = "商贩", group = "交易", apply = SkinMerchant,
 -- `M:HookShow(nil, …)` 静默什么也不做，格子边框一直没加上（开窗后量：子件仍是 1、那个是暴雪槽框）。
 -- `MERCHANT_SHOW` 派发时窗口已经建好，格子也在里面 ⇒ 在这里补一次，`M:OnEvent` 自带 pcall 与开关判断。
 M:OnEvent("MERCHANT_SHOW", DressMerchantSlots)
+-- 翻页 / 买卖之后槽位内容变了，底衬与品质边框跟着重新判一次（MERCHANT_UPDATE 见 docs/api/EVENTS.md）
+M:OnEvent("MERCHANT_UPDATE", SyncMerchantSlots)
 
 M:Panel("trainer", { label = "训练师", group = "交易", apply = SkinTrainer,
     frames = {

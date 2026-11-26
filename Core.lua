@@ -354,6 +354,7 @@ local DEFAULTS = {
             system     = true,
             spec       = true,
             friends    = true,
+            guild      = true,   -- 2026-11-26 新增：在线/总数（没公会时自动整块留空）
             quest      = true,
             stats      = true,
         },
