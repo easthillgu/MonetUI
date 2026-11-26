@@ -459,10 +459,26 @@ local function CurrentSpecIndex()
     return index
 end
 
-local function FriendsUpdate(block)
-    local api = _G.C_FriendList
-    if not api then M:SetText(block, "") return end
+--- 好友计数：**以战网好友为准**（2026-11-26 实测定案）。
+--- 玩家报"一直 0/0"后逐层探过：`C_FriendList.GetNumFriends` / `GetNumOnlineFriends` 是函数、社交系统
+--- `C_SocialUI.IsSystemEnabled()=true`、`IsLegacyFriendSystemEnabled()=false`，但哪怕把社交窗打开两秒
+--- 再读仍是 `0 0`、`GetFriendInfoByIndex(1)=nil` —— 这套 API 在本服拿不到名册。
+--- 真数据在战网那套：`BNGetNumFriends()` 实测 `33 8`（返回顺序 **总数, 在线**，与 `C_FriendList` 那一对相反），
+--- 同机 `Postal/Modules/BlackBook.lua` 也是这么读的。所以主源用战网，`C_FriendList` 只当战网不可用时的兜底。
+local function BNetCounts()
+    local fn = _G.BNGetNumFriends
+    if type(fn) ~= "function" then return nil end
+    local ok, total, online = pcall(fn)
+    if not ok then return nil end
+    total, online = Secrets.Number(total), Secrets.Number(online)
+    if total == nil then return nil end
+    if online ~= nil and online > total then total, online = online, total end   -- 顺序若与文档不符，按"大的当总数"
+    return { total = total, online = online or 0, bnet = true }
+end
 
+local function LocalFriendCounts()
+    local api = _G.C_FriendList
+    if not api then return nil end
     local total, online
     if type(api.GetNumFriends) == "function" then
         local ok, value = pcall(api.GetNumFriends)
@@ -472,23 +488,33 @@ local function FriendsUpdate(block)
         local ok, value = pcall(api.GetNumOnlineFriends)
         if ok then online = Secrets.Number(value) end
     end
+    if total == nil and online == nil then return nil end
+    return { total = total or 0, online = online or 0, bnet = false }
+end
 
-    -- Both are marked "RequiresFriendList": before Blizzard loads the list they read as zero; an entirely unavailable pair hides the block instead.
-    if total == nil and online == nil then M:SetText(block, "") return end
-    -- 2026-11-26 玩家报"好友人数一直 0/0"：客户端在这套 API 上把"名册还没请求"也答成 0，
-    -- 于是 0/0 既可能是"真的没好友"也可能是"没载入"，两种状态在屏幕上是同一串数字。
-    -- 口径：两个都是 0 就**整块留空**（`/mui infobar diagnose` 里会写"已隐藏"），
-    -- 名册一旦载入（FRIENDLIST_UPDATE）再显示真数 —— 宁可不显，也不拿 0 冒充。
-    if (total or 0) <= 0 and (online or 0) <= 0 then M:SetText(block, "") return end
-    M:SetText(block, string.format("%d / %d", online or 0, total or 0))
+local function FriendsUpdate(block)
+    local counts = BNetCounts() or LocalFriendCounts()
+    if not counts then M:SetText(block, "") return end
+    -- 两个都是 0 就整块留空：既可能是真的没好友，也可能是名册没到，同一串 `0 / 0` 分不出来，
+    -- 宁可不显，也不拿 0 冒充（2026-11-26 玩家报障后的口径）。
+    if counts.total <= 0 and counts.online <= 0 then M:SetText(block, "") return end
+    M:SetText(block, string.format("%d / %d", counts.online, counts.total))
 end
 
 local function FriendsTooltip()
     local tip = Tip()
     if not tip then return end
     pcall(tip.AddLine, tip, "好友", 0.6, 0.8, 1)
-    pcall(tip.AddLine, tip, "在线 / 总数", 1, 1, 1)
-    -- Names deliberately not listed: this build's C_FriendList.GetFriendInfo takes a *name* where retail takes an index, and guessing would mean guessing at someone else's data.
+    local counts = BNetCounts()
+    if counts then
+        pcall(tip.AddLine, tip, string.format("战网好友：%d 人在线 / 共 %d 人", counts.online, counts.total), 1, 1, 1)
+    else
+        local localCounts = LocalFriendCounts()
+        if localCounts then
+            pcall(tip.AddLine, tip, string.format("游戏好友：%d 人在线 / 共 %d 人", localCounts.online, localCounts.total), 1, 1, 1)
+        end
+    end
+    -- 名字不列：`待机` 时逐个读好友信息会碰到机密串，而且这格只是"看人数"。
 end
 
 M:RegisterBlock({
@@ -496,7 +522,12 @@ M:RegisterBlock({
     label    = "好友",
     position = "RIGHT",
     trackSample = "88 / 888",
-    events   = { "FRIENDLIST_UPDATE", "PLAYER_ENTERING_WORLD" },
+    -- 战网好友的动静走 BN_*（总数变化 / 上下线），游戏内好友走 FRIENDLIST_UPDATE。
+    events   = {
+        "BN_FRIEND_LIST_SIZE_CHANGED", "BN_FRIEND_ACCOUNT_ONLINE", "BN_FRIEND_ACCOUNT_OFFLINE",
+        "BN_CONNECTED", "BN_DISCONNECTED", "BN_INFO_CHANGED", "BN_CUSTOM_MESSAGE_LOADED",
+        "FRIENDLIST_UPDATE", "PLAYER_ENTERING_WORLD",
+    },
     update   = FriendsUpdate,
     tooltip  = FriendsTooltip,
     onClick  = BlockClick("friends"),   -- 直开社交窗（作者批准的例外：ToggleFriendsFrame，实测零 taint）
