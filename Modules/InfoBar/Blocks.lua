@@ -34,7 +34,7 @@ end
 --- 提示行用的文案（动作名 → 一句话）。信息栏的提示层读 `block.onClick.hint`，
 --- 一处集中、不用给 7 个注册表各加一个字段。
 local CLICK_HINT = {
-    bags      = "打开背包",
+    bags      = "左键开关背包",
     settings  = "打开设置",
     friends   = "打开好友列表",
     dock      = "打开快捷入口（角色 / 任务 / 天赋 …）",
@@ -272,10 +272,10 @@ local function CurrencyOnUpdate(block, elapsed)
     M:RefreshBlock("currency")
 end
 
---- 左键照旧开自己的背包窗，右键归货币选择面板。用可调用表承载 hint：
+--- 左键开 / 关自己的背包窗（`OpenBags` 不带参数 = 切换），右键归货币选择面板。用可调用表承载 hint：
 --- InfoBar 的 OnEnter 只在 `type(onClick)=="table" and onClick.hint` 时补点击提示行。
 local function CurrencyClick(openBags)
-    return setmetatable({ hint = "左键打开背包 · 右键自定义监控" }, {
+    return setmetatable({ hint = "左键开关背包 · 右键自定义监控" }, {
         __call = function(_, block, button)
             if button == "RightButton" then
                 if M.Currency then pcall(M.Currency.TogglePanel, M.Currency) end

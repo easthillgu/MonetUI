@@ -36,8 +36,11 @@ local rows       -- 已建的行
 --- 而 AGENTS 的规矩是"一处判据一份实现" —— 入口表可以各开各的，**开窗逻辑不能抄第二份**。
 local function OpenBags()
     -- 我们自己的背包窗口，动作全在我们名下（`ToggleAllBags` 是暴雪 Lua 全局，不许调）。
+    -- **不带参数 = 开 / 关切换**：以前写死 `Toggle(true)`，信息栏的金钱 / 货币格点第二次关不掉
+    -- （11-26 玩家报「点击背包块只能开」）。`Bags:Toggle` 自己维护 `shown`，第 1798 行那条
+    -- 暴雪背包边沿守卫也走同一个状态，两边不会打架。
     local bags = ns:GetModule("Bags")
-    if bags and type(bags.Toggle) == "function" then bags:Toggle(true) end
+    if bags and type(bags.Toggle) == "function" then bags:Toggle() end
 end
 
 local function OpenMap()
