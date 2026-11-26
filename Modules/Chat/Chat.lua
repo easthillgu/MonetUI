@@ -192,7 +192,7 @@ local STRIP_SLOTS = {
     { key = "GUILD",   chatType = "GUILD",   label = "公" },
     { key = "WORLD",   chatType = "CHANNEL", label = "世界" },
 }
-local STRIP_PAINT, STRIP_HIT = 3, 6
+local STRIP_PAINT, STRIP_HIT = 3, 10
 -- 细条/输入框的最小宽度：玩家把聊天窗拖得极窄时兜一下，免得输入区没地方。
 local MIN_BAR_WIDTH = 260
 local STRIP_ALPHA_IDLE, STRIP_ALPHA_OFF = 0.55, 0.18
@@ -298,28 +298,92 @@ local function RefreshChannels()
     Render()
 end
 
--- ------------------------------------------------------------------ 输入框归还客户端（一次性迁移）
--- 玩家最后决定（2026-11-27）："把这个输入窗还给客户端自己吧，我们只添加 bar 条"。
--- ⇒ 本模块**不再搬输入框、不再改它的锚点和宽度**：位置、宽度、显隐一律由客户端自己管，
--- 我们只做贴在它上沿的那条彩色细条（细条锚在输入框顶边，客户端把框挪回默认位它自己就跟着回去）。
--- 下面这段只为清掉前几版留下的痕迹：存档里若还有 `chat.positions.ChatInput`（拖动或"对齐动作条"模式），
--- 把客户端原来那两条锚点装回去，再把键删掉 —— 重载一次就干净，之后这段永远不干活。
-local LEGACY_STORE_KEY = "ChatInput"
+-- ------------------------------------------------------------------ 输入框抬高（别压住页签）
+-- 报障（2026-11-27）："输入窗不要跟 tab 重叠了，往上移"。实测本客户端把 `ChatFrame1EditBox`
+-- 锚在 `ChatFrame1` 上沿（0 偏移），而页签条 `GeneralDockManager` 也占同一行（429×26 @ bottom=258）
+-- ⇒ 输入框整行盖住页签，综合 / 战斗记录 / CHAT 点不到（点击全落在输入框上）。
+-- 做法：**参照框不改，只把同两条锚点整体抬 26px**（=页签高度）—— 宽度仍由 `ChatFrame1` 决定，
+-- 框还是客户端那条，我们不碰它的宽度/显隐，细条锚在它顶边所以自动跟上。
+-- 客户端自己的布局会把偏移拨回 0（实测采样 8 秒抓到一次回到 `bottom=258`）⇒ 配一个极轻的每帧守护：
+-- 每帧只问一次 `GetNumPoints`，对不上就整段装回去（同一帧内完成，屏上不闪）。
+local INPUT_LIFT = 32   -- 页签条高 26 + 页签自己的 6（实测 tab 32×32 @ bottom=258，抬 32 才彻底不压）
+local LEGACY_STORE_KEY = "ChatInput"   -- 前几版"拖动/对齐动作条"留下的位置存档键，见到就删
 
-local function RestoreClientInput()
+local function ClientHost()
+    local host = _G.ChatFrame1
+    if type(host) ~= "table" or type(host.GetTop) ~= "function" then return nil end
+    return host
+end
+
+local function ApplyInputLift()
+    local eb, host = NativeEditBox(), ClientHost()
+    if not eb or not host then return false end
+    pcall(eb.ClearAllPoints, eb)
+    pcall(eb.SetPoint, eb, "BOTTOMLEFT", host, "TOPLEFT", 0, INPUT_LIFT)
+    pcall(eb.SetPoint, eb, "BOTTOMRIGHT", host, "TOPRIGHT", 0, INPUT_LIFT)
+    return true
+end
+
+local function InputLiftDrifted()
+    local eb, host = NativeEditBox(), ClientHost()
+    if not eb or not host then return false end
+    local okN, count = pcall(eb.GetNumPoints, eb)
+    if not okN or count ~= 2 then return true end
+    local ok1, p1, r1, _, _, y1 = pcall(eb.GetPoint, eb, 1)
+    if not ok1 or p1 ~= "BOTTOMLEFT" or r1 ~= host then return true end
+    if math.abs((tonumber(y1) or 0) - INPUT_LIFT) >= 1 then return true end
+    local ok2, p2, r2, _, _, y2 = pcall(eb.GetPoint, eb, 2)
+    if not ok2 or p2 ~= "BOTTOMRIGHT" or r2 ~= host then return true end
+    if math.abs((tonumber(y2) or 0) - INPUT_LIFT) >= 1 then return true end
+    return false
+end
+
+local guardFrame, guardTick
+local function GuardInputLift()
+    if not active then return end
+    local eb, host = NativeEditBox(), ClientHost()
+    if not eb or not host then return end
+    -- 只比底边高度：客户端重排时改的是**偏移**（锚点数仍是 2），所以"数点数"抓不到，
+    -- 必须读一次 bottom。两次数都走 Secrets（战斗中受限框可能返回机密值，那就这一帧不管）。
+    local okB, bottom = pcall(eb.GetBottom, eb)
+    if not okB then return end
+    bottom = Secrets.Number(bottom)
+    local okT, top = pcall(host.GetTop, host)
+    if not okT then return end
+    top = Secrets.Number(top)
+    if not bottom or not top then return end
+    if math.abs(bottom - (top + INPUT_LIFT)) >= 1 then ApplyInputLift() end
+end
+
+local function AttachGuard()
+    if not guardFrame then
+        guardFrame = CreateFrame("Frame", nil, UIParent)
+        guardFrame:SetSize(1, 1)
+        guardFrame:SetAlpha(0)
+    end
+    if not guardTick then
+        guardTick = Scheduler:Profile("chat:liftinput", "聊天:输入框抬高守护", GuardInputLift)
+    end
+    guardFrame:SetScript("OnUpdate", guardTick)
+    guardFrame:Show()
+end
+
+local function DetachGuard()
+    if guardFrame then guardFrame:SetScript("OnUpdate", nil) end
+end
+
+--- 清掉前几版留下的位置存档（我们不再搬框，只留"抬高"这一个固定偏移）。
+local function ClearLegacyPos()
     local db = ns:DB()
     local chat = db and db.chat
     local store = chat and chat.positions
-    if not (store and store[LEGACY_STORE_KEY]) then return false end
-    store[LEGACY_STORE_KEY] = nil
-    local eb = NativeEditBox()
-    local host = _G.ChatFrame1
-    if not eb or not host then return false end
-    pcall(eb.ClearAllPoints, eb)
-    pcall(eb.SetPoint, eb, "BOTTOMLEFT", host, "TOPLEFT", 0, 0)
-    pcall(eb.SetPoint, eb, "BOTTOMRIGHT", host, "TOPRIGHT", 0, 0)
-    return true
+    if store and store[LEGACY_STORE_KEY] then
+        store[LEGACY_STORE_KEY] = nil
+        return true
+    end
+    return false
 end
+
 function M:Refresh()
     if active then RefreshChannels() end
 end
@@ -346,6 +410,11 @@ FollowWidth = function()
     if not w then return end
     if w < MIN_BAR_WIDTH then w = MIN_BAR_WIDTH end
     if math.abs(frame:GetWidth() - w) >= 1 then frame:SetWidth(w) end
+    -- 抬高那条每帧只查"锚点数"，这里 1 秒补一次完整比对（参照框/偏移被改也会被抓到）。
+    if InputLiftDrifted() then
+        ApplyInputLift()
+        return
+    end
 end
 
 local function OnEvent(_, event)
@@ -405,8 +474,9 @@ function M:Initialize()
     active = true
     RegisterEvents()
     RefreshChannels()
-    -- 前一版把输入框搬走过就还原一次（见文件中部「输入框归还客户端」那段），之后永远不干活。
-    RestoreClientInput()
+    ClearLegacyPos()
+    ApplyInputLift()
+    AttachGuard()
     if not followId then
         followId = Scheduler:Every(1000, FollowWidth, "聊天:细条宽度")
     end
@@ -428,6 +498,7 @@ function M:SetEnabled(value)
         self:Initialize()
     else
         frame:Hide()
+        DetachGuard()
         if followId then
             Scheduler:Unregister(followId)
             followId = nil
@@ -440,12 +511,27 @@ function M:SetEnabled(value)
 end
 
 function M:HandleCommand(rest)
-    if rest == "reset" then
-        if RestoreClientInput() then
-            ns:Print("输入框已还给客户端（存档里的旧位置已清）。")
-        else
-            ns:Print("输入框本来就是客户端自己的，没有要还原的旧存档。")
+    if rest == "lift" or rest == "reset" then
+        -- 抬高是我们唯一还往客户端输入框上写的东西：`/mui chat lift` 显示当前偏移，
+        -- `/mui chat reset` 把它收回 0（不过每帧守护还在，重载后会再抬回来 —— 要彻底不要就关模块）。
+        local eb, host = NativeEditBox(), ClientHost()
+        if not eb or not host then
+            ns:Print("找不到 ChatFrame1 / ChatFrame1EditBox，没法处理。")
+            return true
         end
+        if rest == "lift" then
+            local okB, bottom = pcall(eb.GetBottom, eb)
+            local okT, top = pcall(host.GetTop, host)
+            ns:Print(("输入框抬高：目标偏移 %d px，当前 bottom=%s（ChatFrame1 顶=%s），守护=%s"):format(
+                INPUT_LIFT, tostring(bottom), tostring(top),
+                guardFrame and guardFrame:GetScript("OnUpdate") and "在跑" or "停着"))
+            return true
+        end
+        DetachGuard()
+        pcall(eb.ClearAllPoints, eb)
+        pcall(eb.SetPoint, eb, "BOTTOMLEFT", host, "TOPLEFT", 0, 0)
+        pcall(eb.SetPoint, eb, "BOTTOMRIGHT", host, "TOPRIGHT", 0, 0)
+        ns:Print("输入框抬高的偏移已收回 0（下次重载会再抬到 26px，除非关掉本模块）。")
         return true
     end
     if rest ~= "status" then return false end
