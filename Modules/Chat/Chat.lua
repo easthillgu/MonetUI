@@ -10,15 +10,17 @@ local Scheduler = ns.Scheduler
 local WIDTH, HEIGHT = 520, 30
 local HOME = _G.LE_PARTY_CATEGORY_HOME or 1
 local INSTANCE = _G.LE_PARTY_CATEGORY_INSTANCE or 2
-local CUSTOM_CHANNEL = _G.Enum and _G.Enum.PermanentChatChannelType
+-- 自定义频道（「综合 / 本地防务 / 大脚世界频道 …」）。
+-- 2026-11-27 实测：`Enum.PermanentChatChannelType` 是一张**表**（不是值），拿它当频道类型比较
+-- 会把所有自定义频道判掉、这本名单一直是空的（而且零报错）；真正的取值在 `Enum.ChatChannelType.Custom = 1`。
+local CUSTOM_CHANNEL = _G.Enum and _G.Enum.ChatChannelType and _G.Enum.ChatChannelType.Custom or 1
     and _G.Enum.PermanentChatChannelType.Custom or 3
 local EVENTS = {
     "CHANNEL_UI_UPDATE", "CHANNEL_FLAGS_UPDATED", "GROUP_ROSTER_UPDATE",
     "RAID_ROSTER_UPDATE", "PLAYER_GUILD_UPDATE", "PLAYER_ENTERING_WORLD",
 }
 
-local frame, editBox, customButton, customIndex = nil, nil, nil, 1
-local fixedButtons, buttonLabels = {}, {}
+local frame, editBox = nil, nil
 local customChannels, cycle, selected, watching = {}, {}, nil, false
 local active = false
 -- 前向声明：`Render()`（在本文件靠前处）末尾也要调它；直接写成后面的 `local function`
@@ -163,77 +165,89 @@ local function FindCustom(localID)
     return nil
 end
 
-local function ShortText(text, limit)
-    local chars, count = {}, 0
-    for char in string.gmatch(text, "[%z\1-\127\194-\244][\128-\191]*") do
-        if count >= limit then break end
-        chars[#chars + 1] = char
-        count = count + 1
-    end
-    local out = table.concat(chars)
-    if #out < #text then out = out .. "…" end
-    return out
-end
+-- ------------------------------------------------------------------ 频道细条（聊天条上沿）
+-- 目标（2026-11-27）：一条**与聊天框同宽、3px 高**的细条，按频道顺序等分成格子，
+-- 每格用该频道的颜色 —— 说 / 喊 / 密 / 队 / 团 / 公 / 世界（大脚世界频道）。
+-- 3px 高不好点 ⇒ 每格做成 8px 高的命中框（颜色只画顶上 3px），点哪格就切到哪个频道并聚焦输入。
+-- 三档透明度：当前频道 100%，本场景可用但不是当前 55%，本场景用不上（不在队/团/公会、没这个世界频道）18%。
+-- 颜色一律取 `ChatTypeInfo[<chatType>]`（1.60.1 / 71139 实测存在），缺表时用下面的兜底色。
+local STRIP_SLOTS = {
+    { key = "SAY",     chatType = "SAY",     label = "说" },
+    { key = "YELL",    chatType = "YELL",    label = "喊" },
+    { key = "WHISPER", chatType = "WHISPER", label = "密" },
+    { key = "PARTY",   chatType = "PARTY",   label = "队" },
+    { key = "RAID",    chatType = "RAID",    label = "团" },
+    { key = "GUILD",   chatType = "GUILD",   label = "公" },
+    { key = "WORLD",   chatType = "CHANNEL", label = "世界" },
+}
+local STRIP_PAINT, STRIP_HIT = 3, 8
+local STRIP_ALPHA_IDLE, STRIP_ALPHA_OFF = 0.55, 0.18
+local STRIP_FALLBACK = {
+    SAY = { 1, 1, 1 }, YELL = { 1, 0.25, 0.25 }, WHISPER = { 1, 0.5, 1 },
+    PARTY = { 0.66, 0.66, 1 }, RAID = { 1, 0.5, 0 }, GUILD = { 0.25, 1, 0.25 },
+    CHANNEL = { 1, 0.75, 0.75 },
+}
+local strips = {}   -- 每格一个按钮（含 3px 色块），Build 时建一次
 
-local function SetLabelColor(label, r, g, b)
-    if label then label:SetTextColor(r, g, b, 1) end
-end
-
-local function PaintButton(button, chosen)
-    if not button then return end
-    local label = buttonLabels[button]
-    if label then
-        local r, g, b
-        if chosen then
-            r, g, b = Color:GetHighlight()
-        else
-            r, g, b = Color:GetNeutral()
+local function ChannelRGB(chatType)
+    local info = _G.ChatTypeInfo and _G.ChatTypeInfo[chatType]
+    if type(info) == "table" then
+        local r, g, b = info.r, info.g, info.b
+        if type(r) == "number" and type(g) == "number" and type(b) == "number" then
+            return r, g, b
         end
-        SetLabelColor(label, r, g, b)
     end
-    local bg = ns.Marked(button, "controlBg")
-    if not bg then return end
-    if chosen then
-        local r, g, b = Color:GetHighlight()
-        if Widget.SetBorderState then Widget:SetBorderState(bg, r, g, b, 1) end
-        if bg.SetBackdropColor then bg:SetBackdropColor(r, g, b, 0.16) end
-    else
-        if Widget.SetBorderState then Widget:SetBorderState(bg, nil, nil, nil, nil) end
+    local fallback = STRIP_FALLBACK[chatType] or STRIP_FALLBACK.SAY
+    return fallback[1], fallback[2], fallback[3]
+end
+
+--- 「世界」格的目标 = 大脚世界频道（名字里带「世界」的自定义频道；不在这个频道里时这格不可点）。
+local function WorldChannel()
+    for _, channel in ipairs(customChannels) do
+        local name = channel.name
+        if type(name) == "string"
+            and (string.find(name, "世界") or string.find(string.lower(name), "world")) then
+            return channel
+        end
     end
+    return nil
+end
+
+local function SlotTarget(slot)
+    if slot.key == "WORLD" then return WorldChannel() end
+    return BY_KEY[slot.key]
 end
 
 local function Render()
     if not frame then return end
-    local x = 6
-    for _, entry in ipairs(FIXED) do
-        local button = fixedButtons[entry.key]
-        local available = entry.available()
-        button:SetShown(available)
-        if available then
-            button:ClearAllPoints()
-            button:SetPoint("LEFT", frame, "LEFT", x, 0)
-            button:SetSize(26, 22)
-            PaintButton(button, SameTarget(selected, entry))
-            x = x + 28
+    local count = #STRIP_SLOTS
+    local segWidth = frame:GetWidth() / count
+    for index = 1, count do
+        local slot = STRIP_SLOTS[index]
+        local seg = strips[index]
+        local target = SlotTarget(slot)
+        local available = target ~= nil and (slot.key == "WORLD" or target.available())
+        seg.slot = slot
+        seg.target = target
+        seg:ClearAllPoints()
+        seg:SetPoint("TOPLEFT", frame, "TOPLEFT", math.floor((index - 1) * segWidth), 0)
+        seg:SetSize(math.max(2, math.floor(segWidth)), STRIP_HIT)
+        local r, g, b = ChannelRGB(slot.chatType)
+        seg.tex:SetColorTexture(r, g, b, 1)
+        if not available then
+            seg.tex:SetAlpha(STRIP_ALPHA_OFF)
+        elseif SameTarget(selected, target) then
+            seg.tex:SetAlpha(1)
+        else
+            seg.tex:SetAlpha(STRIP_ALPHA_IDLE)
         end
-    end
-    if #customChannels > 0 then
-        customIndex = math.max(1, math.min(customIndex, #customChannels))
-        local shown = selected and selected.chatType == "CHANNEL" and selected or customChannels[customIndex]
-        local label = buttonLabels[customButton]
-        if label then label:SetText(ShortText(shown.name, 5)) end
-        customButton:SetShown(true)
-        customButton:ClearAllPoints()
-        customButton:SetPoint("LEFT", frame, "LEFT", x, 0)
-        customButton:SetSize(64, 22)
-        PaintButton(customButton, SameTarget(selected, shown))
-        x = x + 66
-    else
-        customButton:SetShown(false)
+        seg.usable = available
+        seg:EnableMouse(available)
     end
     editBox:ClearAllPoints()
-    editBox:SetPoint("LEFT", frame, "LEFT", x, 0)
+    editBox:SetPoint("LEFT", frame, "LEFT", 6, 0)
     editBox:SetPoint("RIGHT", frame, "RIGHT", -6, 0)
+    editBox:SetPoint("TOP", frame, "TOP", 0, -5)
     editBox:SetHeight(22)
     FollowWidth()
 end
@@ -265,11 +279,6 @@ end
 local function SelectTarget(target, focus)
     if not active or not target then return end
     selected = target
-    if target.chatType == "CHANNEL" then
-        for index, channel in ipairs(customChannels) do
-            if channel.localID == target.localID then customIndex = index; break end
-        end
-    end
     Render()
     if focus then
         if target.chatType == "WHISPER" then
@@ -472,34 +481,32 @@ local function Build()
         editBox:ClearFocus()
     end)
 
-    for _, entry in ipairs(FIXED) do
-        local button = CreateFrame("Button", nil, frame, "BackdropTemplate")
-        local label = Widget:Font(button, 11, "pixel", "neutral", "CENTER")
-        button:SetFontString(label)
-        label:SetAllPoints(button)
-        label:SetText(entry.label)
-        Skin:Button(button, { thickness = 1, bgAlpha = 0.82, size = 11 })
-        button:SetScript("OnClick", function() SelectTarget(entry, true) end)
-        fixedButtons[entry.key] = button
-        buttonLabels[button] = label
+    -- 频道细条：每格一颗按钮（8px 命中框），色块只占顶上 3px。
+    for index = 1, #STRIP_SLOTS do
+        local seg = CreateFrame("Button", nil, frame)
+        seg.tex = seg:CreateTexture(nil, "OVERLAY")
+        seg.tex:SetPoint("TOPLEFT", seg, "TOPLEFT", 0, 0)
+        seg.tex:SetPoint("TOPRIGHT", seg, "TOPRIGHT", 0, 0)
+        seg.tex:SetHeight(STRIP_PAINT)
+        seg:SetScript("OnClick", function(self)
+            if not self.usable or not self.target then return end
+            SelectTarget(self.target, true)
+        end)
+        seg:SetScript("OnEnter", function(self)
+            if not self.usable or type(_G.GameTooltip) ~= "table" then return end
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText(self.slot.label, 1, 1, 1)
+            if self.target and type(self.target.name) == "string" then
+                GameTooltip:AddLine(self.target.name, 0.8, 0.8, 0.8)
+            end
+            GameTooltip:Show()
+        end)
+        seg:SetScript("OnLeave", function()
+            if type(_G.GameTooltip) == "table" then GameTooltip:Hide() end
+        end)
+        seg:EnableMouse(false)
+        strips[index] = seg
     end
-
-    customButton = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    local customLabel = Widget:Font(customButton, 10, "pixel", "neutral", "CENTER")
-    customButton:SetFontString(customLabel)
-    customLabel:SetAllPoints(customButton)
-    customLabel:SetText("自定")
-    Skin:Button(customButton, { thickness = 1, bgAlpha = 0.82, size = 10 })
-    customButton:SetScript("OnClick", function()
-        if #customChannels == 0 then return end
-        if selected and selected.chatType == "CHANNEL" then
-            customIndex = customIndex % #customChannels + 1
-        else
-            customIndex = math.max(1, math.min(customIndex, #customChannels))
-        end
-        SelectTarget(customChannels[customIndex], true)
-    end)
-    buttonLabels[customButton] = customLabel
 
     local dock = Skin:Need("GeneralDockManager")
     -- Tab 比容器高 6px；偏移 12px 后仍留 6px 间距。

@@ -327,7 +327,19 @@ local function WatchSnapshot()
     local frame = EnumerateFrames()
     while frame do
         local ok, shown = pcall(frame.IsShown, frame)
-        if ok and shown then set[frame] = true end
+        -- 受限窗口里 IsShown 会返回机密布尔，`if shown then` 会被客户端拦成 BLOCKED（2026-11-27 实测）；
+        -- 读不出真值就当"没看见"，反正是诊断用的名单。
+        -- 注意：本文件没有文件级 `local Secrets`（只有某个函数体内有一份），这里必须走 `ns.Secrets`。
+        local secrets = ns.Secrets
+        local visible = false
+        if ok then
+            if type(secrets) == "table" and type(secrets.Bool) == "function" then
+                visible = secrets.Bool(shown, false)
+            else
+                visible = shown == true
+            end
+        end
+        if visible then set[frame] = true end
         frame = EnumerateFrames(frame)
     end
     return set
