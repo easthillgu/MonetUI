@@ -1690,6 +1690,7 @@ end
 local function DepositAllBank()
     local bt = (Enum and Enum.BankType and Enum.BankType.Character) or 0
     if not (C_Bank and C_Bank.AutoDepositItemsIntoBank) then
+        -- api-audit:ok 运行时兜底文案：API 真缺才打印（快照里有 ⇒ 正常路径根本走不到这句）
         ns:Print("[mui bags] 一键存入：本客户端没有 C_Bank.AutoDepositItemsIntoBank —— 这颗钮在此无效")
         return
     end
@@ -1760,6 +1761,7 @@ local function SortBagsNow()
     end
     local api = _G.C_Container
     if not (api and type(api.SortBags) == "function") then
+        -- api-audit:ok 运行时兜底文案：快照（docs/api/FUNCTIONS.md）里 SortBags 是有的
         ns:Print("[mui bags] 整理：本客户端没有 C_Container.SortBags —— 这颗钮在此无效")
         return false
     end

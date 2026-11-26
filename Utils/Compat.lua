@@ -169,6 +169,27 @@ local WATCH = {
             { "MicroMenu", "Forever 微菜单（12.1.5 也有，名字撞上了）" },
         },
     },
+    {
+        -- 2026-11-26 加：`GetInventoryItemDurability` 那一轮证明过代价 —— 一句旧笔记写着
+        -- "全族不存在"，整条功能就没写，而**离线闸门全绿**（闸门只审写了的代码）。
+        -- 这一组全是"我们某处写过它不存在"的名字：want 省略 = 我们以为有，`absent` = 我们以为没有。
+        -- 每天跑 `/mui compat bad`，`≠` 就是**断言过期**，去把那半截功能补上。
+        -- 注意：快照（docs/api）未收录 ≠ 不存在（`GetInventoryItem*` 就没收录，实机却在）。
+        group = "我们写过的『不存在 / 存在』断言（断言过期在这里现形）",
+        items = {
+            { "GetInventoryItemDurability", "耐久槽位路径的数据源（归档 §2.1 说全族不存在；1.60 · 71139 实测有、签名 slot）" },
+            { "GetInventoryItemLink", "逐件显示真物品名（同上；不在就退回槽位名）" },
+            { "GetInventoryItemID", "取物品 id（10-15 那次按'不存在'处理过）" },
+            { "C_Item.GetWeaponEnchantInfo", "BuffFrame 武器附魔行；缺它那行整行隐藏（文案写着本客户端没有）" },
+            { "C_Bank.AutoDepositItemsIntoBank", "背包『一键存入』钮；缺它那颗钮点了只打印无效" },
+            { "C_Container.SortBags", "背包『整理』钮；缺它只打印无效" },
+            { "GetPetActionInfo", "宠物条状态位 / 自动施法状态（ActionBars 的提示文案说没有；快照未收录，故标 absent）", "absent" },
+            { "GetNumShapeshiftForm", "姿态条单数名（我们说只有复数 GetNumShapeshiftForms）", "absent" },
+            { "UnregisterForDrag", "QuestTracker 的拖拽锁（我们说客户端没有，只能用 SetMovable(false)）", "absent" },
+            { "GetScaledCursorPosition", "Cursor 拖尾（我们说只有文档化的 GetCursorPosition）", "absent" },
+            { "GetSocketItemInfo", "旧全局（快照里只有 C_ItemSocketInfo.GetSocketItemInfo）", "absent" },
+        },
+    },
 }
 
 -- 服务器规则：这些 GameRule 一开，对应暴雪面板就根本不存在，我们的模块等于对空气美化。

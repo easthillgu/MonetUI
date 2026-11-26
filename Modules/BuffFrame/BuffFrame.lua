@@ -883,6 +883,7 @@ local function UpdateEnchants()
     if not list then
         if not enchantApiWarned then
             enchantApiWarned = true
+            -- api-audit:ok 运行时兜底文案：快照（docs/api/FUNCTIONS.md）里 C_Item.GetWeaponEnchantInfo 在
             ns:Print("本客户端没有 C_Item.GetWeaponEnchantInfo，武器附魔行不可用（整行隐藏）。")
         end
         for i = 1, #enchantButtons do enchantButtons[i]:Hide() end
