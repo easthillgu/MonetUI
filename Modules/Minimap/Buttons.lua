@@ -640,8 +640,11 @@ function B:Apply(overlay)
     end
     if settings.mapCompartment then
         SetupCompartment()
+        -- 收纳按钮在 ⇒ 顺手把散落的插件图标也收进来（登记进收纳列表 + 压掉小地图那颗）。
+        B:StartCollect()
     else
         RestoreOne("AddonCompartmentFrame")
+        B:RestoreCollect()
     end
     if settings.mapDifficulty then
         SetupDifficulty()
@@ -679,6 +682,8 @@ function B:Restore()
         end
     end
     if difficultyFrame then difficultyFrame:Hide() end
+    -- 收进收纳的图标一并放回去（否则模块关了、小地图上仍然少一堆图标）。
+    B:RestoreCollect()
     -- 队列的两条轮询一并摘掉：模块关了就别再按拍写暴雪按钮。
     Widget:Unwatch(UIParent, EnsureQueueStatus)
     if container then
@@ -731,6 +736,334 @@ end
 --- 容器（给区域名条定位用）。
 function B:Container()
     return container
+end
+
+-- ------------------------------------------------------------------ 插件图标收纳
+--
+-- 报障："收纳不完善 —— 收纳里有的插件，小地图上还留着自己那颗图标。"
+-- 这个库（LibDBIcon-1.0）自带收纳 API，收纳按钮点开的 AddonCompartmentFrame 那张列表
+-- 就是它登记的条目（不是暴雪凭空的名单）：
+--   IsButtonCompartmentAvailable() / IsButtonInCompartment(name)
+--   AddButtonToCompartment(name) —— 往列表登记一条，点击时转调 dataObject.OnClick
+--   Hide(name) / Show(name)      —— 只显隐小地图上那一颗，**不写插件的存档**
+-- 所以"收进来"= 登记 + 隐藏两件事一起做；插件迟注册、或者它自己 Refresh 又把那颗 Show 回来，
+-- 由一条 1.5s 轮询纠回（一次只遍历 objects 表，很便宜）。
+-- 关掉"插件收纳"时反向做：我们登记过的撤掉、我们隐藏过的放回去（不碰插件自己藏的）。
+
+local collectSubId
+local collectedNames = {}   -- 我们隐藏过的（关模块时放回去）
+local addedNames = {}       -- 我们登记进收纳的（关模块时撤掉）
+-- `addedNames` 只在本次会话有效，但 `AddButtonToCompartment` 会写进**插件自己的存档**
+-- （`object.db.showInCompartment=true`）。不落盘记住"哪几条是我们加的"，重载后就撤不回来了
+-- —— 玩家关掉收纳会看到列表里多出一条重复项。所以登记时同时记进 MonetUIDB。
+local function AddedStore()
+    local db = ns:DB()
+    local store = db.minimapCollectAdded
+    if type(store) ~= "table" then
+        store = {}
+        db.minimapCollectAdded = store
+    end
+    return store
+end
+
+local function LibDBIcon()
+    local stub = _G.LibStub
+    if type(stub) ~= "table" or type(stub.GetLibrary) ~= "function" then return nil end
+    local ok, lib = pcall(stub.GetLibrary, stub, "LibDBIcon-1.0", true)
+    if ok and type(lib) == "table" then return lib end
+    return nil
+end
+
+local function ShownSafe(frame)
+    local ok, value = pcall(frame.IsShown, frame)
+    if not ok then return false end
+    return Secrets.Bool(value, false)
+end
+
+--- 收纳列表里那条同名条目。
+--- `lib:IsButtonInCompartment(name)` 只认库自己写进去的 `object.db.showInCompartment`，
+--- 而不少插件是直接 `AddonCompartmentFrame:RegisterAddon(...)` 登记的（Lueur 就是），
+--- 那条不等 true —— 只看库的标志会**再补一条同名条目**，玩家在列表里看到两个 Lueur。
+local function CompartmentEntry(name)
+    local regs = _G.AddonCompartmentFrame and _G.AddonCompartmentFrame.registeredAddons
+    if type(regs) ~= "table" then return nil end
+    for i = 1, #regs do
+        local entry = regs[i]
+        if type(entry) == "table" and entry.text == name then return entry end
+    end
+    return nil
+end
+
+--- 一颗图标：没登记进收纳就登记；小地图上那颗还亮着就压掉。
+local function CollectOne(lib, name)
+    if type(lib.objects) ~= "table" or not lib.objects[name] then return end
+    if type(lib.IsButtonCompartmentAvailable) == "function"
+        and not lib:IsButtonCompartmentAvailable() then
+        return
+    end
+    if type(lib.GetMinimapButton) ~= "function" then return end
+    local btn = lib:GetMinimapButton(name)
+    if not btn then return end
+    local entry = CompartmentEntry(name)
+    if type(lib.IsButtonInCompartment) == "function" and not lib:IsButtonInCompartment(name)
+        and not entry then
+        if pcall(lib.AddButtonToCompartment, lib, name) then
+            addedNames[name] = true
+            AddedStore()[name] = true
+        end
+    elseif entry and entry.registerForAnyClick then
+        -- 这一条是**库**写的（只有库登记的那条带 registerForAnyClick）。可能不是本会话加的
+        -- （上次会话加完存盘了），也记进存档：关掉收纳时才有归属可撤。
+        if not AddedStore()[name] then
+            AddedStore()[name] = true
+            addedNames[name] = true
+        end
+    end
+    if ShownSafe(btn) then
+        if pcall(lib.Hide, lib, name) then collectedNames[name] = true end
+    end
+end
+
+--- 把当前所有 LibDBIcon 图标收进收纳（幂等，可反复调用）。返回注册总数。
+function B:CollectIcons()
+    local lib = LibDBIcon()
+    if not lib or type(lib.objects) ~= "table" then return 0 end
+    -- 重载后 `addedNames` 是空的，但从存档里能捞回来（关掉收纳时要撤销的就是这些）。
+    for name in pairs(AddedStore()) do addedNames[name] = true end
+    local n = 0
+    for name in pairs(lib.objects) do
+        n = n + 1
+        CollectOne(lib, name)
+    end
+    return n
+end
+
+--- 不是 LibDBIcon 画的、但**自己往收纳列表登记了条目、又在小地图上留着一颗按钮**的图标。
+--- LibDBIcon 那条路只覆盖用库的插件；直接调 `AddonCompartmentFrame:RegisterAddon` 的插件
+--- 不在 `lib.objects` 里，得点名收。名单为空也不影响别人（没装的框体是 nil）。
+local EXTRA_BUTTONS = {
+    "WoWBridgeMinimapButton",   -- 无限工坊 · 开发组件（收纳里有条目，按钮仍在 Minimap 上）
+}
+local extraHidden = {}          -- 我们藏过的（恢复时放回去）
+
+local function CollectExtras()
+    for i = 1, #EXTRA_BUTTONS do
+        local name = EXTRA_BUTTONS[i]
+        local frame = rawget(_G, name)
+        if type(frame) == "table" and frame.Hide and Widget:Readable(frame) then
+            local okShow, shown = pcall(frame.IsShown, frame)
+            if okShow and Secrets.Bool(shown, false) then
+                if pcall(frame.Hide, frame) then extraHidden[name] = true end
+            end
+        end
+    end
+end
+
+local function RestoreExtras()
+    for name in pairs(extraHidden) do
+        local frame = rawget(_G, name)
+        if type(frame) == "table" and frame.Show then pcall(frame.Show, frame) end
+    end
+    extraHidden = {}
+end
+
+--- 轮询：插件迟注册（登录后几秒才成表）与它自己 Refresh 都要纠回。
+--- 不再问 `Minimap:IsActive()`：这条轮询只在 StartCollect 里挂、在 RestoreCollect 里摘，
+--- 关闭模块走的是 RestoreCollect 那条路，别在这里多一道会漏的门（热载时 active 还没置位）。
+local function TickCollect()
+    B:CollectIcons()
+    CollectExtras()
+end
+
+function B:StartCollect()
+    B:CollectIcons()
+    CollectExtras()
+    if not collectSubId then
+        collectSubId = Scheduler:Every(1500, TickCollect, "小地图:插件图标收纳")
+    end
+end
+
+function B:RestoreCollect()
+    local lib = LibDBIcon()
+    if lib then
+        for name in pairs(collectedNames) do
+            pcall(lib.Show, lib, name)
+        end
+        if type(lib.RemoveButtonFromCompartment) == "function" then
+            local store = AddedStore()
+            for name in pairs(addedNames) do
+                pcall(lib.RemoveButtonFromCompartment, lib, name)
+            end
+            for name in pairs(store) do
+                pcall(lib.RemoveButtonFromCompartment, lib, name)
+            end
+            for name in pairs(store) do store[name] = nil end
+        end
+    end
+    RestoreExtras()
+    collectedNames, addedNames = {}, {}
+    if collectSubId then
+        Scheduler:Unregister(collectSubId)
+        collectSubId = nil
+    end
+end
+
+--- `/mui minimap collect`：收纳现状（每颗：在不在收纳列表、小地图上还亮不亮、是不是我们藏的）。
+function B:ProbeCollect()
+    local lib = LibDBIcon()
+    if not lib then
+        ns:Print("本机没有 LibDBIcon-1.0（没有插件用它画小地图图标），没什么可收的。")
+        return
+    end
+    local avail = type(lib.IsButtonCompartmentAvailable) == "function"
+        and lib:IsButtonCompartmentAvailable()
+    ns:Print(("收纳按钮可用=%s · 轮询=%s"):format(tostring(avail and true or false),
+        collectSubId and "运行中" or "停"))
+    local n = 0
+    for name in pairs(lib.objects or {}) do
+        n = n + 1
+        local btn = lib.GetMinimapButton and lib:GetMinimapButton(name)
+        local inC = type(lib.IsButtonInCompartment) == "function"
+            and lib:IsButtonInCompartment(name)
+        ns:Print(("  %s：收纳=%s  小地图上=%s  我们藏的=%s"):format(
+            tostring(name), tostring(inC and true or false),
+            btn and tostring(ShownSafe(btn)) or "无按钮",
+            tostring(collectedNames[name] and true or false)))
+    end
+    ns:Print(("  共 %d 颗（LibDBIcon 注册表）"):format(n))
+    for i = 1, #EXTRA_BUTTONS do
+        local name = EXTRA_BUTTONS[i]
+        local frame = rawget(_G, name)
+        local state = "不存在"
+        if type(frame) == "table" then
+            local okShow, shown = pcall(frame.IsShown, frame)
+            state = okShow and tostring(Secrets.Bool(shown, false)) or "读不出"
+        end
+        ns:Print(("  %s（非 LibDBIcon）：小地图上=%s  我们藏的=%s"):format(
+            name, state, tostring(extraHidden[name] and true or false)))
+    end
+end
+
+--- `/mui minimap buttons`：盘点**散落在小地图周围的插件图标**（LibDBIcon 一类）。
+---
+--- 报障口径是"收纳不完善，收进去的插件仍然有自己的图标在外头" —— 先按真名/父级/锚点把它们列出来，
+--- 才知道哪些是我们该收的、哪些是暴雪自己的（追踪 / 收纳 / 排队 / 日历 / 邮件 / 缩放）。
+--- 判据用两条：① 名字带 `LibDBIcon`（这个库的按钮命名是 `LibDBIcon10_<插件名>`，是硬信号）；
+--- ② 没有名字的（有些插件自绘）再看"挂在 Minimap / MinimapCluster 上 + 带 OnClick + 尺寸 ≤ 48"。
+function B:ScanMinimapButtons()
+    local rows, seen = {}, {}
+    local where = function(relTo)
+        if type(relTo) == "string" then return relTo end
+        if type(relTo) == "table" then
+            local okN, n2 = pcall(relTo.GetName, relTo)
+            return (okN and n2) or "(匿名帧)"
+        end
+        return "?"
+    end
+    local function pointsText(frame)
+        local n = frame.GetNumPoints and frame:GetNumPoints() or 0
+        local out = {}
+        for i = 1, math.min(n, 3) do
+            local ok, point, relTo, relPoint, x, y = pcall(frame.GetPoint, frame, i)
+            if ok and point then
+                out[#out + 1] = ("%s→%s%s(%s,%s)"):format(point, tostring(relPoint), where(relTo),
+                    tostring(x), tostring(y))
+            end
+        end
+        if n > 3 then out[#out + 1] = ("…共%d点"):format(n) end
+        return #out > 0 and table.concat(out, " ") or "无锚点"
+    end
+    --- 锚点（任意一点）是否指向小地图那三颗框；顺带回"它就是小地图的直接子框"。
+    local function anchoredToMap(frame)
+        local n = frame.GetNumPoints and frame:GetNumPoints() or 0
+        for i = 1, math.min(n, 3) do
+            local ok, _, relTo = pcall(frame.GetPoint, frame, i)
+            if ok then
+                local rn = where(relTo)
+                if rn == "Minimap" or rn == "MinimapCluster" or rn == "MinimapBackdrop" then return true end
+            end
+        end
+        return false
+    end
+    local function consider(frame)
+        if not frame or seen[frame] then return end
+        seen[frame] = true
+        local okN, name = pcall(frame.GetName, frame)
+        name = okN and name or nil
+        local okP, p = pcall(frame.GetParent, frame)
+        local parent = "?"
+        if okP and p then
+            local okPN, pn = pcall(p.GetName, p)
+            parent = (okPN and pn) or "(匿名父级)"
+        end
+        local libdbi = type(name) == "string" and name:find("^LibDBIcon") ~= nil
+        local hasClick = false
+        if frame.GetScript then
+            local okS, script = pcall(frame.GetScript, frame, "OnClick")
+            hasClick = okS and type(script) == "function"
+        end
+        local okW, w = pcall(frame.GetWidth, frame)
+        local okH, h = pcall(frame.GetHeight, frame)
+        -- 受限窗口里宽高可能是机密数字，拿去做 `w > 0` 比较会抛（AGENTS：数字只有 ==nil / 真值 / tostring 稳）。
+        w, h = (okW and Secrets.Number(w)) or 0, (okH and Secrets.Number(h)) or 0
+        local nearMap = anchoredToMap(frame)
+        -- 判据口径（2026-11-26 第二版，第一版只看子树时 0 命中）：
+        -- ① 名字以 LibDBIcon 开头（即使它被挂到 UIParent / 别的容器上也能认出来）；
+        -- ② 任何带 OnClick、尺寸 ≤ 48、锚点指向 Minimap / MinimapCluster / MinimapBackdrop 的按钮；
+        -- ③ 名字里带 Minimap / MinimapIcon 的按钮（有些插件自绘，不挂锚点只按名字能认）。
+        local byName = type(name) == "string" and (name:find("Minimap") ~= nil or name:find("MinimapIcon") ~= nil)
+        if libdbi or (hasClick and nearMap and w > 0 and w <= 48 and h <= 48 and h > 0) or (byName and hasClick) then
+            local okShown, shownRaw = pcall(frame.IsShown, frame)
+            local shown = okShown and Secrets.Bool(shownRaw, false) or false
+            local okAlpha, alpha = pcall(frame.GetAlpha, frame)
+            if not okAlpha then alpha = nil end
+            if Secrets and type(Secrets.CanRead) == "function" then
+                if not Secrets.CanRead(alpha) then alpha = nil end
+            end
+            rows[#rows + 1] = {
+                frame = frame,
+                name = type(name) == "string" and name or "(无名)",
+                libdbi = libdbi,
+                parent = parent,
+                point = pointsText(frame),
+                w = w, h = h,
+                shown = shown,
+                alpha = alpha,
+            }
+        end
+    end
+    -- 第一趟：小地图那棵子树（LibDBIcon 的按钮通常直接挂 Minimap）。
+    local function walk(frame, depth)
+        if not frame or depth > 4 then return end
+        local okC, children = pcall(frame.GetChildren, frame)
+        if not okC or type(children) ~= "table" then return end
+        for _, child in ipairs(children) do
+            consider(child)
+            walk(child, depth + 1)
+        end
+    end
+    for _, root in ipairs({ _G.Minimap, _G.MinimapCluster, _G.MinimapBackdrop }) do
+        if root then
+            consider(root)
+            walk(root, 1)
+        end
+    end
+    -- 第二趟：全界面扫（有些插件把按钮挂在 UIParent 或自己的容器上，只靠锚点指向小地图）。
+    if type(EnumerateFrames) == "function" then
+        local frame = EnumerateFrames()
+        while frame do
+            consider(frame)
+            frame = EnumerateFrames(frame)
+        end
+    end
+    local out = {}
+    for i, r in ipairs(rows) do
+        local size = (r.w and r.h) and ("%dx%d"):format(math.floor(r.w), math.floor(r.h)) or "-"
+        local alpha = r.alpha and ("%.2f"):format(r.alpha) or "-"
+        out[#out + 1] = ("  %2d. %s%s  %s  父=%s  alpha=%s  显示=%s  锚点=%s"):format(
+            i, r.name, r.libdbi and "（LibDBIcon）" or "", size, r.parent, alpha, tostring(r.shown), r.point)
+    end
+    return rows, out
 end
 
 EventBus:Register("MONETUI_THEME_CHANGED", function()

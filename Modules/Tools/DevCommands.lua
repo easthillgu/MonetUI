@@ -315,9 +315,99 @@ end
 
 -- 本层真正接管的顶层命令。report / devtools 仍走 Core 的模块 HandleCommand 路径
 -- （在 Core 里以模块名消费），这里不重复实现。
+--- `/mui watch start|stop`：拍两张"此刻可见框"的名单，差集就是**这几秒新冒出来的框**。
+---
+--- 用途：报障"做了某个动作后屏幕上多出一个框，但不知道它是谁" —— 不用先猜位置/名字，
+--- 先 start → 做那个动作 → stop，差的那些框带着真名、父级、尺寸、alpha、坐标。
+--- 全量走 EnumerateFrames（本机 6 万多个框，拍一张约 0.5–1 秒）；forbidden 的框读不出就整条跳过。
+local watchSnapshot
+local function WatchSnapshot()
+    local set = {}
+    if type(EnumerateFrames) ~= "function" then return set end
+    local frame = EnumerateFrames()
+    while frame do
+        local ok, shown = pcall(frame.IsShown, frame)
+        if ok and shown then set[frame] = true end
+        frame = EnumerateFrames(frame)
+    end
+    return set
+end
+local function WatchDescribe(frame)
+    local parts = {}
+    local okN, name = pcall(frame.GetName, frame)
+    parts[#parts + 1] = (okN and type(name) == "string") and name or "(匿名)"
+    local okP, p = pcall(frame.GetParent, frame)
+    if okP and p then
+        local okPN, pn = pcall(p.GetName, p)
+        parts[#parts + 1] = "父=" .. ((okPN and pn) or "(匿名)")
+    end
+    local okW, w = pcall(frame.GetWidth, frame)
+    local okH, h = pcall(frame.GetHeight, frame)
+    if okW and okH and w and h then parts[#parts + 1] = ("%dx%d"):format(math.floor(w), math.floor(h)) end
+    local okA, a = pcall(frame.GetAlpha, frame)
+    if okA and a and (not ns.Secrets or ns.Secrets.CanRead(a)) then
+        parts[#parts + 1] = ("alpha=%.2f"):format(a)
+    else
+        parts[#parts + 1] = "alpha=?"
+    end
+    local okC, x, y = pcall(frame.GetCenter, frame)
+    if okC and x and y and (not ns.Secrets or (ns.Secrets.CanRead(x) and ns.Secrets.CanRead(y))) then
+        parts[#parts + 1] = ("(%.0f,%.0f)"):format(x, y)
+    end
+    return table.concat(parts, "  ")
+end
+local function WatchCommand(rest)
+    rest = string.lower(rest or "")
+    if rest == "" or rest == "start" then
+        -- 先打一句再扫：扫六万多个框要 1 秒上下，如果先扫再打印，玩家看到的是"按了回车没反应"。
+        ns:Print("正在拍快照（扫全部可见框，画面会卡一下）……")
+        local function snap()
+            local ok, err = pcall(function()
+                watchSnapshot = WatchSnapshot()
+            end)
+            if not ok then
+                ns:Print("快照失败：" .. tostring(err))
+                return
+            end
+            local n = 0
+            for _ in pairs(watchSnapshot) do n = n + 1 end
+            ns:Print(("已拍快照：此刻可见框 %d 个。现在去做那个动作，回来跑 /mui watch stop。"):format(n))
+        end
+        if type(_G.C_Timer) == "table" and type(_G.C_Timer.After) == "function" then
+            pcall(_G.C_Timer.After, 0, snap)
+        else
+            snap()
+        end
+        return true
+    end
+    if rest == "stop" then
+        if not watchSnapshot then
+            ns:Print("还没有快照，先跑 /mui watch start。")
+            return true
+        end
+        local now = WatchSnapshot()
+        local new, count = {}, 0
+        for frame in pairs(now) do
+            if not watchSnapshot[frame] then
+                count = count + 1
+                new[#new + 1] = frame
+            end
+        end
+        watchSnapshot = nil
+        ns:Print(("新出现的可见框 %d 个："):format(count))
+        for i = 1, math.min(#new, 40) do
+            ns:Print(("  %2d. %s"):format(i, WatchDescribe(new[i])))
+        end
+        if #new > 40 then ns:Print(("  ……其余 %d 个未列"):format(#new - 40)) end
+        return true
+    end
+    ns:Print("用法：/mui watch start  然后做动作，再 /mui watch stop")
+    return true
+end
+
 local DISPATCH = {
     scale = true, blocks = true, restrict = true, colors = true, lost = true,
-    compat = true, perf = true, dev = true, dig = true, chat = true,
+    compat = true, perf = true, dev = true, dig = true, chat = true, watch = true,
 }
 
 -- 只列开发版诊断命令的文案；发布版连这些字符串都不在包里。
@@ -325,6 +415,7 @@ local HELP_LINES = {
     "  —— 开发版诊断（发布版不提供）——",
     "  |cffffd100/mui scale|r      像素网格 / 缩放自检（改完 UI 缩放后再跑一次对比）",
     "  |cffffd100/mui blocks|r     机密布尔被拦的调用栈账本（`UNKNOWN()` 归因，加 full 看完整栈）",
+    "  |cffffd100/mui watch start|r 拍一张可见框快照；做动作后 `/mui watch stop` 列出**新冒出来的框**（名字/父级/尺寸/alpha/坐标）",
     "  |cffffd100/mui restrict|r   六类受限窗口自查（战斗只是其中一类）+ 可读性前置是否可用",
     "  |cffffd100/mui colors|r     配色亮度阶梯 + 逐组对比度判定（含最小对比控制值与纠偏记录），账本 MonetUIDB.colorReport",
     "  |cffffd100/mui lost|r       血条「损失部分」配色自查：样式有没有落地、织纹有没有把颜色盖住",
@@ -358,6 +449,9 @@ function M:Handle(message)
 
     elseif command == "blocks" then
         PrintBlockLedger(rest)
+
+    elseif command == "watch" then
+        WatchCommand(rest)
 
     elseif command == "restrict" then
         PrintRestrictions()

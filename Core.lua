@@ -57,6 +57,12 @@ local DEFAULTS = {
         Chat         = true,
     },
     chat = { positions = {} },
+    -- 小地图插件收纳（Modules/Minimap/Buttons.lua）：我们往 `AddonCompartmentFrame` 里
+    -- **替插件补登记**的那些名字。`AddButtonToCompartment` 会把 `showInCompartment` 写进
+    -- 插件自己的存档，所以这条归属必须由我们落盘记住 —— 否则重载后玩家关掉收纳，
+    -- 列表里就留下一条撤不掉的重复项。（必须在这个 DEFAULTS 里，否则下次登录被
+    -- MergeDefaults 当成未知键丢掉。）
+    minimapCollectAdded = {},
     -- 位置服务（Utils/Mover.lua）：全 addon 的框共用一套拖拽 / 吸附 / 锁。locked 是全局锁，locks 按组覆盖；
     -- grid 是网格步长（物理像素，0 = 关），snap / snapRange 是框与框互相吸附的开关与范围（物理像素）。
     -- 2026-11-15（§8.124）：**默认锁定**。原来 locked=false，player 框常驻可见，左键一点一拖就把
@@ -1176,7 +1182,7 @@ local DEV_SUBCOMMANDS = {
     skins       = { diagnose=true, diag=true, probe=true, layers=true, templates=true,
                     closes=true, inset=true, arrows=true },
     infobar     = { diagnose=true, diag=true, probe=true },
-    minimap     = { diagnose=true, diag=true, probe=true, menu=true },
+    minimap     = { diagnose=true, diag=true, probe=true, menu=true, near=true, buttons=true, collect=true },
     nameplates  = { diagnose=true, diag=true, probe=true, siblings=true, cvars=true },
     tooltip     = { diagnose=true, diag=true, probe=true },
     buffframe   = { probe=true, diag=true, diagnose=true },
@@ -1292,10 +1298,14 @@ local function HandleSlash(message)
                 ns:Print("模块 " .. moduleName .. " 已关闭。")
             else
                 -- Modules may expose their own sub-commands (e.g. `/mui skins diagnose`): a handler returns true when it consumed the rest of the line, otherwise fall through to the usage line.
+                -- pcall 吞掉的错误必须打出来（否则玩家只看到"用法：on|off"，把"命令里抛错"误读成"命令不认识"）。
                 local handled = false
                 if type(module.HandleCommand) == "function" then
                     local ok, result = pcall(module.HandleCommand, module, rest)
                     handled = ok and result and true or false
+                    if not ok and ns.dev then
+                        ns:Print(("命令 %s %s 执行出错：%s"):format(moduleName, tostring(rest), tostring(result)))
+                    end
                 end
 
                 if not handled then

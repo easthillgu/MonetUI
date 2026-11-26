@@ -1193,6 +1193,9 @@ end
 --- `/mui minimap diagnose`：逐条报暴雪帧名在本客户端是否存在。
 --- `/mui minimap menu`：微菜单这一趟到底建不建得出来、面板受不受保护（11-05 "右键没反应"的现场判据）。
 function M:HandleCommand(rest)
+    -- 子命令统一按"小写 + 去尾部空白"比对：玩家手打 `/mui Minimap Near` 不该落到用法行去。
+    rest = string.lower((rest or ""):gsub("%s+$", ""))
+
     if rest == "menu" then
         local mm = self.microMenu
         if type(mm) == "table" and type(mm.Probe) == "function" then
@@ -1252,6 +1255,176 @@ function M:HandleCommand(rest)
         else
             ns:Print("安全载体对象不在：MicroMenuSecure.lua 没加载，或它没挂到 Minimap 模块上。")
         end
+        return true
+    end
+
+    -- `/mui minimap collect`：收纳现状（每颗 LibDBIcon 图标：在不在收纳列表、小地图上还亮不亮、是不是我们藏的）。
+    if rest == "collect" then
+        local buttons = self.buttons
+        if type(buttons) ~= "table" or type(buttons.ProbeCollect) ~= "function" then
+            ns:Print("Buttons.lua 没加载，读不到收纳状态。")
+            return true
+        end
+        buttons:ProbeCollect()
+        return true
+    end
+
+    -- `/mui minimap buttons`：盘点小地图周围散落的**插件自己的图标**（LibDBIcon 一类），
+    -- 供"收纳不完善、还有额外图标在外头"这类报障定位。实现见 Buttons.lua 的 ScanMinimapButtons。
+    if rest == "buttons" then
+        local buttons = self.buttons
+        if type(buttons) ~= "table" or type(buttons.ScanMinimapButtons) ~= "function" then
+            ns:Print("Buttons.lua 没加载，扫不了小地图按钮。")
+            return true
+        end
+        local rows, lines = buttons:ScanMinimapButtons()
+        ns:Print(("小地图周围散落的插件图标 %d 个（只列命名/锚点判定命中的）："):format(#rows))
+        for _, line in ipairs(lines) do ns:Print(line) end
+        if #rows == 0 then
+            ns:Print("  （一个都没命中：要么已经全收进我们的容器，要么它们的锚点不在 Minimap/MinimapCluster 上）")
+        end
+        return true
+    end
+
+    -- `/mui minimap near [半径]`：把"小地图附近此刻可见的框"列出来（名 / 宽高 / alpha / 到地图中心的距离）。
+    -- 报障"点了某个动作后小地图边上冒出一个框"时先用这条拿真名，再去代码里查是谁建的：
+    -- 全量扫描走 EnumerateFrames，读不出来的框（forbidden）单独计数，不参与排序。
+    local radiusArg = (rest or ""):match("^near%s*(%d*)$")
+    if radiusArg then
+        local radius = tonumber(radiusArg) or 320
+        local mm = _G.Minimap
+        if not mm then ns:Print("Minimap 不存在。") return true end
+        -- 本客户端在受限窗口里会把坐标 / 尺寸 / alpha 标成机密值：机密值一旦进 format 直接抛
+        -- `invalid value (secret)`。所以每个读出来的数字先过 Secrets.CanRead，读不了的记成 nil，
+        -- 打印时按 "-" 走文字路径（口径见 AGENTS「读一个值之前问 Secrets.CanRead」）。
+        local function Readable(v)
+            if v == nil then return nil end
+            if Secrets and type(Secrets.CanRead) == "function" and not Secrets.CanRead(v) then return nil end
+            return v
+        end
+        local okC, cx, cy = pcall(mm.GetCenter, mm)
+        cx, cy = Readable(cx), Readable(cy)
+        if not okC or cx == nil or cy == nil then
+            ns:Print("Minimap 拿不到中心点（或中心点是机密值），这条命令现在跑不了。")
+            return true
+        end
+        local rows, total, unreadable = {}, 0, 0
+        local frame = EnumerateFrames and EnumerateFrames()
+        while frame do
+            if frame ~= mm then
+                local okS, shown = pcall(frame.IsShown, frame)
+                if okS and Secrets.Bool(shown, false) then
+                    local okG, x, y = pcall(frame.GetCenter, frame)
+                    x, y = Readable(x), Readable(y)
+                    if okG and x and y then
+                        local dx, dy = x - cx, y - cy
+                        if math.abs(dx) <= radius and math.abs(dy) <= radius then
+                            total = total + 1
+                            local okN, name = pcall(frame.GetName, frame)
+                            local okW, w = pcall(frame.GetWidth, frame)
+                            local okH, h = pcall(frame.GetHeight, frame)
+                            local okA, a = pcall(frame.GetAlpha, frame)
+                            w = okW and Readable(w) or nil
+                            h = okH and Readable(h) or nil
+                            a = okA and Readable(a) or nil
+                            rows[#rows + 1] = {
+                                name = (okN and type(name) == "string") and name or "(匿名)",
+                                w = w,
+                                h = h,
+                                a = a,
+                                d = math.sqrt(dx * dx + dy * dy),
+                            }
+                        end
+                    else
+                        unreadable = unreadable + 1
+                    end
+                end
+            end
+            frame = EnumerateFrames and EnumerateFrames(frame)
+        end
+        table.sort(rows, function(a, b) return a.d < b.d end)
+        ns:Print(("小地图中心 %.0f,%.0f · 半径 %d 内可见框 %d 个（另有 %d 个坐标读不出）："):format(
+            cx, cy, radius, total, unreadable))
+        for i = 1, math.min(#rows, 40) do
+            local r = rows[i]
+            -- 宽高 / alpha 可能是机密值（读不出来时存的是 nil），走文字拼接而不是 %d，免得抛。
+            local wText = r.w and tostring(math.floor(r.w)) or "-"
+            local hText = r.h and tostring(math.floor(r.h)) or "-"
+            local aText = r.a and ("%.2f"):format(r.a) or "-"
+            ns:Print(("  %2d. %s  %sx%s  alpha=%s  距 %.0f"):format(
+                i, r.name, wText, hText, aText, r.d))
+        end
+        if #rows > 40 then
+            ns:Print(("  ……其余 %d 个未列（缩小范围：/mui minimap near 200）"):format(#rows - 40))
+        end
+        return true
+    end
+
+    -- `/mui minimap loners [半径]`：全屏范围找"只有一个空壳 + 贴图、没有子框"的可见框。
+    -- 专治"屏幕上多出一个空框线、跟按钮不重合"这类报障：选中边条如果锚错了宿主、
+    -- 或者某个暴雪框被压成 alpha 0 却留下一个贴图层，都会落进这个形状。
+    local lonerArg = (rest or ""):match("^loners%s*(%d*)$")
+    if lonerArg then
+        local mm = _G.Minimap
+        local okC, cx, cy = pcall(mm.GetCenter, mm)
+        if not okC or not cx or not cy then ns:Print("Minimap 拿不到中心点。") return true end
+        local radius = tonumber(lonerArg) or 3000
+        local rows, total = {}, 0
+        if type(EnumerateFrames) ~= "function" then ns:Print("没有 EnumerateFrames，扫不了。") return true end
+        local frame = EnumerateFrames()
+        while frame do
+            local okS, shown = pcall(frame.IsShown, frame)
+            if okS and Secrets.Bool(shown, false) then
+                local okA, a = pcall(frame.GetAlpha, frame)
+                if okA and a and (not Secrets or type(Secrets.CanRead) ~= "function" or Secrets.CanRead(a)) and a > 0 then
+                    local okCh, children = pcall(frame.GetNumChildren, frame)
+                    local okRg, regions = pcall(frame.GetNumRegions, frame)
+                    -- 这些计数在受限窗口里可能是机密数字：一律先过 Secrets.Number，
+                    -- 读不出来就当"不匹配"（数字的 ==字面量 / 比较 在机密值上会抛）。
+                    children = okCh and Secrets.Number(children) or nil
+                    regions  = okRg and Secrets.Number(regions) or nil
+                    if children == 0 and regions and regions > 0 then
+                        local okW, w = pcall(frame.GetWidth, frame)
+                        local okH, h = pcall(frame.GetHeight, frame)
+                        local okCe, x, y = pcall(frame.GetCenter, frame)
+                        w = okW and Secrets.Number(w) or nil
+                        h = okH and Secrets.Number(h) or nil
+                        x = okCe and (Secrets.CanRead(x) and x or nil) or nil
+                        y = okCe and (Secrets.CanRead(y) and y or nil) or nil
+                        if w and h and x and y and w >= 10 and h >= 4 then
+                            local dx, dy = x - cx, y - cy
+                            if math.abs(dx) <= radius and math.abs(dy) <= radius then
+                                total = total + 1
+                                local okN, name = pcall(frame.GetName, frame)
+                                local okP, p = pcall(frame.GetParent, frame)
+                                local pn = "?"
+                                if okP and p then
+                                    local okPN, n2 = pcall(p.GetName, p)
+                                    pn = (okPN and n2) or "(匿名)"
+                                end
+                                rows[#rows + 1] = {
+                                    name = (okN and type(name) == "string") and name or "(匿名)",
+                                    parent = pn,
+                                    size = ("%dx%d"):format(math.floor(w), math.floor(h)),
+                                    where = ("(%.0f,%.0f)"):format(x, y),
+                                    regions = regions,
+                                    d = math.sqrt(dx * dx + dy * dy),
+                                }
+                            end
+                        end
+                    end
+                end
+            end
+            frame = EnumerateFrames(frame)
+        end
+        table.sort(rows, function(a, b) return a.d < b.d end)
+        ns:Print(("半径 %d 内「只有贴图、没有子框」的空壳 %d 个（按距小地图远近排）："):format(radius, total))
+        for i = 1, math.min(#rows, 40) do
+            local r = rows[i]
+            ns:Print(("  %2d. %s  父=%s  %s  %s  region=%d  距 %.0f"):format(
+                i, r.name, r.parent, r.size, r.where, r.regions, r.d))
+        end
+        if #rows > 40 then ns:Print(("  ……其余 %d 个未列"):format(#rows - 40)) end
         return true
     end
 

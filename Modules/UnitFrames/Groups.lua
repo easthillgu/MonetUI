@@ -1116,6 +1116,23 @@ local AlphaWalk
 AlphaWalk = function(frame, alpha, depth)
     if not frame then return end
     if type(frame.SetAlpha) == "function" then pcall(frame.SetAlpha, frame, alpha) end
+    -- **贴图 / 字体串也要压**（2026-11-26 判例：点小队成员后"原始队伍位置"冒出一个空心金框）。
+    -- 暴雪的选中高亮是**region**（`selectionHighlight` 一类贴图），它们带 SetIgnoreParentAlpha，
+    -- 因此父框 alpha 0 完全挡不住它；以前这里只走 GetChildren()，region 一层从来没被归零，
+    -- 于是小队框被我们压掉之后，选中时仍会把那条描边画在它自己的原位。
+    -- 归零 region 的 alpha 与关鼠标同性质（写的是我们自己的框吗？不是 —— 但这里是"压着不让看"，
+    -- 与 AlphaTree 一样只在非受限窗口做，受保护框战斗中写不进去也不强写）。
+    if type(frame.GetRegions) == "function" then
+        local ok, regions = pcall(function() return { frame:GetRegions() } end)
+        if ok and type(regions) == "table" then
+            for i = 1, #regions do
+                local region = regions[i]
+                if region and type(region.SetAlpha) == "function" then
+                    pcall(region.SetAlpha, region, alpha)
+                end
+            end
+        end
+    end
     if depth >= 4 then return end
     local kids = ChildrenOf(frame)
     if not kids then return end
@@ -1764,6 +1781,15 @@ function M:RegisterEvents()
     EventBus:Register("PLAYER_TARGET_CHANGED", function()
         SyncSelection()
         if Restricted() then MarkMuteDirty() else ReparkBlizzardGroups() end
+        -- 选中高亮是**暴雪在那一拍之后才点亮/新建**的 region（贴图），当场那一次复压可能早于它出生；
+        -- 补两拍（0.05s / 0.3s）再压一次，避免"空心金框"在屏幕上留到下一个 ticker。
+        if type(_G.C_Timer) == "table" and type(_G.C_Timer.After) == "function" then
+            for _, delay in ipairs({ 0.05, 0.3 }) do
+                pcall(_G.C_Timer.After, delay, function()
+                    if Restricted() then MarkMuteDirty() else ReparkBlizzardGroups() end
+                end)
+            end
+        end
     end)
 
     -- 战斗里排队的补做已交给 ns:AfterCombat（Core 统一注册 PLAYER_REGEN_ENABLED 排空）。
