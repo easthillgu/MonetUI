@@ -112,7 +112,7 @@ local WATCH = {
             { "issecretvalue", "判机密的老前置" },
             { "canaccessvalue", "读值前的正规前置（Secrets.CanRead 用它）" },
             { "canaccesstable", "同上，表版本" },
-            { "canaccessobject", "碰暴雪对象前先问" },
+            { "canaccessobject", "对象级前置：1.60 **实测无**（Secrets.CanRead 只用 canaccessvalue，缺席不影响本仓）", "absent" },
             { "issecurevariable", "归因用：逐键扫脏键" },
             { "InCombatLockdown", "全局老名字（文档里挂在 C_RestrictedActions 下）" },
             { probe = ProbeRestrictedActions, label = "C_RestrictedActions.*", why = "六类受限窗口的账本源" },
@@ -164,7 +164,9 @@ local WATCH = {
             { "DebuffFrame", "同上" },
             { "TempEnchantFrame", "同上；12.1.5 实测**没有这个名字**（BuffFrame.lua 的压制清单里是一条空枪），真名用 /mui compat find Enchant 找" },
             { "SpellFlyout", "弹出托盘：鼠标点开在 12.1.5 是越权的" },
-            { "LFGParentFrame", "Forever 候选：12.1.5 没有属正常，Forever 有就得复核皮肤", "absent" },
+            -- 12.1.5 没有属正常，1.60 **实测有**（2026-11-26 读数），Forever.lua 那整套美化就是给它做的；
+            -- 所以这里不再标 absent —— 标错会让下一趟"有"被当成缺陷，反过来掩盖真缺陷。
+            { "LFGParentFrame", "复古查找组：1.60 实测有（Forever.lua 已美化：窗口/页签/侧签/Glyph）" },
             { "LegacySystemFrame", "同上（Forever 传承进度）", "absent" },
             { "MicroMenu", "Forever 微菜单（12.1.5 也有，名字撞上了）" },
         },
