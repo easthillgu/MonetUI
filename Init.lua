@@ -141,17 +141,28 @@ end
 
 Init:ApplyStatic()
 
---- 已删除模块留下的 CVar 账目必须在 Tweaks / Nameplates 接管之前结算。
---- 只恢复“当前仍是旧模块写入值”的情况；玩家改过或值机密时绝不覆盖。
-function Init:CleanupLegacyCVars()
+--- CVar 到底能不能读了。
+--- `C_CVar.AreCVarsLoaded` 有些 build 在登录后一直答 false —— 2026-11-26 在 1.60.1 · 71139 实测：
+--- PLAYER_LOGIN 与 25 分钟后的 `/mui init status` 两次都是 false，而 GetCVar 早就读得出东西。
+--- 把那个答案当"永久不可读"会让清理永远卡在等待，所以补一条等价判据：已知 CVar 读得出即可。
+local function CVarsReady()
     local api = _G.C_CVar
     if api and type(api.AreCVarsLoaded) == "function" then
         local ok, loaded = pcall(api.AreCVarsLoaded)
         local S = ns.Secrets
-        if not ok or not (S and S.Bool and S.Bool(loaded, false)) then
-            self.lastCleanup = "等待：CVar 尚未加载"
-            return false
-        end
+        if ok and S and S.Bool and S.Bool(loaded, false) then return true end
+    end
+    -- API 说没加载（或压根没有这个 API）时，再看一次真实读数：读得出就当已经就绪。
+    local value, known = ReadCVar("uiScale")
+    return known and value ~= nil and CanRead(value)
+end
+
+--- 已删除模块留下的 CVar 账目必须在 Tweaks / Nameplates 接管之前结算。
+--- 只恢复“当前仍是旧模块写入值”的情况；玩家改过或值机密时绝不覆盖。
+function Init:CleanupLegacyCVars()
+    if not CVarsReady() then
+        self.lastCleanup = "等待：CVar 尚未加载"
+        return false
     end
 
     local db = ns:DB()
@@ -232,23 +243,41 @@ function Init:CleanupLegacyCVars()
     return deferred == 0
 end
 
---- ADDON_LOADED 后先做轻量迁移；未就绪的项在 PLAYER_LOGIN 再试一次。
+--- ADDON_LOADED / PLAYER_LOGIN 先做轻量迁移；未就绪的项在事件与定时器上补试。
+--- 2026-11-26 实机（1.60.1 · 71139）：只挂 MONETUI_RESTRICTION_CHANGED 一个重试口时，进城挂机
+--- 25 分钟都不会有第二次尝试，`lastCleanup` 永远停在"等待：CVar 尚未加载"。所以四条都挂：
+--- 进入世界 / 脱战 / 限制状态变化（这条仍留，用于副本里读不到的时机）＋ 登录后 3 s / 10 s 定时兜底。
 function Init:Prepare()
     if self.cleanupComplete then return true end
     self.cleanupComplete = self:CleanupLegacyCVars()
-    if not self.cleanupComplete and not self.cleanupWatching and ns.EventBus and ns.EventBus.Register then
+    if not self.cleanupComplete and not self.cleanupWatching then
         self.cleanupWatching = true
+
         local function retry()
-            if self.cleanupComplete or ns:IsRestricted() then return end
+            if self.cleanupComplete then return end
+            -- 战斗中不写 CVar，下一次脱战再算；ns:InCombat 由 Core 提供，离线桩里可能没有。
+            if type(ns.InCombat) == "function" and ns:InCombat() then return end
             self:Prepare()
         end
-        pcall(ns.EventBus.Register, ns.EventBus, "MONETUI_RESTRICTION_CHANGED", function()
-            if _G.C_Timer and _G.C_Timer.After then
-                _G.C_Timer.After(0, retry)
-            else
-                retry()
+
+        -- 定时兜底独立于事件：CVars 可能晚于 PLAYER_LOGIN 才落地，而进程事件里没有"CVars 好了"这一条。
+        if _G.C_Timer and _G.C_Timer.After then
+            _G.C_Timer.After(3, retry)
+            _G.C_Timer.After(10, retry)
+        end
+
+        if ns.EventBus and ns.EventBus.Register then
+            local function viaTimer()
+                if _G.C_Timer and _G.C_Timer.After then
+                    _G.C_Timer.After(0, retry)
+                else
+                    retry()
+                end
             end
-        end)
+            pcall(ns.EventBus.Register, ns.EventBus, "PLAYER_ENTERING_WORLD", viaTimer)
+            pcall(ns.EventBus.Register, ns.EventBus, "PLAYER_REGEN_ENABLED", viaTimer)
+            pcall(ns.EventBus.Register, ns.EventBus, "MONETUI_RESTRICTION_CHANGED", viaTimer)
+        end
     end
     return self.cleanupComplete
 end
@@ -450,7 +479,12 @@ function Init:Run(onReady)
     local try
     try = function()
         local db = ns:DB().init
-        if db.chatAligned and HasAlignedLayout(self.SETUP.chatLayoutName) then return end
+        if db.chatAligned and HasAlignedLayout(self.SETUP.chatLayoutName) then
+            -- 状态要如实说"这一项已经做完"，否则 `/mui init status` 一直显示「上次对齐：未运行」，
+            -- 看着像没做（2026-11-26 实机即如此）。
+            self.lastAlign = "跳过：已标记对齐且布局仍在"
+            return
+        end
         self.attempts = self.attempts + 1
         if self.attempts > 2 then
             self.lastAlign = self.lastAlign .. "；自动重试已用尽，可手动 /mui init run"
