@@ -504,6 +504,68 @@ function Compat:Find(sub)
     return #bag.hits
 end
 
+--- 老式全局族（`/mui compat legacy`）。为什么单列一组、且**不**进 WATCH：
+--- WATCH 的语义是"我们确实依赖它"，缺了就报红；而这些是**候选能力** —— 存在就能补功能，
+--- 不存在也不算缺陷（缺十几个会让 `compat bad` 永远有噪音，就没人看它了）。
+--- 判据同一条：1.60 是经典内核，很多"零售已删"的老全局在这里是活着的第一手 API。
+local LEGACY = {
+    { "物品 / 装备", {
+        "GetItemInfo", "GetItemInfoInstant", "GetItemCount", "GetItemQualityColor",
+        "GetInventoryItemTexture", "GetInventoryItemCount", "GetInventoryItemCooldown",
+        "GetSocketItemInfo", "GetSocketTypes", "IsEquippedItem", "GetInventorySlotInfo",
+    } },
+    { "动作条 / 宏", {
+        "GetActionInfo", "GetActionTexture", "GetActionCooldown", "GetActionCount", "HasAction",
+        "GetMacroInfo", "GetNumMacros", "GetMacroBody", "GetBindingKey", "SetBindingClick",
+    } },
+    { "技能", {
+        "GetSpellInfo", "GetSpellCooldown", "GetSpellTexture", "GetSpellCharges", "GetSpellCount",
+    } },
+    { "单位 / 光环 / 队伍", {
+        "UnitAura", "UnitBuff", "UnitDebuff", "UnitHealth", "UnitPower",
+        "GetNumPartyMembers", "GetNumRaidMembers", "GetRaidRosterInfo", "UnitInRaid",
+        "GetGuildInfo", "GetGuildRosterInfo", "GetNumGuildMembers",
+    } },
+    { "任务 / 商店 / 训练 / 拍卖", {
+        "GetQuestLogTitle", "GetNumQuestLogEntries", "GetQuestLink", "GetQuestReward",
+        "GetMerchantNumItems", "GetMerchantItemInfo",
+        "GetNumTrainerServices", "GetTrainerServiceInfo",
+        "GetAuctionItemInfo", "GetNumAuctionItems",
+    } },
+    { "聊天 / 设置 / 天赋 / 成就", {
+        "GetChatWindowInfo", "GetChatWindowMessages", "SendAddonMessage", "GetChannelList",
+        "GetCVar", "SetCVar",
+        "GetNumTalentTabs", "GetTalentInfo",
+        "GetAchievementInfo", "GetNumAchievements",
+    } },
+}
+
+--- 一趟把"老式全局族现在还剩哪些"打完：**只列缺失的**，全在就一行"全部存在"。
+function Compat:LegacyReport()
+    local absent, total = {}, 0
+    for _, grp in ipairs(LEGACY) do
+        total = total + #grp[2]
+        for _, name in ipairs(grp[2]) do
+            if Exists(name) == false then absent[#absent + 1] = name end
+        end
+    end
+    ns:Print(("|cffffd100老式全局族|r：%d 个里有 %d 个缺失（其余在这个客户端都还活着）")
+        :format(total, #absent))
+    if #absent == 0 then
+        ns:Print("  全部存在 —— 这些老 API 能用的功能就没理由写『客户端没有』。")
+        return 0
+    end
+    local line = {}
+    for i = 1, #absent do
+        line[#line + 1] = absent[i]
+        if #line == 6 or i == #absent then
+            ns:Print("  |cffff6b6b缺|r " .. table.concat(line, ", "))
+            line = {}
+        end
+    end
+    return #absent
+end
+
 --- 打印并记账。opts = { bad = 只列与假设不符的, tmpl = 连模板一起探（会造框体） }。
 function Compat:Print(opts)
     opts = opts or {}

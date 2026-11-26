@@ -389,6 +389,10 @@ function M:Handle(message)
             local arg = string.lower(rest or "")
             if string.find(arg, "^find") then
                 Compat:Find(string.match(arg, "^find%s+(.*)"))
+            elseif arg == "legacy" then
+                -- 老式全局族清单：只答"还有哪些老 API 活着"，不是缺陷报告（所以不进 WATCH）
+                if type(Compat.LegacyReport) == "function" then Compat:LegacyReport()
+                else ns:Print("这个版本的 Compat 没有 LegacyReport。") end
             elseif arg == "caps" then
                 ns:Print("|cffffd100能力表|r（未探测 = 还没人问过；要现探就照常跑 /mui compat）")
                 for _, line in ipairs(Compat:ListCapabilities()) do ns:Print("  " .. line) end
