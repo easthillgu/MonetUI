@@ -10,8 +10,7 @@
 --   * 枚举暴雪框**只读**：每个 Get* 都 pcall，入口过 Widget:Readable，
 --     字符串/数字出栈前过 Secrets.CanRead（机密串的 type() 照样是 "string"）；
 --   * 不往暴雪对象写字段、不挂 HookScript / hooksecurefunc；候选在命令当拍取
---     （本客户端没有 GetMouseFocus，优先 GetMouseFoci，缺席退回 EnumerateFrames+IsMouseOver），
---     api-audit:ok 这里是"哪个名字被用"的说明，不是对 GetMouseFoci 的缺席断言
+--     （本客户端没有 GetMouseFocus，优先 GetMouseFoci，缺席退回 EnumerateFrames+IsMouseOver），  -- api-audit:ok 这里说的是"用哪个名字"，不是断言 GetMouseFoci 缺席
 --     不留任何常驻轮询；
 --   * 脚本钩子只挂自建框（面板拖动 / 行点击 / 输入框），与 Config/SimpleConfig.lua 同例。
 
