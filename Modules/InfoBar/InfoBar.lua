@@ -867,12 +867,28 @@ local PROBED = {
     "IsXPUserDisabled", "GetMaxLevelForPlayerExpansion", "BreakUpLargeNumbers",
 }
 
+--- 点路径解析（`"C_AddOns.GetNumAddOns"` 这类也认），只给 Diagnose 的 API 自检用。
+local function ResolvePath(path)
+    local node = _G
+    for part in tostring(path):gmatch("[^%.]+") do
+        if type(node) ~= "table" and type(node) ~= "userdata" then return nil end
+        node = node[part]
+        if node == nil then return nil end
+    end
+    return node
+end
+
 function M:Diagnose()
-    -- 逐条确认 + 打印走美化层那本公共账（`Skin:Verify`），这样 `/mui skins diagnose` 一处能看全：
-    -- 哪个名字在本客户端不存在，不再各模块自己抄一份 ✓/✗ 循环。
-    local _, missing = ns.Skin:Verify("infobar", PROBED, "信息栏对象自检（本客户端实测）：")
-    if missing > 0 then
-        ns:Print(string.format("%d 个缺失：对应数据块会自动留空，不影响其它块。", missing))
+    -- ⚠ 别拿 `Skin:Verify` 审这批名字：它审的是**框体**，而 PROBED 里全是 API 函数，
+    -- 于是每次自检都刷一屏「23 个对象存在，其中 23 个不是框体」的废话（11-26 实机读数）。
+    -- 这里只问"在不在"，缺了才逐条点名。
+    local missing = {}
+    for i = 1, #PROBED do
+        if ResolvePath(PROBED[i]) == nil then missing[#missing + 1] = PROBED[i] end
+    end
+    ns:Print(("信息栏 API 自检：%d/%d 存在。"):format(#PROBED - #missing, #PROBED))
+    if #missing > 0 then
+        ns:Print("缺失：" .. table.concat(missing, ", ") .. "（对应数据块会自动留空，不影响其它块）")
     end
 
     -- 耐久数据源现状（比只报一句"签名/尚未探测"有用，实机就是这个格在验）：
