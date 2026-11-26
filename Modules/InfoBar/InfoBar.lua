@@ -12,6 +12,12 @@ local Scheduler = ns.Scheduler
 local Secrets  = ns.Secrets
 local infobarSubId = nil
 
+--- 慢刷块（货币 2s / 系统 1s）**不再各自挂逐帧 OnUpdate**，由一条 1 秒订阅统一驱动：
+--- 旧写法两块常驻 `SetScript("OnUpdate")`，条隐藏 / 模块关闭 / 宠物对战时也每秒空转 120 次。
+--- 现在订阅只在"条显示 且 至少一块慢刷块可见"时存在（CraftBuddy InfoBar 的同一条口径）。
+local tickJob = nil
+local ticking = {}
+
 local M = { name = "InfoBar", blocks = {} }
 ns.InfoBar = M
 
@@ -281,16 +287,25 @@ function M:SetText(block, text)
     block.text:SetText(value or "")
     block.hasText = value ~= nil
 
+    local relayout = false
     if value then
         local width = block.text:GetStringWidth() or 0
         -- 数字对齐轨（美术提升 ①）：数值块量一次最大样本宽度（trackWidth），
         -- 之后位数增减不再改帧宽 ⇒ Relayout 不跟着抖；CENTER 组也就不左右横跳。
         -- 只作用于注册时显式声明 trackSample 的块（纯文字块保持原样）。
         if block.trackWidth then width = math.max(width, block.trackWidth) end
-        block.frame:SetWidth(math.max(width, MIN_WIDTH) + PADDING)
+        local frameWidth = math.max(width, MIN_WIDTH) + PADDING
+        -- 差宽写入：帧宽没变就**连 SetWidth 带 Relayout 一起跳过**。
+        -- 系统块（帧率每秒都在变）自从有了 trackSample，帧宽恒等于样本宽 ——
+        -- 旧写法每秒仍做一次 SetWidth + 逐格 ClearAllPoints/SetPoint，纯属白排。
+        if frameWidth ~= block.frameWidth then
+            block.frameWidth = frameWidth
+            block.frame:SetWidth(frameWidth)
+            relayout = true
+        end
     end
 
-    self:Relayout()
+    if relayout then self:Relayout() end
 end
 
 --- Redistribute visible blocks: left-anchored grow rightwards, right-anchored leftwards, in registration order.
@@ -375,6 +390,8 @@ local function UpdateShown(block)
     block.lastShown = on
     block.frame:SetShown(on)
     M:Relayout()
+    -- 可见块集合变了 ⇒ 秒刷可能该开 / 该停（例如货币块空掉隐藏后，只剩系统块也要继续刷）。
+    if M.SyncTicker then M:SyncTicker() end
 end
 
 --- Record a block's spec; frames are built later in `M:Build` because blocks register at file load while the bar only exists at login.
@@ -529,14 +546,8 @@ local function BuildBlockFrame(block)
     end
 
     if block.onUpdate then
-        -- 逐块每帧回调：块一直在，所以是常驻驱动，但同样要进 /mui perf 的外部账
-        -- （key 按块区分，账能指到是哪一块贵）。
-        frame:SetScript("OnUpdate", Scheduler:Profile("infobar:" .. tostring(block.key),
-            "InfoBar " .. tostring(block.key), function(_, elapsed)
-            if not M.active then return end
-            if not M:BlockEnabled(block.key) then return end
-            pcall(block.onUpdate, block, elapsed)
-        end))
+        -- 只登记，不挂脚本：秒刷由 M:SyncTicker() 的一条 1s 订阅统一驱动（见文件顶部 tickJob 注释）。
+        ticking[#ticking + 1] = block
     end
 
     local align = block.trackSample and "RIGHT" or "CENTER"
@@ -590,7 +601,11 @@ local function CreateBar()
     -- 2 physical px: the info bar belongs to the panel tier of the border split (unit frames, auras
     -- and action buttons take 1px; the info bar, minimap and quest tracker take 2px).
     Widget:Theme(bar, { thickness = 2, bgAlpha = 0.25 })
-    bar:EnableMouse(true)
+    -- 条体是**整屏宽**的，但它自己不吃鼠标：以前 `EnableMouse(true)` 让这条 14px 高的横带
+    -- 把整片屏幕的边缘都挡掉（悬停淡出靠它，代价是这一带点不到世界/别的插件）。
+    -- 现在只有**格子**（每个块自建 Button、自己 EnableMouse）收鼠标，空格子区照旧透传；
+    -- 悬停淡出也由格子的 OnEnter/OnLeave 驱动（hoverDepth 计数，见 OnEnter/OnLeave）。
+    bar:EnableMouse(false)
     bar:SetScript("OnEnter", function() OnEnter() end)
     bar:SetScript("OnLeave", function() OnLeave() end)
 
@@ -671,9 +686,43 @@ local function ScheduleBlockUpdate(block)
     end)
 end
 
+--- 秒刷节拍：每个慢刷块自带"累计到多少秒才刷"（货币 2s / 系统 1s），这里只负责按真实
+--- 经过时间（Scheduler 投的 elapsed）喂它们，签名沿用 `block.onUpdate(block, elapsed)`，
+--- 所以两块原有的累计逻辑一行都不用改。
+local TICK_MS = 1000
+
+local function TickSeconds(elapsed)
+    if not M.active then return end
+    local dt = tonumber(elapsed) or (TICK_MS / 1000)
+    for i = 1, #ticking do
+        local block = ticking[i]
+        local frame = block.frame
+        if frame and frame:IsShown() and M:BlockEnabled(block.key) then
+            pcall(block.onUpdate, block, dt)
+        end
+    end
+end
+
+--- 订阅只在"真的要用"时存在：条显示 + 模块启用 + 不在宠物对战 + 至少一块慢刷块可见。
+--- 四类入口（Initialize / ApplyLayout / SetEnabled / 宠物对战开关）都调它，幂等。
+function M:SyncTicker()
+    local want = false
+    if M.active and bar and bar:IsShown() and not hiddenForPetBattle then
+        for i = 1, #ticking do
+            local frame = ticking[i].frame
+            if frame and frame:IsShown() then want = true break end
+        end
+    end
+    if want then
+        if not tickJob then tickJob = Scheduler:Every(TICK_MS, TickSeconds, "信息条:秒刷") end
+    elseif tickJob then
+        Scheduler:Unregister(tickJob)
+        tickJob = nil
+    end
+end
+
 function M:Initialize()
     self.active = true
-
     CreateBar()
 
     for i = 1, #blocks do
@@ -698,10 +747,12 @@ function M:Initialize()
     EventBus:Register("PET_BATTLE_OPENING_START", function()
         hiddenForPetBattle = true
         if bar and M.active then bar:SetShown(false) end
+        M:SyncTicker()
     end)
     EventBus:Register("PET_BATTLE_CLOSE", function()
         hiddenForPetBattle = false
         if bar and M.active then bar:SetShown(true) end
+        M:SyncTicker()
     end)
 
     -- Combat: the edge breathes red while a guard is up, yellow while the calendar has pending invites (checked on both edges of combat).
@@ -761,6 +812,7 @@ function M:Initialize()
 
     ApplyColors()
     RefreshPulse()
+    self:SyncTicker()
 end
 
 --- Re-anchor and re-measure; called after a setting changes.
@@ -771,6 +823,7 @@ function M:ApplyLayout()
     -- 装饰件跟着条体的尺寸 / 贴边方向走（经验条就挂在底边那条衬线上）。
     self:ApplyDecorations()
     bar:SetShown(self.active and not hiddenForPetBattle)
+    self:SyncTicker()
 end
 
 function M:SetEnabled(enabled)
@@ -794,6 +847,7 @@ function M:SetEnabled(enabled)
             self:ApplyLayout()
         end
     end
+    self:SyncTicker()
 end
 
 -- 每格的数据源。缺名字是一份报告，不是错误 —— 数据源缺 ⇒ 那一格留空。
