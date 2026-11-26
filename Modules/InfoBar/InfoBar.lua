@@ -875,15 +875,22 @@ function M:Diagnose()
         ns:Print(string.format("%d 个缺失：对应数据块会自动留空，不影响其它块。", missing))
     end
 
-    -- 耐久取值形态由 `Modules/Tools/Durability.lua` 探测（同一份实现，信息栏只读结论）。
+    -- 耐久数据源现状（比只报一句"签名/尚未探测"有用，实机就是这个格在验）：
+    -- 槽位 API 到底在不在、本会话定形成什么、背包兜底能读几件 —— 三个数一起印。
     local durability = ns.Durability
-    local signature = (durability and type(durability.Signature) == "function")
-        and durability:Signature() or nil
-    if signature then
-        ns:Print(("耐久取值签名已实测为: GetInventoryItemDurability(%s)")
-            :format(signature == "unit" and "unit, slot" or "slot"))
-    elseif self.active then
-        ns:Print("耐久取值签名：尚未探测（装备上任意一件有耐久的装备后会自动判定）。")
+    if durability then
+        local hasSlot = type(_G.GetInventoryItemDurability) == "function"
+        local signature = (type(durability.Signature) == "function") and durability:Signature() or nil
+        ns:Print(("耐久·槽位 API：%s%s"):format(
+            hasSlot and "存在" or "缺失",
+            signature and (signature == "unit" and "（实测签名 unit, slot）" or "（实测签名 slot）") or "（未定形）"))
+        local okBag, bag = pcall(durability.ScanBags, durability)
+        if okBag and bag then
+            ns:Print(("耐久·背包兜底：可读 %d 件 · 总评 %.0f%% · 最低 %.0f%%（%s）"):format(
+                bag.count, bag.percent, bag.lowest or 0, tostring(bag.lowestName or "-")))
+        else
+            ns:Print("耐久·背包兜底：背包里没有带耐久的物品（这一格会留空）。")
+        end
     end
 
     local shown = 0
@@ -905,6 +912,48 @@ function M:Diagnose()
     ns:Print(("当前 %d/%d 块可见。"):format(shown, #blocks))
 end
 
+--- `/mui infobar dura`：把耐久格**实际会显示的东西**整段印出来（不用悬停截图，可复制）。
+--- 两条数据源各试一次，印明用的是哪条，再逐件列出 —— 实机验「提示到底全不全」就靠这一条。
+function M:DurabilityReport()
+    local durability = ns.Durability
+    if not durability then
+        ns:Print("耐久：`Modules/Tools/Durability.lua` 没就位（检查 Tools.xml）。")
+        return
+    end
+
+    local hasSlot = type(_G.GetInventoryItemDurability) == "function"
+    ns:Print(("耐久·槽位 API `GetInventoryItemDurability`：%s；`GetInventoryItemLink`：%s")
+        :format(hasSlot and "存在" or "缺失", type(_G.GetInventoryItemLink) == "function" and "存在" or "缺失"))
+
+    local data
+    if hasSlot and type(durability.Scan) == "function" then
+        local ok, slot = pcall(durability.Scan, durability)
+        if ok and slot then data = slot end
+    end
+    if not data and type(durability.ScanBags) == "function" then
+        local ok, bag = pcall(durability.ScanBags, durability)
+        if ok and bag then data = bag end
+    end
+    if not data then
+        ns:Print("耐久·读数：两条数据源都读不出（没穿带耐久的装备、背包里也没有）。")
+        return
+    end
+
+    ns:Print(("耐久·数据源：%s · 总评 %.0f%% · %d 件 · 最低 %.0f%%（%s）"):format(
+        data.source == "bags" and "背包内物品" or "已装备物品",
+        data.percent, data.count, data.lowest or 0, tostring(data.lowestName or "-")))
+    local shown = math.min(#data.items, 20)
+    for i = 1, shown do
+        local item = data.items[i]
+        ns:Print(("  %2d. %-18s %5.1f%%  %s"):format(
+            i, tostring(item.name), item.pct,
+            data.source == "bags" and ("背包 " .. tostring(item.bag) .. " · 槽 " .. tostring(item.slot)) or ""))
+    end
+    if #data.items > shown then
+        ns:Print(("  ……另有 %d 件"):format(#data.items - shown))
+    end
+end
+
 function M:HandleCommand(rest)
     local line = rest or ""
     local cmd, tail = line:match("^(%S+)%s*(.-)%s*$")
@@ -912,6 +961,11 @@ function M:HandleCommand(rest)
 
     if sub == "diagnose" or sub == "diag" or sub == "probe" then
         self:Diagnose()
+        return true
+    end
+
+    if sub == "dura" or sub == "durability" then
+        self:DurabilityReport()
         return true
     end
 
