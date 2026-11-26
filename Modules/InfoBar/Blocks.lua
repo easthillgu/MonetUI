@@ -475,6 +475,11 @@ local function FriendsUpdate(block)
 
     -- Both are marked "RequiresFriendList": before Blizzard loads the list they read as zero; an entirely unavailable pair hides the block instead.
     if total == nil and online == nil then M:SetText(block, "") return end
+    -- 2026-11-26 玩家报"好友人数一直 0/0"：客户端在这套 API 上把"名册还没请求"也答成 0，
+    -- 于是 0/0 既可能是"真的没好友"也可能是"没载入"，两种状态在屏幕上是同一串数字。
+    -- 口径：两个都是 0 就**整块留空**（`/mui infobar diagnose` 里会写"已隐藏"），
+    -- 名册一旦载入（FRIENDLIST_UPDATE）再显示真数 —— 宁可不显，也不拿 0 冒充。
+    if (total or 0) <= 0 and (online or 0) <= 0 then M:SetText(block, "") return end
     M:SetText(block, string.format("%d / %d", online or 0, total or 0))
 end
 
