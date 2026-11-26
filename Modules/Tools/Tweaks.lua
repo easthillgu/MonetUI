@@ -12,7 +12,7 @@
 -- 关掉后不会再被登录补回来（见 SEED_ADDITIONS 的说明）。
 --
 -- 2026-11-08 作者拍板：另加一层「默认画面快照」—— 把当时调好的整套观感 CVar 设为出厂默认，
--- 每次登录自动对齐。快照只裁决插件不管的 CVar，开着的开关优先级更高（见 AlignVision）。
+-- 每次登录自动对齐。快照只裁决插件不管的 CVar，开关管辖项一律跳过（见 AlignVision）。
 -- 记录当前画面用 /mui tweaks snapshot，查看 / 停掉自动对齐用 /mui tweaks defaults。
 
 local ADDON_NAME, ns = ...
@@ -102,10 +102,10 @@ end
 -- ⚠ Config.wtf 是落盘值，可能比游戏内当前值旧（刚 /console 改过还没写盘）。所以这只是 seed：
 --   进游戏敲一次 `/mui tweaks snapshot` 用实机值覆盖，命令会逐条打「旧 → 新」供核对。
 --   没证据的条目（ResampleQuality）留空，对齐时跳过，等 snapshot 补 —— 不瞎填一个数。
--- 快照只裁决「插件不管」的 CVar；开关开着的条目一律交给开关，见 AlignVision。
+-- 快照只裁决「插件不管」的 CVar；开关管辖的条目一律交给开关，见 AlignVision。
 -- 2026-11-16 收口（代码审查）：**被 TWEAKS 开关管住的一律不进这张表** ——
 -- 以前这里还写着 particleDensity 80 / volumefog 1 / weatherDensity 3 / ffxDeath 0 /
--- ResampleAlwaysSharpen 1，和「开关默认全开」正面冲突：AlignVision 跳过开关开着的条目，
+-- ResampleAlwaysSharpen 1，和「开关默认全开」正面冲突：AlignVision 跳过开关管辖的条目，
 -- 于是新存档实际落到开关写的 0/0/0，快照那几个数**永远不下发** —— 两套默认各说各话，
 -- 玩家关掉开关时又会被快照写回 0（等于插件替他关）。作者实机复核同样是 0/0/0。
 local FACTORY_VISION = {
@@ -152,8 +152,8 @@ local cvarWarned = {}
 
 local function Text(value)
     -- 从游戏拿来的值要进字符串之前再过一次机密判断：`type()` 判不出来（AGENTS 字符串条）。
-    if value == nil then return "-" end
     if Secrets.IsSecret(value) then return "机密" end
+    if value == nil then return "-" end
     return tostring(value)
 end
 
@@ -215,7 +215,7 @@ end
 --- 玩家若真自己设过目标值，自动改成默认值就是误伤。
 local function DefaultOf(cvar)
     local info = CVarInfo(cvar)
-    if info and info.default ~= nil then
+    if info and not Secrets.IsSecret(info.default) and info.default ~= nil then
         local d = tostring(info.default)
         if d ~= "" then return d end
     end
@@ -238,7 +238,8 @@ local function WriteCVar(cvar, value)
     if value == nil then return false end
     local want = tostring(value)
     local info = CVarInfo(cvar)
-    local cur = (info and info.value) or ReadCVar(cvar)
+    local cur
+    if info and info.value ~= nil then cur = info.value else cur = ReadCVar(cvar) end
     local rec = CVarRecord(cvar)
     rec.want, rec.got = want, cur
 
@@ -246,13 +247,13 @@ local function WriteCVar(cvar, value)
     -- SetCVar（不报错）+ 复验读回 nil（不是 string，旧判据放过）⇒ 假记"已写"。
     -- 实机判例 1.60：autoLootRange 这个 CVar 在 Forever 不存在，旧版就把它记成了"已写"；
     -- 此守卫对所有条目生效，不再把不存在的 CVar 误记成功（lootRange 子项已据此外删）。
-    if cur == nil and (not info or info.value == nil) then
+    if not Secrets.IsSecret(cur) and cur == nil and (not info or info.value == nil) then
         CVarFlag(cvar, "本客户端没有这个 CVar（名字不存在）")
         return false
     end
 
-    -- 先读后写：常态下值没变就不该落一笔。
-    if type(cur) == "string" and not Secrets.IsSecret(cur) and SameValue(cur, want) then
+    -- 先读后写：常态下值没变就不该落一笔。机密值不能比较，但仍可尝试写入后复验。
+    if not Secrets.IsSecret(cur) and type(cur) == "string" and SameValue(cur, want) then
         rec.note = "已是"
         return true
     end
@@ -273,12 +274,17 @@ local function WriteCVar(cvar, value)
     end
 
     -- 不报错不等于写进去了：secure / read-only 可能"静默收下、值不动"。复验一次。
+    -- 复验值机密时无法确认落点，必须按失败保留原值账，等限制解除后重试。
     local after = ReadCVar(cvar)
+    if Secrets.IsSecret(after) then
+        CVarFlag(cvar, "写了复验是机密值（无法确认）")
+        return false
+    end
     if after == nil then
         CVarFlag(cvar, "写了复验读不到（值没落地）")
         return false
     end
-    if type(after) == "string" and not Secrets.IsSecret(after) and not SameValue(after, want) then
+    if not SameValue(after, want) then
         CVarFlag(cvar, "写了没生效（复验仍是 " .. Text(after) .. "）")
         return false
     end
@@ -334,9 +340,9 @@ local function RestoreCVar(cvar, want)
     local before = ReadCVar(cvar)
     local back = origin[cvar]
     if back ~= nil then
-        WriteCVar(cvar, back)
-        origin[cvar] = nil
-    elseif before ~= nil and not Secrets.IsSecret(before) then
+        -- 写失败 / 复验不通过时保留原值，限制解除后还能重试。
+        if WriteCVar(cvar, back) then origin[cvar] = nil end
+    elseif not Secrets.IsSecret(before) and before ~= nil then
         local def = DefaultOf(cvar)
         if def ~= nil
             and SameValue(before, want)
@@ -378,21 +384,24 @@ function M:Apply()
         for j = 1, #list do
             local cvar, want = list[j].cvar, list[j].value
             if on then
-                if origin[cvar] == nil then origin[cvar] = ReadCVar(cvar) end
+                if origin[cvar] == nil then
+                    local cur = ReadCVar(cvar)
+                    -- 机密值既不能比较，也不能落进 SavedVariables；留空账等可读时再记。
+                    if not Secrets.IsSecret(cur) and cur ~= nil then origin[cvar] = cur end
+                end
                 WriteCVar(cvar, want)
             elseif origin[cvar] ~= nil then
                 local cur = ReadCVar(cvar)
-                if cur == nil then
-                    -- 读不到值，这条账没有意义
-                    origin[cvar] = nil
-                elseif not Secrets.IsSecret(cur) and SameValue(cur, want) then
-                    -- 值还是我们写进去的 → 还原成玩家的原值
-                    WriteCVar(cvar, origin[cvar])
-                    origin[cvar] = nil
-                else
-                    -- 玩家中途自己改过：不抢他的值，只清账
-                    origin[cvar] = nil
+                if not Secrets.IsSecret(cur) and cur ~= nil then
+                    if SameValue(cur, want) then
+                        -- 值还是我们写进去的 → 还原成玩家的原值；写失败时绝不清账。
+                        if WriteCVar(cvar, origin[cvar]) then origin[cvar] = nil end
+                    else
+                        -- 玩家中途自己改过：不抢他的值，只清账
+                        origin[cvar] = nil
+                    end
                 end
+                -- 读不到 / 机密都说明还原尚未确认，保留原值等限制解除后重试。
             end
         end
     end
@@ -417,8 +426,10 @@ function M:RestoreToDefault()
             local cvar = list[j].cvar
             local back = origin[cvar] or DefaultOf(cvar)
             if back ~= nil then
-                if WriteCVar(cvar, back) then n = n + 1 end
-                origin[cvar] = nil
+                if WriteCVar(cvar, back) then
+                    n = n + 1
+                    origin[cvar] = nil
+                end
             end
         end
     end
@@ -458,7 +469,7 @@ function M:Initialize()
     end
 
     -- 默认画面对齐放在最后（2026-11-08）：
-    -- ① 必须在 Apply 之后 —— 开着的开关才会赢过快照；
+    -- ① 必须在 Apply 之后 —— 开关的写入 / 还原先完成，快照只补插件不管的项；
     -- ② 必须在 stuck 检查之后 —— 否则快照把值一写，这条诊断就被自己抹掉了
     --    （「开关关但值没还原」是查灰屏的关键信号，不能因为加了默认就看不见）。
     -- AlignVision 定义在文件后半，这里走 self: 表查找：chunk 整份加载完才轮到 Initialize，
@@ -527,8 +538,8 @@ end
 --- 两条纪律（2026-11-08）：
 --- ① 顺序在 Apply() **之后** —— Apply 会按开关写目标值 / 还原原值，快照最后裁决。
 ---    反过来（快照先、Apply 后）玩家拨开关那一拍会被 Apply 顶掉，开关看起来失灵。
---- ② **跳过开关开着的条目** —— 那是玩家显式表达的画面取向，快照不许抢。
----    否则 noWeather 开着写 0、快照又要 3，每次登录两边各写一次，谁赢全看顺序。
+--- ② **跳过所有开关管辖的条目（不论开关开还是关）** —— 旧快照可能采到过开关值，
+---    例如 noWeather 开着采到 weatherDensity=0；只看开关状态会在关闭并还原后又被写回 0。
 --- 只写确实不同的值；零写入不打印，避免每次登录刷一行。
 --- @param quiet boolean|nil true = 不打印汇总（命令里自己打）
 --- @param force boolean|nil true = 忽略 auto 开关（`/mui tweaks defaults apply` 用）
@@ -540,7 +551,7 @@ function M:AlignVision(quiet, force)
     local wrote, skipped = 0, 0
     for i = 1, #VISION do
         local v = VISION[i]
-        if v.key and self:IsOn(v.key) then
+        if v.key then
             skipped = skipped + 1
         else
             local want = snap[v.cvar]
@@ -554,7 +565,7 @@ function M:AlignVision(quiet, force)
         end
     end
     if not quiet and wrote > 0 then
-        ns:DevPrint(("|cff00ff00默认画面对齐|r：写入 %d 条（另有 %d 条由开着的开关接管）。")
+        ns:DevPrint(("|cff00ff00默认画面对齐|r：写入 %d 条（另有 %d 条由开关接管）。")
             :format(wrote, skipped))
         ns:DevPrint("  想把新画面留作默认：/mui tweaks snapshot　｜　不想自动对齐：/mui tweaks defaults off")
     end
@@ -743,12 +754,12 @@ function M:HandleCommand(rest)
         ns:Print(("已记下 %d 条（其中 %d 条与出厂快照不同）。"):format(n, changed))
         ns:Print("  登录自动对齐：" .. (store.auto ~= false
             and "|cff00ff00开|r" or "|cff808080关|r（/mui tweaks defaults on 打开）"))
-        -- 开关开着的条目不受快照管辖，得说清楚，否则玩家会以为快照没生效。
+        -- 开关管辖的条目一律不受快照管辖，得说清楚，否则玩家会以为快照没生效。
         for i = 1, #VISION do
             local v = VISION[i]
-            if v.key and self:IsOn(v.key) then
-                ns:Print(("  |cffffa940注意|r：%s 由开着的开关 %s 接管，快照值不参与对齐；想让它生效就 /mui tweaks set %s 0")
-                    :format(v.cvar, v.key, v.key))
+            if v.key then
+                ns:Print(("  |cffffa940注意|r：%s 由开关 %s 接管，无论开关开还是关，快照值都不参与对齐")
+                    :format(v.cvar, v.key))
             end
         end
         ns:Print("  查看：/mui tweaks defaults　｜　停掉自动对齐：/mui tweaks defaults off")
@@ -769,7 +780,7 @@ function M:HandleCommand(rest)
         end
         if flag == "apply" then
             local w, s = self:AlignVision(true, true)
-            ns:Print(("已按默认画面对齐：写入 %d 条，跳过 %d 条（开着的开关接管）。"):format(w, s))
+            ns:Print(("已按默认画面对齐：写入 %d 条，跳过 %d 条（开关接管）。"):format(w, s))
             return true
         end
         ns:Print("|cffffd100默认画面快照|r（登录自动对齐：" ..
@@ -777,7 +788,7 @@ function M:HandleCommand(rest)
         for i = 1, #VISION do
             local v = VISION[i]
             local want = store.vision[v.cvar]
-            local owned = v.key and self:IsOn(v.key)
+            local owned = v.key
             ns:Print(("  %-22s 默认 %-8s %s"):format(
                 v.cvar, want or "未采样",
                 owned and ("|cffffa940由开关 " .. v.key .. " 接管|r") or "|cff00ff00快照对齐|r"))

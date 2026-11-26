@@ -191,8 +191,11 @@ check("选择面板在清单空时提示自己添加",
     currencySrc:find("默认追踪金币 · 点下面的行添加其它货币", 1, true) ~= nil)
 check("斜杠命令 Usage 说明默认只追踪金币",
     currencySrc:find("默认只追踪金币；其它货币用 add", 1, true) ~= nil)
+-- 2026-11 配置重排：旧文案「其它货币不自动带入」并入分组说明；
+-- 判据不变 —— 面板必须讲清"清单是自定义的/要自己维护"，并给入口按钮。
 check("配置面板说明其它货币要自己添加",
-    cfg:find("其它货币不自动带入", 1, true) ~= nil)
+    cfg:find("自定义清单跨角色保存", 1, true) ~= nil
+    and cfg:find("编辑监控清单", 1, true) ~= nil)
 check("DEFAULTS 不写死 1792 / 3402（不替玩家选货币）",
     core:find("currencyWatch%s*=%s*{%s*}", 1, false) ~= nil
     and not core:find("currencyWatch%s*=%s*{%s*1792", 1, false))

@@ -839,7 +839,8 @@ local CHAT_PLATE_ALPHA = 0.35     -- 底板浓度（对齐聊天框既有的 0.3
 local CHAT_EDGE_ALPHA  = 0.80     -- 边框浓度（对齐页签既有的 0.80）
 local CHAT_PIN_FNS = {}           -- 名字 → 稳定闭包（PollWatch 按引用去重）
 local CHAT_HOVER = setmetatable({}, { __mode = "k" })  -- frame → true：任一悬停即显示页签
-local KNOWN_EB = {}               -- 已纳入频道色跟踪的输入框名（ChatFrameNEditBox）
+local KNOWN_EB = {}               -- 已纳入频道色跟踪的输入框基础名（ChatFrameN）
+local CHAT_CHANNEL_STATE = {}     -- controlBg → 上次频道色；稳定轮询只在颜色变化时重刷
 local INPUT_LAYER = {}            -- §8.92 名字 → { eb = 原始 frameLevel, cb = 原始背板 level }
 local chatHideToken = 0
 local CHAT_FADE_TARGET           -- 淡入淡出目标 alpha（1 显示 / 0 隐藏）
@@ -1366,16 +1367,23 @@ end
 function ChatBand:ChannelColor(eb)
     if not eb or type(eb.GetAttribute) ~= "function" then return nil end
     local okT, chatType = pcall(eb.GetAttribute, eb, "chatType")
-    if not okT or type(chatType) ~= "string" or chatType == "" then return nil end
+    -- GetAttribute 可能返回机密串：先过 CanRead，再比较 / 当表键；pcall 不能替代值级守卫。
+    if not okT or not Secrets.CanRead(chatType) or type(chatType) ~= "string" or chatType == "" then return nil end
     local info
     if chatType == "CHANNEL" then
         local okN, n = pcall(eb.GetAttribute, eb, "channelTarget")
-        info = (ChatTypeInfo and ChatTypeInfo["CHANNEL" .. (n or 1)])
-            or (ChatTypeInfo and ChatTypeInfo["CHANNEL1"])
+        local key = "CHANNEL1"
+        if okN and Secrets.CanRead(n) and (type(n) == "number" or type(n) == "string") then
+            key = "CHANNEL" .. tostring(n)
+        end
+        info = (ChatTypeInfo and ChatTypeInfo[key]) or (ChatTypeInfo and ChatTypeInfo.CHANNEL1)
     else
         info = ChatTypeInfo and ChatTypeInfo[chatType]
     end
-    if info and type(info.r) == "number" then return info.r, info.g, info.b end
+    if info and Secrets.CanRead(info.r) and Secrets.CanRead(info.g) and Secrets.CanRead(info.b)
+        and type(info.r) == "number" and type(info.g) == "number" and type(info.b) == "number" then
+        return info.r, info.g, info.b
+    end
     return nil
 end
 
@@ -1385,7 +1393,13 @@ function ChatBand:ApplyChannelColor(eb)
     if not cb or type(Widget.SetBorderState) ~= "function" then return end
     local r, g, b = self:ChannelColor(eb)
     if not r then return end
+    local prior = CHAT_CHANNEL_STATE[cb]
+    if prior and prior[1] == r and prior[2] == g and prior[3] == b and prior[4] == CHAT_EDGE_ALPHA then
+        return
+    end
     Widget:SetBorderState(cb, r, g, b, CHAT_EDGE_ALPHA)
+    if not prior then prior = {}; CHAT_CHANNEL_STATE[cb] = prior end
+    prior[1], prior[2], prior[3], prior[4] = r, g, b, CHAT_EDGE_ALPHA
 end
 
 function ChatBand:ApplyChannelColorByName(name)
@@ -1441,41 +1455,33 @@ function ChatBand:RegisterRuntimeChatFrame(name)
     self:TrackEditBox(name)
 end
 
---- §8.90 安装一次 `FCF_OpenTemporaryWindow` 钩子：玩家开战网 / 交易 / 副本等临时窗（编号 >10）时，
---- 暴雪动态建出 ChatFrameN，只遍历 1..10 会漏。钩子里认领名字形如 `ChatFrame%d` 的新窗并补齐皮肤。
---- hooksecurefunc 不污染——只给非安全框上皮肤、不碰受保护 API。
-local function EnsureTempWindowHook()
-    if ChatBand._tempHooked then return end
-    if type(hooksecurefunc) ~= "function" then return end
-    ChatBand._tempHooked = true
-    hooksecurefunc("FCF_OpenTemporaryWindow", function(chatFrame)
-        if not chatFrame or type(chatFrame.GetName) ~= "function" then return end
-        local ok, nm = pcall(chatFrame.GetName, chatFrame)
-        if not ok or type(nm) ~= "string" or not nm:match("^ChatFrame%d+$") then return end
-        if ChatBand.dynamic[nm] then return end
-        ChatBand.dynamic[nm] = true
-        ChatBand:RegisterRuntimeChatFrame(nm)
-    end)
-end
+--- 无钩子的运行期同步入口：既发现动态临时窗，也复检已认领输入框的频道色。
+--- FCF_OpenTemporaryWindow 建窗后不保证发 UPDATE_CHAT_WINDOWS，因此 UIParent 低频 PollWatch 是兜底；
+--- 相关事件只负责提前触发，不作为唯一发现途径。函数为模块级稳定引用，重复 Apply 不会累积。
+local function ChatRuntimePass()
+    if not M.active then return end
 
---- 安装一次 `ChatEdit_UpdateHeader` 钩子：暴雪每次刷新输入框头部（切频道 / 聚焦 / 输 `/w 名`）都走它，
---- 钩子里只按名字认领我们的输入框并即时重染边框。hooksecurefunc 不污染——只读取属性、给我们的
---- 非安全框上色，不碰任何受保护 API。受限制上下文里 `GetAttribute` 的机密值被 pcall 兜掉。
-local function EnsureChannelHeaderHook()
-    if ChatBand._headerHooked then return end
-    if type(hooksecurefunc) ~= "function" then return end
-    ChatBand._headerHooked = true
-    hooksecurefunc("ChatEdit_UpdateHeader", function(eb)
-        if not eb or type(eb.GetName) ~= "function" then return end
-        local ok, nm = pcall(eb.GetName, eb)
-        -- §8.106 KNOWN_EB 的键是基础名 `ChatFrameN`（TrackEditBox 传进来的），而这里拿到的是
-        -- 输入框真名 `ChatFrameNEditBox`。以前直接 KNOWN_EB[nm] 恒 miss —— 这是双后缀 bug 的
-        -- 另一半：就算把 TrackEditBox 的入参改对，钩子照样一次都不会重染。去掉后缀再认领。
-        local base = (ok and type(nm) == "string") and (nm:match("^(.-)EditBox$") or nm) or nil
-        if base and KNOWN_EB[base] then
-            ChatBand:ApplyChannelColor(eb)
+    -- 暴雪把新建窗追加进 CHAT_FRAMES；基础 1..10 已在 SkinChat 处理，这里只认 >10 的新窗。
+    if type(CHAT_FRAMES) == "table" then
+        for _, name in ipairs(CHAT_FRAMES) do
+            if Secrets.CanRead(name) and type(name) == "string" and not ChatBand.dynamic[name] then
+                local index = tonumber(name:match("^ChatFrame(%d+)$"))
+                if index and index > 10 then
+                    local frame = Skin:Need(name)
+                    if frame then
+                        ChatBand:RegisterRuntimeChatFrame(name)
+                        -- 注册成功才入账；中途失败时下一拍允许重试（Dress / Watch 本身均幂等）。
+                        ChatBand.dynamic[name] = true
+                    end
+                end
+            end
         end
-    end)
+    end
+
+    -- ChatEdit_UpdateHeader 不再 hook：按已认领的基础名读取当前属性，隐藏输入框也能同步。
+    for name in pairs(KNOWN_EB) do
+        ChatBand:ApplyChannelColorByName(name)
+    end
 end
 
 function ChatBand:HoverEnabled()
@@ -1690,6 +1696,10 @@ end
 -- 编辑模式 / 登录恢复可能在套皮后重排，进世界再校一次（SetHeight 幂等、无污染）。
 if ns.EventBus then
     ns.EventBus:Register("PLAYER_ENTERING_WORLD", MatchChatHeight)
+    -- 稳定引用：窗口 / 颜色变化时提前同步；真正兜底仍是 SkinChat 里的 PollWatch。
+    ns.EventBus:Register("UPDATE_CHAT_WINDOWS", ChatRuntimePass)
+    ns.EventBus:Register("UPDATE_FLOATING_CHAT_WINDOWS", ChatRuntimePass)
+    ns.EventBus:Register("UPDATE_CHAT_COLOR", ChatRuntimePass)
     -- D：配置变化（悬停开关 / 输入框位置）统一由这条事件触发页签刷新；
     -- 输入框位置由 PollWatch 下一拍自动按新值重钉，无需在这里手动重排。
     ns.EventBus:Register("MONETUI_CHAT_SKIN_SETTING_CHANGED", function()
@@ -1721,15 +1731,10 @@ local function SkinChat()
     -- §8.94 输入框背板原来是 `Skin:EditBox` 里写死的 0.9，现在由这里传同一档（dresser 已支持 control）。
     M:Dress(CHAT_EDITS, { as = "editbox", control = {
         bgAlpha = CHAT_PLATE_ALPHA, borderAlpha = CHAT_EDGE_ALPHA } })
-    -- §8.90 输入框边框跟频道色：认领这 10 个输入框 + 安装头部钩子（切频道即时重染）。
-    EnsureChannelHeaderHook()
-    -- §8.90 临时聊天窗（>10）动态覆盖钩子。
-    EnsureTempWindowHook()
+    -- §8.90 输入框边框跟频道色：认领这 10 个输入框，运行期统一由 ChatRuntimePass 复检。
     -- §8.106 这里必须传**基础名**（ChatFrameN）：TrackEditBox / PinEditBox / SyncEditMouse /
-    -- ApplyChannelColorByName 一律在函数内部拼 `name .. "EditBox"`。以前传 CHAT_EDITS
-    -- （已经是 ChatFrameNEditBox 全名），于是账本冒出 10 条 `ChatFrameNEditBoxEditBox` 死名、
-    -- KNOWN_EB 存成错键、头部钩子按真名永远匹配不上 ⇒ §8.90「切频道即时重染」从没生效过。
-    -- `CHAT_EDITS` 只供 M:Dress 与 frames 账本用（那两处要的确实是全名）。
+    -- ApplyChannelColorByName 一律在函数内部拼 `name .. "EditBox"`。`CHAT_EDITS` 只供 M:Dress
+    -- 与 frames 账本用（那两处要的确实是全名），不能拿来重复拼 EditBox 后缀。
     for _, name in ipairs(CHAT_FRAMES) do ChatBand:TrackEditBox(name) end
 
     -- 聊天窗"滚回底部"那枚箭头：暴雪逐帧重放它的 alpha 动画 ⇒ 压 α0 顶不住，只能换皮。
@@ -1758,6 +1763,13 @@ local function SkinChat()
     end)
 
     SetupChatTabHover()
+
+    -- UIParent 是动态窗发现与隐藏输入框频道色复检的稳定锚点；PollWatch 按函数引用去重。
+    local anchor = Skin:Need("UIParent")
+    if anchor and Widget and Widget.PollWatch and Widget:Readable(anchor) then
+        Widget:PollWatch(anchor, ChatRuntimePass, 0.25)
+    end
+    ChatRuntimePass()
 end
 ChatBand.SkinChat = SkinChat
 
@@ -1765,7 +1777,7 @@ M:Panel("chat", { label = "聊天", group = "社交", apply = SkinChat,
     frames = {
         CHAT_FRAMES, CHAT_BUTTONS, CHAT_TABS, CHAT_EDITS,
         CHAT_CHANNEL_POPUPS,
-        CHAT_EXTRA_WINDOWS,
+        CHAT_EXTRA_WINDOWS, "UIParent",
     } })
 -- === CHAT BAND §8.89 END ===
 

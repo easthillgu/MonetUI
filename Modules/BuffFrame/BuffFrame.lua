@@ -59,6 +59,7 @@ end
 local buffButtons, procButtons, debuffButtons = {}, {}, {}
 local buffContainer, procContainer, debuffContainer
 local combatBuffs   -- 前置声明：折叠上限的 helper 在容器创建之前就引用它
+local combatAurasEnabled = false -- 只有完整容器组真正 Enable 后才为真；失败/模块禁用时必须是 false
 local collapseButton
 
 local function Collapsed()
@@ -75,7 +76,7 @@ end
 
 --- 战斗容器的显示上限：折叠时只留短时 buff + 附魔槽，展开时恢复满格。
 local function ApplyCombatCap()
-    if not combatBuffs then return end
+    if not combatAurasEnabled or not combatBuffs then return end
     local cap = Collapsed() and COLLAPSE_VISIBLE_CAP or (MAX_AURAS - 3)
     pcall(combatBuffs.SetAuraGroupMaxFrameCount, combatBuffs, COLLAPSE_GROUP_KEY, cap)
 end
@@ -473,6 +474,26 @@ local function ApplyCombatFlow(container, size)
     FlowCall(container, "SetFlowLayoutMaximumLineSize", "SetAuraLayoutRowWidth", lineSize)
 end
 
+local function SetCombatAuraEnabled(container, enabled)
+    if type(container.SetEnabled) ~= "function" then return true end
+    return pcall(container.SetEnabled, container, enabled and true or false)
+end
+
+--- 失败容器必须真正退出引擎刷新；Hide/alpha=0 都不会停止 SetEnabled(true) 的容器。
+local function DiscardCombatAura(container)
+    if not container then return end
+    SetCombatAuraEnabled(container, false)
+    pcall(container.Hide, container)
+end
+
+local function SetCombatContainersEnabled(enabled)
+    local ok = true
+    for _, container in ipairs({ combatBuffs, combatDebuffs }) do
+        if container and not SetCombatAuraEnabled(container, enabled) then ok = false end
+    end
+    return ok
+end
+
 local function CreateCombatAura(frameName, key, filter, size, kind)
     if not EnsureAuraContainerAddOn() then
         return nil, "Blizzard_AuraContainer 未加载"
@@ -483,7 +504,10 @@ local function CreateCombatAura(frameName, key, filter, size, kind)
     end
 
     -- 引擎要一个可渲染的矩形才会跑第一次布局。
-    container:SetSize(1, 1)
+    if not pcall(container.SetSize, container, 1, 1) then
+        DiscardCombatAura(container)
+        return nil, "SetSize 失败"
+    end
     ApplyCombatFlow(container, size)
 
     local styleButton = function(button)
@@ -530,6 +554,7 @@ local function CreateCombatAura(frameName, key, filter, size, kind)
 
     local okAdd, err = pcall(container.AddAuraGroup, container, key, filter, opts)
     if not okAdd then
+        DiscardCombatAura(container)
         return nil, "AddAuraGroup 失败: " .. tostring(err)
     end
 
@@ -560,7 +585,10 @@ local function CreateCombatAura(frameName, key, filter, size, kind)
 
     pcall(container.SetUnit, container, "player")
     -- ArcAuras 同款：出生就 Enable，让引擎把它纳入自己的刷新流程（出生后 Hide 不影响）。
-    if type(container.SetEnabled) == "function" then pcall(container.SetEnabled, container, true) end
+    if not SetCombatAuraEnabled(container, true) then
+        DiscardCombatAura(container)
+        return nil, "SetEnabled(true) 失败"
+    end
     pcall(container.UpdateAllAuras, container)
     -- **常显 + alpha 0**：引擎只给"活着的"容器派数据/刷新，脱战藏起来（Hide）就再也不会更新，
     -- 进战斗 Show 出来是空的（一期踩过）。所以保持 Show 状态，用 alpha 当开关：
@@ -573,32 +601,68 @@ local function CreateCombatAura(frameName, key, filter, size, kind)
     return container
 end
 
+local function MarkCombatAurasUnavailable(why)
+    combatAurasEnabled = false
+    if not combatWarned then
+        combatWarned = true
+        ns:Print("战斗中的玩家光环（原生 AuraContainer）不可用，战斗中改用暴雪原生 Buff 框：" .. tostring(why or "未知原因"))
+    end
+end
+
 local function EnsureCombatAuras()
-    if combatBuffs and combatDebuffs then return true end
+    if not ns:IsModuleEnabled("BuffFrame") then return false end
+    if combatAurasEnabled and combatBuffs and combatDebuffs then return true end
     if InCombat() then
         -- 战斗里建出来的容器永远是空的：排队到脱战补做（ns:AfterCombat）。
         ns:AfterCombat("buffframe-auras", EnsureCombatAuras)
         return false
+    end
+
+    -- 模块关闭时只停用、不销毁；重新启用必须复用原容器，且仅在脱战时恢复 Enable。
+    if combatBuffs and combatDebuffs then
+        if SetCombatContainersEnabled(true) then
+            combatAurasEnabled = true
+            ApplyCombatCap()
+            local alpha = combatMode and 1 or 0
+            pcall(combatBuffs.SetAlpha, combatBuffs, alpha)
+            pcall(combatDebuffs.SetAlpha, combatDebuffs, alpha)
+            SetExternalAuraFit(true)
+            return true
+        end
+        SetCombatContainersEnabled(false)
+        SetExternalAuraFit(false)
+        MarkCombatAurasUnavailable("已有容器 SetEnabled(true) 失败")
+        return false
+    end
+
+    -- 正常路径不会出现半个已发布引用；真出现时先停用清场，绝不留下 Enabled 孤儿。
+    if combatBuffs or combatDebuffs then
+        DiscardCombatAura(combatBuffs)
+        DiscardCombatAura(combatDebuffs)
+        combatBuffs, combatDebuffs = nil, nil
+        SetExternalAuraFit(false)
     end
     if type(ns.PrepareAuraStyle) == "function" then pcall(ns.PrepareAuraStyle) end
 
     local buffs, why = CreateCombatAura("MonetUICombatBuffFrame", "monetPlayerCombatBuffs", "HELPFUL", BUFF_SIZE, "buff")
     local debuffs = buffs and CreateCombatAura("MonetUICombatDebuffFrame", "monetPlayerCombatDebuffs", "HARMFUL", DEBUFF_SIZE, "debuff")
     if not buffs or not debuffs then
-        if not combatWarned then
-            combatWarned = true
-            ns:Print("战斗中的玩家光环（原生 AuraContainer）不可用，战斗中改用暴雪原生 Buff 框：" .. tostring(why or "未知原因"))
+        -- Hide 不会停止引擎更新；两半都必须 SetEnabled(false) 后再藏。
+        if buffs then
+            SetCombatAuraEnabled(buffs, false)
+            pcall(buffs.Hide, buffs)
         end
-        if buffs then pcall(buffs.Hide, buffs) end
-        if debuffs then pcall(debuffs.Hide, debuffs) end
-        -- 这两个容器就此没人再引用，但它们身上的按钮已经上过样式、已经记进 `"external"`：
-        -- 战斗显示退回暴雪原生框，这一组不再干活 —— 当场销账，别留一条空转的 ticker。
-        -- 下一次脱战 `EnsureCombatAuras` 重试成功时再建回来。
+        if debuffs then
+            SetCombatAuraEnabled(debuffs, false)
+            pcall(debuffs.Hide, debuffs)
+        end
         SetExternalAuraFit(false)
+        MarkCombatAurasUnavailable(why)
         return false
     end
 
     combatBuffs, combatDebuffs = buffs, debuffs
+    combatAurasEnabled = true
     ApplyCombatCap()
     combatBuffs:SetPoint("TOPLEFT", UIParent, "TOPLEFT", AURA_GAP, -AURA_GAP)
     combatDebuffs:SetPoint("TOPLEFT", combatBuffs, "BOTTOMLEFT", 0, -8)
@@ -609,7 +673,7 @@ end
 
 --- 引擎容器是否可作为战斗显示。
 local function EngineCombatReady()
-    return combatBuffs ~= nil and combatDebuffs ~= nil
+    return combatAurasEnabled and combatBuffs ~= nil and combatDebuffs ~= nil
 end
 
 --- 换主题：**绝不重建引擎容器**（2026-10-25 判例）。旧的 RebuildCombatAuras 已删除 ——
@@ -619,6 +683,7 @@ end
 
 --- 战斗显示开关：只切 alpha（容器常显，引擎才会持续更新；见 CreateCombatAura 的注释）。
 local function SetCombatContainersAlpha(alpha)
+    if not combatAurasEnabled then return end
     if combatBuffs then pcall(combatBuffs.SetAlpha, combatBuffs, alpha) end
     if combatDebuffs then pcall(combatDebuffs.SetAlpha, combatDebuffs, alpha) end
 end
@@ -811,7 +876,7 @@ end
 --- 附魔行刷新：1s 轮询与 M:Update（脱战路径）共用。战斗模式由 SetCombatMode 藏行，
 --- 这里直接早退。所有游戏返回值已过 Secrets.Bool/Number，机密格隐藏/降级。
 local function UpdateEnchants()
-    if not enchantContainer then return end
+    if not enchantActive or not enchantContainer then return end
     if combatMode then return end
 
     local list = CollectEnchants()
@@ -897,7 +962,7 @@ local function CombatCollapseCounts()
 end
 
 function M:Update()
-    if not buffContainer then return end
+    if not ns:IsModuleEnabled("BuffFrame") or not buffContainer then return end
 
     if not Secrets.CanReadAuras() then
         -- 加密/受限环境（战斗中）：**插件被硬禁读**——2026-10-25 插件上下文实测：
@@ -996,7 +1061,7 @@ end
 local buffSubId = nil
 local function QueueUpdate()
     local frame = buffContainer
-    if not frame or pending then return end
+    if not ns:IsModuleEnabled("BuffFrame") or not frame or pending then return end
     pending = true
     buffSubId = Scheduler:Every(250, function()
         if buffSubId then Scheduler:Unregister(buffSubId); buffSubId = nil end
@@ -1095,14 +1160,30 @@ end
 
 function M:SetEnabled(enabled)
     if enabled then
-        -- 引擎容器可能早就建好了（`EnsureCombatAuras` 命中 :426 那句直接 return true），
-        -- 这一路不会再走到装载处的销/建，所以开模块时自己把这一组建回来。
-        SetExternalAuraFit(true)
+        -- 已有容器只恢复、不重建；战斗中只排队，脱战前绝不重设 Enable。
+        if combatBuffs and combatDebuffs and not EngineCombatReady() then
+            if InCombat() then
+                ns:AfterCombat("buffframe-auras", EnsureCombatAuras)
+            else
+                EnsureCombatAuras()
+            end
+        end
+        if EngineCombatReady() then
+            SetExternalAuraFit(true)
+        else
+            SetExternalAuraFit(false)
+        end
         -- 附魔行：恢复右键路径 + 重挂轮询（防重复），self:Update() 里会立即刷一次。
         enchantActive = true
         StartEnchantPoll()
         self:Update()
     else
+        combatAurasEnabled = false
+        -- 引擎容器保持 Show 状态，但必须真正退出刷新；alpha=0 不是禁用。
+        if combatBuffs then pcall(combatBuffs.SetAlpha, combatBuffs, 0) end
+        if combatDebuffs then pcall(combatDebuffs.SetAlpha, combatDebuffs, 0) end
+        SetCombatContainersEnabled(false)
+        SuppressBlizzard()
         -- buffContainer 也藏起来的话，QueueUpdate 的 OnUpdate 驱动就停了，所以只清按钮。
         if procContainer then procContainer:Hide() end
         if debuffContainer then debuffContainer:Hide() end
@@ -1112,9 +1193,6 @@ function M:SetEnabled(enabled)
         if enchantContainer then enchantContainer:Hide() end
         if collapseButton then collapseButton:Hide() end
         for _, button in ipairs(enchantButtons) do button:Hide() end
-        -- 引擎容器保持 Show 状态（引擎才会持续喂数据），用 alpha 关掉可见性。
-        if combatBuffs then pcall(combatBuffs.SetAlpha, combatBuffs, 0) end
-        if combatDebuffs then pcall(combatDebuffs.SetAlpha, combatDebuffs, 0) end
         for _, button in ipairs(buffButtons) do button:Hide() end
         for _, button in ipairs(procButtons) do button:Hide() end
         for _, button in ipairs(debuffButtons) do button:Hide() end

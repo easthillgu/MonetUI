@@ -1,0 +1,4 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- MonetUI · Modules/Chat — 独立聊天输入条与频道切换。 -->
+    <Script file="Chat.lua"/>
+</Ui>

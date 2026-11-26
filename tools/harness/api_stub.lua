@@ -29,7 +29,7 @@ local PROTECTED_OP = {
     Show = true, Hide = true, SetShown = true,
     SetParent = true, SetScale = true, SetFrameStrata = true, SetFrameLevel = true,
     SetScript = true, HookScript = true,
-    SetAttribute = true, SetAttributeMismatch = true,
+    SetAttribute = true, SetAttributeMismatch = true, SetAttributeNoHandler = true,
     RegisterEvent = true, RegisterUnitEvent = true, UnregisterEvent = true,
     UnregisterAllEvents = true, RegisterStateDriver = true, UnregisterStateDriver = true,
     RegisterForClicks = true, RegisterForDrag = true, RegisterDisabledTicks = true,
@@ -213,8 +213,17 @@ function ApiStub.New(config)
         secrets = false,        -- C_Secrets.HasSecretRestrictions()
         flushWindow = false,    -- 正处在 Core.AfterCombat 的排空窗口里（run.lua 在派发 regen / 限制解除时置位）
         editMode = false,       -- PetBattleFrames / EditMode（暂不置）
-        inRaid = false,         -- IsInRaid()：团队帧的显隐分支靠它
-        inParty = false,        -- IsInGroup() / IsInParty()
+        inParty = false,        -- IsInGroup(HOME) / IsInParty()
+        inInstanceParty = false,
+        inRaid = false,
+        inGuild = false,
+        guildOfficer = false,
+        chatChannels = {},
+        chatLockdown = false,
+        outgoingChatRestricted = false,
+        chatSendResult = nil,
+        chatSendError = false,
+        chatSendSecret = false,
         deadUnits = nil,        -- [unit] = true ⇒ UnitIsDeadOrGhost(unit)
         disconnectedUnits = nil,-- [unit] = true ⇒ not UnitIsConnected(unit)
         time = 1000,
@@ -259,9 +268,20 @@ function ApiStub.New(config)
     end
     api.isProtectedObj = isProtectedObj
 
+    -- 1.60.1 / 71037 的 Map-only 实测：机密值仍加密，但受保护函数与安全片段放行。
+    function api.ProtectedWritesBlocked()
+        if api.world.lockdown then return true end
+        if not api.world.restricted then return false end
+        local mapOnly = api.restrictions and api.restrictions.Map == true
+        for name in pairs(api.restrictions or {}) do
+            if name ~= "Map" then mapOnly = false end
+        end
+        return not mapOnly
+    end
+
     local function restrictionBlocks(st)
         if not isProtectedObj(st) then return false end
-        return api.world.lockdown or api.world.restricted
+        return api.ProtectedWritesBlocked()
     end
 
     local function labelOf(st)
@@ -334,6 +354,7 @@ function ApiStub.New(config)
     local function need(obj, op)
         local st = STATE[obj]
         if not st then error("attempt to use a removed " .. tostring(op) .. " handle", 2) end
+        if api.world.secureExecution then return st end
         if not (st.blizzard or st.secure) then return st end
         local file, line, guarded, swallowedAt = CallSite(3)
         local pmDoc = docProtectedFor(st.kind, op)
@@ -342,7 +363,7 @@ function ApiStub.New(config)
             -- prot=0 的暴雪框 + 受限窗口：客户端不会拒这一刀，所以不判红；但"受保护级操作"
             -- 落在它身上只说明离线判据（XML inherits 链）没覆盖到它的出身，留黄等实机复核。
             if st.blizzard and not st.protected and isProtectedOp
-                and (api.world.lockdown or api.world.restricted) then
+                and api.ProtectedWritesBlocked() then
                 add("A2n", "warn", string.format("A2n:%s:%s:%s:%s", labelOf(st), op, tostring(file), tostring(line)), {
                     file = file, line = line, frame = labelOf(st), op = op, kind = st.kind,
                     guarded = guarded, swallowedAt = swallowedAt,
@@ -879,6 +900,8 @@ function ApiStub.New(config)
         return table.unpack(t, 1, #t)
     end
     function BASE.GetNumChildren(o) return #childrenOf(o) end
+    function BASE.SetFontString(o, fontString) need(o, "SetFontString").fontString = fontString end
+    function BASE.GetFontString(o) return STATE[o].fontString end
     function BASE.GetFontStrings(o)
         local out = {}
         for _, r in ipairs(regionsOf(o)) do
@@ -977,11 +1000,45 @@ function ApiStub.New(config)
     function BASE.SetAttribute(o, key, value)
         local st = need(o, "SetAttribute")
         st.attrs[key] = value
+        if api.world.secureExecution then
+            st.secureAttrs = st.secureAttrs or {}
+            st.secureAttrs[key] = true
+        end
+    end
+    function BASE.SetAttributeNoHandler(o, key, value)
+        local st = need(o, "SetAttributeNoHandler")
+        st.attrs[key] = value
+        if api.world.secureExecution then
+            st.secureAttrs = st.secureAttrs or {}
+            st.secureAttrs[key] = true
+        end
     end
     function BASE.GetAttribute(o, key) return STATE[o].attrs[key] end
     function BASE.SetAttributeMismatch(o, ...) need(o, "SetAttributeMismatch") end
     function BASE.RegisterForClicks(o, ...) need(o, "RegisterForClicks") end
     function BASE.RegisterForDrag(o, ...) need(o, "RegisterForDrag") end
+
+    local env
+    local function runSecureSnippet(body, self, message, newstate)
+        local chunk, err = load(body, "[secure snippet]", "t", setmetatable({
+            self = self, message = message, newstate = newstate,
+        }, { __index = env }))
+        if not chunk then error(err, 0) end
+        local previous = api.world.secureExecution
+        api.world.secureExecution = true
+        local ok, result = pcall(chunk)
+        api.world.secureExecution = previous
+        if not ok then error(result, 0) end
+    end
+    function BASE.Execute(o, body) runSecureSnippet(body, o) end
+    function BASE.ChildUpdate(o, key, value)
+        local st = STATE[o]
+        for _, child in ipairs(st.children) do
+            local cs = STATE[child]
+            local body = cs and cs.attrs["_childupdate-" .. key]
+            if body then runSecureSnippet(body, child, value) end
+        end
+    end
     function BASE.SetOverrideBinding() end
     function BASE.GetOverrideBinding() return nil end
 
@@ -1578,7 +1635,7 @@ function ApiStub.New(config)
     api.gateMethodTable = gateMethodTable
 
     ---------------------------------------------------------------- 全局 API
-    local env = {}
+    env = {}
     api.env = env
 
     local function rawsetenv(k, v) rawset(env, k, v) end
@@ -1811,7 +1868,7 @@ function ApiStub.New(config)
     rawsetenv("GetRealmName", function() return "Testrealm" end)
     -- 客户端语言：LibMonetColor / AceLocale 一类在加载期就要 GetLocale()，缺一个就整包挂掉
     rawsetenv("GetLocale", function() return "zhCN" end)
-    rawsetenv("GetDefaultLanguage", function() return "zhCN" end)
+    rawsetenv("GetDefaultLanguage", function() return "zhCN", 7 end)
     rawsetenv("GetRegion", function() return "CN" end)
     rawsetenv("GetAccountArea", function() return "China" end)
     rawsetenv("UnitRealmName", function() return "Testrealm" end)
@@ -1859,11 +1916,23 @@ function ApiStub.New(config)
     -- 组队/团队判定：这批老 API 文档快照不收录（"缺席≠不存在"，见 docs 备忘），手工给齐。
     -- 默认给"不在队、不在团"这一最平常态，值挂在 api.world 上 —— Groups.lua 的
     -- MonetPartyHeader / MonetRaidHeader 显隐分支靠的就是它，改成 true 就能跑另一头。
-    rawsetenv("IsInRaid", function(ignorePets)
-        return api.world.inRaid and true or false
+    rawsetenv("IsInRaid", function(category)
+        return category ~= 2 and api.world.inRaid and true or false
     end)
-    rawsetenv("IsInGroup", function(ignorePets)
+    rawsetenv("IsInGroup", function(category)
+        if category == 2 then return api.world.inInstanceParty and true or false end
         return (api.world.inRaid or api.world.inParty) and true or false
+    end)
+    rawsetenv("IsInGuild", function() return api.world.inGuild and true or false end)
+    rawsetenv("GetChannelName", function(identifier)
+        if type(identifier) == "number" then
+            local channel = api.world.chatChannels[identifier]
+            return channel and channel.localID or 0
+        end
+        for _, channel in ipairs(api.world.chatChannels) do
+            if channel.name == identifier then return channel.localID, channel.name end
+        end
+        return 0
     end)
     rawsetenv("IsInParty", function(ignorePets)
         return (api.world.inParty and not api.world.inRaid) and true or false
@@ -1987,6 +2056,9 @@ function ApiStub.New(config)
         local obj, st = api.NewObject(frameType, name, p, { secure = secure, template = template })
         st.owned = true
         st.inheritedSecure = secure and not ownReason
+        if template == "SecureHandlerStateTemplate" then
+            st.w.WrapScript = function() return true end
+        end
         if api.onObjectCreated then api.onObjectCreated(obj, st) end
         return obj
     end)
@@ -2572,8 +2644,8 @@ function ApiStub.New(config)
     })
     defC("C_ActionBar", {
         GetActionInfo = function() return nil end,
-        GetActionCooldown = function() return 0, 0, 0 end,
-        GetActionCooldownDuration = function() return 0 end,
+        GetActionCooldown = function() return { start = 0, duration = 0, isActive = false } end,
+        GetActionCooldownDuration = function() return nil end,
         GetActionDisplayCount = function() return 0 end,
         IsActionInRange = function() return true end,
         HasAction = function() return true end,
@@ -2638,7 +2710,28 @@ function ApiStub.New(config)
     defC("C_UnitClass", { GetDisplayInfo = function() return nil end })
     defC("C_VideoOptions", { GetGSetting = function() return true end })
     defC("C_CharacterServices", { AreCharacterServicesAllowed = function() return false end })
-    defC("C_GuildInfo", { GetNumMembers = function() return 0 end })
+    defC("C_GuildInfo", {
+        GetNumMembers = function() return 0 end,
+        IsGuildOfficer = function() return api.world.guildOfficer and true or false end,
+    })
+    defC("C_ChatInfo", {
+        GetChannelInfoFromIdentifier = function(identifier)
+            return api.world.chatChannels[tonumber(identifier)]
+        end,
+        InChatMessagingLockdown = function() return api.world.chatLockdown and true or false end,
+        AreOutgoingAddonChatMessagesRestricted = function()
+            return api.world.outgoingChatRestricted and true or false
+        end,
+        SendChatMessage = function(message, chatType, languageID, target)
+            api.chatMessages = api.chatMessages or {}
+            api.chatMessages[#api.chatMessages + 1] = {
+                message = message, chatType = chatType, languageID = languageID, target = target,
+            }
+            if api.world.chatSendError then error("mock chat send failure") end
+            if api.world.chatSendSecret then return api.Secret("boolean") end
+            return api.world.chatSendResult
+        end,
+    })
     defC("C_LootJournal", { GetItemSets = function() return nil end })
     defC("C_Collections", { IsInProgressMatch = function() return false end })
     defC("C_UIMap", { GetMap = function() return nil end })

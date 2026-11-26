@@ -3,7 +3,7 @@
 --
 -- 为什么必须单独测：这套逻辑跨 /reload 才有意义，而且有两条容易写反的纪律 ——
 --   ① 对齐必须在 Apply **之后**（否则开着的开关被顶掉，玩家拨开关没反应）；
---   ② 对齐必须**跳过开关开着的条目**（否则 noWeather 写 0、快照写 3，每次登录互相覆盖）；
+--   ② 对齐必须**跳过所有开关管辖的条目**（旧快照可能记下 noWeather=0，关掉后不能再写回）；
 --   ③ 对齐还必须在 stuck 检查**之后**，否则「开关关但值没还原」这个查灰屏的关键信号
 --      会被快照自己抹掉。
 -- 另外 Config.wtf 只是落盘值，出厂快照是 seed，实机重采由 /mui tweaks snapshot 负责。
@@ -20,6 +20,8 @@
 --   7) stuck 诊断不被对齐抹掉
 --   8) 浮点 CVar 存成 "0.500000" 时不误报「写了没生效」（2026-11-13：新增的 0.5 目标值）
 --   9) defaults / status / restore 命令不抛、提示齐全
+--  10) noWeather 开→采样→关→还原→reload，旧快照不得把天气重新关掉
+--  11) 写异常 / 静默无效 / 复验缺失或机密均保留原值，解除失败后可重试
 --
 -- 跑法：lua tools/tweaks-defaults-probe.lua    退出码 0 = 全绿
 -- 依赖：lua 5.4（loadfile 三参 env）；无第三方库。
@@ -29,6 +31,8 @@ env._G = env
 
 local CVARS = {}
 local FLOAT6 = {}   -- 名单里的 CVar 写入后存成 "0.500000" 形态（客户端差异，见 SetCVar 桩件）
+local WRITE_MODE   -- nil=正常；throw=调用抛错；ignore=静默不写；missing=复验 nil；secret=复验机密
+local SECRET = {}  -- 机密值哨兵（Lua 5.4 桩件无法制造客户端真机密值）
 local function C(name, initial, default)
     CVARS[name] = { value = initial, initial = initial, default = default or initial }
 end
@@ -79,6 +83,7 @@ C("floatingCombatTextDodgeParryMiss_v2",    "1", "1")
 C("floatingCombatTextDamageReduction_v2",   "1", "1")
 
 local function Reset()
+    WRITE_MODE = nil
     for _, r in pairs(CVARS) do
         r.value = r.initial
     end
@@ -94,8 +99,12 @@ env.C_CVar = {
     SetCVar = function(n, v)
         local r = CVARS[n]
         if not r then return false end
+        if WRITE_MODE == "throw" then error("blocked") end
+        if WRITE_MODE == "ignore" then return end
         -- FLOAT6：模拟把浮点 CVar 存成 "0.500000" 的客户端形态（本机 RenderScale 就是这样）。
         r.value = FLOAT6[n] and string.format("%.6f", tonumber(v) or 0) or tostring(v)
+        if WRITE_MODE == "missing" then r.value = nil end
+        if WRITE_MODE == "secret" then r.value = SECRET end
         return true
     end,
 }
@@ -107,7 +116,7 @@ local DB = {}
 local out = {}
 local function MakeNS()
     local ns = {}
-    ns.Secrets = { IsSecret = function() return false end }
+    ns.Secrets = { IsSecret = function(v) return v == SECRET end }
     ns.Print = function(_, msg) out[#out + 1] = tostring(msg) end
     ns.DevPrint = function(_, msg) out[#out + 1] = tostring(msg) end   -- 同 Print，诊断文本也要被 Text() 捕获
     ns.DB = function() return DB end
@@ -308,17 +317,18 @@ check("snapshot 补齐了出厂没采样的 ResampleQuality",
     DB.tweakDefaults.vision.ResampleQuality == "1", tostring(DB.tweakDefaults.vision.ResampleQuality))
 check("snapshot 逐条打印「更新」", Text():find("更新", 1, true) ~= nil)
 check("snapshot 记下当时的开关状态", DB.tweakDefaults.switches.noWeather == true)
-check("snapshot 点名「由开着的开关接管」的冲突",
-    Text():find("由开着的开关", 1, true) ~= nil, Text():gsub("\n", " / "))
+check("snapshot 点名开关接管项不参与对齐",
+    Text():find("快照值都不参与对齐", 1, true) ~= nil, Text():gsub("\n", " / "))
 check("snapshot 不擅自改 auto（尊重 defaults off）", DB.tweakDefaults.auto == true)
 
 CVARS.brightness.value = "50"
+CVARS.particleDensity.value = "40"
 out = {}
 local M8 = Load()
 M8:Initialize()
 check("之后按新快照写回 60，不是出厂 55", CVARS.brightness.value == "60", CVARS.brightness.value)
-check("新快照里的 particleDensity 90 也生效", CVARS.particleDensity.value == "90",
-    CVARS.particleDensity.value)
+check("新快照里的 particleDensity 90 不生效（fewParticles 关着也由开关独立管辖）",
+    CVARS.particleDensity.value == "40", CVARS.particleDensity.value)
 
 print("== 6) stuck 诊断不被对齐抹掉 ==")
 Reset()
@@ -368,6 +378,123 @@ out = {}
 local okR, errR = pcall(M9.HandleCommand, M9, "restore")
 check("restore 不抛（多了自动对齐提示）", okR, errR)
 check("restore 提醒 reload 会被快照写回", Text():find("defaults off", 1, true) ~= nil)
+
+print("== 10) noWeather 开→采样→关→还原→reload 保持关 ==")
+Reset()
+CVARS.weatherDensity.value = "3"
+DB = { tweaks = { noWeather = true }, tweakSeed = 3, tweakOrigin = {},
+       tweakDefaults = { vision = {}, auto = true } }
+local M11 = Load()
+M11:Initialize()
+check("开关打开后 weatherDensity=0，并记住原值 3",
+    CVARS.weatherDensity.value == "0" and DB.tweakOrigin.weatherDensity == "3",
+    tostring(CVARS.weatherDensity.value) .. "/" .. tostring(DB.tweakOrigin.weatherDensity))
+M11:HandleCommand("snapshot")
+check("旧快照采到开关值 weatherDensity=0（模拟已存在的脏快照）",
+    DB.tweakDefaults.vision.weatherDensity == "0", tostring(DB.tweakDefaults.vision.weatherDensity))
+M11:HandleCommand("set noWeather 0")
+check("关闭开关恢复原值 3 并清账", CVARS.weatherDensity.value == "3"
+    and DB.tweakOrigin.weatherDensity == nil, tostring(CVARS.weatherDensity.value))
+local M11Reload = Load()
+M11Reload:Initialize()
+check("reload 后旧快照不再把天气写回 0", CVARS.weatherDensity.value == "3",
+    CVARS.weatherDensity.value)
+local forcedWrites, forcedSkips = M11Reload:AlignVision(true, true)
+check("强制 apply 也跳过全部开关管辖项", forcedWrites == 0 and forcedSkips == 7
+    and CVARS.weatherDensity.value == "3",
+    forcedWrites .. "/" .. forcedSkips .. "/" .. tostring(CVARS.weatherDensity.value))
+
+print("== 11) 写失败保留原值，限制解除后重试 ==")
+local function ArmedWeather()
+    Reset()
+    CVARS.weatherDensity.value = "3"
+    DB = { tweaks = { noWeather = true }, tweakSeed = 3, tweakOrigin = {},
+           tweakDefaults = { vision = {}, auto = true } }
+    local m = Load()
+    m:Initialize()
+    assert(CVARS.weatherDensity.value == "0" and DB.tweakOrigin.weatherDensity == "3")
+    return m
+end
+
+local M12 = ArmedWeather()
+WRITE_MODE = "throw"
+M12:HandleCommand("set noWeather 0")
+check("SetCVar 抛错不算成功，RestoreOne / Apply 均保留原值",
+    DB.tweakOrigin.weatherDensity == "3" and CVARS.weatherDensity.value == "0",
+    tostring(DB.tweakOrigin.weatherDensity) .. "/" .. tostring(CVARS.weatherDensity.value))
+out = {}
+M12:HandleCommand("status")
+check("抛错落在账本里，不当成已写", Text():find("写入被拒", 1, true) ~= nil,
+    Text():gsub("\n", " / "))
+M12:Settings().noWeather = true
+M12:Apply()
+check("失败后重新打开也不会把插件目标值误存成原值", DB.tweakOrigin.weatherDensity == "3",
+    tostring(DB.tweakOrigin.weatherDensity))
+M12:Settings().noWeather = false
+WRITE_MODE = nil
+M12:Apply()
+check("限制解除后 Apply 重试还原成功并清账",
+    CVARS.weatherDensity.value == "3" and DB.tweakOrigin.weatherDensity == nil,
+    tostring(CVARS.weatherDensity.value))
+
+M12:Settings().noWeather = true
+M12:Apply()
+WRITE_MODE = "ignore"
+M12:HandleCommand("set noWeather 0")
+check("SetCVar 静默不写、复验仍是目标值时保留原值",
+    DB.tweakOrigin.weatherDensity == "3" and CVARS.weatherDensity.value == "0",
+    tostring(DB.tweakOrigin.weatherDensity) .. "/" .. tostring(CVARS.weatherDensity.value))
+WRITE_MODE = nil
+M12:Apply()
+check("静默失败解除后重试成功", CVARS.weatherDensity.value == "3"
+    and DB.tweakOrigin.weatherDensity == nil, tostring(CVARS.weatherDensity.value))
+
+M12:Settings().noWeather = true
+M12:Apply()
+M12:Settings().noWeather = false
+WRITE_MODE = "missing"
+M12:Apply()
+check("写后复验 nil 不算成功，Apply 不清账", DB.tweakOrigin.weatherDensity == "3",
+    tostring(DB.tweakOrigin.weatherDensity))
+WRITE_MODE = nil
+CVARS.weatherDensity.value = "0"  -- 模拟限制解除后重新可读，值仍是插件目标值
+M12:Apply()
+check("复验恢复可读后重试成功", CVARS.weatherDensity.value == "3"
+    and DB.tweakOrigin.weatherDensity == nil, tostring(CVARS.weatherDensity.value))
+
+M12:Settings().noWeather = true
+M12:Apply()
+WRITE_MODE = "secret"
+M12:HandleCommand("set noWeather 0")
+check("写后复验机密不算成功，且不对机密值比较", DB.tweakOrigin.weatherDensity == "3",
+    tostring(DB.tweakOrigin.weatherDensity))
+WRITE_MODE = nil
+CVARS.weatherDensity.value = "0"  -- 模拟限制解除后机密标记消失
+M12:Apply()
+check("机密复验解除后重试成功", CVARS.weatherDensity.value == "3"
+    and DB.tweakOrigin.weatherDensity == nil, tostring(CVARS.weatherDensity.value))
+
+M12:Settings().noWeather = true
+M12:Apply()
+WRITE_MODE = "ignore"
+local failedDefaultWrites = M12:RestoreToDefault()
+check("RestoreToDefault 写失败不计成功且保留原值",
+    DB.tweakOrigin.weatherDensity == "3" and CVARS.weatherDensity.value == "0",
+    tostring(DB.tweakOrigin.weatherDensity) .. "/" .. tostring(CVARS.weatherDensity.value))
+WRITE_MODE = nil
+local restoredDefaultWrites = M12:RestoreToDefault()
+check("RestoreToDefault 重试成功后才清账", DB.tweakOrigin.weatherDensity == nil
+    and CVARS.weatherDensity.value == "3" and restoredDefaultWrites > failedDefaultWrites,
+    restoredDefaultWrites .. "/" .. failedDefaultWrites)
+
+Reset()
+CVARS.weatherDensity.value = SECRET
+DB = { tweaks = { noWeather = true }, tweakSeed = 3, tweakOrigin = {},
+       tweakDefaults = { vision = {}, auto = true } }
+local M13 = Load()
+M13:Initialize()
+check("开关初次采样不把机密值写进原值账", DB.tweakOrigin.weatherDensity == nil
+    and CVARS.weatherDensity.value == "0", tostring(DB.tweakOrigin.weatherDensity))
 
 print(fail == 0 and "\n全部通过" or ("\n失败 " .. fail .. " 项"))
 os.exit(fail == 0 and 0 or 1)

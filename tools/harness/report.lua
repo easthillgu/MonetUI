@@ -33,7 +33,8 @@ local LEVELS = { red = 1, warn = 2, guarded = 3, info = 4 }
 
 -- 类名 -> 断言编号（渲染时按断言分组）
 local CLASS_ASSERT = {
-    A0 = 1, A0p = 1, A0b = 1, A1s = 1, A1t = 1,
+    -- B：受限首启 / reload；Map-only 当场建框，其余限制延迟，解禁后完整恢复。
+    A0 = 1, A0p = 1, A0b = 1, A1s = 1, A1t = 1, B = 1,
     A2 = 2, A2c = 2, A2i = 2, A2r = 2, A2n = 2, A6 = 2, A1b = 2,
     A3 = 3, A3h = 3, A3s = 3,
     A4 = 4, A4t = 4, A4s = 4, A4h = 4,

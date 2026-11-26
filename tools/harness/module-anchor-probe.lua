@@ -45,6 +45,17 @@ local UIParent = { _name = "UIParent",
     GetWidth = function() return 1920 end,
     GetHeight = function() return 1080 end }
 local ns = { AfterCombat = function() end }
+local Secrets = {
+    CanRead = function(v) return not (type(v) == "table" and v.__secret == true) end,
+    Number = function(v)
+        if type(v) ~= "number" or (type(v) == "table" and v.__secret == true) then return nil end
+        return v
+    end,
+    Bool = function(v, default)
+        if type(v) == "table" and v.__secret == true then return default end
+        return v and true or false
+    end,
+}
 local InCombat = function() return false end
 local Stored = function(e) return e.store and e.store() or nil end
 local FAILED = 0
@@ -143,6 +154,21 @@ local q9 = off.point
 check("9 锚定后落在屏幕外 -> 二次自愈回 fallback",
     q9 and q9[2] == UIParent and q9[1] == "CENTER" and q9[4] == 300,
     q9 and tostring(q9[4]) or "no point")
+
+panel._rect = { { __secret = true }, 800, 260, 194 }
+run("10 锚框机密 rect -> 不运算，降级 fallback",
+    { key = "groupRaid", frame = raid,
+      default = { point = "RIGHT", relativeTo = "MonetUIMinimapPanel",
+                  relativePoint = "LEFT", x = -14, y = 0, fallback = fb }, store = none },
+    UIParent, "CENTER", 300)
+panel._rect = { 1500, 800, 260, 194 }
+panel._shown = { __secret = true }
+run("11 具名面板机密显隐 -> 不真值测试，降级 fallback",
+    { key = "groupRaid", frame = raid,
+      default = { point = "RIGHT", relativeTo = "MonetUIMinimapPanel",
+                  relativePoint = "LEFT", x = -14, y = 0, fallback = fb }, store = none },
+    UIParent, "CENTER", 300)
+panel._shown = true
 
 return FAILED
 ]]

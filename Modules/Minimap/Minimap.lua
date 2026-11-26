@@ -22,7 +22,7 @@ local ADDON_NAME, ns = ...
 local Mark   = function(o, k, v) return ns:Mark(o, k, v) end
 local Marked = function(o, k) return ns:Marked(o, k) end
 local Widget   = ns.Widget
-local Skin     = ns.Skin
+local SkinKit  = ns.Skin
 local EventBus = ns.EventBus
 local Secrets  = ns.Secrets
 
@@ -204,13 +204,12 @@ local hooked = setmetatable({}, { __mode = "k" })
 --- 集群按钮被暴雪重新 Show 时再藏一次。
 --- 这一档条目能不能只按 alpha 收（不 Hide）。
 --- `art` 是原意（美术层，藏了会留空洞）。**第二条是 11-06 实机加的必要条件**：
---- `hideMicroMenu` 平时走 `Hide()` + "一 Show 就再 Hide"，而 `microMenuSecure` 那 12 行是
---- **代点**原生微按钮（`type="click"`），引擎的 `HandleAttributeClick` 对 `IsVisible()=false`
---- 的目标**静默跳过**（实测：12 行全成死行、`logs` 与 `taint.log` 零记录，玩家只看到"点了没反应"）
---- ⇒ 开着载体时这一条只能压 alpha，不能断掉 shown 链（照样看不见，但链是通的）。
+--- `hideMicroMenu` 平时走 `Hide()` + "一 Show 就再 Hide"，而 `microMenuSecure` 的代点行要求
+--- 原生目标 `IsVisible()=true`，否则引擎的 `HandleAttributeClick` 静默跳过（实测：整排成死行）。
+--- 日历同样代点 `GameTimeFrame`，所以 `hideClock` 在安全载体开着时也只能压 alpha，不能断 shown 链。
 local function alphaOnlyFor(entry)
     if entry.art then return true end
-    if entry.key == "hideMicroMenu" then
+    if entry.key == "hideMicroMenu" or entry.key == "hideClock" then
         local s = Settings()
         return (s and s.microMenuSecure) and true or false
     end
@@ -527,19 +526,23 @@ local function ZoomStep(delta)
 end
 
 --- 方形地图上打标记。
---- 暴雪自己的 MinimapMixin:OnClick 只在点击落在**圆内**时才 PingLocation（那个判断是给
---- 圆形小地图写的），方形皮肤下四个角会被判成"点在圆外"而什么也不做。
---- 这里照抄它那套坐标换算，只是去掉圆的判断：方形的地图，四角也是地图的一部分。
+--- 暴雪自己的 MinimapMixin:OnClick 只在点击落在**圆内**时才 PingLocation，而且战斗中也由
+--- 客户端安全执行。圆内点击透传给原生；圆外只在脱战补一次，避免受限调用和重复标记。
 local function PingAtCursor(minimap)
     if not minimap or not minimap.PingLocation or not _G.GetCursorPosition then return end
-    local x, y = GetCursorPosition()
-    local scale = minimap.GetEffectiveScale and minimap:GetEffectiveScale()
-    if not scale or scale == 0 then return end
-    x = x / scale
-    y = y / scale
+    -- 受限时点击透传给暴雪原生 OnClick：圆内由客户端安全地 ping，圆外不补调用。
+    if InCombat() or ns:IsRestricted() then return end
+    local rawX, rawY = GetCursorPosition()
+    local x, y = Secrets.Number(rawX), Secrets.Number(rawY)
+    local scale = Secrets.Number(minimap.GetEffectiveScale and minimap:GetEffectiveScale())
     local cx, cy = minimap:GetCenter()
-    if not cx then return end
-    pcall(minimap.PingLocation, minimap, x - cx, y - cy)
+    cx, cy = Secrets.Number(cx), Secrets.Number(cy)
+    local width = Secrets.Number(minimap.GetWidth and minimap:GetWidth())
+    if not x or not y or not scale or scale == 0 or not cx or not cy or not width then return end
+    local dx, dy = x / scale - cx, y / scale - cy
+    -- 圆内也已经透传给原生 OnClick，避免一次点击打两个标记；只补方形可见区的四角。
+    if dx * dx + dy * dy < (width / 2) * (width / 2) then return end
+    pcall(minimap.PingLocation, minimap, dx, dy)
 end
 
 --- 方形地图的命中区。
@@ -551,7 +554,7 @@ local OpenTrackingMenu
 --- 暴雪的 Minimap 命中区是圆的，方形皮肤下四角够不到；这层透明帧铺满**可见区**
 --- （不是整个 256×256 画布：上下那两条已经被遮罩裁掉了，落在那儿的位置地图上并不显示）：
 ---   * 滚轮 —— 缩放；
----   * 左键 —— 自己打标记（四角也算），所以不穿透给地图；
+---   * 左键 —— 圆内透传暴雪原生 ping；脱战时圆外补一次，战斗中圆外不调用受保护方法；
 ---   * 右键 —— 弹微型菜单；
 ---   * 鼠标移动 —— 透传给地图，地图自己的悬停效果照旧。
 local function EnsureBlocker(minimap)
@@ -568,6 +571,7 @@ local function EnsureBlocker(minimap)
         blocker = CreateFrame("Frame", "MonetUIMinimapOverlay", parent)
         blocker:SetFrameLevel(minimap:GetFrameLevel() + 10)
         blocker:SetPropagateMouseMotion(true)
+        blocker:SetPropagateMouseClicks(true)
         blocker:EnableMouse(true)
         blocker:SetScript("OnMouseWheel", function(_, delta)
             if not Settings().scrollZoom then return end
@@ -575,7 +579,7 @@ local function EnsureBlocker(minimap)
         end)
         blocker:SetScript("OnMouseUp", function(_, button)
             if button == "LeftButton" then
-                -- 左键自己处理：方形的地图四角也要能打标记
+                -- 左键：圆内已透传给暴雪原生 OnClick；脱战时只补方形可见区的四角。
                 PingAtCursor(_G.Minimap)
                 return
             end
@@ -589,7 +593,7 @@ local function EnsureBlocker(minimap)
             if button ~= "RightButton" then return end
             -- 停在按钮上时不弹菜单（暴雪按钮自己要用这个键）
             if M.buttons and M.buttons:IsOverButton() then return end
-            -- #43：开着全量安全载体就用它（自有动作行 + 代点原生微按钮行的并集），否则用 4 行纯 C_* 菜单。
+            -- #43：开着全量安全载体就用它（自有动作行 + 代点原生微按钮行的并集），否则用 3 行普通 C_* 菜单。
             if M.microMenuSecure and Settings().microMenuSecure then
                 M.microMenuSecure:Toggle()
             elseif M.microMenu and Settings().microMenu then
@@ -1035,7 +1039,7 @@ function Restore()
     RestoreHybrid()
 
     -- 暴雪按钮搬回原来的父级，我们画的底板藏起来
-    if M.buttons then M.buttons:Restore() end
+    if M.buttons and not M.buttons:Restore() then failed = true end
     -- 被我们压掉的第三方 pin（遮罩档的带子裁剪）放回去
     if M.pins then M.pins:Restore() end
     if M.microMenu then M.microMenu:Close() end
@@ -1212,8 +1216,7 @@ function M:HandleCommand(rest)
         return true
     end
 
-    -- `/mui minimap secure on|off`：#43 载体的开关（验证要反复开关，点配置 UI 太慢）。
-    -- 只写 `settings.microMenuSecure` 一个键，右键分发处（本文件 578 行）每拍现读，**不需要重载**。
+    -- `/mui minimap secure on|off`：切换后立即重算时钟/微按钮的隐藏方式，右键无需重载。
     if rest == "secure" then
         ns:Print("用法：/mui minimap secure on|off（当前=" ..
             tostring((Settings() or {}).microMenuSecure) .. "）· 判据：/mui minimap securemenu")
@@ -1223,16 +1226,20 @@ function M:HandleCommand(rest)
     if subSecure then
         local s = Settings()
         if s then
+            local changed = false
             if subSecure == "on" or subSecure == "1" then
                 s.microMenuSecure = true
-                ns:Print("微型菜单改用**全量安全载体**（12 行代点原生微按钮）。右键小地图即生效，无需重载。")
+                changed = true
+                ns:Print("微型菜单改用**全量安全载体**（含日历与原生微按钮）。右键小地图即生效，无需重载。")
             elseif subSecure == "off" or subSecure == "0" then
                 s.microMenuSecure = false
+                changed = true
                 if self.microMenuSecure then self.microMenuSecure:Close() end
-                ns:Print("微型菜单回到 4 行纯 C_* 菜单。")
+                ns:Print("微型菜单回到 3 行普通 C_* 菜单（日历只在安全载体中）。")
             else
                 ns:Print("用法：/mui minimap secure on|off（当前=" .. tostring(s.microMenuSecure) .. "）")
             end
+            if changed then ApplyButtons() end
             return true
         end
     end
@@ -1253,11 +1260,11 @@ function M:HandleCommand(rest)
     ns:Print("---- 小地图自检 ----")
     -- 名字可达性记进美化层那本公共账（Skin:Need），`/mui skins diagnose` 一处就能看全；
     -- 这里只额外报小地图特有的"一个键位有哪几种拼法、命中了哪一种"。
-    Skin.With("minimap", function()
+    SkinKit.With("minimap", function()
         for _, entry in ipairs(BUTTONS) do
             local found, names = false, {}
             for _, path in ipairs(entry.paths) do
-                if Skin:Need(path) then
+                if SkinKit:Need(path) then
                     found = true
                     names[#names + 1] = path
                 end

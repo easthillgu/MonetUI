@@ -54,7 +54,9 @@ local DEFAULTS = {
         Skins        = true,
         InfoBar      = true,
         Tooltip      = true,
+        Chat         = true,
     },
+    chat = { positions = {} },
     -- 位置服务（Utils/Mover.lua）：全 addon 的框共用一套拖拽 / 吸附 / 锁。locked 是全局锁，locks 按组覆盖；
     -- grid 是网格步长（物理像素，0 = 关），snap / snapRange 是框与框互相吸附的开关与范围（物理像素）。
     -- 2026-11-15（§8.124）：**默认锁定**。原来 locked=false，player 框常驻可见，左键一点一拖就把
@@ -534,6 +536,9 @@ local function LoadDatabase()
     local db = ns:DB()
     MergeDefaults(db, DEFAULTS)
     Migrate(db)
+    if ns.Init and type(ns.Init.Prepare) == "function" then
+        ns.Init:Prepare()
+    end
     return db
 end
 
@@ -665,14 +670,16 @@ local combatState = nil    -- nil = 还没收到过 regen 事件（登录/重载
 --- 现在是否在战斗中。事件派发当拍也正确（见 combatState 注释）；没收到过事件时退回实时标志。
 function ns:InCombat()
     if combatState ~= nil then return combatState end
-    return (InCombatLockdown and InCombatLockdown()) and true or false
+    return ((InCombatLockdown and InCombatLockdown())
+        or (UnitAffectingCombat and UnitAffectingCombat("player"))) and true or false
 end
 
 ns.EventBus:Register("PLAYER_REGEN_DISABLED", function() combatState = true end)
 ns.EventBus:Register("PLAYER_REGEN_ENABLED",  function() combatState = false end)
 -- 登录 / 重载时可能已经在战斗里（事件不会补发）：用实时标志定初值。
 ns.EventBus:Register("PLAYER_ENTERING_WORLD", function()
-    combatState = (InCombatLockdown and InCombatLockdown()) and true or false
+    combatState = ((InCombatLockdown and InCombatLockdown())
+        or (UnitAffectingCombat and UnitAffectingCombat("player"))) and true or false
 end)
 
 local function RunAfterCombat(key, fn)
@@ -718,9 +725,9 @@ local function FlushAfterCombat()
     flushTickQueued = true
     C_Timer.After(0, function()
         flushTickQueued = false
-        -- 新的一拍里标志已翻，此时再问一次才算数：仍在别的受限窗口（Map / Chat …）
-        -- 就整队留着，等解禁事件或下次脱战再排，不硬写。
-        if ns.IsRestricted and ns:IsRestricted() then return end
+        -- 新的一拍里标志已翻，此时再问一次才算数。Map 仍会加密数据，但 1.60.1 / 71037
+        -- 实测它不拦受保护写入；其余限制照旧整队留队，等解禁事件或下次脱战。
+        if not ns:CanRunProtectedWork() then return end
         FlushNow()
     end)
 end
@@ -731,20 +738,21 @@ end
 -- 先摘走"，不再保证模块回调跑之前动作已落地 —— 依赖"更早的统一排空"的模块按新序各做各的，
 -- 最坏多等一拍。
 ns.EventBus:Register("PLAYER_REGEN_ENABLED", FlushAfterCombat)
--- 那个新 tick 若发现还在别的受限窗口里（Map / Chat 一类）会整队留着 —— 没有下一次脱战就永远
--- 没人做。换边事件就是那个"下一次"（Core 自己派发，见下面六类限制那本账）。
+-- 那个新 tick 若发现仍处在会拦受保护写入的限制窗口里，会整队留着；Map-only 不在此列。
+-- 换边事件就是其它限制的"下一次"，避免副本内没有下一次脱战时任务永远不执行。
 ns.EventBus:Register("MONETUI_RESTRICTION_CHANGED", FlushAfterCombat)
 
 function ns:AfterCombat(key, fn, mode)
     if type(key) ~= "string" or type(fn) ~= "function" then return end
 
-    -- 当场能做的条件从"不在战斗中"放宽成"不在任何一类受限窗口里"（见下面 6 类限制）：
-    -- Map / Chat 这类限制生效时写入同样会被拒，排到队列里等状态清掉。
+    -- 当场能做的条件从"不在战斗中"放宽成"不在会拦受保护写入的限制窗口里"。Map 仍走
+    -- IsRestricted 保护机密数据，但 1.60.1 / 71037 在厄运之槌实测 CheckAllowProtectedFunctions
+    -- 对 TargetFrame / MainActionBar / ContainerFrame1 / Minimap 与自建安全处理器全部放行。
     -- 再加一道**原生标志**前置：脱战派发当拍 `IsRestricted()` 已答"自由"，但客户端此刻仍
     -- 锁着（先派事件后翻标志）—— 那一刻当场跑等于替模块写被拒，所以让它排队，由上面
     -- `FlushAfterCombat` 的新 tick 做掉。两处判据必须同源：谁收紧"能不能写"，这里就得跟着收紧，
     -- 否则守卫排队、这边同步重跑 = 互顶成死循环（11-04 实测 962 层爆栈那条）。
-    if mode ~= "regen" and not ns:IsRestricted()
+    if mode ~= "regen" and ns:CanRunProtectedWork()
         and not (InCombatLockdown and InCombatLockdown()) then
         RunAfterCombat(key, fn)
         return
@@ -796,6 +804,17 @@ function ns:IsRestricted()
     if not restrictionKnown then return ns:InCombat() end
     if ns:InCombat() then return true end
     return AnyRestrictionActive()
+end
+
+-- Map 会加密数据但 1.60.1 / 71037 实测不拦受保护写入；其余限制仍保守延迟。
+function ns:CanRunProtectedWork()
+    if not restrictionKnown then return not ns:InCombat() end
+    if ns:InCombat() then return false end
+    for i = 1, #RESTRICTION_ORDER do
+        local name = RESTRICTION_ORDER[i]
+        if name ~= "Map" and restrictionActive[name] then return false end
+    end
+    return true
 end
 
 --- 任一禁限类型激活中（含 Activating 等待态，宁可多守一拍）。
@@ -882,11 +901,12 @@ function ns:InitializeModule(name)
     if not module or module._initialized then return false end
 
     if module.Initialize then
-        local ok, err = pcall(module.Initialize, module)
+        local ok, result = pcall(module.Initialize, module)
         if not ok then
-            self:Print("模块 " .. name .. " 初始化失败: " .. tostring(err))
+            self:Print("模块 " .. name .. " 初始化失败: " .. tostring(result))
             return false
         end
+        if result == false then return false end
     end
 
     module._initialized = true
@@ -930,6 +950,9 @@ function ns:StartModules()
     for _, name in ipairs(moduleOrder) do
         if self:IsModuleEnabled(name) then
             self:InitializeModule(name)
+            if self.Async and type(self.Async.Checkpoint) == "function" then
+                self.Async.Checkpoint()
+            end
         end
     end
 
@@ -1343,6 +1366,7 @@ end)
 
 ns.EventBus:Register("PLAYER_LOGIN", function()
     LoadDatabase()
+    SeedRestrictions()
     -- 主题刷新失败不能让模块永远不启动：以前这里裸调 RefreshTheme，
     -- 抛一次错就停在 StartModules 之前（模块一个都没加载，玩家看到的是"插件没生效"）。
     local okTheme, themeErr = pcall(RefreshTheme, "login")
@@ -1373,9 +1397,9 @@ ns.EventBus:Register("PLAYER_LOGIN", function()
         end
     end
 
-    -- 启动前置层（Init.lua）在放行模块之前把需要的设置统一调整好：静态基线已在
-    -- 文件加载期固定，这里等编辑模式布局数据就绪、一次性对齐聊天框，然后才
-    -- StartModules —— 各模块拿到的第一份几何就是最终值，不需要运行期反复重贴。
+    -- 启动前置层（Init.lua）先恢复旧 CVar 账目，再把模块初始化放进 Async 协程；
+    -- StartModules 在每个模块之间让出帧预算，避免登录当拍连续跑完所有重模块。
+    -- 聊天框布局仍独立等到 EditMode 就绪，不阻塞动作条等模块。
     local function Boot()
         -- Before the modules: every size they build is computed from the scale.
         ApplyAutoScale()

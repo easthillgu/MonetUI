@@ -147,8 +147,8 @@ ok(FREEFN !== '' && !/AcquireFreeSlot/.test(FREEFN),
 // 2026-11-06：银行侧**已接**（原先"索引语义未定性就不接"的临时口径作废）。
 // 定性的硬证据：`Enum.BagIndex` 里 6..14 = CharacterBankTab_1..9；站银行 NPC 前实测
 // `6:48 槽 / 26 件 / 22 空`、7..14 全 0 槽 ⇒ 索引与物理格子 1:1，不存在"同一格多个索引"。
-ok(/FillFreeWindow\(freeWin, empties, activeMode == "bank"\)/.test(SRC),
-  'F5 银行侧也传真槽位坐标 + keepTitle（空银行也留标题行，见 F7）');
+ok(/FillFreeWindow\(freeWin, empties, true\)/.test(SRC),
+  'F5 两套模式都传真槽位坐标 + keepTitle（空窗口也留标题行，见 F7）');
 ok(/Skin:ApplySlotCooldown\(cd, rec\.itemID\)/.test(SRC) && /if not rec\.itemID then return end/.test(SRC),
   'F6 空格复用清冷却遮罩（共用 Skin:ApplySlotCooldown，nil itemID 也显式收）+ 空槽悬停不弹提示');
 

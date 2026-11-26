@@ -1,9 +1,8 @@
 -- Modules/Minimap/MicroMenu.lua
 -- 右键小地图弹出的微型游戏菜单：一列游戏面板的快捷入口，面板用统一的 Monet 材质。
 --
--- 入口全部"存在才画"：每一行要么把点击**安全转发**给暴雪自己的那颗微按钮
--- （`SecureActionButtonTemplate` + `type="click"`），要么只有一个**纯 C_* API** 动作
--- （`Settings.OpenToCategory` / `C_Map.OpenWorldMap` / 我们自己的模块）。两者都拿不到就不建行。
+-- 入口全部"存在才画"：普通菜单只保留纯 C_* API 或我们自己的模块；需要暴雪 Lua 开窗链的
+-- 日历行声明 `secureTarget`，交给 `MicroMenuSecure` 用 `SecureActionButtonTemplate` 代点原生时钟。
 -- **不再有**"探测 _G 里的暴雪开关函数然后调用它"这条路 —— 那是 11-05 开服 P0 的写法（§8.36）。
 
 local ADDON_NAME, ns = ...
@@ -19,7 +18,7 @@ local frame      -- 菜单面板
 local catcher    -- 点别处关闭
 local rows       -- 已建的行
 
---- 入口定义：**只允许 `luaAction`，而且只能是纯 C_* API 或我们自己的模块**。
+--- 入口定义：每行必须且只能声明一种出口；`luaAction` 只能是纯 C_* API 或我们自己的模块。
 ---
 --- ⚠ 11-05 开服实测（`/mui minimap menu`）：这里曾给每行做 `SecureActionButtonTemplate` +
 --- `type="click"` 去代点暴雪微按钮，结果是 **面板自己 `IsProtected()=true`、`GetNumPoints()=0`** ——
@@ -28,11 +27,10 @@ local rows       -- 已建的行
 --- 信息栏那一版是同一个机制、只是它的写入会记日志（HANDOFF §8.36 / §8.37 / §8.38）。
 --- ⇒ 硬规矩：安全模板控件绝不锚到「我们要重摆 / 逐拍排版」的框上。
 ---
---- 代价说清楚：**这一版微菜单只剩三行**。角色 / 法术 / 任务 / 成就 / 好友 / 收藏 / 副本 /
---- 职业 / 寻找组 / 住房 / 商店 / 帮助 在本客户端**没有纯 C_* 开窗 API**（docs/api 快照里 Open 动词
---- 只有 `C_Map.OpenWorldMap` / `C_Calendar.OpenCalendar` / `C_TradeSkillUI.OpenTradeSkill` /
---- `C_SettingsUtil.OpenSettingsPanel` 这一小撮），而调暴雪 Lua 全局是被禁止的 P0 写法。
---- 要恢复它们走 #43 的独立安全载体，不要在这里重试第二种安全模板写法。
+--- 代价说清楚：**这一版普通菜单只剩三行**。角色 / 法术 / 任务 / 成就 / 好友 / 收藏 / 副本 /
+--- 职业 / 寻找组 / 住房 / 商店 / 帮助 / 日历在本客户端没有既能加载 UI 又能直接开窗的纯 C_* API。
+--- `C_Calendar.OpenCalendar` 只请求日历数据，不会加载 `Blizzard_Calendar` 或显示 `CalendarFrame`；
+--- 日历必须交给 #43 的独立安全载体代点 `GameTimeFrame`，不要在普通面板里重试安全模板。
 --- 动作抽成**函数**并导出（11-07；定向动作现为 `character` —— `questlog` / `talent` 随任务、专精两格删除撤掉）：
 --- 信息栏的格子（`Blocks.lua`）也要用同一批动作，
 --- 而 AGENTS 的规矩是"一处判据一份实现" —— 入口表可以各开各的，**开窗逻辑不能抄第二份**。
@@ -47,14 +45,6 @@ local function OpenMap()
     if ns:IsRestricted() then return end
     local C_Map = _G.C_Map
     if C_Map and type(C_Map.OpenWorldMap) == "function" then C_Map.OpenWorldMap() end
-end
-
-local function OpenCalendar()
-    -- 11-05 实测：本客户端的纯 C_* 开窗动词只有 `OpenWorldMap`/`OpenCalendar`/`OpenTradeSkill(要 skillLineID)`/
-    -- `OpenSettingsPanel` 这一小撮（`/run` 扫遍所有 `C_*.Open*`）。日历是其中唯一无参、能直接加进行里的。
-    if ns:IsRestricted() then return end
-    local C_Calendar = _G.C_Calendar
-    if C_Calendar and type(C_Calendar.OpenCalendar) == "function" then C_Calendar.OpenCalendar() end
 end
 
 local function OpenSettings()
@@ -115,7 +105,7 @@ end
 local ENTRIES = {
     { label = "背包", luaAction = OpenBags },
     { label = "地图", luaAction = OpenMap },
-    { label = "日历", luaAction = OpenCalendar },
+    { label = "日历", secureTarget = "GameTimeFrame" },
     { label = "设置", luaAction = OpenSettings },
 }
 
@@ -125,7 +115,6 @@ local ENTRIES = {
 M.actions = {
     bags     = OpenBags,
     map      = OpenMap,
-    calendar = OpenCalendar,
     settings = OpenSettings,
     dock     = OpenMicroDock,
     character = OpenCharacter, -- 微菜单自用；信息栏「耐久」格 11-10 起只读，不再代点这里
@@ -134,11 +123,12 @@ M.actions = {
 
 --- 曾经这里按名字取暴雪那颗微按钮、把行做成安全按钮去代点它。11-05 实测：那些行锚进面板
 --- 之后面板 `IsProtected()=true`，自己的 `SetPoint` 被静默丢弃 ⇒ 菜单展不开（ENTRIES 上方注释）。
---- 所以这里**不再有第二种动作源**：行只有 `luaAction`（纯 C_* API / 我们自己的模块）这一条路。
+--- 所以普通面板只实现 `luaAction`（纯 C_* API / 我们自己的模块），安全代点只归独立载体。
 ---
 --- **11-06 加的唯一出口**：`#43` 那版独立安全载体（`MicroMenuSecure.lua`）要在它的菜单里也放这几行
---- （右键开着载体时本文件的 4 行菜单不参与，见 `Minimap.lua` 的右键分发），
---- 但入口定义**只能有一份** —— 这里导出，载体那边读，不许抄第二份。
+--- （右键开着载体时本文件的普通菜单不参与，见 `Minimap.lua` 的右键分发）。
+--- 每行必须且只能声明一种出口：普通行走 `luaAction`，安全代点行走 `secureTarget`。
+--- 入口定义**只有一份** —— 这里导出，载体那边读，不许抄第二份。
 M.ownEntries = ENTRIES
 
 --- 只剩"纯 C_* API"可以留在 Lua 里直接调（不牵动暴雪的 Lua 面板链，也不会把机密值比较
@@ -272,9 +262,15 @@ end
 ---      信息栏 §8.37 就是这么炸的，这里就是那条风险的现场复验）；
 ---   ③ 开关与展开状态（设置关着 ⇒ 右键那条 `if` 根本不走到这里）。
 function M:Probe(enabledSetting)
-    local actions, skipped = 0, {}
+    local actions, secure, skipped = 0, 0, {}
     for _, entry in ipairs(ENTRIES) do
-        if SafeActionFor(entry) then actions = actions + 1 else skipped[#skipped + 1] = entry.label end
+        if SafeActionFor(entry) then
+            actions = actions + 1
+        elseif type(entry.secureTarget) == "string" then
+            secure = secure + 1
+        else
+            skipped[#skipped + 1] = entry.label
+        end
     end
 
     if not frame then Build() end
@@ -293,8 +289,8 @@ function M:Probe(enabledSetting)
     local rl, rb, rw, rh
     if type(frame.GetRect) == "function" then rl, rb, rw, rh = frame:GetRect() end
 
-    ns:Print(("微菜单：入口 %d · 有合法动作 %d · 无动作跳过 %s"):format(
-        #ENTRIES, actions, (#skipped > 0) and table.concat(skipped, "、") or "无"))
+    ns:Print(("微菜单：入口 %d · 普通动作 %d · 仅安全载体 %d · 无动作跳过 %s"):format(
+        #ENTRIES, actions, secure, (#skipped > 0) and table.concat(skipped, "、") or "无"))
     ns:Print(("面板：已建 · 受保护=%s · 行 %d 颗（其中受保护 %d）· 锚点数=%s · 矩形=%s · 高 %.1f · shown=%s"):format(
         tostring(protFrame), #(rows or {}), rowProt, tostring(np),
         (rl and string.format("%.0f,%.0f %.0fx%.0f", rl, rb, rw or 0, rh or 0)) or "读不出",

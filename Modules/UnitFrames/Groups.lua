@@ -766,7 +766,9 @@ local function MapButtons()
         for i = 1, #list do
             local button = list[i]
             local unit = button:GetAttribute("unit")
-            if unit then
+            -- 安全头在受限期可能返回机密 unit：先做值级守卫，再写字段/当表键。
+            -- 本次读不到就整颗跳过，保留按钮上次的普通 unit，不把机密值带进任何分支。
+            if type(unit) == "string" and Secrets.CanRead(unit) and not Secrets.IsSecret(unit) then
                 button.unit = unit
                 byUnit[unit] = button
             end
@@ -955,10 +957,9 @@ end
 
 local parked = setmetatable({}, { __mode = "k" })
 
---- 受保护写入的唯一门槛。**六类受限窗口都算**（Combat / Encounter / ChallengeMode /
---- PvPMatch / Map / Chat）：只判战斗会漏掉后三类，那些窗口里 `EnableMouse` / `SetPoint`
---- 一样被拒（见 AGENTS「受限窗口不止战斗」）。
+--- 受保护写入门槛：Combat / Encounter / ChallengeMode / PvPMatch / Chat 延迟，Map 按 1.60.1 实测放行。
 local function Restricted()
+    if type(ns.CanRunProtectedWork) == "function" then return not ns:CanRunProtectedWork() end
     if type(ns.IsRestricted) == "function" then return ns.IsRestricted() end
     return InCombat()
 end

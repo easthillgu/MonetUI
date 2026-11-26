@@ -108,14 +108,20 @@ local CHAT_CHANNEL_BUTTONS = {
 }
 local CHAT_EXTRA_WINDOWS = { "ChannelFrame", "ChatConfigFrame" }
 
-local dressLog, hoverLog, pollLog, panelLog, busLog, timers = {}, {}, {}, {}, {}, {}
+local dressLog, hoverLog, pollLog, panelLog, busLog, busFns, borderLog, timers = {}, {}, {}, {}, {}, {}, {}, {}
 local db = { skins = { hoverChatTabs = true } }
 local chatPanelEnabled = true
 
 local ns = {
-    Secrets = { IsSecret = function(v) return type(v) == "table" and v.__secret == true end },
+    Secrets = {
+        IsSecret = function(v) return type(v) == "table" and v.__secret == true end,
+        CanRead = function(v) return not (type(v) == "table" and v.__secret == true) end,
+    },
     DB = function() return db end,
-    EventBus = { Register = function(_, ev) busLog[#busLog + 1] = ev end },
+    EventBus = { Register = function(_, ev, fn)
+        busLog[#busLog + 1] = ev
+        busFns[ev] = fn
+    end },
     -- §8.90：桩里 Marked 返回 nil（控件底不在桩里），ApplyChannelColor 据此早退。
     Marked = function() return nil end,
 }
@@ -125,6 +131,10 @@ local Skin = {
 }
 local Widget = {
     PollWatch = function(_, f, fn, iv) pollLog[#pollLog + 1] = { f = f, fn = fn, iv = iv } end,
+    Readable = function() return true end,
+    SetBorderState = function(_, frame, r, g, b, a)
+        borderLog[#borderLog + 1] = { frame = frame, r = r, g = g, b = b, a = a }
+    end,
     HoverWatch = function(_, f, enter, leave)
         for _, e in ipairs(hoverLog) do
             if e.f == f then return e end
@@ -135,6 +145,7 @@ local Widget = {
     end,
 }
 local M = {
+    active = true,
     Dress = function(_, names, opts) dressLog[#dressLog + 1] = { names = names, opts = opts } end,
     IsEnabled = function() return chatPanelEnabled end,
     Panel = function(_, key, opts) panelLog[#panelLog + 1] = { key = key, opts = opts } end,
@@ -149,7 +160,7 @@ local function FlushTimers()
 end
 
 local env = setmetatable({
-    ns = ns, Skin = Skin, Widget = Widget, M = M, C_Timer = C_Timer,
+    ns = ns, Secrets = ns.Secrets, Skin = Skin, Widget = Widget, M = M, C_Timer = C_Timer,
     CHAT_FRAMES = CHAT_FRAMES, CHAT_EDITS = CHAT_EDITS, CHAT_TABS = CHAT_TABS,
     CHAT_BUTTONS = CHAT_BUTTONS, CHAT_CHANNEL_POPUPS = CHAT_CHANNEL_POPUPS,
     CHAT_CHANNEL_BUTTONS = CHAT_CHANNEL_BUTTONS, CHAT_EXTRA_WINDOWS = CHAT_EXTRA_WINDOWS,
@@ -192,12 +203,18 @@ check("§8.90 输入框边框跟频道色（读 chatType→ChatTypeInfo，不经
     band:find("function ChatBand:ChannelColor", 1, true) ~= nil
     and band:find("GetAttribute", 1, true) ~= nil
     and band:find("ChatTypeInfo", 1, true) ~= nil)
-check("§8.90 ChatEdit_UpdateHeader 钩子（切频道即时重染）",
-    band:find('hooksecurefunc("ChatEdit_UpdateHeader"', 1, true) ~= nil)
+check("§8.90 切频道改色走稳定事件/轮询，不挂钩子",
+    band:find('hooksecurefunc("ChatEdit_UpdateHeader"', 1, true) == nil
+    and band:find('ns.EventBus:Register("UPDATE_CHAT_WINDOWS", ChatRuntimePass)', 1, true) ~= nil
+    and band:find('ns.EventBus:Register("UPDATE_CHAT_COLOR", ChatRuntimePass)', 1, true) ~= nil
+    and band:find("Widget:PollWatch(anchor, ChatRuntimePass, 0.25)", 1, true) ~= nil
+    and band:find("ChatBand:ApplyChannelColorByName(name)", 1, true) ~= nil)
 check("§8.90 频道色经 Widget:SetBorderState 持久化（不打架）",
     band:find("Widget:SetBorderState", 1, true) ~= nil)
-check("§8.90 临时聊天窗动态覆盖（FCF_OpenTemporaryWindow 钩子）",
-    band:find('hooksecurefunc("FCF_OpenTemporaryWindow"', 1, true) ~= nil)
+check("§8.90 临时聊天窗由事件提前发现、轮询兜底，不挂钩子",
+    band:find('hooksecurefunc("FCF_OpenTemporaryWindow"', 1, true) == nil
+    and band:find('ns.EventBus:Register("UPDATE_FLOATING_CHAT_WINDOWS", ChatRuntimePass)', 1, true) ~= nil
+    and band:find("ChatBand:RegisterRuntimeChatFrame(name)", 1, true) ~= nil)
 check("§8.90 IterateFrames 纳入动态临时窗",
     band:find("for name in pairs(self.dynamic)", 1, true) ~= nil)
 check("§8.90 页签淡入时长读 tabFade 配置",
@@ -469,6 +486,40 @@ end
 check("§8.93 Apply 传 topExtend = 0（框内不再留带）", topExtendSeen == 0, topExtendSeen)
 check("Apply 为 10 个聊天窗各挂一条 PollWatch", #pollLog == 10, #pollLog)
 check("PEW 再校一次高度", #busLog >= 1 and busLog[1] == "PLAYER_ENTERING_WORLD")
+check("无钩子运行期同步注册了三个聊天事件", busFns.UPDATE_CHAT_WINDOWS ~= nil
+    and busFns.UPDATE_FLOATING_CHAT_WINDOWS ~= nil and busFns.UPDATE_CHAT_COLOR ~= nil)
+
+local dynamicDresses, dynamicPolls = #dressLog, #pollLog
+add("ChatFrame11", 256, 1)
+add("ChatFrame11EditBox", 32, 1)
+add("ChatFrame11Tab", 32, 1)
+CHAT_FRAMES[11] = "ChatFrame11"
+busFns.UPDATE_FLOATING_CHAT_WINDOWS()
+check("运行期临时窗被真实同步入口收编", ChatBand.dynamic.ChatFrame11 == true
+    and #dressLog == dynamicDresses + 3 and #pollLog == dynamicPolls + 1,
+    tostring(ChatBand.dynamic.ChatFrame11) .. "/" .. (#dressLog - dynamicDresses) .. "/" .. (#pollLog - dynamicPolls))
+busFns.UPDATE_FLOATING_CHAT_WINDOWS()
+check("临时窗重复事件不重复换皮/轮询", #dressLog == dynamicDresses + 3
+    and #pollLog == dynamicPolls + 1)
+
+env.ChatTypeInfo = {
+    SAY = { r = 0.2, g = 0.4, b = 0.6 },
+    WHISPER = { r = 0.7, g = 0.3, b = 0.1 },
+}
+ebs[1].chatType = "SAY"
+ebs[1].GetAttribute = function(self, key)
+    if key == "chatType" then return self.chatType end
+end
+busFns.UPDATE_CHAT_COLOR()
+check("切频道事件真实重染输入框边框", #borderLog == 1
+    and borderLog[1].frame == ebs[1].bg and borderLog[1].r == 0.2,
+    #borderLog)
+ebs[1].chatType = "WHISPER"
+busFns.UPDATE_CHAT_COLOR()
+check("频道变化写入新颜色", #borderLog == 2 and borderLog[2].r == 0.7, #borderLog)
+ebs[1].chatType = { __secret = true }
+busFns.UPDATE_CHAT_COLOR()
+check("机密 chatType 不比较、不索引、不改色", #borderLog == 2, #borderLog)
 check("chat 面板注册带 apply", #panelLog == 1 and panelLog[1].key == "chat"
     and type(panelLog[1].opts.apply) == "function")
 
@@ -578,15 +629,17 @@ db.skins.chatEditBoxAutoHide = false
 
 -- ---------------------------------------------------------------- §8.106 静态防回归
 -- 实机 `/mui skins diagnose` 曾打出 10 条 `ChatFrameNEditBoxEditBox` 死名：Apply 把
--- CHAT_EDITS（已经是全名）塞给内部还会拼 "EditBox" 的 TrackEditBox，KNOWN_EB 存成错键、
--- ChatEdit_UpdateHeader 钩子按真名一次都匹配不上 ⇒ §8.90 切频道即时重染从未生效。
+-- CHAT_EDITS（已经是全名）塞给内部还会拼 "EditBox" 的 TrackEditBox，KNOWN_EB 存成错键，
+-- 频道色同步按基础名一次都匹配不上。现在统一由 ChatRuntimePass 复检 KNOWN_EB，不再挂全局钩子。
 check("§8.106 Apply 用基础名 CHAT_FRAMES 认领输入框",
     social:find("for _, name in ipairs(CHAT_FRAMES) do ChatBand:TrackEditBox(name) end", 1, true) ~= nil)
 check("§8.106 不再把 CHAT_EDITS 传给 TrackEditBox（双后缀死名）",
     social:find("for _, name in ipairs(CHAT_EDITS) do ChatBand:TrackEditBox(name) end", 1, true) == nil)
-check("§8.106 头部钩子去掉 EditBox 后缀再查 KNOWN_EB",
-    social:find("KNOWN_EB[base]", 1, true) ~= nil
-    and social:find('nm:match("^(.-)EditBox$")', 1, true) ~= nil)
+check("§8.106 频道色轮询按基础名查 KNOWN_EB",
+    band:find("for name in pairs(KNOWN_EB) do", 1, true) ~= nil
+    and band:find("ChatBand:ApplyChannelColorByName(name)", 1, true) ~= nil
+    and band:find('function ChatBand:TrackEditBox(name)', 1, true) ~= nil
+    and band:find('Skin:Need(name .. "EditBox")', 1, true) ~= nil)
 check("§8.106 Strip 对容器型 BorderFrame 只压 regions（不整层 Fade）",
     skinSrc:find('key == "BorderFrame" and type(piece.GetRegions) == "function"', 1, true) ~= nil
     and skinSrc:find("local regs = { piece:GetRegions() }", 1, true) ~= nil)

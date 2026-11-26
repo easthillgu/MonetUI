@@ -5,6 +5,7 @@
 //   node tools/harness/run.js --selftest   再加载 samples/ 的坏样例，验证断言**确实会红**
 //   node tools/harness/run.js --secrets    机密值常开（默认只在六类受限窗口里开）
 //   node tools/harness/run.js --max=30     每类断言多列几条明细
+//   node tools/harness/run.js --restricted-boot=Combat  限制中首启，解禁后断言完整恢复
 //
 // 为什么要它：11-05 开服前没有实机环境，而现有闸门（api-audit / audit-locals / audit-taint /
 // test-skin-lua / test-mult）全是源码正则静态检查 —— 它们能证明"这个名字文档里有"，
@@ -75,7 +76,8 @@ if (selftest) {
   args.push(`--samples=${SAMPLES.split(path.sep).join("/")}`);
 }
 for (const a of process.argv.slice(2)) {
-  if (a.startsWith("--max=") || a.startsWith("--root=") || a === "--secrets") args.push(a);
+  if (a.startsWith("--max=") || a.startsWith("--root=") || a === "--secrets"
+      || a.startsWith("--restricted-boot=")) args.push(a);
 }
 
 console.log(`# lua ${lua.version} · harness ${path.relative(ROOT, RUN_LUA).split(path.sep).join("/")}${selftest ? " · 含坏样例自检" : ""}`);

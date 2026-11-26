@@ -35,6 +35,87 @@ Init.SETUP = {
 
 Init.reason = "未运行"
 Init.lastAlign = "未运行"
+Init.lastCleanup = "未运行"
+
+local LEGACY_COMBAT_CVARS = {
+    floatingCombatTextCombatDamage_v2 = true,
+    floatingCombatTextCombatDamage = true,
+    floatingCombatTextCombatHealing_v2 = true,
+    floatingCombatTextCombatHealing = true,
+    floatingCombatTextDodgeParryMiss_v2 = true,
+    floatingCombatTextDodgeParryMiss = true,
+    floatingCombatTextCombatState_v2 = true,
+    floatingCombatTextCombatState = true,
+}
+
+local function CanRead(value)
+    local S = ns.Secrets
+    return not (S and S.IsSecret and S.IsSecret(value))
+        and not (S and S.CanRead and not S.CanRead(value))
+end
+
+local function CVarText(value)
+    if not CanRead(value) then return nil end
+    if type(value) == "string" or type(value) == "number" then return tostring(value) end
+    return nil
+end
+
+local function SameCVar(a, b)
+    a, b = CVarText(a), CVarText(b)
+    if not a or not b then return false end
+    local na, nb = tonumber(a), tonumber(b)
+    if na and nb then return na == nb end
+    return a == b
+end
+
+local function ReadCVar(name)
+    local api = _G.C_CVar
+    local getter = api and api.GetCVar or _G.GetCVar
+    if type(getter) ~= "function" then return nil, false end
+    local ok, value = pcall(getter, name)
+    if not ok then return nil, false end
+    return value, true
+end
+
+local function CVarInfo(name)
+    local api = _G.C_CVar
+    if not api or type(api.GetCVarInfo) ~= "function" then return nil end
+    local ok, value, default, _, _, locked, secure, readonly = pcall(api.GetCVarInfo, name)
+    if not ok then return nil end
+    return { value = value, default = default, locked = locked, secure = secure, readonly = readonly }
+end
+
+local function CurrentCVar(name)
+    local value, ok = ReadCVar(name)
+    if ok then return value, true end
+    local info = CVarInfo(name)
+    if info and CanRead(info.value) and type(info.value) ~= "nil" then return info.value, true end
+    return nil, false
+end
+
+local function CVarExists(name)
+    local info = CVarInfo(name)
+    return info ~= nil and (type(info.value) ~= "nil" or type(info.default) ~= "nil")
+end
+
+local function WriteCVar(name, value)
+    value = CVarText(value)
+    if not value then return false, "原值不可读" end
+    local info = CVarInfo(name)
+    local S = ns.Secrets
+    if info and (S.Bool(info.locked, false) or S.Bool(info.secure, false) or S.Bool(info.readonly, false)) then
+        return false, "客户端禁止写入"
+    end
+    local api = _G.C_CVar
+    local setter = api and api.SetCVar or _G.SetCVar
+    if type(setter) ~= "function" then return false, "SetCVar 不可用" end
+    local ok = pcall(setter, name, value)
+    if not ok then return false, "写入被拒" end
+    local after, known = ReadCVar(name)
+    if not known or not CanRead(after) then return false, "复验值不可读" end
+    if not SameCVar(after, value) then return false, "写入未生效" end
+    return true
+end
 
 --- 数值漏斗：机密值 / 非数字一律不采信（12.x 判例）。
 local function Num(v)
@@ -59,6 +140,118 @@ function Init:ApplyStatic()
 end
 
 Init:ApplyStatic()
+
+--- 已删除模块留下的 CVar 账目必须在 Tweaks / Nameplates 接管之前结算。
+--- 只恢复“当前仍是旧模块写入值”的情况；玩家改过或值机密时绝不覆盖。
+function Init:CleanupLegacyCVars()
+    local api = _G.C_CVar
+    if api and type(api.AreCVarsLoaded) == "function" then
+        local ok, loaded = pcall(api.AreCVarsLoaded)
+        local S = ns.Secrets
+        if not ok or not (S and S.Bool and S.Bool(loaded, false)) then
+            self.lastCleanup = "等待：CVar 尚未加载"
+            return false
+        end
+    end
+
+    local db = ns:DB()
+    local restored, removed, deferred = 0, 0, 0
+    local legacy = type(db.combatText) == "table" and db.combatText.saved
+    if type(legacy) == "table" then
+        local saved = {}
+        for key, value in pairs(legacy) do
+            if CanRead(key) and type(key) == "string" and LEGACY_COMBAT_CVARS[key] then
+                saved[key] = value
+            else
+                removed = removed + 1
+            end
+        end
+        legacy = saved
+        for name in pairs(LEGACY_COMBAT_CVARS) do
+            local original = legacy[name]
+            if not CanRead(original) then
+                deferred = deferred + 1
+            elseif original ~= nil then
+                if not CVarText(original) then
+                    legacy[name] = nil
+                    removed = removed + 1
+                else
+                    local current, known = CurrentCVar(name)
+                    if not known or not CanRead(current) then
+                        deferred = deferred + 1
+                    elseif not CVarExists(name) or not SameCVar(current, "0") then
+                        legacy[name] = nil
+                        removed = removed + 1
+                    else
+                        local ok = WriteCVar(name, original)
+                        if ok then
+                            legacy[name] = nil
+                            restored = restored + 1
+                        else
+                            deferred = deferred + 1
+                        end
+                    end
+                end
+            end
+        end
+        if next(legacy) == nil then
+            db.combatText = nil
+        else
+            db.combatText = { saved = legacy }
+        end
+    else
+        db.combatText = nil
+    end
+
+    local tweaks = type(db.tweaks) == "table" and db.tweaks or nil
+    local origin = type(db.tweakOrigin) == "table" and db.tweakOrigin or nil
+    if tweaks then tweaks.lootRange = nil end
+    if origin then
+        local original = origin.autoLootRange
+        if not CanRead(original) then
+            deferred = deferred + 1
+        elseif original ~= nil then
+            local current, known = CurrentCVar("autoLootRange")
+            if not known or not CanRead(current) then
+                deferred = deferred + 1
+            elseif not CVarExists("autoLootRange") or not SameCVar(current, "1") then
+                origin.autoLootRange = nil
+                removed = removed + 1
+            elseif WriteCVar("autoLootRange", original) then
+                origin.autoLootRange = nil
+                restored = restored + 1
+            else
+                deferred = deferred + 1
+            end
+        end
+    end
+    if origin and next(origin) == nil then db.tweakOrigin = nil end
+    if tweaks and next(tweaks) == nil then db.tweaks = nil end
+
+    self.lastCleanup = ("恢复 %d 条，清理 %d 条，待重试 %d 条"):format(restored, removed, deferred)
+    return deferred == 0
+end
+
+--- ADDON_LOADED 后先做轻量迁移；未就绪的项在 PLAYER_LOGIN 再试一次。
+function Init:Prepare()
+    if self.cleanupComplete then return true end
+    self.cleanupComplete = self:CleanupLegacyCVars()
+    if not self.cleanupComplete and not self.cleanupWatching and ns.EventBus and ns.EventBus.Register then
+        self.cleanupWatching = true
+        local function retry()
+            if self.cleanupComplete or ns:IsRestricted() then return end
+            self:Prepare()
+        end
+        pcall(ns.EventBus.Register, ns.EventBus, "MONETUI_RESTRICTION_CHANGED", function()
+            if _G.C_Timer and _G.C_Timer.After then
+                _G.C_Timer.After(0, retry)
+            else
+                retry()
+            end
+        end)
+    end
+    return self.cleanupComplete
+end
 
 --- 只读几何诊断：聊天框底边 / 动作条底边 / 差值。
 function Init:Geometry()
@@ -120,7 +313,8 @@ function Init:AlignChatBottom(force)
         self.lastAlign = "跳过：布局 " .. name .. " 已存在"
         return false, self.lastAlign
     end
-    if _G.InCombatLockdown and _G.InCombatLockdown() then
+    if (_G.InCombatLockdown and _G.InCombatLockdown())
+        or (_G.UnitAffectingCombat and _G.UnitAffectingCombat("player")) then
         self.lastAlign = "跳过：战斗中"
         return false, self.lastAlign
     end
@@ -165,12 +359,6 @@ function Init:AlignChatBottom(force)
     -- （oldR / outOfRange 机密值报错）。ApplySystemAnchor 用的是 anchorInfo，
     -- 保留预设原值 true 即可，编辑模式里也仍显示「默认位置」。
     chat.anchorInfo.offsetY = self.SETUP.bottom
-
-    -- MakeNewLayout 读 self.highestLayoutIndexByType[layoutType]；编辑模式 UI 未打开时
-    -- 这张计数表可能还没建，补一个空表让它走 NumValues+1 的正常分支。
-    if type(em.highestLayoutIndexByType) ~= "table" then
-        em.highestLayoutIndexByType = {}
-    end
 
     local okMake, makeErr = pcall(em.MakeNewLayout, em, newLayout,
         _G.Enum.EditModeLayoutType.Account, name, false)
@@ -235,8 +423,28 @@ end
 ---    MakeNewLayout 会静默丢保存，进世界之后再调才稳定。
 function Init:Run(onReady)
     self:ApplyStatic()
-    self.reason = "静态基线已就位，模块已放行"
-    if onReady then onReady() end
+    self:Prepare()
+    self.reason = "模块启动任务已排队"
+    if ns.Async and type(ns.Async.Run) == "function" then
+        local job = ns.Async:Run(function()
+            self.reason = "模块初始化中（异详见 Async 日志）"
+            if onReady then onReady() end
+            self.reason = "模块已放行"
+        end, nil, "启动:模块初始化")
+        if job then
+            self.startJob = job
+        elseif onReady then
+            local ok, err = pcall(onReady)
+            self.reason = ok and "模块已放行" or ("模块启动异常：" .. tostring(err))
+        else
+            self.reason = "模块已放行"
+        end
+    elseif onReady then
+        local ok, err = pcall(onReady)
+        self.reason = ok and "模块已放行" or ("模块启动异常：" .. tostring(err))
+    else
+        self.reason = "模块已放行"
+    end
 
     self.attempts = 0
     local try
@@ -292,4 +500,5 @@ function Init:Status()
         tostring(g.layoutName or "读不到"), tostring(g.layoutType or "读不到"),
         tostring(self.SETUP.chatLayoutName), tostring(HasAlignedLayout(self.SETUP.chatLayoutName)),
         tostring(self.lastAlign)))
+    ns:Print("  旧 CVar 清理：" .. tostring(self.lastCleanup))
 end

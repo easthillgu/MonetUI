@@ -91,12 +91,18 @@ local function DressMenuButtons(frame)
     end
 end
 
+-- ShowWatch / HookShow 按函数引用去重：回调必须是模块级稳定引用，不能在 Apply 里造闭包。
+local function DressMenuButtonsOnShow()
+    local frame = Skin:Need("GameMenuFrame")
+    if frame then DressMenuButtons(frame) end
+end
+
 local function SkinGameMenu()
     local frame = Skin:Need("GameMenuFrame")
     if not frame then return end
     M:Dress(frame, { panel = { bgAlpha = 0.96 } })
     DressMenuButtons(frame)
-    M:HookShow(frame, function() DressMenuButtons(frame) end)
+    M:HookShow(frame, DressMenuButtonsOnShow)
 end
 
 local function SkinSettings()
@@ -749,6 +755,10 @@ local function SkinMacroPopup()
     M:Dress(popup, { window = true, inset = true, panel = { bgAlpha = 0.96 }, deep = true })
 end
 
+local function MacroPopupPass()
+    Skin.With("macros", SkinMacroPopup)
+end
+
 local function SkinMacros()
     local frame = Skin:Need("MacroFrame")
     if not frame then return end
@@ -766,8 +776,8 @@ local function SkinMacros()
     -- MacroPopupFrame 是点"选图标"时才创建的：那时主窗口一定开着，所以挂在主窗口的
     -- PollWatch 上等它出现（主窗口关着时轮询不跑，零成本）。
     -- 轮询回调跑在 Apply 之外，作用域得自己带上，否则账目会落到 "_" 名下。
-    Skin.With("macros", SkinMacroPopup)
-    ns.Widget:PollWatch(frame, function() Skin.With("macros", SkinMacroPopup) end)
+    MacroPopupPass()
+    ns.Widget:PollWatch(frame, MacroPopupPass)
 end
 
 M:Panel("macros", { label = "宏编辑器", group = "系统", apply = SkinMacros,
@@ -830,6 +840,12 @@ M:Panel("colorpicker", { label = "拾色器", group = "系统", apply = SkinColo
 -- 只换填充和边框，尺寸 / 位置一概不动（它在编辑模式里有自己的位置）。
 -- 颜色**保留暴雪自己的**（呼吸=蓝、疲劳=紫、火=橙）：那是语义，不是装饰。
 -- 复检是必须的：每次计时启动暴雪都会重设填充，静态换肤会被顶掉（Widget:StatusBar 内置轮询）。
+local function MirrorTimerOnShow(timer)
+    if timer and timer.StatusBar then
+        ns.Widget:ReapplyBar(timer.StatusBar)
+    end
+end
+
 local function SkinMirrorTimer()
     local container = Skin:Need("MirrorTimerContainer")
     local timers = container and container.mirrorTimers
@@ -842,9 +858,7 @@ local function SkinMirrorTimer()
                 ns.Widget:StatusBar(timer.StatusBar)
                 -- 计时框平时是隐藏的，而轮询对隐藏框不跑：暴雪在启动计时时会把填充换回去，
                 -- 那一刻没人看得见，等它显示出来又是一条暴雪的填充。用"显示"这个跳变补一次。
-                ns.Widget:ShowWatch(timer, function()
-                    ns.Widget:ReapplyBar(timer.StatusBar)
-                end)
+                ns.Widget:ShowWatch(timer, MirrorTimerOnShow)
             end
         end
     end

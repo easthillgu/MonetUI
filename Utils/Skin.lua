@@ -3974,7 +3974,6 @@ local QUALITY_COLOR = setmetatable({}, {
 --- @param q number|nil 品质（0 灰 / 1 白 / 8 以上一律 nil = 素边）
 --- @return { r = number, g = number, b = number } | nil
 function Skin:QualityColor(q)
-    if q == nil then return nil end
     -- 品质值来自暴雪（容器 / 事件载荷），可能是机密值：机密既不能当表键也不能比较，
     -- 读不出就按"没有色"处理（= 素边），绝不抛。
     local n
@@ -4159,22 +4158,30 @@ local function AbsRectUnits(fr)
     while fr do
         local okL, l = pcall(fr.GetLeft, fr)
         local okB, b = pcall(fr.GetBottom, fr)
-        if not okL or not okB or type(l) ~= "number" or type(b) ~= "number" then return nil end
+        if not okL or not okB then return nil end
+        l, b = Secrets.Number(l), Secrets.Number(b)
+        if l == nil or b == nil then return nil end
         absL, absB = absL + l, absB + b
         if fr == UIParent then return absL, absB end
-        fr = fr:GetParent()
+        local okP, parent = pcall(fr.GetParent, fr)
+        if not okP then return nil end
+        fr = parent
     end
     return nil
 end
 
 local function SnapQualityBorder(btn, border, entry)
     local okS, s = pcall(btn.GetEffectiveScale, btn)
-    if not okS or type(s) ~= "number" or s <= 0 then return end
+    if not okS then return end
+    s = Secrets.Number(s)
+    if s == nil or s <= 0 then return end
     local absL, absB = AbsRectUnits(btn)
     if not absL then return end
     local okW, W = pcall(btn.GetWidth, btn)
     local okH, H = pcall(btn.GetHeight, btn)
-    if not okW or not okH or type(W) ~= "number" or type(H) ~= "number" then return end
+    if not okW or not okH then return end
+    W, H = Secrets.Number(W), Secrets.Number(H)
+    if W == nil or H == nil then return end
     local pxL, pxB = absL * s, absB * s
     local pxR, pxT = pxL + W * s, pxB + H * s
     -- 边框矩形 = 按钮矩形外扩 1 物理像素，四缘全部落在整数像素上（局部坐标以按钮
@@ -4198,9 +4205,8 @@ end
 --- 处理 —— 保守方向：宁可多算一次，也不要因为读不到就漏掉一个真在屏幕上的格子。
 local function BorderShown(border)
     local ok, vis = pcall(border.IsVisible, border)
-    if not ok then return true end
-    if Secrets and Secrets.IsSecret and Secrets.IsSecret(vis) then return true end
-    return vis and true or false
+    if not ok or not Secrets.CanRead(vis) then return true end
+    return Secrets.Bool(vis, false)
 end
 
 --- 清单#7：格子的"几何指纹" = 绝对左/下 + 宽/高 + 有效缩放（SnapQualityBorder 的全部
@@ -4261,7 +4267,7 @@ local function EnsureQualityDriver()
                     local key = ResolveItemKey(btn)
                     -- 机密键不做 == 比较（AGENTS：机密值比较会抛）：读不出按 nil 记，
                     -- 受限期保留上次状态，解除后键变可读 ⇒ 指纹不等 ⇒ 照旧重算。
-                    if key ~= nil and Secrets and Secrets.CanRead and not Secrets.CanRead(key) then
+                    if Secrets and Secrets.CanRead and not Secrets.CanRead(key) then
                         key = nil
                     end
                     local unchanged = gl and entry.gl == gl and entry.gb == gb
@@ -4324,8 +4330,9 @@ function Skin:ItemQualityBorder(btn, withInfo)
         self:Track(border)
         entry = { frame = border }
         qualityBorders[btn] = entry
-        SnapQualityBorder(btn, border, entry)
+        -- 先落条目与稳定驱动，再试首次排版；机密几何让首拍 return 也不会永久漏掉后续重排。
         EnsureQualityDriver()
+        SnapQualityBorder(btn, border, entry)
     end
     if withInfo and not entry.ilvl then
         entry.ilvl = Skin:SlotInfoFont(btn)

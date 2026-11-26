@@ -158,8 +158,12 @@ function P:Apply()
     RefreshAll()
 end
 
---- 关模块：把压下去的 pin 全部放回去。
+--- 关模块：先停驱动，再把压下去的 pin 全部放回去。
 function P:Restore()
+    if pinsSubId then
+        Scheduler:Unregister(pinsSubId)
+        pinsSubId = nil
+    end
     for pin in pairs(hidden) do ApplyAlpha(pin, false) end
 end
 

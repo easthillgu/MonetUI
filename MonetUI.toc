@@ -45,6 +45,7 @@ Modules\QuestTracker\QuestTracker.xml
 Modules\ActionBars\ActionBars.xml
 Modules\Nameplates\Nameplates.xml
 Modules\Tooltip\Tooltip.xml
+Modules\Chat\Chat.xml
 # 工具模块：鼠标发光、耐久度、提示条
 Modules\Tools\Tools.xml
 Modules\InfoBar\InfoBar.xml

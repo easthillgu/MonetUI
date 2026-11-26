@@ -37,7 +37,10 @@ end
 --- 任务体里调它：预算用完就 yield 到下一帧（下一拍驱动会再 resume 回来）。
 --- 不在协程里调（没在 resume 中）时是空操作，调用点不必判断。
 local function Checkpoint()
-    if coroutine.isyieldable and coroutine.isyieldable() and NowMs() >= frameDeadline then
+    -- Lua 5.1 没有 coroutine.isyieldable；running() 在主线程返回 nil，在协程内返回协程。
+    -- 兼容 5.2+ 的第二个 isMain 返回值，避免主线程上下文误判为可 yield。
+    local co, isMain = coroutine.running()
+    if co and not isMain and NowMs() >= frameDeadline then
         coroutine.yield("wait")
     end
 end

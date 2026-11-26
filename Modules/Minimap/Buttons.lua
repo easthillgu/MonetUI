@@ -15,6 +15,7 @@ local Widget   = ns.Widget
 local Media    = ns.Media
 local Secrets  = ns.Secrets
 local EventBus = ns.EventBus
+local Scheduler = ns.Scheduler
 local Skin     = ns.Skin
 
 -- 旁表标记（见 Core.lua 的 ns:Mark）
@@ -31,6 +32,7 @@ B.CANVAS = 20      -- 徽章材质的画布边长（材质 64×64，徽章本体
 
 local container        -- 三个按钮的容器（挂在小地图的覆盖层上）
 local difficultyFrame  -- 难度指示（完全是我们自己的框）
+local restoreSubId
 
 -- 暴雪按钮被搬进来之前的父级与锚点（还原时放回去）
 local savedParents = setmetatable({}, { __mode = "k" })
@@ -68,7 +70,11 @@ local Resolve = ns.ResolveObject
 --- layout 是我们给它安排的锚点（还原按钮时按它摆回去，重入钩子也靠它复原）。
 local function SaveParent(frame, layout)
     if savedParents[frame] then
-        if layout then savedParents[frame].layout = layout end
+        if layout then
+            savedParents[frame].layout = layout
+            -- 上一次还原失败时轮询会让路；重新启用按钮时再恢复重摆。
+            savedParents[frame].restoring = false
+        end
         return
     end
     local points = {}
@@ -92,6 +98,7 @@ local function SaveParent(frame, layout)
         size   = { frame:GetWidth(), frame:GetHeight() },
         art    = art,
         layout = layout,
+        restoring = false,
     }
 end
 
@@ -121,7 +128,7 @@ end
 local function Reassert(frame)
     if reasserting then return end
     local saved = frame and savedParents[frame]
-    if not saved or not saved.layout then return end
+    if not saved or not saved.layout or saved.restoring then return end
     if InCombatLockdown() then
         -- 战斗中搬不动（受保护），排队等脱战补做
         pcall(function()
@@ -142,6 +149,8 @@ local function HookReassert(frame)
     fd.reassertHooked = true
     Widget:PollWatch(frame, function(self)
         if InCombatLockdown() then return end
+        local saved = savedParents[self]
+        if not saved or saved.restoring then return end
         if self:GetParent() ~= container then
             pcall(Reassert, self)
         end
@@ -386,6 +395,32 @@ local function QueueArtRegions(btn)
     return out
 end
 
+--- 回写并复核一个 alpha；SetAlpha 在受限上下文里可能"不报错但没落地"。
+local function RestoreAlpha(region, alpha)
+    if type(region.SetAlpha) ~= "function" then return false end
+    if not pcall(region.SetAlpha, region, alpha) then return false end
+    if type(region.GetAlpha) == "function" then
+        local ok, current = pcall(region.GetAlpha, region)
+        if not ok then return false end
+        local matchesOK, matches = pcall(function() return current == alpha end)
+        if not matchesOK or not matches then return false end
+    end
+    return true
+end
+
+--- 隐藏我们自己的装饰，并在取器可用时确认真的藏掉。
+local function HideDecoration(region)
+    if type(region.Hide) ~= "function" then return false end
+    if not pcall(region.Hide, region) then return false end
+    if type(region.IsShown) == "function" then
+        local ok, shown = pcall(region.IsShown, region)
+        if not ok then return false end
+        local hiddenOK, hidden = pcall(function() return not shown end)
+        if not hiddenOK or not hidden then return false end
+    end
+    return true
+end
+
 --- 原 alpha 记进旁表（不写暴雪字段），RestoreQueueArt 按值放回。
 local function FadeQueueEye(btn)
     if not btn then return end
@@ -406,11 +441,12 @@ end
 
 local function RestoreQueueArt(btn)
     local list = Marked(btn, "queueArt")
-    if not list then return end
+    if not list then return true end
     for i = 1, #list do
-        pcall(list[i].region.SetAlpha, list[i].region, list[i].alpha)
+        if not RestoreAlpha(list[i].region, list[i].alpha) then return false end
     end
     Mark(btn, "queueArt", nil)
+    return true
 end
 
 --- 每 0.5 秒：①补压被动画抬回来的 alpha；②按回父级与锚点。
@@ -420,7 +456,7 @@ local function QueuePoll()
     local btn = Resolve(QUEUE_PATH)
     if not btn or not container then return end
     local saved = savedParents[btn]
-    if not saved or not saved.layout then return end
+    if not saved or not saved.layout or saved.restoring then return end
     FadeQueueEye(btn)
     if InCombatLockdown() then return end
     local okP, par = pcall(btn.GetParent, btn)
@@ -476,45 +512,114 @@ end
 
 -- ------------------------------------------------------------------ 对外接口
 
+--- 事务式还原一个按钮。只有父级、锚点、尺寸与装饰全部写回并复核成功，调用方才删快照。
+--- 失败时 `restoring` 保持为 true：重摆轮询让路，快照留到下一次脱战重试。
+local function RestoreFrame(frame, saved)
+    if not frame or not saved then return false, "missing snapshot" end
+    saved.restoring = true
+    if (type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown())
+        or (type(_G.UnitAffectingCombat) == "function" and _G.UnitAffectingCombat("player")) then
+        return false, "restricted"
+    end
+
+    local wasReasserting = reasserting
+    reasserting = true
+    local ok, restored, reason = pcall(function()
+        frame:SetParent(saved.parent)
+        frame:ClearAllPoints()
+        for _, pt in ipairs(saved.points) do
+            frame:SetPoint(pt[1], pt[2], pt[3], pt[4], pt[5])
+        end
+        frame:SetSize(saved.size[1], saved.size[2])
+
+        -- pcall 成功不等于写入成功；受保护家族会静默吞掉排版，必须回读复核。
+        if frame:GetParent() ~= saved.parent then return false, "parent" end
+        if frame:GetWidth() ~= saved.size[1] or frame:GetHeight() ~= saved.size[2] then
+            return false, "size"
+        end
+        if frame:GetNumPoints() ~= #saved.points then return false, "point count" end
+        for i, pt in ipairs(saved.points) do
+            local point, relTo, relPoint, x, y = frame:GetPoint(i)
+            if point ~= pt[1] or relTo ~= pt[2] or relPoint ~= pt[3]
+                or x ~= pt[4] or y ~= pt[5] then
+                return false, "points"
+            end
+        end
+
+        for _, info in ipairs(saved.art) do
+            if not RestoreAlpha(info.region, info.alpha) then return false, "art" end
+        end
+
+        -- 徽章存在旁表里（`Mark(btn, "badge", ...)`）：以前读的是 `frame.monetBadge` 这个
+        -- 从来不存在的字段，所以还原时徽章一直挂在屏幕上（review 2026-10-29）。
+        local badge = Marked(frame, "badge")
+        if badge and not HideDecoration(badge) then return false, "badge" end
+        -- 排队按钮的动态字符徽章只藏不删（下次 Apply 复用同一块板）。
+        local glyph = Marked(frame, "glyph")
+        if glyph then
+            Skin:GlyphBadgeOff(glyph)
+            if not HideDecoration(glyph) then return false, "glyph" end
+        end
+        if not RestoreQueueArt(frame) then return false, "queue art" end
+
+        -- 追踪按钮的原父框（Tracking）是被我们 alpha 0 压掉的，一并还回去。
+        local oldParent = saved.parent
+        if oldParent and oldParent ~= container and oldParent ~= UIParent
+            and Marked(oldParent, "parked") then
+            local alpha = Marked(oldParent, "parkAlpha")
+            if type(oldParent.SetAlpha) ~= "function" then return false, "parked alpha" end
+            oldParent:SetAlpha(type(alpha) == "number" and alpha or 1)
+            if type(oldParent.GetAlpha) == "function" then
+                local current = oldParent:GetAlpha()
+                if current ~= (type(alpha) == "number" and alpha or 1) then
+                    return false, "parked alpha"
+                end
+            end
+            if type(oldParent.EnableMouse) == "function" then
+                oldParent:EnableMouse(true)
+                if type(oldParent.IsMouseEnabled) == "function" and not oldParent:IsMouseEnabled() then
+                    return false, "parked mouse"
+                end
+            end
+            Mark(oldParent, "parked", nil)
+            Mark(oldParent, "parkAlpha", nil)
+        end
+        return true
+    end)
+    reasserting = wasReasserting
+    if not ok then return false, "restore failed" end
+    return restored, reason
+end
+
+local function StopRestorePoller()
+    if not restoreSubId then return end
+    Scheduler:Unregister(restoreSubId)
+    restoreSubId = nil
+end
+
+local function RetryButtonRestore()
+    if B:Restore() then StopRestorePoller() end
+end
+
+local function EnsureRestorePoller()
+    if restoreSubId then return end
+    restoreSubId = Scheduler:Every(500, RetryButtonRestore, "小地图:按钮还原重试")
+end
+
 --- 某个开关关掉时：把暴雪按钮放回原来的位置（显隐交给"暴雪集群按钮"那一组管）。
+--- 返回 true 表示已还原或无需还原；false 表示快照已保留，可稍后重试。
 local function RestoreOne(path)
     local frame = Resolve(path)
-    if not frame then return end
+    if not frame then return false, "frame unavailable" end
     local saved = savedParents[frame]
-    if not saved then return end
-    -- 先把存档删掉，再动手还原：重入钩子看到"这个按钮已经交还给暴雪了"就不会
-    -- 在我们 SetParent / SetPoint 的过程中又把它搬回容器里（否则还原会被钩子推翻）。
-    savedParents[frame] = nil
-    pcall(frame.SetParent, frame, saved.parent)
-    pcall(frame.ClearAllPoints, frame)
-    for _, pt in ipairs(saved.points) do
-        pcall(frame.SetPoint, frame, pt[1], pt[2], pt[3], pt[4], pt[5])
+    if not saved then return true end
+    local ok, reason = RestoreFrame(frame, saved)
+    if ok then
+        savedParents[frame] = nil
+        return true
     end
-    pcall(frame.SetSize, frame, saved.size[1], saved.size[2])
-    for _, info in ipairs(saved.art) do
-        pcall(info.region.SetAlpha, info.region, info.alpha)
-    end
-    -- 徽章存在旁表里（`Mark(btn, "badge", ...)`）：以前读的是 `frame.monetBadge` 这个
-    -- 从来不存在的字段，所以还原时徽章一直挂在屏幕上（review 2026-10-29）。
-    local badge = Marked(frame, "badge")
-    if badge then pcall(badge.Hide, badge) end
-    -- 排队按钮的两件私货：动态字符徽章 + 被压掉的 Eye 贴图 alpha。
-    -- 徽章只藏不删（下次 Apply 复用同一块板），贴图 alpha 按存档放回。
-    local glyph = Marked(frame, "glyph")
-    if glyph then Skin:GlyphBadgeOff(glyph) end
-    RestoreQueueArt(frame)
-    -- 追踪按钮的原父框（Tracking）是被我们 alpha 0 压掉的，一并还回去。
-    local oldParent = saved.parent
-    if oldParent and oldParent ~= container and oldParent ~= UIParent
-        and Marked(oldParent, "parked") then
-        local alpha = Marked(oldParent, "parkAlpha")
-        Mark(oldParent, "parked", nil)
-        Mark(oldParent, "parkAlpha", nil)
-        pcall(oldParent.SetAlpha, oldParent, type(alpha) == "number" and alpha or 1)
-        if type(oldParent.EnableMouse) == "function" then
-            pcall(oldParent.EnableMouse, oldParent, true)
-        end
-    end
+    EnsureRestorePoller()
+    return false, reason
 end
 
 --- 把三个按钮摆到覆盖层上（overlay 是小地图可见区那块透明层）。
@@ -554,35 +659,25 @@ function B:Apply(overlay)
 end
 
 --- 还原：把暴雪按钮搬回原来的父级与锚点，我们画的底板藏起来。
+--- 返回 false 表示至少一项未完成；对应快照保留，可在限制解除后再次调用。
 function B:Restore()
-    -- 先把帧名收集成一张表再逐个还原：遍历中改 savedParents（还要把条目置 nil）
-    -- 既可能撞上"遍历中改表"的规矩，也可能撞上弱键被回收。
+    -- 先把帧名收集成一张表再逐个还原：失败项保留在弱键表里，但局部数组持有强引用，
+    -- 避免本轮遍历中因弱键回收而丢失重试目标。
     local frames = {}
     for frame in pairs(savedParents) do frames[#frames + 1] = frame end
 
+    local complete = true
     for _, frame in ipairs(frames) do
         local saved = savedParents[frame]
-        if frame and saved then
-            -- 先把存档删掉再还原：重入钩子看到"已经交还给暴雪了"就不会在
-            -- 还原的过程中又把它搬回容器里（同 RestoreOne 的理由）。
-            savedParents[frame] = nil
-            pcall(frame.SetParent, frame, saved.parent)
-            pcall(frame.ClearAllPoints, frame)
-            for _, pt in ipairs(saved.points) do
-                pcall(frame.SetPoint, frame, pt[1], pt[2], pt[3], pt[4], pt[5])
+        if saved then
+            local ok = RestoreFrame(frame, saved)
+            if ok then
+                savedParents[frame] = nil
+            else
+                complete = false
             end
-            pcall(frame.SetSize, frame, saved.size[1], saved.size[2])
-            for _, info in ipairs(saved.art) do
-                pcall(info.region.SetAlpha, info.region, info.alpha)
-            end
-            local badge = Marked(frame, "badge")
-            if badge then pcall(badge.Hide, badge) end
-            local glyph = Marked(frame, "glyph")
-            if glyph then Skin:GlyphBadgeOff(glyph) end
-            RestoreQueueArt(frame)
         end
     end
-    savedParents = setmetatable({}, { __mode = "k" })
     if difficultyFrame then difficultyFrame:Hide() end
     -- 队列的两条轮询一并摘掉：模块关了就别再按拍写暴雪按钮。
     Widget:Unwatch(UIParent, EnsureQueueStatus)
@@ -590,6 +685,12 @@ function B:Restore()
         Widget:Unwatch(container, QueuePoll)
         Mark(container, "queuePoll", nil)
     end
+    if complete then
+        StopRestorePoller()
+    else
+        EnsureRestorePoller()
+    end
+    return complete
 end
 
 --- 难度会随进出副本变，单独刷新一次。

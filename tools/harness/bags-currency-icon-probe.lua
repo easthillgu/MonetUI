@@ -226,8 +226,9 @@ check("公开 RefreshCurrencyTitles 给配置面板调用",
 check("配置面板有图标开关且联动刷新",
     config:find("背包标题行：货币用图标", 1, true) ~= nil
     and config:find('bags:RefreshCurrencyTitles()', 1, true) ~= nil)
+-- 2026-11 配置重排后文案改为「省位置，名称悬停可见」；判据仍是"图标模式 + 悬停能看名称"。
 check("配置提示说明图标 + 悬停看名称",
-    config:find("悬停看名称与完整数值", 1, true) ~= nil)
+    config:find("省位置，名称悬停可见", 1, true) ~= nil)
 check("文字模式仍保留（icons off 可切回）",
     bagsSrc:find("local function FittedCurrencyText", 1, true) ~= nil)
 

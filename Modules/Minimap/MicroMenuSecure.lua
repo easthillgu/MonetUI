@@ -3,7 +3,7 @@
 -- 开着时右键小地图弹的是**并集**：我们自己的合法动作行（背包 / 地图 / 日历 / 设置，入口单源
 -- = `MicroMenu.lua` 导出的 `ownEntries`）+ 能代点的原生微按钮行（角色 / 专业 / 法术书 / 天赋 /
 -- 任务日志 / 公会 / 查找队伍 / 收藏 / 帮助 / 商店…）。关掉（`/mui` 小地图页取消勾选，
--- 或 `/mui minimap secure off`）就回 `MicroMenu.lua` 那 4 行纯 C_* 菜单。
+-- 或 `/mui minimap secure off`）就回 `MicroMenu.lua` 那 3 行普通 C_* 菜单（日历只在安全载体里）。
 -- **11-06 实机定案的两条属性写法**（都写在建行处注释里）：`type="click"` 的委托属性名是
 -- **`clickbutton`**（不是 `click`），而且必须 `RegisterForClicks("AnyDown","AnyUp")` ——
 -- 这台客户端 `ActionButtonUseKeyDown=1`，只注册 Up 会被算成"释放"，`type=click` 没有释放动作，
@@ -22,7 +22,7 @@
 --
 -- 代价（作者实机确认过，接受并转正）：
 --   * 战斗里开不了（Show 受保护框会被拦）—— 右键是脱战手势，真在战斗中按就当没这菜单。
---   * 菜单开着时进战斗，Close 的 Hide 也会被拦 ⇒ 那一拍关不掉，脱战后补关。
+--   * 菜单开着时进战斗，Close 先收普通 catcher；受保护面板留到限制解除后的新 tick 再 Hide。
 --   * 建行时按状态筛：**不可点的入口不建行**（18 级实测跳掉"传承" `IsEnabled=false`；
 --     "游戏菜单"是暴雪自己拒绝脚本化点击，进 `FORWARD_BLOCKED` 黑名单）。
 --     跳过原因记在 `skipped` 台账里，`/mui minimap securemenu` 逐条印出来——
@@ -60,6 +60,7 @@ local frame
 local rows
 local catcher
 local built   -- 只在脱战建一次；建失败（受限窗口 / 模板缺失）保持 false，下次脱战再试
+local closePending -- 普通 catcher 已收，受保护面板等限制解除后的新 tick 再 Hide
 
 -- 定向菜单（11-07，信息栏"点什么出什么"）：代点行按原生按钮名登记，`OpenTarget` 只留那一行。
 -- 用模块级旁表而不是往行上写字段（AGENTS：别往框体上写字段，一律走旁表）。
@@ -80,7 +81,30 @@ local FORWARD_BLOCKED = {
     MainMenuMicroButton = "暴雪不允许脚本化打开游戏菜单（11-06 实机：代点零反应、零报错、零拦截）",
 }
 
---- 让 12 颗代点目标"可见但透明"：shown=true + alpha 0。
+local function OwnEntries()
+    local minimapModule = ns:GetModule("Minimap")
+    local menu = minimapModule and minimapModule.microMenu
+    return (menu and type(menu.ownEntries) == "table") and menu.ownEntries or {}
+end
+
+local function SecureTargets()
+    local out = {}
+    for _, entry in ipairs(OwnEntries()) do
+        if type(entry.secureTarget) == "string" then
+            out[#out + 1] = { label = entry.label, btn = entry.secureTarget }
+        end
+    end
+    for _, target in ipairs(TARGETS) do out[#out + 1] = target end
+    return out
+end
+
+local function TargetEnabled(button)
+    if type(button.IsEnabled) ~= "function" then return true end
+    local ok, enabled = pcall(button.IsEnabled, button)
+    return ok and enabled ~= false
+end
+
+--- 让代点目标"可见但透明"：shown=true + alpha 0。
 --- 引擎对 `type="click"` 的 `HandleAttributeClick` 会跳过 `IsVisible()=false` 的目标，
 --- 而 `IsVisible` 只看自身与祖先的 shown 链、不看 alpha ⇒ 透明不影响代点落地。
 --- 每次开菜单都重 assert 一次（暴雪/第三方可能把底栏重新藏回去）。
@@ -97,11 +121,17 @@ function M.ensureVisible()
             pcall(f.SetAlpha, f, 0)
         end
     end
-    for _, t in ipairs(TARGETS) do
+    local db = ns:DB()
+    local minimap = type(db.minimap) == "table" and db.minimap or {}
+    for _, t in ipairs(SecureTargets()) do
         local b = _G[t.btn]
-        if b and type(b.IsShown) == "function" then
+        if b and TargetEnabled(b) and type(b.IsShown) == "function" then
             local ok, shown = pcall(b.IsShown, b)
             if ok and not shown then pcall(b.Show, b) end
+        end
+        -- 时钟默认被小地图设置隐藏；只有用户确实要求隐藏时才补 alpha 0。
+        if b and t.btn == "GameTimeFrame" and minimap.hideClock and type(b.SetAlpha) == "function" then
+            pcall(b.SetAlpha, b, 0)
         end
     end
 end
@@ -109,10 +139,10 @@ end
 --- 此刻有几颗代点目标真的可点（`IsVisible`）。给 Probe 用，也用来丢掉死行。
 function M.clickableCount()
     local ok, dead = 0, {}
-    for _, t in ipairs(TARGETS) do
+    for _, t in ipairs(SecureTargets()) do
         local b = _G[t.btn]
         local vis = false
-        if b and type(b.IsVisible) == "function" then
+        if b and TargetEnabled(b) and type(b.IsVisible) == "function" then
             local okV, v = pcall(b.IsVisible, b)
             vis = okV and v and true or false
         end
@@ -140,7 +170,7 @@ local function Build()
     -- 所以排版全部在脱战这一次做完，之后一个 `SetPoint` 都不写。
     local container = CreateFrame("Frame", "MonetUIMicroMenuSecure", UIParent, "BackdropTemplate")
     if not container or type(container.SetBackdrop) ~= "function" then
-        -- 连底衬能力都没有（异常客户端）⇒ 这版载体用不了，交回 4 行菜单。
+        -- 连底衬能力都没有（异常客户端）⇒ 这版载体用不了，交回 3 行菜单。
         return nil
     end
 
@@ -196,77 +226,81 @@ local function Build()
         return row
     end
 
-    -- **第一组：我们自己的合法动作**（纯 C_* API / 我们自己的模块）。
-    -- 11-06 补的覆盖缺口：右键开着本载体时 `Minimap.lua` 不再走 `MicroMenu.lua` 那 4 行
-    -- （见那边的分发点），于是不结这条并集就会丢掉"背包 / 地图 / 日历 / 设置"。
-    -- 入口定义**只有一份**：`MicroMenu.lua` 导出 `ownEntries`，这里读，不抄第二份。
-    local minimapModule = ns:GetModule("Minimap")
-    local ownEntries = minimapModule and minimapModule.microMenu and minimapModule.microMenu.ownEntries
-    for _, e in ipairs(ownEntries or {}) do
-        if type(e.luaAction) == "function" then
+    -- 两种安全行共用同一条代点路径：日历与原生微按钮都必须是 clickbutton + Down/Up。
+    local function makeSecureRow(text, btnName)
+        local b = _G[btnName]
+        local whySkip
+        if not b then
+            whySkip = "本客户端没有这颗按钮"
+        elseif FORWARD_BLOCKED[btnName] then
+            whySkip = FORWARD_BLOCKED[btnName]
+        elseif not TargetEnabled(b) then
+            whySkip = "此刻不可用（IsEnabled=false）"
+        end
+        if whySkip then return nil, whySkip end
+
+        local row = makeRow(text, "SecureActionButtonTemplate")
+        row:RegisterForClicks("AnyDown", "AnyUp")
+        -- `type="click"` + **`clickbutton`**（不是 `click`！）：
+        -- 暴雪 SecureTemplates 的实现是
+        --   SECURE_ACTIONS.click = function(self, unit, button)
+        --     local delegate = SecureButton_GetModifiedAttribute(self, "clickbutton", button)
+        --     if delegate and not delegate:HasAccessConstraints()
+        --        and not delegate:HasAnyForbiddenAspects(Enum.ForbiddenAspect.ScriptedInput) then
+        --       delegate:Click(button) end end
+        -- 11-06 双探针实机定案：属性名写 `click` 时完全不响应；改成 `clickbutton` 后
+        -- 同一个目标立刻能开角色面板（对照的 `type="macro"` + `/click` 反而不通，不用）。
+        --
+        -- **必须双注册 Down+Up**：这台客户端 `ActionButtonUseKeyDown=1`，只注册 Up 会被算成
+        -- "释放"，而 `type=click` 没有释放动作 ⇒ 静默什么都不做（零报错、零 taint.log）。
+        -- 这两项仍沿用 11-06 实机通过的 Lua 写法：安全片段无法可靠取得暴雪框引用，
+        -- 且本容器没有 Execute。改走 ChildUpdate 前必须先做 taintLog=2 对照验证。
+        row:SetAttribute("type", "click")
+        row:SetAttribute("clickbutton", b)
+        -- 安全模板缺席时 CreateFrame 不报错，只会给普通按钮；属性全对也不会代点。
+        if type(row.IsProtected) ~= "function" or not row:IsProtected() then
+            pcall(row.Hide, row)
+            pcall(container.Hide, container)
+            return nil, "SecureActionButtonTemplate 没生成安全按钮", true
+        end
+        rowByBtn[btnName] = row
+        return row
+    end
+
+    -- **第一组：我们自己的入口**。普通行走纯 C_* / 自有模块；日历行走安全代点。
+    -- `C_Calendar.OpenCalendar` 只请求数据，不会加载或显示 CalendarFrame，所以日历的目标是
+    -- 原生 `GameTimeFrame`：由客户端执行它的 OnClick，先加载 Blizzard_Calendar 再切换面板。
+    -- 入口定义只有一份：`MicroMenu.lua` 导出 ownEntries，这里不抄第二份。
+    for _, e in ipairs(OwnEntries()) do
+        local hasLua = type(e.luaAction) == "function"
+        local hasSecure = type(e.secureTarget) == "string"
+        if hasLua and hasSecure then
+            skipped[#skipped + 1] = e.label .. "：同时声明 luaAction 与 secureTarget（不该发生）"
+        elseif hasLua then
             local row = makeRow(e.label)
             row:SetScript("OnClick", function(_, button)
                 if button ~= "LeftButton" then return end
                 pcall(e.luaAction)
-                -- 自有动作行点完就收（与 4 行版一致）；代点行不能这么做，原因见下面 catcher 的注释。
                 M:Close()
             end)
+        elseif hasSecure then
+            local _, whySkip, fatal = makeSecureRow(e.label, e.secureTarget)
+            if fatal then return nil end
+            if whySkip then skipped[#skipped + 1] = e.label .. "：" .. whySkip end
         else
-            skipped[#skipped + 1] = e.label .. "：入口没有 luaAction（不该发生）"
+            skipped[#skipped + 1] = e.label .. "：入口没有合法出口（不该发生）"
         end
     end
 
     -- **第二组：代点原生微按钮**（安全行）。
     for _, t in ipairs(TARGETS) do
-        local b = _G[t.btn]
-        local whySkip
-        if not b then
-            whySkip = "本客户端没有这颗按钮"
-        elseif FORWARD_BLOCKED[t.btn] then
-            whySkip = FORWARD_BLOCKED[t.btn]
-        else
-            if type(b.IsEnabled) == "function" then
-                local okE, en = pcall(b.IsEnabled, b)
-                if okE and en == false then whySkip = "此刻不可用（IsEnabled=false）" end
-            end
-        end
-        if whySkip then
-            skipped[#skipped + 1] = t.label .. "：" .. whySkip
-        else
-            local row = makeRow(t.label, "SecureActionButtonTemplate")
-            row:RegisterForClicks("AnyDown", "AnyUp")
-            -- `type="click"` + **`clickbutton`**（不是 `click`！）：
-            -- 暴雪 SecureTemplates 的实现是
-            --   SECURE_ACTIONS.click = function(self, unit, button)
-            --     local delegate = SecureButton_GetModifiedAttribute(self, "clickbutton", button)
-            --     if delegate and not delegate:HasAccessConstraints()
-            --        and not delegate:HasAnyForbiddenAspects(Enum.ForbiddenAspect.ScriptedInput) then
-            --       delegate:Click(button) end end
-            -- 11-06 双探针实机定案：属性名写 `click` 时 B 型完全不响应；改成 `clickbutton` 后
-            -- **同一个目标立刻能开角色面板**（对照的 `type="macro"` + `/click` 反而不通，不用）。
-            --
-            -- **必须双注册 Down+Up**（同一次实机）：这台客户端 `ActionButtonUseKeyDown=1`，引擎判定是
-            --   clickAction = (down and useOnKeyDown) or (not down and not useOnKeyDown)
-            -- 只注册 `LeftButtonUp` 时，鼠标抬起那一拍被算成"释放"，而 `type=click` 没有释放动作 ⇒
-            -- **静默什么都不做**（零报错、`taint.log` 零记录，玩家只看到"点了没反应"）。
-            -- 施法/开窗全由客户端在受限环境里代做，我们一个暴雪 Lua 全局都不碰。
-            row:SetAttribute("type", "click")
-            row:SetAttribute("clickbutton", b)
-            -- **安全模板缺席时 `CreateFrame` 不报错**，只会给一个普通按钮 —— 那种按钮属性写得再对也不会
-            -- 代点（11-05 记过那一类："属性全对、0 拦截、点击无反应"）。整框 `IsProtected()` 会跟着
-            -- 锚定家族变 true，所以判据只能看**这一行自己**是不是受保护。
-            if type(row.IsProtected) ~= "function" or not row:IsProtected() then
-                pcall(row.Hide, row)
-                pcall(container.Hide, container)
-                return nil
-            end
-            -- 定向菜单的索引：信息栏点哪格，`OpenTarget` 就按原生按钮名取这一行。
-            rowByBtn[t.btn] = row
-        end
+        local _, whySkip, fatal = makeSecureRow(t.label, t.btn)
+        if fatal then return nil end
+        if whySkip then skipped[#skipped + 1] = t.label .. "：" .. whySkip end
     end
 
     if #rows == 0 then
-        -- 两组一行都没建成（异常客户端）⇒ 载体没意义，删掉交回 4 行菜单。
+        -- 两组一行都没建成（异常客户端）⇒ 载体没意义，删掉交回 3 行普通菜单。
         container:Hide()
         return nil
     end
@@ -341,6 +375,7 @@ function M:OpenTarget(anchor, btnName)
     local row = rowByBtn[btnName]
     if not row then return false end
     if not AnchorAt(anchor) then return false end
+    closePending = false
 
     M.ensureVisible()
 
@@ -362,12 +397,16 @@ function M:OpenTarget(anchor, btnName)
 end
 
 function M:Toggle()
-    if frame and frame:IsShown() then
+    if frame and frame:IsShown() and not closePending then
         self:Close()
         return
     end
     -- 受限窗口里 Show 受保护框会被拦 ⇒ 这一拍不开（右键是脱战手势，真在战斗中按就当没这菜单）。
-    if ns:IsRestricted() then return end
+    if ns:IsRestricted() then
+        if frame and frame:IsShown() then self:Close() end
+        return
+    end
+    -- 上一次 Close 只延迟了受保护面板的 Hide；确认这次真能打开后，再取消待执行关闭。
     -- 已经有别的菜单开着就别抢（单源：`MicroMenu.lua` 导出的 `anyMenuOpen`）。
     -- 同一次右键里暴雪的追踪菜单 / LibDBPanel 这类也可能开菜单，我们再开一次就等于把人家关掉，
     -- 玩家看到的是"右键没反应"，而实际是"开了又立刻被关掉"。
@@ -375,6 +414,7 @@ function M:Toggle()
     local anyMenuOpen = minimapModule and minimapModule.microMenu and minimapModule.microMenu.anyMenuOpen
     if type(anyMenuOpen) == "function" and anyMenuOpen() then return end
     if not Build() then return end
+    closePending = false
     -- 定向菜单（`OpenTarget`）可能把行筛成只剩一行、并把目标行挪到了首行槽位：
     -- 全量菜单开之前先还原行位与行数 —— `Build` 只在第一次跑，不还原就会一直只有一行、位置也不对。
     RestoreRows()
@@ -387,16 +427,31 @@ function M:Toggle()
     frame:Show()
 end
 
+--- 限制解除后的新 tick 才碰受保护面板；`closePending` 让再次打开能取消这次关闭。
+local function FinishClose()
+    if not closePending or not frame or ns:IsRestricted() then return end
+    closePending = false
+    frame:Hide()
+end
+
 function M:Close()
-    if not frame then return end
-    -- 战斗中 Hide 受保护框会被拦：那一拍关不掉，留到脱战补（见文件头"代价"）。
-    if ns:IsRestricted() then return end
+    -- catcher 是普通全屏框，不受安全锚定家族保护：任何受限窗口都必须立即收掉。
     if catcher then pcall(catcher.Hide, catcher) end
+    if not frame then
+        closePending = false
+        return
+    end
+    if ns:IsRestricted() then
+        closePending = true
+        ns:AfterCombat("minimap-micro-menu-close", FinishClose, "regen")
+        return
+    end
+    closePending = false
     frame:Hide()
 end
 
 function M:IsOpen()
-    return frame and frame:IsShown() and true or false
+    return frame and not closePending and frame:IsShown() and true or false
 end
 
 --- `/mui minimap securemenu`：把判据印成结论（AGENTS：别让玩家对着裸数字判断）。
@@ -406,12 +461,12 @@ function M:Probe(enabledSetting)
         if ns:IsRestricted() then
             ns:Print("载体还没建：此刻处于受限窗口（战斗/地图/聊天…），脱战后第一次右键才会建。")
         elseif not Build() then
-            ns:Print("|cffff6b6b建不出来|r：容器没有底衬能力 / 客户端的 `SecureActionButtonTemplate` 不是安全模板（行不受保护）/ 12 颗微按钮一个都不在 ⇒ 交回 4 行菜单。")
+            ns:Print("|cffff6b6b建不出来|r：容器没有底衬能力 / 客户端的 `SecureActionButtonTemplate` 不是安全模板（行不受保护）/ 代点目标一个都不在 ⇒ 交回 3 行菜单。")
             return
         end
     end
     if not frame then
-        ns:Print("载体对象为空（内部状态异常），交回 4 行菜单。")
+        ns:Print("载体对象为空（内部状态异常），交回 3 行菜单。")
         return
     end
     local prot = (type(frame.IsProtected) == "function") and frame:IsProtected() or false
@@ -430,8 +485,9 @@ function M:Probe(enabledSetting)
     -- **这条只读不写**（§8.38 的探针纪律：诊断命令不许产生它正在判定的状态）——
     -- 开菜单时 `ensureVisible()` 才会去补 Show，所以这里报出来的"不可点"不等于死行。
     local nOK, dead = M.clickableCount()
+    local targets = SecureTargets()
     ns:Print(("代点目标此刻可点 %d/%d%s（开菜单时 ensureVisible 会逐颗补 Show）"):format(
-        nOK, #TARGETS, #dead > 0 and ("；不可点：" .. table.concat(dead, " ")) or ""))
+        nOK, #targets, #dead > 0 and ("；不可点：" .. table.concat(dead, " ")) or ""))
     -- 建行时跳过的入口：这些行**故意不存在**，不是漏建（静默少一行是最难查的缺陷形态）
     if #skipped > 0 then
         ns:Print("没建行的入口（故意跳过，不是漏建）：")
@@ -439,11 +495,11 @@ function M:Probe(enabledSetting)
     end
     local verdict
     if not enabledSetting then
-        verdict = "开着 4 行菜单，这个载体不参与右键"
+        verdict = "开着 3 行普通菜单，这个载体不参与右键（日历不可用）"
     elseif ns:IsRestricted() then
         verdict = "战斗/受限中：右键不会打开（脱战才开）"
     else
-        verdict = "可开：右键小地图应弹出 12 行"
+        verdict = "可开：右键小地图应弹出 " .. tostring(#(rows or {})) .. " 行"
     end
     ns:Print(("设置 microMenuSecure=%s · 此刻受限=%s ⇒ %s"):format(
         tostring(enabledSetting), tostring(ns:IsRestricted()), verdict))

@@ -9,6 +9,7 @@ local EventBus = ns.EventBus
 local Color    = ns.Color
 local Media    = ns.Media
 local Scheduler = ns.Scheduler
+local Secrets  = ns.Secrets
 local infobarSubId = nil
 
 local M = { name = "InfoBar", blocks = {} }
@@ -624,8 +625,17 @@ local function UpdateBlock(block)
     if not ok then
         if not block.reported then
             block.reported = true
-            ns:Print("信息栏 [" .. tostring(block.key) .. "] 更新失败，该块暂不显示：" .. tostring(err))
+            local reason = "未知错误"
+            if Secrets.CanRead(err) then
+                local okText, text = pcall(tostring, err)
+                if okText then reason = text end
+            end
+            ns:Print("信息栏 [" .. tostring(block.key) .. "] 更新失败，该块暂不显示：" .. reason)
         end
+        -- 失败时旧读数已经不可信：清文本缓存与实体，避免 updater 报错后继续显示上一次的数据。
+        block.hasText = false
+        block.lastText = nil
+        if block.text then block.text:SetText("") end
         UpdateShown(block)
         return
     end

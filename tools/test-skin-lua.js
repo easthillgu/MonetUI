@@ -298,9 +298,12 @@ const liveUf = aurLines.filter((_, i) => !(i > openAt && i < closeAt)).join('\n'
 for (const [label, re] of Object.entries({
   '先 LoadAddOn Blizzard_AuraContainer': /LoadAddOn[\s\S]{0,40}Blizzard_AuraContainer/,
   'CreateFrame AuraContainer + CustomAuraContainerTemplate': /CreateFrame, "AuraContainer", nil, parent, "CustomAuraContainerTemplate"/,
-  '建容器先给可渲染矩形 SetSize(1,1)': /container:SetSize\(1, 1\)/,
+  // 冒号写法与 pcall 写法等价；2026-11 收口后全仓统一走 pcall，两种都认。
+  '建容器先给可渲染矩形 SetSize(1,1)': /(?:container:SetSize\(1, 1\)|pcall\(container\.SetSize, container, 1, 1\))/,
   'AddAuraGroup 传 initializeFrame': /AddAuraGroup, container, key, filterString, opts/,
-  'SetUnit + UpdateAllAuras': /SetUnit, container, "target"[\s\S]{0,120}UpdateAllAuras, container/,
+  // 两条之间隔着 SetEnabled(true) 这一道门（失败要 Discard，不能进 UpdateAll），
+  // 所以只判**先后**：SetUnit → … → UpdateAllAuras，不卡行距。
+  'SetUnit + UpdateAllAuras': /(?:pcall\(container\.SetUnit, container, "target"\)|SetUnit, container, "target")[\s\S]{0,400}UpdateAllAuras, container/,
   '关掉引擎按钮的点击（否则吃掉换目标）': /SetMouseClickEnabled, button, false/,
   // 字体先建好（EnsureAuraTexts 内部 SetFont）再 SetApplicationCount。拆函数后两步隔几百行，
   // 断言**调用顺序**而不是行距。
@@ -310,11 +313,17 @@ for (const [label, re] of Object.entries({
 
 // 主题变化：2026-10-25 判例 —— **绝不重建容器**（重建后那批按钮被我们碰过，引擎在战斗里再写
 // 它们就被记成 MonetUI → 连环 ADDON_ACTION_BLOCKED UNKNOWN() ×11，只有 /reload 能清）。
-// 处理器只许 UpdateAll，不许出现 Rebuild / CreateAuraContainer。
-const themeHandler = /EventBus:Register\("MONETUI_THEME_CHANGED", function\(\)([\s\S]{0,400}?)\n\s*end\)/.exec(uf);
+// 处理器只许重涂（Apply / UpdateAll），不许出现 Rebuild / CreateAuraContainer。
+// 2026-11-15（§8.125）追加：必须走 M:Apply()（Apply 末尾自带 UpdateAll）—— 只 UpdateAll 会漏掉
+// 血条填充 / 空槽 / 能量条这类"建框时一次涂、之后没人重涂"的颜色，实机表现＝换地图配色不变。
+// 处理器体可能超过 400 字（含多段判例注释），所以按"下一个 EventBus:Register"截断，不卡长度。
+const themeAt = uf.indexOf('EventBus:Register("MONETUI_THEME_CHANGED"');
+const nextRegAt = themeAt < 0 ? -1 : uf.indexOf('EventBus:Register(', themeAt + 1);
+const themeHandler = themeAt < 0 ? null : uf.slice(themeAt, nextRegAt > 0 ? nextRegAt : themeAt + 1600);
 check('MONETUI_THEME_CHANGED 处理器存在', !!themeHandler);
-check('主题变化只 UpdateAll、不重建容器（2026-10-25 判例）',
-      !!themeHandler && /M:UpdateAll\(\)/.test(themeHandler[1]) && !/Rebuild|CreateAuraContainer/.test(themeHandler[1]));
+check('主题变化只重涂、不重建容器（2026-10-25 判例）',
+      !!themeHandler && /M:(?:Apply|UpdateAll)\(\)/.test(themeHandler)
+      && !/Rebuild|CreateAuraContainer/.test(themeHandler));
 
 // ---------------------------------------------------------------- 14
 console.log('\n[14] 姓名板不给减益换皮（2026-10-28 玩家拍板：维持现状）');
@@ -326,12 +335,18 @@ const np = srcOf('Modules/Nameplates/Nameplates.lua');
 check('减益换皮代码不在了（DressDebuff* / AnchorDebuffs / borderSource）',
       !/DressDebuff|AnchorDebuffs|borderSource/.test(np));
 check('不给暴雪光环按钮挂 OnShow 钩子', !/HookScript,\s*child,\s*"OnShow"/.test(np));
-has(np, /local function FadeBlizzardSiblings\(base, keep\)/, 'FadeBlizzardSiblings 已定义');
+// 2026-11 重写：兄弟子框压制从"一次扫平铺"改成**节点级账本**（fadedNodes / pendingRestores）——
+// 每块暴雪牌的全部子框（含引擎动态再建的 BuffListFrame 一族）逐节点记账，还原时按节点自己
+// 的 alpha 归还，跨牌换单位也跟着节点走。断言跟着新结构走，判据一条不松：
+//   · 取子框只有一个漏斗 ChildrenOf（多返回值包表）；
+//   · 压制只用 SetAlpha(0)，绝不 Hide（C++ 点击区锚在血条/名字上）；
+//   · 还原按记录的原 alpha 回写，失败进 pendingRestores 重试，不清账。
+has(np, /local function ChildrenOf\(frame\)/, '取子框只有 ChildrenOf 一个漏斗');
 // 断言**代码**，不是注释。2026-11-03 的 71085819 把取子框改成 `local kids = base:GetChildren()`
 // + `for i = 1, #kids`：GetChildren 返回的是多返回值，kids 于是是**第一个子框**（userdata），
 // `#kids` 直接抛 —— 兄弟子框压暗整段从那天起就没跑过。而旧断言
 // `/ipairs\(\{ base:GetChildren\(\) \}\)/` 当时**是绿的**：它匹配到的是描述旧写法的那句注释。
-// 所以这里先把注释剥掉再判函数体（全仓同款形状另由 tools/audit-multireturn.js 兜）。
+// 所以这里先把注释剥掉再判（全仓同款形状另由 tools/audit-multireturn.js 兜）。
 const bodyOf = (src, sig) => {
     const re = new RegExp(sig.replace(/[()]/g, '\\$&') + '[\\s\\S]*?\\r?\\nend\\r?\\n');
     const m = src.match(re);
@@ -341,16 +356,24 @@ const bodyOf = (src, sig) => {
         .map((l) => l.replace(/\s--.*$/, ''))
         .join('\n');
 };
-const wrappedKids = (body) => !/= *base:GetChildren\(\)/.test(body)
-    && !/ipairs\(base:GetChildren\(\)\)/.test(body)
-    && (/pcall\(ChildrenOf, base\)/.test(body) || /\{ *base:GetChildren\(\) *\}/.test(body));
-check('FadeBlizzardSiblings 把 GetChildren 的多返回值包成表（剥注释后判代码）',
-      wrappedKids(bodyOf(np, 'local function FadeBlizzardSiblings(base, keep)')));
-check('RestoreBlizzardSiblings 同样包成表（不是 ipairs(base:GetChildren())）',
-      wrappedKids(bodyOf(np, 'local function RestoreBlizzardSiblings(base)')));
-has(np, /pcall\(c\.SetAlpha, c, 0\)/, '兄弟子框压 alpha 0（不是 Hide，保住 C++ 点击区）');
-has(np, /local function RestoreBlizzardSiblings\(base\)/, '有还原创（模块关掉原样归还）');
-has(np, /FadeBlizzardSiblings\(base, plate\)/, 'HideBlizzardPlate 里真的调了');
+const stripComments = (src) => src.split(/\r?\n/)
+    .filter((l) => !l.trim().startsWith('--'))
+    .map((l) => l.replace(/\s--.*$/, ''))
+    .join('\n');
+const npCode = stripComments(np);
+check('ChildrenOf 把 GetChildren 的多返回值包成表',
+      /return \{ *frame:GetChildren\(\) *\}/.test(bodyOf(np, 'local function ChildrenOf(frame)')));
+check('代码里没有裸调 GetChildren 的多返回值（剥注释后判代码）',
+      !/= *frame:GetChildren\(\)/.test(npCode) && !/ipairs\(frame:GetChildren\(\)\)/.test(npCode));
+has(np, /local function FadeNativeNode\(obj, base, plate, deep\)/, '节点级压制 FadeNativeNode 已定义');
+check('节点压 alpha 0（不是 Hide，保住 C++ 点击区）',
+      /pcall\(obj\.SetAlpha, obj, 0\)/.test(bodyOf(np, 'local function FadeNativeNode(obj, base, plate, deep)')));
+has(np, /local function RestoreNativeBase\(base\)/, '有还原创（模块关掉原样归还）');
+check('还原按节点记录的原 alpha 回写（不是统一顶 1）',
+      /rec\.alpha/.test(bodyOf(np, 'local function RestoreNativeBase(base)')));
+has(np, /pendingRestores\[base\] = true/, '还原失败进重试账本，不当成已归还');
+has(np, /local function HideBlizzardPlate\(base, plate\)[\s\S]*?FadeBlizzardTree\(base, plate\)/, 'HideBlizzardPlate 里真的调了');
+has(np, /for i = 1, #plate\.fastFaded/, '逐帧复查已知快节点（alpha 被顶回来会再压）');
 check('绝不在暴雪框上写字段的纪律注释还在', /绝不往暴雪的框体[\s\S]{0,80}上写字段/.test(np));
 
 // ---------------------------------------------------------------- 15
@@ -499,7 +522,10 @@ if (iconWidgets) {
         /local sized = /.test(b) && /local isSlot = false/.test(b) && /if sized then/.test(b));
   check('宽高比较前过 Secrets.CanRead（机密数字 type 也是 number）',
         /Secrets\.CanRead\(w\)/.test(b) && /Secrets\.CanRead\(h\)/.test(b));
-  check('做事的那一档才落标记', /if sized and isSlot and not hasAtlas then\s*\n\s*Mark\(child, "iconFlat", true\)/.test(b));
+  // 2026-11-16 追加 `not contentInNormal`（外观页部位导航钮的图标挂在 NormalTexture 上，
+  // 属于功能图标，必须整钮跳过）。判据不变：只有真做事那一档才落 iconFlat。
+  check('做事的那一档才落标记',
+        /if sized and isSlot and not hasAtlas(?: and not contentInNormal)? then\s*\n\s*Mark\(child, "iconFlat", true\)/.test(b));
   check('按设计跳过（非方形 / atlas）也落标记，免每趟重复读',
         /elseif sized then[\s\S]{0,200}?Mark\(child, "iconFlat", true\)/.test(b));
   check('尺寸没落地的那一档不落标记（留给显示期补扫）',

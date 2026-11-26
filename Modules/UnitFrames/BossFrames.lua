@@ -2,7 +2,7 @@
 -- 首领框架：普通按钮 + visibility 驱动 + Monet 皮肤。
 -- 与小队/团队同源：血条、能量、名字、选中边框（样式复用 Groups.lua 的函数）。
 --
--- 压制暴雪的 Boss1TargetFrame..Boss5TargetFrame（饿事件 + alpha 0 + 移出屏幕），
+-- 可逆压制暴雪的 Boss1TargetFrame..Boss5TargetFrame（alpha/鼠标静音，不卸事件、不写脚本），
 -- 自建按钮由客户端受限环境控制显隐（[@bossN,exists] show; hide）。
 
 local ADDON_NAME, ns = ...
@@ -45,10 +45,9 @@ local function InCombat()
     return type(InCombatLockdown) == "function" and InCombatLockdown()
 end
 
---- 受保护写入的唯一门槛：六类受限窗口都算（同 Groups.lua 的 Restricted）。
---- 守卫判"忙"的窗口与 `ns:AfterCombat` 的"当场能做"判据（也是 ns:IsRestricted）同源，
---- 二者不一致才会互顶成死循环。
+--- 受保护写入门槛与 Core 同源：Map 只加密数据，其余限制延迟写入。
 local function Restricted()
+    if type(ns.CanRunProtectedWork) == "function" then return not ns:CanRunProtectedWork() end
     if type(ns.IsRestricted) == "function" then return ns.IsRestricted() end
     return InCombat()
 end
@@ -357,10 +356,16 @@ local function RestyleBoss(cfg)
 end
 
 local StopSuppressTicker   -- 前向声明：TeardownBoss 在定义之前，见下面「压制暴雪首领框」
+local RestoreBlizzardBoss
+local restoreBlizzardPending = false
 
 local function TeardownBoss()
     if ticker then ticker:Cancel(); ticker = nil end
     if StopSuppressTicker then StopSuppressTicker() end
+    -- 必须先归还暴雪框，再拆自绘框。恢复按节点独立 pcall；失败的节点留在账本里，
+    -- 等限制解除事件重试，不会因某一颗失败而把其余已压制的框永久丢掉。
+    restoreBlizzardPending = true
+    if RestoreBlizzardBoss then RestoreBlizzardBoss() end
     if bossAnchor then bossAnchor:Hide(); bossAnchor = nil end
     for i = 1, MAX_BOSS do
         local btn = bossButtons[i]
@@ -379,54 +384,81 @@ end
 -- 压制暴雪首领框
 -- ============================================================================
 
-local function StarveBoss(frame)
-    if not frame then return end
-    pcall(frame.UnregisterAllEvents, frame)
-    if type(frame.GetChildren) ~= "function" then return end
-    -- `GetChildren` 返回的是**多返回值**不是表：直接 `pcall(frame.GetChildren, frame)` 只拿到
-    -- 第一个子框，随后 `#kids` 恒为 0（框体表没有数组部分）—— 子件事件从来没被饿掉过。
-    -- 本仓其余十处都写成 `{ ... }`（见 Utils/Skin.lua 的同款注释）。
-    local ok, kids = pcall(function() return { frame:GetChildren() } end)
-    if not ok or type(kids) ~= "table" then return end
-    for i = 1, #kids do
-        local child = kids[i]
-        if child and type(child.UnregisterAllEvents) == "function" then
-            pcall(child.UnregisterAllEvents, child)
-        end
-    end
-end
+-- 压制账本必须留住每个实际静音过的节点：子框可能被暴雪换父/池化，只在根框上
+-- 做一次 Unmute 会漏掉已经离开根树的子件。原文的 UnregisterAllEvents 无法枚举还原，
+-- 因此这里从源头取消卸事件，改为 Widget:Mute 的可逆 alpha/鼠标静音。
+local suppressedBlizzard = {}
+local suppressedByFrame = {}
+local MUTE_OPTS = { depth = 0 }
 
 local function ParkBoss(frame)
     if not frame then return end
-    pcall(frame.SetAlpha, frame, 0)
-    pcall(frame.EnableMouse, frame, false)
-    if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, false) end
-    if type(frame.ClearAllPoints) == "function" then pcall(frame.ClearAllPoints, frame) end
-    if type(frame.SetPoint) == "function" then
-        pcall(frame.SetPoint, frame, "TOPLEFT", "UIParent", "BOTTOMRIGHT", 1, -1)
+    local widget = Widget()
+    if not widget or type(widget.Mute) ~= "function" then return end
+
+    local function visit(node)
+        if not node then return end
+        if not suppressedByFrame[node] then
+            suppressedByFrame[node] = true
+            suppressedBlizzard[#suppressedBlizzard + 1] = node
+        end
+        -- 重复压制只补写 alpha/鼠标，不覆盖 Widget 首次保存的原状态。
+        pcall(widget.Mute, widget, node, MUTE_OPTS)
+
+        if type(node.GetChildren) == "function" then
+            -- GetChildren 是多返回值，必须包成表；单颗读取失败不阻断其余节点。
+            local ok, kids = pcall(function() return { node:GetChildren() } end)
+            if ok and type(kids) == "table" then
+                for i = 1, #kids do visit(kids[i]) end
+            end
+        end
     end
+
+    visit(frame)
+end
+
+RestoreBlizzardBoss = function()
+    local widget = Widget()
+    if not widget or type(widget.Unmute) ~= "function" then return false end
+
+    -- 逆序归还：先子后根。只移除确认恢复的节点，部分失败保留到下一次重试。
+    for i = #suppressedBlizzard, 1, -1 do
+        local frame = suppressedBlizzard[i]
+        local ok, restored = pcall(function()
+            widget:Unmute(frame, MUTE_OPTS)
+            return not widget:IsMuted(frame)
+        end)
+        if ok and restored then
+            suppressedByFrame[frame] = nil
+            table.remove(suppressedBlizzard, i)
+        end
+    end
+
+    if #suppressedBlizzard == 0 then
+        restoreBlizzardPending = false
+        return true
+    end
+    return false
 end
 
 local function SuppressBlizzardBoss()
     local cfg = Config()
-    if cfg and cfg.hideBlizzard == false then return end
+    if cfg and cfg.hideBlizzard == false then
+        restoreBlizzardPending = true
+        RestoreBlizzardBoss()
+        return
+    end
 
     -- **受限窗口里一次都不做**：`BossTargetFrameContainer` / `BossNTargetFrame` 都是
-    -- `protected=true`（实机探针 2026-11-01），受限期对受保护框的 SetAlpha / SetPoint /
-    -- ClearAllPoints 全部被拒。压制必须在受限之外做扎实，受限中补不了。
+    -- `protected=true`（实机探针 2026-11-01），受限期对受保护框的 SetAlpha /
+    -- EnableMouse 会被拒。压制必须在受限之外做扎实，受限中补不了。
     if Restricted() then return end
 
     local f = _G.BossTargetFrameContainer
-    if f then
-        StarveBoss(f)
-        ParkBoss(f)
-    end
+    if f then ParkBoss(f) end
     for i = 1, MAX_BOSS do
         local bf = _G["Boss" .. i .. "TargetFrame"]
-        if bf then
-            StarveBoss(bf)
-            ParkBoss(bf)
-        end
+        if bf then ParkBoss(bf) end
     end
 end
 
@@ -476,6 +508,7 @@ function M:Apply()
         return
     end
 
+    restoreBlizzardPending = false
     SuppressBlizzardBoss()
 
     if cfg.enabled ~= false then
@@ -511,6 +544,10 @@ function M:RegisterEvents()
     eb:Register("ZONE_CHANGED_NEW_AREA", function()
         local cfg = Config()
         if cfg then SuppressBlizzardBoss() end
+    end)
+    eb:Register("MONETUI_RESTRICTION_CHANGED", function()
+        -- 只在确实执行过 Teardown/关闭隐藏后补还原；模块仍启用时不能把压制误解除。
+        if restoreBlizzardPending and not Restricted() then RestoreBlizzardBoss() end
     end)
     eb:Register("UNIT_TARGET", function()
         for i = 1, MAX_BOSS do

@@ -17,6 +17,8 @@
     <!-- 模板层：按结构认控件（MoneyFrame / EditBox / ColoredProgressBar），
          必须在 Skin.lua 之后（它往 Skin 上挂方法）。 -->
     <Script file="SkinTemplates.lua"/>
+    <!-- 公共门面只依赖已加载的 Skin / Widget，运行期再访问 Core。 -->
+    <Script file="PublicAPI.lua"/>
     <Script file="Compat.lua"/>
     <!-- Coexist / Async 只在运行期被调用（加载期一个接口都不碰），放最后。
          Async 用 Scheduler:EveryFrame 做帧驱动，必须排在 Scheduler.lua 之后（已满足）。 -->

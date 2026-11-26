@@ -593,35 +593,52 @@ end
 --- 被下一次的 `== nil` 判成"已处理"，而 Unmute 又只认真值、永远不清它 —— 于是这个节点
 --- 之后被暴雪打开鼠标（池化按钮复用）就再也没人关回去，实机症状是"原始目标追踪还能点"。
 local function MuteMouseTree(node, depth, on)
-    if not node then return end
+    if not node then return true end
     if node.EnableMouse then
         if on then
             if not Marked(node, "muiMouseHeld") then
+                local canReadMouse = type(node.IsMouseEnabled) == "function"
+                local was
+                if canReadMouse then
+                    local ok, value = pcall(node.IsMouseEnabled, node)
+                    if not ok or not Secrets.CanRead(value) then return false end
+                    was = value
+                end
+                if not pcall(node.EnableMouse, node, false) then return false end
+                if node.EnableMouseClicks and not pcall(node.EnableMouseClicks, node, false) then return false end
+                if node.EnableMouseMotion and not pcall(node.EnableMouseMotion, node, false) then return false end
+                if canReadMouse then
+                    local okNow, now = pcall(node.IsMouseEnabled, node)
+                    if not okNow or not Secrets.CanRead(now) or now ~= false then return false end
+                end
                 Mark(node, "muiMouseHeld", true)
-                local ok, was = pcall(node.IsMouseEnabled, node)
-                if ok and was == true then Mark(node, "muiMousePrior", true) end
-                pcall(node.EnableMouse, node, false)
-                if node.EnableMouseClicks then pcall(node.EnableMouseClicks, node, false) end
-                if node.EnableMouseMotion then pcall(node.EnableMouseMotion, node, false) end
+                if was == true then Mark(node, "muiMousePrior", true) end
             end
         elseif Marked(node, "muiMouseHeld") then
             local prior = Marked(node, "muiMousePrior")
+            if prior then
+                if not pcall(node.EnableMouse, node, true) then return false end
+                if node.EnableMouseClicks and not pcall(node.EnableMouseClicks, node, true) then return false end
+                if node.EnableMouseMotion and not pcall(node.EnableMouseMotion, node, true) then return false end
+                if type(node.IsMouseEnabled) == "function" then
+                    local ok, now = pcall(node.IsMouseEnabled, node)
+                    if not ok or not Secrets.CanRead(now) or now ~= true then return false end
+                end
+            end
             Mark(node, "muiMouseHeld", nil)
             Mark(node, "muiMousePrior", nil)
-            if prior then
-                pcall(node.EnableMouse, node, true)
-                if node.EnableMouseClicks then pcall(node.EnableMouseClicks, node, true) end
-                if node.EnableMouseMotion then pcall(node.EnableMouseMotion, node, true) end
-            end
         end
     end
-    if depth <= 0 then return end
+    if depth <= 0 then return true end
     -- `GetChildren` 返回的是**多返回值**不是表：直接 `pcall(node.GetChildren, node)` 只拿到
     -- 第一个子框，随后 `type(kids) ~= "table"` 判掉 → 递归空转，整棵子树一个都关不掉
     -- （`c2b6b2b` 修过同款，Groups.lua / Compat.lua 各留了一条注释）。必须包成表。
     local ok, kids = pcall(function() return { node:GetChildren() } end)
-    if not ok or not kids then return end
-    for i = 1, #kids do MuteMouseTree(kids[i], depth - 1, on) end
+    if not ok or not kids then return false end
+    for i = 1, #kids do
+        if not MuteMouseTree(kids[i], depth - 1, on) then return false end
+    end
+    return true
 end
 
 --- 把暴雪的 HUD 框收起来：alpha 0 + 关鼠标。各模块以前各自抄一份
@@ -643,12 +660,15 @@ function Widget:Mute(frame, opts)
     opts = opts or {}
     if opts.combat ~= "write" and ns:InCombat() then return false end
     if not Marked(frame, "muiMuted") then
-        Mark(frame, "muiMuted", true)
         local ok, alpha = pcall(frame.GetAlpha, frame)
-        if ok then Mark(frame, "muiMuteAlpha", alpha) end
+        if not ok then return false end
+        Mark(frame, "muiMuteAlpha", alpha)
+        Mark(frame, "muiMuted", true)
     end
-    pcall(frame.SetAlpha, frame, opts.alpha or 0)
-    MuteMouseTree(frame, opts.depth or 2, true)
+    if not pcall(frame.SetAlpha, frame, opts.alpha or 0) then return false end
+    local okAlpha, alpha = pcall(frame.GetAlpha, frame)
+    if not okAlpha or not Secrets.CanRead(alpha) or alpha ~= (opts.alpha or 0) then return false end
+    if not MuteMouseTree(frame, opts.depth or 2, true) then return false end
     return true
 end
 
@@ -658,10 +678,12 @@ function Widget:Unmute(frame, opts)
     opts = opts or {}
     if opts.combat ~= "write" and ns:InCombat() then return false end
     local prior = Marked(frame, "muiMuteAlpha")
+    if not pcall(frame.SetAlpha, frame, prior or 1) then return false end
+    local okAlpha, alpha = pcall(frame.GetAlpha, frame)
+    if not okAlpha or not Secrets.CanRead(alpha) or alpha ~= (prior or 1) then return false end
+    if not MuteMouseTree(frame, opts.depth or 2, false) then return false end
     Mark(frame, "muiMuted", nil)
     Mark(frame, "muiMuteAlpha", nil)
-    pcall(frame.SetAlpha, frame, prior or 1)
-    MuteMouseTree(frame, opts.depth or 2, false)
     return true
 end
 
@@ -1996,7 +2018,10 @@ local pixelGlowId = nil
 local function PixelGlowTick(elapsed)
     for frame, st in pairs(pixelGlows) do
         if not st.static then
-            if not frame:IsShown() then
+            local okShown, shown = pcall(frame.IsShown, frame)
+            if not okShown or not Secrets.CanRead(shown) or shown == nil then
+                -- 读不到（含机密）时只跳过本帧，不能把仍可能显示的环误收掉。
+            elseif not Secrets.Bool(shown, false) then
                 -- 框体藏了（宠物条收起来、条被换页）：收摊，等下次点亮再重新开始
                 Widget:StopPixelGlow(frame)
             else

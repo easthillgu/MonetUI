@@ -39,23 +39,38 @@ local function AnchorY(bottom, height, anchor)
     return bottom + height / 2
 end
 
+local function EffectiveScale(frame)
+    if not frame or type(frame.GetEffectiveScale) ~= "function" then return 1 end
+    local ok, raw = pcall(frame.GetEffectiveScale, frame)
+    if not ok then return 1 end
+    if not Secrets.CanRead(raw) then return nil end
+    if raw == nil then return 1 end
+    return Secrets.Number(raw)
+end
+
 --- 框的矩形，统一换算到 UIParent 的单位。
 -- GetRect 的值是"屏幕坐标 × 这个框的有效缩放"，被父框缩放过（动作条 0.93、团队框 0.8）时
 -- 直接拿来算吸附会差几个点，所以先除以它相对 UIParent 的缩放。
 local function Rect(frame)
     if frame == UIParent then
-        return 0, 0, UIParent:GetWidth() or 0, UIParent:GetHeight() or 0
+        local okW, rawW = pcall(UIParent.GetWidth, UIParent)
+        local okH, rawH = pcall(UIParent.GetHeight, UIParent)
+        if not okW or not okH then return nil end
+        local width, height = Secrets.Number(rawW), Secrets.Number(rawH)
+        if width == nil or height == nil then return nil end
+        return 0, 0, width, height
     end
     if not frame or type(frame.GetRect) ~= "function" then return nil end
-    local left, bottom, width, height = frame:GetRect()
-    if not left or not width then return nil end
+    local ok, left, bottom, width, height = pcall(frame.GetRect, frame)
+    if not ok then return nil end
+    left, bottom, width, height = Secrets.Number(left), Secrets.Number(bottom),
+        Secrets.Number(width), Secrets.Number(height)
+    if left == nil or bottom == nil or width == nil or height == nil then return nil end
     -- GetEffectiveScale 在受限环境下可能返回机密值（Media.lua 头部记过同一件事）：
     -- 机密时不做除法与比较，直接把这一帧当作"读不到"，调用方用上一次的位置。
-    local rawScale = frame.GetEffectiveScale and frame:GetEffectiveScale() or 1
-    local rawParent = UIParent.GetEffectiveScale and UIParent:GetEffectiveScale() or 1
-    local frameScale = Secrets.Number(rawScale)
-    local parentScale = Secrets.Number(rawParent)
-    if frameScale == nil or parentScale == nil then return nil end
+    local frameScale = EffectiveScale(frame)
+    local parentScale = EffectiveScale(UIParent)
+    if frameScale == nil or parentScale == nil or frameScale <= 0 or parentScale <= 0 then return nil end
     local scale = frameScale / parentScale
     if scale > 0 and scale ~= 1 then
         left, bottom, width, height = left / scale, bottom / scale, width / scale, height / scale
@@ -146,10 +161,14 @@ end
 --- 松手时把矩形吸到网格 / 别的框 / 屏幕边上。只算一次，拖动途中不跑。
 local function SnapRect(rect, entry)
     local cfg = MoverConfig()
-    local mult = Media:Mult()
+    local mult = Secrets.Number(Media:Mult())
+    local left, bottom, width, height = Secrets.Number(rect[1]), Secrets.Number(rect[2]),
+        Secrets.Number(rect[3]), Secrets.Number(rect[4])
+    if mult == nil or left == nil or bottom == nil or width == nil or height == nil then return end
+    rect[1], rect[2], rect[3], rect[4] = left, bottom, width, height
 
     -- 1) 网格：左上角落到整数格（格子大小按物理像素算，换分辨率格距不变）
-    local grid = cfg.grid
+    local grid = Secrets.Number(cfg.grid)
     if grid and grid > 0 then
         local step = grid * mult
         rect[1] = math.floor(rect[1] / step + 0.5) * step
@@ -158,19 +177,34 @@ local function SnapRect(rect, entry)
 
     -- 2) 吸附：同组里其它可见框的左/中/右、下/中/上，加上屏幕的左/中/右、下/中/上
     if cfg.snap == false then return end
-    local range = (cfg.snapRange or 6) * mult
+    local rawRange = cfg.snapRange
+    local range
+    if Secrets.CanRead(rawRange) then
+        if rawRange == nil or rawRange == false then range = 6 else range = Secrets.Number(rawRange) end
+    end
+    if range == nil then return end
+    range = range * mult
 
     local xs, ys = {}, {}
-    local uw, uh = UIParent:GetWidth() or 0, UIParent:GetHeight() or 0
-    xs[1], xs[2], xs[3] = 0, uw / 2, uw
-    ys[1], ys[2], ys[3] = 0, uh / 2, uh
+    local okW, rawW = pcall(UIParent.GetWidth, UIParent)
+    local okH, rawH = pcall(UIParent.GetHeight, UIParent)
+    local uw, uh
+    if okW and okH then uw, uh = Secrets.Number(rawW), Secrets.Number(rawH) end
+    if uw and uh then
+        xs[1], xs[2], xs[3] = 0, uw / 2, uw
+        ys[1], ys[2], ys[3] = 0, uh / 2, uh
+    end
 
     for key, other in pairs(entries) do
         -- 容器框自己永远可见（内容由安全头控制），所以登记时可以给一个 isVisible 回调。
-        local visible = other.frame and other.frame:IsShown()
-        if visible and other.isVisible then
+        local visible = false
+        if other.frame and type(other.frame.IsShown) == "function" then
+            local ok, shown = pcall(other.frame.IsShown, other.frame)
+            if ok and Secrets.CanRead(shown) then visible = Secrets.Bool(shown, false) end
+        end
+        if other.isVisible then
             local ok, shown = pcall(other.isVisible)
-            visible = ok and shown and true or false
+            visible = ok and Secrets.CanRead(shown) and Secrets.Bool(shown, false) or false
         end
         if key ~= entry.key and visible and other.group == entry.group then
             local ol, ob, ow, oh = Rect(other.frame)
@@ -224,25 +258,33 @@ local function AnchorUsable(frame, parentKey)
     if not frame or type(frame.GetRect) ~= "function" or type(frame.IsShown) ~= "function" then
         return false
     end
-    local okRect, left, _, width, height = pcall(frame.GetRect, frame)
-    if not okRect or type(left) ~= "number" or type(width) ~= "number"
-        or type(height) ~= "number" or width <= 0 or height <= 0 then
+    local okRect, left, bottom, width, height = pcall(frame.GetRect, frame)
+    if not okRect then return false end
+    left, bottom, width, height = Secrets.Number(left), Secrets.Number(bottom),
+        Secrets.Number(width), Secrets.Number(height)
+    if left == nil or bottom == nil or width == nil or height == nil
+        or width <= 0 or height <= 0 then
         return false
     end
     if parentKey and entries[parentKey] then return true end
     local okShown, shown = pcall(frame.IsShown, frame)
-    return okShown and shown and true or false
+    if not okShown or not Secrets.CanRead(shown) then return false end
+    return Secrets.Bool(shown, false)
 end
 
 --- 摆完是否整体落在屏幕外。rect 给不出有效值时返回 false（隐藏框别乱挪）。
 local function Offscreen(frame)
     if not frame or type(frame.GetRect) ~= "function" then return false end
     local ok, left, bottom, width, height = pcall(frame.GetRect, frame)
-    if not ok or type(left) ~= "number" or type(bottom) ~= "number"
-        or type(width) ~= "number" or type(height) ~= "number" then return false end
-    local sw = (UIParent.GetWidth and UIParent:GetWidth()) or 0
-    local sh = (UIParent.GetHeight and UIParent:GetHeight()) or 0
-    if sw <= 0 or sh <= 0 then return false end
+    if not ok then return false end
+    left, bottom, width, height = Secrets.Number(left), Secrets.Number(bottom),
+        Secrets.Number(width), Secrets.Number(height)
+    if left == nil or bottom == nil or width == nil or height == nil then return false end
+    local okW, rawW = pcall(UIParent.GetWidth, UIParent)
+    local okH, rawH = pcall(UIParent.GetHeight, UIParent)
+    if not okW or not okH then return false end
+    local sw, sh = Secrets.Number(rawW), Secrets.Number(rawH)
+    if sw == nil or sh == nil or sw <= 0 or sh <= 0 then return false end
     return left + width < 0 or left > sw or bottom + height < 0 or bottom > sh
 end
 
@@ -386,7 +428,11 @@ function Mover:Store(key)
     local stored = Stored(entry)
     local parent, parentKey = ParentOf(stored and stored.relativeTo)
     local pl, pb, pw, ph = Rect(parent)
-    if not pl then pl, pb, pw, ph = 0, 0, UIParent:GetWidth() or 0, UIParent:GetHeight() or 0 end
+    if not pl then
+        local ul, ub, uw, uh = Rect(UIParent)
+        if not ul then return end
+        pl, pb, pw, ph = ul, ub, uw, uh
+    end
 
     local point, relativePoint, x, y = ChoosePair(rect, { pl, pb, pw, ph })
     x, y = Math:Round(x, 2), Math:Round(y, 2)

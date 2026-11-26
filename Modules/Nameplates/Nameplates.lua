@@ -1,7 +1,7 @@
 -- Modules/Nameplates/Nameplates.lua
 -- Nameplates (姓名板) in the Monet slim-bar style: our own bar hung on Blizzard's base plate
--- with their UnitFrame child hidden (the Andromeda / ElvUI / Plater approach, no oUF).  The game
--- keeps drawing the auras on a reparented frame; bars are fed raw (possibly secret) values.
+-- with their native visuals faded out (the Andromeda / ElvUI / Plater approach, no oUF).
+-- Bars and aura containers are fed raw (possibly secret) values.
 
 local ADDON_NAME, ns = ...
 
@@ -646,8 +646,7 @@ local function AlphaOf(obj)
     return value
 end
 
---- 这一拍要不要压回 0。读得出来且已经是 0 就跳过 —— 常态下守卫 4 次/秒，几乎全是
---- "把已经是 0 的 alpha 再写一遍"（8.25 那笔账）。
+--- 这一拍要不要压回 0。已知节点逐帧复查，已经是 0 就跳过写入。
 --- **读不出来时照旧写**：暴雪把 alpha 顶回 1 的正是在战斗中，那时"读不到"很可能只是
 --- "现在不许我判断"，当成"不用写"就等于把 2026-10-28 的实机判例（当前目标的暴雪牌
 --- `blizzardHidden=true` 但 `ufAlpha=1.00`，和自绘牌同屏）又放回来。宁可多写一次。
@@ -665,67 +664,126 @@ end
 -- 有减益时暴雪还会**动态再建**容器（BuffListFrame 一族）。这些 sibling 全都不在
 -- UnitFrame 里，alpha 沿树继承救不了它们 → "暴雪牌子没藏掉、和自绘的同屏"。
 -- 一并压 0（SetAlpha 非 Hide：C++ 点击区锚在血条/名字上，见下，alpha 不影响命中）。
-local siblingFaded = setmetatable({}, { __mode = "k" })   -- 还原时要知道哪些被我们压过
-local siblingAlpha = setmetatable({}, { __mode = "k" })   -- 它们被压之前自己的 alpha（交还要还原）
+-- 原生节点按 base 记账：UnitFrame 来自框体池，同一块牌换单位时可能已经换成另一个对象。
+-- 只记在我们确实压过的节点上，交还时恢复它自己的 alpha，不把暴雪距离衰减统一顶成 1。
+local fadedNodes = setmetatable({}, { __mode = "k" })       -- obj -> { base, alpha }
+local pendingRestores = setmetatable({}, { __mode = "k" })  -- base -> true
+local restoreRetryAt = setmetatable({}, { __mode = "k" })   -- base -> guard clock
 
---- `GetChildren` 返回的是**多返回值**不是表 —— 暴雪自己就写成 `{ frame:GetChildren() }`
---- （FrameXML 转储里十几处都是这个形状），本仓 `c2b6b2b` 修过一次同款空转 bug
---- （`pcall(frame.GetChildren, frame)` 只拿到第一个子框，随后 `#kids` 恒为 0）。
---- 所以包表省不掉；能省的是每次调用新建的那个闭包 —— 提成模块级函数，守卫和交还共用。
+--- `GetChildren` 返回的是**多返回值**不是表，必须包表。
 local function ChildrenOf(frame)
     return { frame:GetChildren() }
 end
 
-local function FadeBlizzardSiblings(base, keep)
-    if not base or type(base.GetChildren) ~= "function" then return end
-    local ok, kids = pcall(ChildrenOf, base)
-    if not ok or type(kids) ~= "table" then return end
-    for i = 1, #kids do
-        local c = kids[i]
-        if c ~= keep and c.SetAlpha and NeedsFade(c) then
-            -- 只在**真要写**的时候记账：以前每个子框每拍都被标一遍，交还时于是把暴雪自己
-            -- 按距离算出来的 alpha（实测 base 0.60）一并顶回 1 —— 只有我们动过的才该还原。
-            if not siblingFaded[c] then siblingAlpha[c] = AlphaOf(c) end
-            siblingFaded[c] = true
-            pcall(c.SetAlpha, c, 0)
+local function RegionsOf(frame)
+    return { frame:GetRegions() }
+end
+
+local function FadeNativeNode(obj, base, plate, deep)
+    if not obj or obj == plate or type(obj.SetAlpha) ~= "function" then return end
+    local rec = fadedNodes[obj]
+    if rec then
+        -- 框体池把节点交给另一块牌时，还原责任跟着节点走，旧 base 不再能改它。
+        rec.base = base
+    elseif not NeedsFade(obj) then
+        return
+    else
+        rec = { base = base, alpha = AlphaOf(obj) }
+        fadedNodes[obj] = rec
+    end
+
+    -- 声明 ignoreParentAlpha 的深层节点不受 UnitFrame alpha=0 约束，必须进逐帧列表。
+    local fast = not deep
+    if deep and type(obj.IsIgnoringParentAlpha) == "function" then
+        local ok, ignores = pcall(obj.IsIgnoringParentAlpha, obj)
+        fast = ok and Secrets.Bool(ignores, false)
+    end
+    local list = fast and plate.fastFaded or plate.deepFaded
+    local seen = fast and plate.fastSeen or plate.deepSeen
+    if not seen[obj] then
+        seen[obj] = true
+        list[#list + 1] = obj
+    end
+    if NeedsFade(obj) then pcall(obj.SetAlpha, obj, 0) end
+end
+
+-- UnitFrame 的 selectionHighlight 等子件声明了 ignoreParentAlpha，根 alpha=0 挡不住它们。
+-- 首次接管与低频补扫递归覆盖帧和 region；逐帧只复查已知快节点。
+local function FadeNativeTree(frame, base, plate, depth)
+    if not frame or frame == plate then return end
+    if type(frame.GetChildren) == "function" then
+        local ok, kids = pcall(ChildrenOf, frame)
+        if ok and type(kids) == "table" then
+            for i = 1, #kids do
+                local child = kids[i]
+                if child ~= plate then
+                    FadeNativeNode(child, base, plate, depth > 0)
+                    FadeNativeTree(child, base, plate, depth + 1)
+                end
+            end
+        end
+    end
+    if type(frame.GetRegions) == "function" then
+        local ok, regions = pcall(RegionsOf, frame)
+        if ok and type(regions) == "table" then
+            for i = 1, #regions do
+                FadeNativeNode(regions[i], base, plate, true)
+            end
         end
     end
 end
 
-local function RestoreBlizzardSiblings(base)
-    if not base or type(base.GetChildren) ~= "function" then return end
-    local ok, kids = pcall(ChildrenOf, base)
-    if not ok or type(kids) ~= "table" then return end
-    for i = 1, #kids do
-        local c = kids[i]
-        if siblingFaded[c] then
-            siblingFaded[c] = nil
-            pcall(c.SetAlpha, c, siblingAlpha[c] or 1)
-            siblingAlpha[c] = nil
+local function FadeBlizzardTree(base, plate)
+    FadeNativeTree(base, base, plate, 0)
+end
+
+local function RestoreNativeBase(base)
+    local objects = {}
+    for obj, rec in pairs(fadedNodes) do
+        if rec.base == base then objects[#objects + 1] = obj end
+    end
+    local failed = false
+    for i = 1, #objects do
+        local obj = objects[i]
+        local rec = fadedNodes[obj]
+        local want = rec and rec.alpha ~= nil and rec.alpha or 1
+        local ok = pcall(obj.SetAlpha, obj, want)
+        local after = AlphaOf(obj)
+        if ok and after ~= nil and after == want then
+            fadedNodes[obj] = nil
+        else
+            failed = true
         end
     end
+    if failed then
+        pendingRestores[base] = true
+    else
+        pendingRestores[base] = nil
+        restoreRetryAt[base] = nil
+    end
+    return not failed
 end
 
 local function HideBlizzardPlate(base, plate)
     local uf = BlizzardUnitFrame(base)
     if not uf then return false end
 
-    -- **不要 Hide**：本客户端的姓名板点击是 C++ 做的，点击区来自
-    -- NamePlateUnitFrameMixin:UpdateHitTestArea 里 SetHitTestPoints 设的那几个点，而它们锚在
-    -- 暴雪的血条 / 名字上。把 UnitFrame 藏起来，这些锚点就没有可测的矩形了 —— 表现就是
-    -- "点不中玩家 / 宠物，只有没被我们接管的 NPC 才点得中"。只把 alpha 压到 0：
-    -- 视觉上一样看不见，但 hit test 仍然有效。
-    -- 压之前把它**当前**的 alpha 记在我们自己的牌上（不是暴雪框上）：暴雪按距离算淡出
-    -- （实测 base 0.60），交还时硬写 1 会把这套淡出顶掉 —— BetterNamePlates 也是还原原值。
+    if plate.blizzardUF and plate.blizzardUF ~= uf then
+        RestoreNativeBase(base)
+        plate.blizzardUF, plate.blizzardHidden, plate.blizzardAlpha = nil, nil, nil
+        plate.fastFaded, plate.fastSeen, plate.deepFaded, plate.deepSeen = {}, {}, {}, {}
+    end
+    plate.fastFaded = plate.fastFaded or {}
+    plate.fastSeen = plate.fastSeen or {}
+    plate.deepFaded = plate.deepFaded or {}
+    plate.deepSeen = plate.deepSeen or {}
+
     if plate.blizzardAlpha == nil then plate.blizzardAlpha = AlphaOf(uf) end
-    if uf.SetAlpha then pcall(uf.SetAlpha, uf, 0) end
-    -- IsShown 也可能返回机密值：一律过 Secrets.Bool（读不出来就当"没显示"，再 Show 一次）。
-    -- Show 是受保护项（下文 456 行注释）：战斗中被拒会弹玩家可见的 ADDON_ACTION_BLOCKED
-    -- （2026-11-02 实机：进本姓名板 churn 一次 9 条，BLOCKED 日志全来自这两处）。
-    -- 战斗里跳过 —— 被拒的 Show 本来就是 no-op，游戏在下一个 SetUnit / 更新周期自补。
+    FadeNativeNode(uf, base, plate, false)
+    FadeBlizzardTree(base, plate)
+    -- Show 是受保护项；战斗中等暴雪下一次 SetUnit / 更新自己补，不发无谓拦截。
     if uf.IsShown and not InCombat()
         and not Secrets.Bool(uf:IsShown(), false) then pcall(uf.Show, uf) end
-    FadeBlizzardSiblings(base, plate)
 
     plate.blizzardUF = uf
     plate.blizzardHidden = true
@@ -746,22 +804,15 @@ end
 --- @param plate our plate frame that borrowed `base`'s unit frame (may be nil)
 local function RestoreBlizzardPlate(base, plate)
     local uf = BlizzardUnitFrame(base)
-    if uf then
-        if uf.SetAlpha then
-            -- 还原接管前读到的那一个值；读不到（当时就机密）才退回 1 —— 那是暴雪自己的默认满不透明。
-            pcall(uf.SetAlpha, uf, (plate and plate.blizzardAlpha) or 1)
-        end
-        -- 同 HideBlizzardPlate：战斗里 Show 必被拒（弹 ADDON_ACTION_BLOCKED），
-        -- 跳过，等游戏自己的 SetUnit / 更新周期补齐。
-        if not InCombat() then pcall(uf.Show, uf) end
-    end
-    RestoreBlizzardSiblings(base)
+    local restored = RestoreNativeBase(base)
+    if uf and not InCombat() then pcall(uf.Show, uf) end
     if plate then
         plate.blizzardHidden = nil
         plate.blizzardUF = nil
         plate.blizzardAlpha = nil
+        plate.fastFaded, plate.fastSeen, plate.deepFaded, plate.deepSeen = nil, nil, nil, nil
     end
-    return uf ~= nil
+    return restored
 end
 
 -- UpdateBorder 定义在后面（仇恨/目标描边）；红闪到期要请它恢复边框色，先前向声明这个 local，
@@ -1248,53 +1299,67 @@ function UpdateBorder(plate)
 end
 
 --- Blizzard can show its own UnitFrame again on any update; keep it faded (never hidden — the
---- C++ nameplate hit test is anchored to its bars, see HideBlizzardPlate).
---- sibling 容器一并回压：暴雪更新会重设它们的 alpha，**有减益时还会动态新 建 sibling 容器**
---- （alpha 沿树继承救不了它们，和背包"晚生子框"同一课）—— 每拍整树补压。
-local function KeepBlizzardHidden(plate)
-    local uf = plate.blizzardUF
+-- C++ nameplate hit test is anchored to its bars, see HideBlizzardPlate).
+-- 已知快节点逐帧回压；full=true 时补扫动态新建的深层节点和 ignoreParentAlpha region。
+local function KeepBlizzardHidden(plate, full)
+    local base = plate.base
+    local uf = BlizzardUnitFrame(base)
     if not uf then return end
-    -- **守卫里不再 `Show()`**（这是这一档改动的主要目的）：以前每拍都问一次 `IsShown`、
-    -- 没显示就补一刀 `Show`，而它没有战斗门 —— 战斗中必被拒，2026-11-02 进本那 9 条
-    -- `ADDON_ACTION_BLOCKED` 就来自 Show 这一处（接管那一次的 Show 在 HideBlizzardPlate 里，
-    -- 那边有 `not InCombat()` 门，保留）。暴雪把牌子藏回去时会在下一次 SetUnit / 更新
-    -- 周期自己 Show（BetterNamePlates 从头到尾不 Show，就是等这一手）；alpha 已经 0 的框
-    -- 视觉上本来就没有可看见的东西，晚一拍点亮不影响压制。
-    if uf.SetAlpha and NeedsFade(uf) then
-        if plate.blizzardAlpha == nil then plate.blizzardAlpha = AlphaOf(uf) end
-        pcall(uf.SetAlpha, uf, 0)
+    if plate.blizzardUF ~= uf then
+        if not plate.blizzardHidden or not HideBlizzardPlate(base, plate) then return end
     end
-    FadeBlizzardSiblings(plate.base, plate)
-end
 
--- ---- 目标高亮回压守卫（2026-10-28 实机判例）--------------------------------------
--- 牌子成为**当前目标**时，暴雪自己的更新把 UnitFrame 的 alpha 重设回 1（目标高亮，
--- base alpha 同时到 1.0）。我们的回压只挂在 UpdatePlate（事件驱动）里，目标切换那一刻
--- 暴雪抢先、之后就没人再压 —— 表现是"当前目标的暴雪牌整块亮着，和自绘牌同屏"，
--- 它右侧的减益列也跟着回来（探针实锤：假人牌 blizzardHidden=true 但 ufAlpha=1.00）。
--- 低频守卫对全部 blizzardHidden 的牌子整树回压；PLAYER_TARGET_CHANGED 再补一记即时的。
-local guardJob = nil
-local GUARD_INTERVAL_MS = 250
-
-local function GuardTick()
-    if not M.active then return end
-    for _, plate in pairs(plates) do
-        if plate.blizzardHidden and plate.base then
-            KeepBlizzardHidden(plate)
+    for i = 1, #plate.fastFaded do
+        FadeNativeNode(plate.fastFaded[i], base, plate, false)
+    end
+    if full then
+        FadeBlizzardTree(base, plate)
+        for i = 1, #plate.deepFaded do
+            FadeNativeNode(plate.deepFaded[i], base, plate, true)
         end
     end
 end
 
---- 回压订阅只在**真有牌压着**的时候存在。以前是一个私有 `CreateFrame("Frame")` + OnUpdate
---- 常驻：`M.active` 为假时它照样每帧醒一次再早退（累加器省的是回调次数，省不下唤醒），
---- 屏幕上一块牌都没有时也是。现在计数归零就摘掉订阅 —— `Utils/Scheduler` 的主框随之
---- 隐藏，空闲时一个回调都不跑，全仓也少一个常驻驱动帧（8.26.7 第 1 条）。
---- 调用点 = 任何让 `blizzardHidden` 增减的地方：`HideBlizzardPlate` / `RestoreBlizzardPlate`
---- 之后（`UpdatePlate` 的两支、`Removed`）与 `Apply` / `SetEnabled` 的整批还原。
---- **不要**把它挂在每次 `UpdatePlate` 上：它按定义要重数整张表，而 UpdatePlate 是每牌的
---- UNIT_HEALTH 处理函数。
+-- 目标高亮 / 焦点 / 光环更新会重设原生 alpha。逐帧复查已知节点，消掉 250ms 可见窗口；
+-- 全树扫描仍限 4Hz，避免几十块牌每帧递归 GetChildren/GetRegions。
+local guardJob = nil
+local GUARD_SCAN_INTERVAL = 0.25
+local RESTORE_RETRY_INTERVAL = 0.25
+local guardClock, guardScanElapsed = 0, 0
+
+local function GuardTick(elapsed)
+    local dt = elapsed or 0
+    guardClock = guardClock + dt
+
+    local bases = {}
+    for base in pairs(pendingRestores) do bases[#bases + 1] = base end
+    local sawPending = #bases > 0
+    for i = 1, #bases do
+        local base = bases[i]
+        if (restoreRetryAt[base] or 0) <= guardClock then
+            RestoreNativeBase(base)
+            if pendingRestores[base] then
+                restoreRetryAt[base] = guardClock + RESTORE_RETRY_INTERVAL
+            end
+        end
+    end
+    if sawPending and not next(pendingRestores) then M:SyncGuard() end
+    if not M.active then return end
+
+    guardScanElapsed = guardScanElapsed + dt
+    local full = guardScanElapsed >= GUARD_SCAN_INTERVAL
+    if full then guardScanElapsed = guardScanElapsed - GUARD_SCAN_INTERVAL end
+    for _, plate in pairs(plates) do
+        if plate.blizzardHidden and plate.base then
+            KeepBlizzardHidden(plate, full)
+        end
+    end
+end
+
+--- 回压订阅只在**真有牌压着或还有还原欠账**的时候存在。
 function M:SyncGuard()
     local n = 0
+    for _ in pairs(pendingRestores) do n = n + 1 end
     for _, plate in pairs(plates) do
         if plate.blizzardHidden and plate.base then n = n + 1 end
     end
@@ -1304,7 +1369,7 @@ function M:SyncGuard()
             guardJob = nil
         end
     elseif not guardJob then
-        guardJob = ns.Scheduler:Every(GUARD_INTERVAL_MS, GuardTick, "姓名板:守卫")
+        guardJob = ns.Scheduler:EveryFrame(GuardTick, "姓名板:守卫")
     end
 end
 
@@ -1319,7 +1384,8 @@ end
 --   ② 容器出生就要 `SetEnabled(true)` + `UpdateAllAuras`，并且给一个可渲染的 1×1 矩形；
 --   ③ 换单位不是换光环 —— 池子复用后引擎不会自己重读，必须 `SetUnit(新令牌)` + `UpdateAllAuras`。
 -- 容器**永不销毁**（重建会留下上一世代被引擎驱动的容器，战斗里连环拦截）：模块关闭只是
--- `plate:Hide()` 连子树一起藏，外加把共享 fit 账摘掉；开关用 alpha，不用 Hide（引擎会停更）。
+-- `SetEnabled(false)` 让它退出引擎刷新，`plate:Hide()` 连子树一起藏，并摘掉共享 fit 账；
+-- 重新启用只恢复仍存活的容器。出生后保持 Show，显示开关用 alpha，不用 Hide（引擎会停更）。
 -- ============================================================================
 
 local AURA_OWNER = "monetNameplateAuras"
@@ -1395,6 +1461,18 @@ local function AuraWarn(reason)
     ns:Print("姓名板光环：引擎容器不可用（" .. tostring(reason) .. "），本会话不再尝试。")
 end
 
+local function SetPlateAuraEnabled(container, enabled)
+    if type(container) ~= "table" or type(container.SetEnabled) ~= "function" then return true end
+    return pcall(container.SetEnabled, container, enabled and true or false)
+end
+
+local function DiscardPlateAuraContainer(container)
+    if type(container) ~= "table" then return end
+    SetPlateAuraEnabled(container, false)
+    pcall(container.Hide, container)
+    pcall(container.SetParent, container, nil)
+end
+
 --- 一块牌子一个容器，挂在**我们自己的牌子**下面（随牌子一起显隐、随模块关闭一起消失）。
 --- 只在首次建，建好不再动结构：战斗里建容器对姓名板是允许的（§8.143 v7 实测），
 --- 所以不走 AfterCombat 队列 —— 排队反而会让第一块牌子整场没有 debuff。
@@ -1459,21 +1537,33 @@ local function CreatePlateAuraContainer(plate)
     -- 不加 !CROWD_CONTROL：作者要的是"玩家放的 debuff"全集，控制技也算。
     local okAdd, err = pcall(container.AddAuraGroup, container, "debuffs", "HARMFUL|PLAYER", opts)
     if not okAdd then
+        DiscardPlateAuraContainer(container)
         AuraWarn("AddAuraGroup 失败: " .. tostring(err))
         return nil
     end
 
     pcall(container.SetUnit, container, plate.unit)
     -- 出生就 Enable，让引擎把它纳入自己的刷新流程（出生后 Show/Hide 不影响）。
-    if type(container.SetEnabled) == "function" then pcall(container.SetEnabled, container, true) end
+    if not SetPlateAuraEnabled(container, true) then
+        DiscardPlateAuraContainer(container)
+        AuraWarn("SetEnabled(true) 失败")
+        return nil
+    end
     pcall(container.UpdateAllAuras, container)
     if type(container.SetMouseClickEnabled) == "function" then pcall(container.SetMouseClickEnabled, container, false) end
     pcall(container.EnableMouse, container, false)
 
     -- 锚在名字行的左上角：名字的 BOTTOMLEFT 就是牌子的 TOPLEFT + TEXT_GAP，
     -- 所以名字的 TOPLEFT 正好是"牌子左边缘、名字正上方"，与重排时的 SyncPlateAuraLayout 同一条。
-    container:ClearAllPoints()
-    container:SetPoint("BOTTOMLEFT", plate.name, "TOPLEFT", 0, AURA_GAP)
+    local okAnchor = pcall(function()
+        container:ClearAllPoints()
+        container:SetPoint("BOTTOMLEFT", plate.name, "TOPLEFT", 0, AURA_GAP)
+    end)
+    if not okAnchor then
+        DiscardPlateAuraContainer(container)
+        AuraWarn("容器锚点失败")
+        return nil
+    end
     -- 与 BuffFrame 不同：姓名板上这块容器**就是功能本身**，alpha 保持 1、保持 Show。
     pcall(container.SetAlpha, container, 1)
     pcall(container.Show, container)
@@ -1484,13 +1574,17 @@ end
 --- 绑定 / 重绑：同一块牌子被池子换给另一个单位时，引擎不会自己重读，必须显式换绑。
 --- 幂等 —— 牌子对象（连同容器）活过模块关闭 / 重开，重开时容器已经在了。
 local function BindPlateAuras(plate)
-    if not plate or not plate.unit then return end
+    if not M.active or not plate or not plate.unit then return end
     local container = plate.auraContainer
     if not container then
-        -- 时长染色曲线必须由**非安全调用方**先建好，否则第一次在机密窗口里建会被拒并永久缓存 false。
-        if type(ns.PrepareAuraStyle) == "function" then pcall(ns.PrepareAuraStyle) end
+        -- 时长染色曲线必须由**非安全调用方**先建好；机密窗口只创建容器，不创建曲线。
+        if not InCombat() and type(ns.PrepareAuraStyle) == "function" then pcall(ns.PrepareAuraStyle) end
         container = CreatePlateAuraContainer(plate)
         if not container then return end
+    elseif not SetPlateAuraEnabled(container, true) then
+        -- 只恢复仍存活的原容器；恢复失败不重建替代品。
+        pcall(container.Hide, container)
+        return
     end
     pcall(container.SetUnit, container, plate.unit)
     pcall(container.UpdateAllAuras, container)
@@ -1507,8 +1601,7 @@ local function UpdatePlate(plate)
     if not M:ShouldShow(unit) then
         -- Filtered out: give the unit the plate the game would have drawn (widgets,
         -- soft-target icon, Blizzard's own look) and stand down.
-        -- SyncGuard 只在**真交还了**的时候跑：它是整表重数，而 blizzardHidden 全仓只有
-        -- HideBlizzardPlate(:717) / RestoreBlizzardPlate(:746) 两处会翻。
+        -- SyncGuard 只在接管状态变化时跑；它是整表重数，不能放进每块牌的 HEALTH 事件。
         if plate.blizzardHidden then
             RestoreBlizzardPlate(plate.base, plate)
             M:SyncGuard()
@@ -1520,9 +1613,7 @@ local function UpdatePlate(plate)
 
     if not plate.blizzardHidden then
         HideBlizzardPlate(plate.base, plate)
-        -- 同上：只有这一支可能把 blizzardHidden 从假变真。以前 SyncGuard 无条件挂在
-        -- UpdatePlate 末尾，而 UpdatePlate 是每块牌子 UNIT_HEALTH 的处理函数 ——
-        -- 一波 AoE = N 次事件 × 每次 O(N) 重数 = O(N²) 次表迭代，纯白做。
+        -- 只有这一支接管原生牌，避免每块牌的 HEALTH 事件都触发全表重数。
         M:SyncGuard()
     else
         KeepBlizzardHidden(plate)
@@ -1580,6 +1671,7 @@ local CAST_EVENTS = {
 }
 
 local UNIT_EVENTS = {
+    "UNIT_AURA",
     "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_NAME_UPDATE", "UNIT_LEVEL",
     "UNIT_FACTION", "UNIT_CONNECTION",
     "UNIT_THREAT_SITUATION_UPDATE", "UNIT_THREAT_LIST_UPDATE",
@@ -1592,6 +1684,12 @@ local UNIT_EVENTS = {
 
 local function OnPlateEvent(plate, event, ...)
     if not plate.unit or not plates[plate.unit] then return end
+
+    if event == "UNIT_AURA" then
+        -- 暴雪先处理同一事件并创建/重排原生光环子框；我们在注册序之后补扫整棵。
+        if plate.blizzardHidden and plate.base then KeepBlizzardHidden(plate, true) end
+        return
+    end
 
     if CAST_EVENTS[event] then
         if event == "UNIT_SPELLCAST_INTERRUPTED" or event == "UNIT_SPELLCAST_FAILED" then
@@ -1649,6 +1747,11 @@ local function Added(unit)
         plate:SetScript("OnEvent", OnPlateEvent)
     end
 
+    -- base 复用后 UnitFrame 可能已被池子换成新对象；先清旧归属，不能把旧 alpha 快照套给新框。
+    if plate.blizzardHidden and plate.blizzardUF ~= BlizzardUnitFrame(base) then
+        RestoreBlizzardPlate(base, plate)
+    end
+
     plate.unit = unit
     if Setting("showAuras") ~= false then BindPlateAuras(plate) end
     plate:ClearAllPoints()
@@ -1675,6 +1778,8 @@ local function Removed(unit)
     local plate = plates[unit]
     if not plate then return false end
 
+    -- 原生 UnitFrame 马上要回池；先恢复我们压过的节点，失败则留下 pending 账由守卫重试。
+    if plate.blizzardHidden and plate.base then RestoreBlizzardPlate(plate.base, plate) end
     plates[unit] = nil
     plate.unit = nil
     plate:UnregisterAllEvents()
@@ -1707,8 +1812,15 @@ function M:RegisterEvents()
     EventBus:Register("PLAYER_TARGET_CHANGED", function()
         if not M.active then return end
         for _, plate in pairs(plates) do
-            if plate.blizzardHidden and plate.base then KeepBlizzardHidden(plate) end
+            if plate.blizzardHidden and plate.base then KeepBlizzardHidden(plate, true) end
             UpdateBorder(plate)
+        end
+    end)
+
+    EventBus:Register("PLAYER_FOCUS_CHANGED", function()
+        if not M.active then return end
+        for _, plate in pairs(plates) do
+            if plate.blizzardHidden and plate.base then KeepBlizzardHidden(plate, true) end
         end
     end)
 
@@ -1773,6 +1885,7 @@ function M:Apply()
             if Setting("showAuras") ~= false then
                 BindPlateAuras(plate)
             else
+                SetPlateAuraEnabled(plate.auraContainer, false)
                 pcall(plate.auraContainer.Hide, plate.auraContainer)
             end
         elseif Setting("showAuras") ~= false and plate.unit then
@@ -1819,6 +1932,8 @@ function M:SetEnabled(enabled)
     self.active = false
     for unit, plate in pairs(plates) do
         if plate.base then RestoreBlizzardPlate(plate.base, plate) end
+        -- 容器随 plate 保留供下次复用，但模块关闭时必须退出引擎刷新。
+        SetPlateAuraEnabled(plate.auraContainer, false)
         plate.unit = nil
         plate:UnregisterAllEvents()
         HideCast(plate)   -- 模块关闭同样清干净施法状态（含红闪/尾闪时间戳）
@@ -1925,6 +2040,7 @@ function M:ProbeSiblings()
                     end
                     if name == nil or name == "-" or name == "nil" then name = "（匿名）" end
                     if string.find(string.lower(name), "bufflist") then buffListHits = buffListHits + 1 end
+                    local rec = fadedNodes[c]
                     rows[#rows + 1] = {
                         unit      = Text(unit),
                         base      = baseName,
@@ -1933,8 +2049,8 @@ function M:ProbeSiblings()
                         alpha     = AlphaOf(c),
                         ours      = (c == plate) or nil,
                         unitFrame = (c == uf) or nil,
-                        fadedByUs = siblingFaded[c] or nil,
-                        priorAlpha = siblingAlpha[c],
+                        fadedByUs = rec and rec.base == base or nil,
+                        priorAlpha = rec and rec.alpha,
                     }
                 end
             elseif okKids and type(kids) == "table" then
@@ -1962,7 +2078,7 @@ function M:ProbeSiblings()
         truncated      = (#rows >= SIBLING_ROW_CAP) or nil,
         rows           = rows,
         note           = "只读：GetName 过 Text() 防机密串，alpha 走 AlphaOf（nil=读不出）。"
-            .. "buffListHits>0 就是 BlizzardBasePlate 下确有同级光环容器，FadeBlizzardSiblings 的覆盖面判据。",
+            .. "buffListHits>0 就是 BlizzardBasePlate 下确有同级光环容器，FadeBlizzardTree 的覆盖面判据。",
     }
 
     local saved = false

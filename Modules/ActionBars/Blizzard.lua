@@ -1,6 +1,6 @@
 -- Modules/ActionBars/Blizzard.lua
 -- 暴雪自己那几条动作条的"压制 / 归还"（P5' 拆分，2026-10-26）：
---   * Park / ParkBag：把暴雪的条收起来（alpha 0 + 关鼠标，绝不 Hide/SetParent）；
+--   * Park / ParkBag：动作条只做 alpha 0 + 关鼠标；非保护背包条走 Hide；
 --   * KeepParked + ParkWatch：0.5 秒的独立驱动，暴雪把条 Show 回来就再压一次；
 --   * Restore：原样放回去（模块停用、或玩家改回用暴雪动作条时）；
 --   * M:ParkBlizzard / M:RestoreBlizzard：按清单批处理，Apply / SetEnabled 调它。
@@ -20,6 +20,8 @@ local Marked = function(o, k) return ns:Marked(o, k) end
 -- 模块私有的幂等守卫键走 per-module 弱旁表（ns:NewFrameData）；hidden（与 Skin 共享）仍走 Mark/Marked。
 local FFD, GetFFD = ns:NewFrameData()
 local Widget = ns.Widget
+local Secrets = ns.Secrets
+local Locked = M.ProtectedLocked
 
 -- 8 条动作条：暴雪那几条只做 alpha 0（见 Park），点击板盖住它们看不见的裸按钮；
 -- 显示与施法全部由我们自己的按钮承担（槽位由安全片段写，见 Secure.lua 的 PAGE_CHILD 段）。
@@ -34,55 +36,6 @@ local ACTION_BAR_FRAMES = {
 local BAG_BAR_FRAMES = {
     "BagsBar", "MainMenuBarBackpackButton",
 }
-
--- 收起暴雪那几条动作条的做法（照 Ellesmere 在 12.x 上验证过的，参考插件
--- EllesmereUIActionBars.lua:1004-1036 与 :1308-1319）：
---   * MainActionBar 留在原地（宠物对战要还原微型菜单）：只 alpha 0 + 收掉两端装饰；
---   * 其余条 SetParent 到一个常隐框体 —— 不经过 Hide()/SetShown() 那条受保护 setter，
---     也就不会在战斗转换时被记成 ADDON_ACTION_BLOCKED；
---   * 按钮一律 UnregisterAllEvents + SetAttributeNoHandler("statehidden", true)：不自己 Hide，
---     暴雪自己的 UpdateShownButtons 读到这个属性就会 SetShown(false)。这一步很关键：以前
---     我们自己 Hide/SetShown，战斗转换时暴雪的 SetShownBase 就被拒（日志里那一串
---     MultiBarBottomLeftButton1:SetShown()）。
---   * OverrideActionBar / PossessActionBar 不碰：搬它们会把受保护子树弄脏、阻断
---     BeginActionBarTransition（Ellesmere :1595 的教训）。载具时让暴雪自己显示。
-local hiddenParent
-
-local function HiddenParent()
-    if not hiddenParent then
-        hiddenParent = CreateFrame("Frame", "MonetUIActionBarDump", UIParent)
-        hiddenParent:SetAllPoints(UIParent)
-        hiddenParent:Hide()
-    end
-    return hiddenParent
-end
-
---- 让暴雪的按钮收不到鼠标：**一个属性都不写**，只关鼠标。
----
---- 以前这里是 UnregisterAllEvents + SetAttributeNoHandler("statehidden", true)，让它自己
---- SetShown(false)。实机 taint.log 证明这条路会反噬：
----   SetAttributeNoHandler 把受保护按钮标脏 → 暴雪自己之后 UpdateShownButtons 的
----   SetShown 被拒（"blocked in combat because of taint from MonetUI"）→ 按钮留在"显示"
----   状态 → alpha 0 看不见但**照样收 OnEnter** → ActionButton.lua:1391 OnEnter →
----   UpdateAction → SetAttribute/ClearAttribute 再一次被拒 → 每次鼠标扫过都刷一屏。
---- 关鼠标不是受保护操作，不写任何字段，也不会让按钮卡在错误状态。
-local function KillMouse(frame, depth)
-    if not frame then return end
-    pcall(frame.EnableMouse, frame, false)
-    if frame.EnableMouseClicks then pcall(frame.EnableMouseClicks, frame, false) end
-    if frame.EnableMouseMotion then pcall(frame.EnableMouseMotion, frame, false) end
-    if (depth or 0) <= 0 then return end
-    local ok, children = pcall(function() return { frame:GetChildren() } end)
-    if not ok or not children then return end
-    for i = 1, #children do KillMouse(children[i], depth - 1) end
-end
-
---- 收起一条暴雪动作条时用在它整棵子树上：按钮 + 按钮容器都不能收鼠标。
-local function QuietHideButton(button)
-    if not button then return end
-    pcall(button.UnregisterAllEvents, button)
-    KillMouse(button, 1)
-end
 
 --- 1 号条自带的翻页箭头（ActionBarPageNumber，frameLevel 100，压在我们上面）：
 --- 条 alpha 0 之后它看不见，但仍然是可点的普通按钮。只关鼠标，不 Hide()。
@@ -107,43 +60,30 @@ local function KillPagerMouse(bar)
     end
 end
 
---- 收起一条暴雪动作条：**只 SetAlpha(0)**，别的一个都不碰。
----
---- 走过的弯路，留在这里免得再踩：
----   * Hide() / SetShown()：暴雪的显示状态走受保护的 SetShownBase / UpdateShownButtons，
----     Hide 一次它下一拍就 SetShown(true) 回来（这条路不经过 Lua 的 Show，hook 抓不到）——
----     屏幕上那三排"发白"的 45×45 按钮一直是暴雪的，我们的 28×28 只在下面露一条边。
----   * SetParent 到隐藏框体：编辑模式（UpdateRightActionBarPositions）按父级几何算条的缩放，
----     算出来是 0，直接炸 "MultiBarRight:SetScale(): Scale must be > 0"。
----   * 关它按钮的鼠标（EnableMouse）：那些按钮/容器是**受保护**框体，碰一下就被弄脏，
----     之后暴雪自己更新它们就变成 ADDON_ACTION_FORBIDDEN，每次点击动作条都弹
----     "MonetUI 已被禁用，因为该功能只对暴雪的 UI 开放"。
---- 现在：普通动作条换到常隐框体；**MainActionBar 例外，必须留在暴雪的父链上**（见下）。
---- 被收起的暴雪条清单 + 驱动：暴雪会在变形 / 载具 / 召唤宠物 / 翻页时重新 Show 它们，
---- 我们每 0.5 秒把 alpha 压回 0（顺带再关一次翻页箭头）。
---- **为什么不用 `hooksecurefunc(frame, "Show")`**：secure hook 插在暴雪调用链中间，
---- 我们的代码一跑，同一条链后面暴雪的安全调用（Show → UpdateVisibility →
---- UpdateShownButtons → SetShown）就会整片被拒 —— taint.log 里宠物条那一串
---- `PetActionButton*:SetShown()` 正是这么来的。定时驱动属于独立的一次执行，不夹在链里。
+--- 收起动作条只改 alpha 与鼠标，不换父、不 Hide、不卸事件、不写属性。
+--- 定时补压不能换成 Show 钩子：安全钩子会插进暴雪自己的受保护调用链。
 local parkedList = {}
 local parkSubId
+local Restore
 
 local function KeepParked()
-    -- **战斗里什么都不做。** 受保护的条/按钮上，战斗中写 alpha / 鼠标本身就是受限制的；
-    -- 我们那一下会成为"暴雪后续安全调用被拒"的污染源（taint.log 里宠物条
-    -- PetActionButton*:SetShown / PetActionBar:ClearAllPointsBase 那一串就是这么来的）。
-    -- 脱战后（PLAYER_REGEN_ENABLED 会立刻调一次）再收拾。
-    if InCombatLockdown() then return end
-    for i = 1, #parkedList do
+    for i = #parkedList, 1, -1 do
         local frame = parkedList[i]
-        if GetFFD(frame).parked then
-            if Marked(frame, "hidden") then
-                -- ParkBag 那条路：暴雪把它 Show 回来就再藏一次。
+        local data = GetFFD(frame)
+        if data.parked then
+            if data.restoring then
+                -- 背包条是非保护框，Map/Chat 限制不该拖住它的还原。
+                if Marked(frame, "hidden") or not Locked() then
+                    Restore(data.name)
+                end
+            elseif Marked(frame, "hidden") then
+                -- ParkBag 那条路：暴雪把它 Show 回来就再藏一次。它不是受保护动作条，
+                -- 六类限制里也必须补压，否则副本/聊天窗口会露出原背包条。
                 if frame:IsShown() then pcall(frame.Hide, frame) end
-            elseif frame:GetAlpha() > 0 then
+            elseif not Locked() and frame:GetAlpha() > 0 then
                 -- 暴雪在变形 / 载具 / 翻页之后把 alpha 顶回来了：再压一次（子树鼠标顺带复检，
                 -- 新池化出来的按钮也在这一步被关掉）。
-                Widget:Mute(frame, { depth = 2, combat = "write" })
+                Widget:Mute(frame, { depth = 2 })
                 KillPagerMouse(frame)
             end
         end
@@ -163,8 +103,9 @@ end
 local function Park(name)
     local frame = _G[name]
     if not frame or GetFFD(frame).parked then return false end
+    if not Widget:Mute(frame, { depth = 2 }) then return false end
     GetFFD(frame).parked = true
-    GetFFD(frame).parent = frame:GetParent()
+    GetFFD(frame).name = name
 
     -- **一律留在暴雪的父链上，只做"看不见 + 不吃鼠标"。**
     --
@@ -185,9 +126,7 @@ local function Park(name)
     -- 换来的是它的安全重排不再被拒。
     -- 全仓唯一的一份"收起暴雪 HUD"：alpha 0 + 整棵子树关鼠标，原状态记在旁表里，
     -- Restore 逐项还原（以前这里只关根框，子树是漏的）。
-    -- 战斗里照写：暴雪每次 Show 都会把 alpha 顶回来，而我们的补刀在 0.5 秒驱动里，
-    -- 跳过战斗会让条先露一拍。
-    Widget:Mute(frame, { depth = 2, combat = "write" })
+    -- Park 由脱战 Apply 调用；0.5 秒补刀在六类限制里都跳过，不能强行写受保护子树。
     -- 整棵子树都关鼠标：alpha 0 只是看不见，按钮/容器照样收 OnEnter，而一进战斗
     -- 暴雪按钮的 OnEnter（ActionButton.lua:1391）会 UpdateAction → SetAttribute，
     -- 那一下会被判 BLOCKED（taint.log 里 335 条全是这一类）。
@@ -205,12 +144,6 @@ local function Park(name)
         pcall(frame.Selection.SetAlpha, frame.Selection, 0)
     end
 
-    if type(frame.actionButtons) == "table" then
-        for _, button in pairs(frame.actionButtons) do
-            pcall(button.UnregisterAllEvents, button)
-            KillMouse(button, 1)
-        end
-    end
     return true
 end
 
@@ -220,39 +153,51 @@ end
 local function ParkBag(name)
     local frame = _G[name]
     if not frame or GetFFD(frame).parked then return false end
+    if not pcall(frame.Hide, frame) then return false end
+    local okShown, shown = pcall(frame.IsShown, frame)
+    if not okShown or Secrets.Bool(shown, false) then return false end
     GetFFD(frame).parked = true
+    GetFFD(frame).name = name
     Mark(frame, "hidden", true)
     GetFFD(frame).alpha = frame:GetAlpha()
     -- 同样不挂 Show 后钩（会夹在暴雪调用链里）：交给 0.5s 的驱动再藏一次。
     ParkWatch(frame)
-    pcall(frame.Hide, frame)
     return true
 end
 
-local function Restore(name)
+local function StopParkWatch(frame)
+    for i = #parkedList, 1, -1 do
+        if parkedList[i] == frame then table.remove(parkedList, i) end
+    end
+    if #parkedList == 0 and parkSubId then
+        Scheduler:Unregister(parkSubId)
+        parkSubId = nil
+    end
+end
+
+Restore = function(name)
     local frame = _G[name]
     if not frame or not GetFFD(frame).parked then return false end
-    GetFFD(frame).parked = nil
+    local data = GetFFD(frame)
+    data.restoring = true
     if Marked(frame, "hidden") then
-        Mark(frame, "hidden", nil)
-        pcall(frame.Show, frame)
-        pcall(frame.SetAlpha, frame, GetFFD(frame).alpha or 1)
-        return true
-    end
-    -- alpha 与整棵子树的鼠标状态由 Mute 记在旁表里的那一份还原。
-    Widget:Unmute(frame, { depth = 2, combat = "write" })
-    if Marked(frame, "leftManager") then
-        frame.ignoreFramePositionManager = nil    -- 交还：让编辑模式的托管系统重新接管它
-    end
-    if GetFFD(frame).parent and GetFFD(frame).parent ~= hiddenParent then
-        pcall(frame.SetParent, frame, GetFFD(frame).parent)
-    end
-    GetFFD(frame).parent = nil
-    if type(frame.actionButtons) == "table" then
-        for _, button in pairs(frame.actionButtons) do
-            pcall(button.EnableMouse, button, true)
+        local alpha = data.alpha or 1
+        if not pcall(frame.Show, frame) or not pcall(frame.SetAlpha, frame, alpha) then return false end
+        local okShown, shown = pcall(frame.IsShown, frame)
+        local okAlpha, current = pcall(frame.GetAlpha, frame)
+        if not okShown or not Secrets.Bool(shown, false)
+            or not okAlpha or not Secrets.CanRead(current) or current ~= alpha then
+            return false
         end
+        Mark(frame, "hidden", nil)
+        data.alpha = nil
+    elseif not Widget:Unmute(frame, { depth = 2 }) then
+        return false
     end
+    data.parked = nil
+    data.name = nil
+    data.restoring = nil
+    StopParkWatch(frame)
     return true
 end
 

@@ -77,9 +77,11 @@ end
 
 --- 给按钮装翻页子片段（幂等）：客户端换页时由 ChildUpdate 触发，跑在安全环境里。
 local function InstallPageChild(button, index)
-    if GetFFD(button).pageChild then return end
-    GetFFD(button).pageChild = true
-    pcall(button.SetAttributeNoHandler, button, "_childupdate-" .. PAGE_CHILD, PageChildSnippet(index))
+    local data = GetFFD(button)
+    if data.pageChild then return end
+    local ok = pcall(button.SetAttributeNoHandler, button, "_childupdate-" .. PAGE_CHILD, PageChildSnippet(index))
+    data.pageChild = ok and true or nil
+    return ok
 end
 
 -- ---------------------------------------------------------------------------
@@ -115,10 +117,15 @@ local KEYDOWN_SNIPPET = [[
 
 --- 给一个按钮装上"类型 / 按下抬起"两条子片段（幂等）。
 local function InstallSecureInit(button)
-    if GetFFD(button).secureInit then return end
-    GetFFD(button).secureInit = true
-    pcall(button.SetAttributeNoHandler, button, "_childupdate-" .. KIND_CHILD, KIND_SNIPPET)
-    pcall(button.SetAttributeNoHandler, button, "_childupdate-" .. KEYDOWN_CHILD, KEYDOWN_SNIPPET)
+    local data = GetFFD(button)
+    if data.kindChild and data.keydownChild then return true end
+    local kindOK = data.kindChild or pcall(button.SetAttributeNoHandler, button,
+        "_childupdate-" .. KIND_CHILD, KIND_SNIPPET)
+    local keydownOK = data.keydownChild or pcall(button.SetAttributeNoHandler, button,
+        "_childupdate-" .. KEYDOWN_CHILD, KEYDOWN_SNIPPET)
+    data.kindChild = kindOK and true or nil
+    data.keydownChild = keydownOK and true or nil
+    return kindOK and keydownOK
 end
 
 --- 在安全环境里把类型 / useOnKeyDown 下发一遍（不经过 Lua 的脏值）。

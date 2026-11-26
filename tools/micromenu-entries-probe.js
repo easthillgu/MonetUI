@@ -21,6 +21,10 @@ const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
 const SRC = fs.readFileSync(path.join(ROOT, 'Modules/Minimap/MicroMenu.lua'), 'utf8');
+const SECURE_SRC = fs.readFileSync(path.join(ROOT, 'Modules/Minimap/MicroMenuSecure.lua'), 'utf8');
+const MINIMAP_SRC = fs.readFileSync(path.join(ROOT, 'Modules/Minimap/Minimap.lua'), 'utf8');
+const SECURE_CODE = SECURE_SRC.split(/\r?\n/).map((l) => l.replace(/--.*$/, "")).join("\n");
+const MINIMAP_CODE = MINIMAP_SRC.split(/\r?\n/).map((l) => l.replace(/--.*$/, "")).join("\n");
 const CODE = SRC.split(/\r?\n/).map((l) => l.replace(/--.*$/, "")).join("\n");
 const ENTRIES = (CODE.match(/local ENTRIES = \{[\s\S]*?\n\}/) || [''])[0];
 
@@ -43,14 +47,18 @@ ok(!/^\s*action\s*=/m.test(ENTRIES),
   'A4 ENTRIES 里没有 `action =` 字段：那条兜底正是调暴雪 Lua 全局的路，不能被"留着无害"骗回来');
 
 const FORBIDDEN = [
-  'ToggleGameMenu', 'ToggleAllBags', 'ToggleWorldMap', 'ToggleFriendsFrame',
+  'ToggleGameMenu', 'ToggleAllBags', 'ToggleWorldMap',
   'ToggleQuestLog', 'ToggleQuestFrame', 'ToggleAchievementFrame', 'ToggleCalendar',
   'ToggleCollectionsJournal', 'ToggleEncounterJournal', 'ToggleSpellBook',
   'PlayerSpellsUtil', 'ShowUIPanel', 'HideUIPanel', 'ToggleFrame', 'ToggleCharacter',
 ];
 const hit = FORBIDDEN.filter((n) => new RegExp('\\b' + n + '\\b').test(CODE));
-ok(hit.length === 0,
-  'A5 一个暴雪 Lua 全局都不被调用（命中：' + (hit.length ? hit.join(', ') : '无') + '）');
+const friendHits = (CODE.match(/\bToggleFriendsFrame\b/g) || []).length;
+const approvedFriendsException = friendHits === 1
+  && /local function OpenFriends\(\)[\s\S]{0,180}local fn = _G\.ToggleFriendsFrame[\s\S]{0,120}if type\(fn\) == "function" then fn\(\) end/.test(CODE);
+ok(hit.length === 0 && approvedFriendsException,
+  'A5 只保留作者批准的 OpenFriends 单点例外，其余暴雪 Lua 全局零调用（命中：'
+  + (hit.length ? hit.join(', ') : '无') + '；好友例外=' + (approvedFriendsException ? '限定' : '越界') + '）');
 
 // ---------------------------------------------------------------- B 入口只剩合法出口
 const entries = [...ENTRIES.matchAll(/label\s*=\s*"([^"]+)"/g)].map((m) => m[1]);
@@ -58,13 +66,29 @@ ok(entries.length >= 1 && entries.length <= 6,
   `B1 入口数量收到 ${entries.length} 行（${entries.join('、') || '无'}）—— 有纯 C_* 开口的就那么几个，多出来的一定是又去点暴雪按钮了`);
 ok(!/buttons\s*=/.test(ENTRIES),
   'B2 ENTRIES 里不再有 `buttons =` 微按钮名单（那是 A2 那条路的输入）');
-const withAction = [...ENTRIES.matchAll(/luaAction\s*=\s*function/g)].length;
-ok(withAction === entries.length,
-  `B3 每一行都自带 luaAction（${withAction}/${entries.length}）—— 没有动作的行造出来就是"点了没反应"`);
+const entryRows = [...ENTRIES.matchAll(/\{([^{}]*)\}/g)].map((m) => m[1]).filter((row) => /label\s*=/.test(row));
+const exits = entryRows.map((row) => ({
+  action: /luaAction\s*=\s*(?:function|[A-Za-z_]\w*)/.test(row),
+  secure: /secureTarget\s*=\s*"[^"]+"/.test(row),
+}));
+const withAction = exits.filter((row) => row.action).length;
+const withSecure = exits.filter((row) => row.secure).length;
+ok(exits.length === entries.length && exits.every((row) => row.action !== row.secure) && withAction >= 1,
+  `B3 每行恰有一种出口：普通动作 ${withAction} · 安全代点 ${withSecure}（没有死行，也没有双出口）`);
 ok(/if ns:IsRestricted\(\) then return end[\s\S]{0,240}C_Map\.OpenWorldMap/.test(CODE),
   'B4 地图行走 `C_Map.OpenWorldMap`（文档标 [受限]）⇒ 前面必须有 ns:IsRestricted() 门');
 ok(/ns:GetModule\("Bags"\)[\s\S]{0,240}bags:Toggle\(true\)/.test(CODE),
   'B5 背包行走我们自己的背包模块（动作全在我们名下，不牵动暴雪 Lua 面板链）');
+ok(!/C_Calendar\.OpenCalendar/.test(CODE)
+  && /label\s*=\s*"日历",\s*secureTarget\s*=\s*"GameTimeFrame"/.test(ENTRIES),
+  'B6 日历不再直调只请求数据的 C_Calendar.OpenCalendar，改为声明原生 GameTimeFrame 代点目标');
+ok(/for _, e in ipairs\(OwnEntries\(\)\)[\s\S]{0,900}makeSecureRow\(e\.label, e\.secureTarget\)/.test(SECURE_CODE)
+  && /row:RegisterForClicks\("AnyDown", "AnyUp"\)/.test(SECURE_CODE)
+  && /row:SetAttribute\("clickbutton", b\)/.test(SECURE_CODE)
+  && /nOK, #targets/.test(SECURE_CODE),
+  'B7 安全载体按 ownEntries 建日历行，并共用 clickbutton + AnyDown/AnyUp 代点路径');
+ok(/entry\.key == "hideMicroMenu" or entry\.key == "hideClock"[\s\S]{0,180}s\.microMenuSecure/.test(MINIMAP_CODE),
+  'B8 安全载体开启时隐藏时钟只压 alpha，不断掉 GameTimeFrame 的 shown 链');
 
 // ---------------------------------------------------------------- C 判据命令在位
 ok(/function M:Probe\(enabledSetting\)/.test(CODE) && /GetNumPoints/.test(CODE),

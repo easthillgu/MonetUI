@@ -317,7 +317,7 @@ end
 -- （在 Core 里以模块名消费），这里不重复实现。
 local DISPATCH = {
     scale = true, blocks = true, restrict = true, colors = true, lost = true,
-    compat = true, perf = true, dev = true, dig = true,
+    compat = true, perf = true, dev = true, dig = true, chat = true,
 }
 
 -- 只列开发版诊断命令的文案；发布版连这些字符串都不在包里。
@@ -337,6 +337,7 @@ local HELP_LINES = {
     "  |cffffd100/mui skins templates [片段]|r 模板库账本：多少个模板 / 映射到 skinAs / Camelot 覆盖；带片段查「这个控件被认成什么」",
     "  |cffffd100/mui dev|r        元素探测面板（256×256）：列出目标窗体包含的框体/贴图，点行复制名字去接线",
     "  |cffffd100/mui dig|r        枚举指针下的窗体：先把鼠标指到目标窗口上，再输入这条命令（全量存 MonetUIDB.devProbeReport）",
+    "  |cffffd100/mui chat status|r 聊天条状态：当前频道 / 自定义频道数 / 发送锁定状态（不打印输入内容）",
     "  |cffffd100/mui perf [reset|diag]|r 调度器总账：订阅数 / 逐路耗时排序 / 失败计数 + 外部驱动账 + Lua 内存 + 当前被暂停的轮询框；带 reset 先清零再计时，带 diag 打调试能力自检（账本 MonetUIDB.perfReport）",
     "  |cffffd100/mui skins closes|r 关闭按钮换皮覆盖面：按图集全量扫，已换皮/仍是暴雪原样/读不出三档（closeReport）",
     "  |cffffd100/mui skins inset|r 换皮容器的有效 alpha（父链连乘，不是单点 GetAlpha），α<0.99 全列（insetReport）",
@@ -397,6 +398,13 @@ function M:Handle(message)
                 ns:Print("Compat.Print 不可调用。")
             end
         end
+
+    elseif command == "chat" then
+        local chat = ns:GetModule("Chat")
+        if chat and type(chat.HandleCommand) == "function" and chat:HandleCommand(string.lower(rest or "")) then
+            return true
+        end
+        ns:Print("用法：/mui chat status")
 
     elseif command == "dev" or command == "dig" then
         local probe = ns:GetModule("DevProbe")

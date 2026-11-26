@@ -749,8 +749,8 @@ local function UpdateThreat(frame)
     end
 end
 
---- Hover: the border washes to the highlight slot (a 1px wash).  HookScript, because
---- Widget:UnitTooltip owns OnEnter / OnLeave.
+--- Hover: the border washes to the highlight slot (a 1px wash).  The secure
+--- frame is observed by Widget:HoverWatch; no OnEnter/OnLeave script is installed.
 local function HoverBorder(frame, enter)
     if not Shared("hoverGlow") then return end
     if frame.threatStatus and frame.threatStatus > 0 then return end
@@ -763,6 +763,41 @@ local function HoverBorder(frame, enter)
         -- The hover is over: the state layer's colour comes back.
         RestoreDynamicBorder(frame)
     end
+end
+
+local function UnitTipHide()
+    local tip = _G.GameTooltip
+    if tip then pcall(tip.Hide, tip) end
+end
+
+local function UnitTipEnter(frame)
+    if not Widget:Readable(frame) then UnitTipHide(); return end
+
+    local unit = frame.unit
+    if type(unit) ~= "string" or not Secrets.CanRead(unit) or Secrets.IsSecret(unit)
+       or not Secrets.CanReadIdentity(unit) then
+        UnitTipHide()
+        return
+    end
+
+    local tip = _G.GameTooltip
+    if not tip then return end
+    if not pcall(tip.SetOwner, tip, frame, "ANCHOR_RIGHT") then UnitTipHide(); return end
+    if not pcall(tip.SetUnit, tip, unit) then UnitTipHide(); return end
+    pcall(tip.Show, tip)
+end
+
+-- Stable module-level callbacks: HoverWatch de-duplicates by function identity and
+-- sends its leave edge when visibility changes, so a hidden/disabled frame cannot
+-- leave an owned tooltip behind.
+local function UnitHoverEnter(frame)
+    UnitTipEnter(frame)
+    HoverBorder(frame, true)
+end
+
+local function UnitHoverLeave(frame)
+    UnitTipHide()
+    HoverBorder(frame, false)
 end
 
 --- The state layer (LibMonetColor-Anim-1.0) drives the border colour: the
@@ -876,12 +911,13 @@ local function BuildUnitTexts(frame, unit)
     end
 end
 
--- 收尾：主题 / 单位提示 / 悬停边框 / 拖动登记 / 位置记忆。
+-- 收尾：主题 / 轮询提示与悬停边框 / 拖动登记 / 位置记忆。
 local function FinishUnitFrame(frame, unit, position, border)
     Widget:Theme(frame, { thickness = border, bgAlpha = 0.9 })
-    Widget:UnitTooltip(frame, unit)
-    frame:HookScript("OnEnter", function(self) HoverBorder(self, true) end) -- TAINT-OK: frame 是自建单位框（hover 边框）
-    frame:HookScript("OnLeave", function(self) HoverBorder(self, false) end) -- TAINT-OK: 同上
+    -- SecureUnitButtonTemplate 不写 OnEnter/OnLeave：提示与边框统一走轮询。
+    -- Mouse 必须打开才能悬停；显隐只由 visibility driver 控制。
+    frame:EnableMouse(true)
+    Widget:HoverWatch(frame, UnitHoverEnter, UnitHoverLeave)
 
     -- 拖动 / 吸附 / 位置记忆统一走 Utils/Mover.lua（默认位置是调用方给的 position 表）。
     ns.Mover:Register(frame, unit, {
@@ -892,7 +928,7 @@ local function FinishUnitFrame(frame, unit, position, border)
     })
 
     frame.position = position
-    frame:Hide()
+    ApplyVisibility(frame, true)
 end
 
 local function CreateUnitFrame(unit, position)
@@ -911,8 +947,7 @@ local function CreateUnitFrame(unit, position)
 
     -- 安全单位按钮：和暴雪一样，左键 = 选中（设为目标），右键 = 弹单位菜单
     -- （设置焦点等）。SecureUnitButtonTemplate 的两个模板写在同一条串里实测可用。
-    -- 受保护的框体上非安全脚本（OnEnter / OnLeave / OnUpdate）照样能设，
-    -- 只有 SetAttribute / RegisterForClicks 这类安全动作在战斗中会被拒。
+    -- 不在框体写 OnEnter/OnLeave/OnUpdate；提示与悬停边框由 Widget:HoverWatch 轮询。
     local frame = Widget:CreateFrame("MonetUI" .. unit:gsub("^%l", string.upper) .. "Frame",
         UIParent, width, height, "SecureUnitButtonTemplate, BackdropTemplate", "CheckButton")
     frame.unit = unit
@@ -1180,12 +1215,27 @@ function M:RegisterEvents()
 end)
 end
 
+local function CanInitialize()
+    local managed = type(ns.CanRunProtectedWork) == "function"
+    if managed and not ns:CanRunProtectedWork() then return false end
+    if not managed and type(ns.IsRestricted) == "function" and ns:IsRestricted() then return false end
+    if type(InCombatLockdown) == "function" and InCombatLockdown() then return false end
+    return not (type(UnitAffectingCombat) == "function" and UnitAffectingCombat("player") == true)
+end
+
 function M:Initialize()
+    if not CanInitialize() then
+        ns:AfterCombat("unitframes-initialize", function()
+            if not ns:IsModuleEnabled("UnitFrames") then return end
+            ns:InitializeModule("UnitFrames")
+        end)
+        return false
+    end
+
     for _, unit in ipairs(UNITS) do
         local default = ns.DEFAULTS.unitFrames[unit]
         frames[unit] = CreateUnitFrame(unit, default)
         PositionFrame(frames[unit])
-        ApplyVisibility(frames[unit], true)
     end
 
     if ns:DB().unitFrames.hideBlizzard then

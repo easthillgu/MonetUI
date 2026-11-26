@@ -39,7 +39,7 @@ local EventBus = ns.EventBus
 local Secrets  = ns.Secrets
 local Skin     = ns.Skin
 
-local M = { name = "ActionBars" }
+local M = { name = "ActionBars", enabled = true }
 
 
 local ActionBar        = _G.C_ActionBar
@@ -55,14 +55,13 @@ local TaxiRequestEarlyLanding = _G.TaxiRequestEarlyLanding
 local UnitOnTaxi              = _G.UnitOnTaxi
 local RANGE_INDICATOR         = _G.RANGE_INDICATOR
 
---- True while the client refuses protected work.
---- **Prefer Core's `ns:InCombat()`**: this client dispatches PLAYER_REGEN_* *before* it flips
---- `InCombatLockdown()`, and the `ns:AfterCombat` flush runs inside that dispatch -- so the raw
---- flag still says "in combat" there and every deferred action would queue itself again
---- (nothing lands until the *second* combat ends).
+--- Core 的受保护写入门是主判据；登录 / reload 当拍再补两个原生战斗标志。
 local function Locked()
-    if type(ns.InCombat) == "function" then return ns:InCombat() end
-    return (InCombatLockdown and InCombatLockdown()) and true or false
+    if type(ns.CanRunProtectedWork) == "function" and not ns:CanRunProtectedWork() then return true end
+    if type(InCombatLockdown) == "function" and InCombatLockdown() then return true end
+    if type(UnitAffectingCombat) == "function" and UnitAffectingCombat("player") == true then return true end
+    return type(ns.CanRunProtectedWork) ~= "function"
+        and type(ns.IsRestricted) == "function" and ns:IsRestricted() and true or false
 end
 
 --- pcall wrapper.  Action-bar queries can refuse an empty slot and can hand back
@@ -609,7 +608,6 @@ end
 -- 装配顺序：图标件 → 文本 → 冷却 → 按下/悬停反馈 → 描边状态。
 local function SkinButton(button)
     if GetFFD(button).skinned then return end
-    GetFFD(button).skinned = true
 
     BuildButtonIcon(button)
     BuildButtonFonts(button)
@@ -617,6 +615,7 @@ local function SkinButton(button)
     BuildButtonFeedback(button)
 
     RefreshRing(button)
+    GetFFD(button).skinned = true
 end
 
 --- 把这一格的内容（图标 / 数字 / 宏名 / 冷却）刷新成槽位 slot 的样子。
@@ -701,8 +700,10 @@ local hintedFlyout
 --- （宠物条不在这里：它收养的是暴雪 PetActionButton，拖放由暴雪自己处理，
 ---  原来的 isPet 分支在 def.pet 提前 return 之后就已经走不到了。）
 local function InstallDrag(bar, button, index)
-    pcall(button.RegisterForDrag, button, "LeftButton", "RightButton")
-    button:SetScript("OnDragStart", function(self)
+    local data = GetFFD(button)
+    if data.dragReady then return true end
+    local registered = pcall(button.RegisterForDrag, button, "LeftButton", "RightButton")
+    local startOK = pcall(button.SetScript, button, "OnDragStart", function(self)
         if InCombatLockdown() then return end
         local slot = SlotOf(self, bar, index)
         if slot and not IsModifiedClick("PICKUPACTION") then
@@ -715,11 +716,13 @@ local function InstallDrag(bar, button, index)
         end
         if slot and PickupAction then pcall(PickupAction, slot) end
     end)
-    button:SetScript("OnReceiveDrag", function(self)
+    local receiveOK = pcall(button.SetScript, button, "OnReceiveDrag", function(self)
         if InCombatLockdown() then return end
         local slot = SlotOf(self, bar, index)
         if slot and PlaceAction then pcall(PlaceAction, slot) end
     end)
+    data.dragReady = registered and startOK and receiveOK and true or nil
+    return data.dragReady == true
 end
 
 -- 按钮要实现的最小一份 SpellFlyout（弹出托盘）接口。
@@ -768,13 +771,13 @@ local function EnsureFlyoutMixin(button)
     -- 条隐藏 / 换页 / 上载具时按钮会被藏起来：托盘不能留在我们身上，
     -- 否则下一次别人（包括暴雪自己的 ActionButton）要弹托盘就撞断言。
     if not GetFFD(button).flyoutHooked then
-        GetFFD(button).flyoutHooked = true
-        button:HookScript("OnHide", function(self) -- TAINT-OK: button 是自建动作按钮（托盘 FlyoutMixin 的旧版残留收尾），实机案已入 AGENTS/PLAN
+        local ok = pcall(button.HookScript, button, "OnHide", function(self) -- TAINT-OK: button 是自建动作按钮（托盘 FlyoutMixin 的旧版残留收尾），实机案已入 AGENTS/PLAN
             local popup = _G.SpellFlyout
             if popup and popup.flyoutButton == self then
                 pcall(popup.DetatchFromButton, popup)
             end
         end)
+        GetFFD(button).flyoutHooked = ok and true or nil
     end
 end
 
@@ -782,7 +785,6 @@ end
 -- GameTooltip:SetAction 在本客户端可用（实测 function）。
 local function EnsureButtonTooltip(button, bar, index)
     if GetFFD(button).tooltip then return end
-    GetFFD(button).tooltip = true
     Widget:HoverWatch(button, function(self)
         local slot = SlotOf(self, bar, index)
         if not slot then return end
@@ -794,6 +796,7 @@ local function EnsureButtonTooltip(button, bar, index)
     end, function()
         GameTooltip:Hide()
     end)
+    GetFFD(button).tooltip = true
 end
 
 local function BuildButton(bar, index)
@@ -801,9 +804,14 @@ local function BuildButton(bar, index)
     local name = "MonetUI" .. def.key .. "Button" .. index
 
     -- 只有自绘条会走到这里（宠物条 / 姿态条在 CreateBar 里提前 return 去收养暴雪按钮），
-    -- 所以模板固定用安全动作按钮那一套。
-    local button = CreateSecureButton(name, bar.frame, index)
-    if not button then return nil end
+    -- 所以模板固定用安全动作按钮那一套。失败留下的半成品也登记进条，下一次只补它。
+    local button = bar.buttons[index]
+    if not button then
+        button = CreateSecureButton(name, bar.frame, index)
+        if not button then return nil end
+        bar.buttons[index] = button
+    end
+    if GetFFD(button).built then return button end
 
     -- 安全按钮契约（和 Ellesmere 在 12.x 上验证过的写法一致）：
     --   * SetID(0)：让客户端的 CalculateAction 走"显式 action 属性"这条（path 2），
@@ -837,6 +845,7 @@ local function BuildButton(bar, index)
 
     EnsureButtonTooltip(button, bar, index)
 
+    GetFFD(button).built = true
     return button
 end
 
@@ -1099,6 +1108,35 @@ local function EnsureAdoptedIcon(btn)
     end
     if not icon or not icon.ClearAllPoints or not icon.SetPoint then return end
 
+    local data = GetFFD(btn)
+    if not data.adoptedIconOriginal then
+        local original = { points = {}, mask = btn.IconMask }
+        local okCount, count = pcall(icon.GetNumPoints, icon)
+        if okCount and type(count) == "number" then
+            for i = 1, count do
+                local okPoint, point = pcall(function() return { icon:GetPoint(i) } end)
+                if okPoint then original.points[#original.points + 1] = point end
+            end
+        end
+        local okTex, u0, u1, v0, v1 = pcall(icon.GetTexCoord, icon)
+        if okTex then original.u0, original.u1, original.v0, original.v1 = u0, u1, v0, v1 end
+        local mask = original.mask
+        if mask then
+            local okWidth, width = pcall(mask.GetWidth, mask)
+            local okHeight, height = pcall(mask.GetHeight, mask)
+            if okWidth and okHeight then original.maskWidth, original.maskHeight = width, height end
+            original.maskPoints = {}
+            local okCount, count = pcall(mask.GetNumPoints, mask)
+            if okCount and type(count) == "number" then
+                for i = 1, count do
+                    local okPoint, point = pcall(function() return { mask:GetPoint(i) } end)
+                    if okPoint then original.maskPoints[#original.maskPoints + 1] = point end
+                end
+            end
+        end
+        data.adoptedIconOriginal = original
+    end
+
     local size = ButtonSize()
     local mask = btn.IconMask
     if mask then
@@ -1152,20 +1190,126 @@ local ADOPTED_ART = {
 
 local function FadeAdoptedArt(btn)
     if not btn then return end
+    local data = GetFFD(btn)
     -- 我们认作图标的那张贴图不能压：EnsureAdoptedIcon 的第三级兜底就是 GetNormalTexture()，
     -- 压了它等于把刚裁好的图标抹没（宠物图标整格消失）。
-    local iconRegion = GetFFD(btn).adoptedIcon
+    local iconRegion = data.adoptedIcon
     for _, key in ipairs(ADOPTED_ART) do
         local region = btn[key]
         if region and region ~= iconRegion and type(region.SetAlpha) == "function" then
+            if not data.adoptedArtAlpha then data.adoptedArtAlpha = {} end
+            if data.adoptedArtAlpha[region] == nil then
+                local ok, alpha = pcall(region.GetAlpha, region)
+                if ok then data.adoptedArtAlpha[region] = alpha end
+            end
             pcall(region.SetAlpha, region, 0)
         end
     end
 end
 
+local function MaintainAdoptedButton(self)
+    -- 轮询在战斗 / 地图 / 聊天等限制里也会到期；收养按钮的图标与美术层归暴雪所有，
+    -- 限制期一个字节都不写，解禁后的下一拍再补。
+    if Locked() then return end
+    EnsureAdoptedIcon(self)
+    FadeAdoptedArt(self)
+end
+
+--- 收养按钮的热键 / 数量直接使用暴雪 FontString；交还时连字体与颜色一起还原。
+local function RememberAdoptedText(fs, data)
+    if not fs then return end
+    if not data.adoptedTextOriginal then data.adoptedTextOriginal = {} end
+    if data.adoptedTextOriginal[fs] then return end
+    local original = {}
+    if type(fs.GetFont) == "function" then
+        local ok, font, size, flags = pcall(fs.GetFont, fs)
+        if ok then original.font, original.size, original.flags = font, size, flags end
+    end
+    if type(fs.GetTextColor) == "function" then
+        local ok, r, g, b, a = pcall(fs.GetTextColor, fs)
+        if ok then original.r, original.g, original.b, original.a = r, g, b, a end
+    end
+    data.adoptedTextOriginal[fs] = original
+end
+
+--- 首次收养与二次收养共用：ReleaseAdoptedButton 已把暴雪字体还回去，第二次必须重新上 Monet 样式。
+local function ApplyAdoptedTextStyle(btn, data)
+    local tcol = ButtonTextColor()
+    if btn.HotKey then
+        RememberAdoptedText(btn.HotKey, data)
+        pcall(Widget.SetFont, Widget, btn.HotKey, HOTKEY_SIZE, "pixel")
+        if btn.HotKey.SetTextColor then pcall(btn.HotKey.SetTextColor, btn.HotKey, tcol.r, tcol.g, tcol.b, tcol.a) end
+    end
+    if btn.Count then
+        RememberAdoptedText(btn.Count, data)
+        pcall(Widget.SetFont, Widget, btn.Count, COUNT_SIZE, "pixel")
+        if btn.Count.SetTextColor then pcall(btn.Count.SetTextColor, btn.Count, tcol.r, tcol.g, tcol.b, tcol.a) end
+    end
+end
+
+--- 宠物条交还时撤掉换皮副作用；下次收养可重新建 Monet 装饰，不往暴雪对象写字段。
+local function ReleaseAdoptedButton(btn)
+    if not btn then return end
+    local data = GetFFD(btn)
+    Widget:Unwatch(btn, MaintainAdoptedButton)
+    data.adoptedWatch = nil
+    if data.adoptedIconOriginal then
+        local original = data.adoptedIconOriginal
+        local icon = data.adoptedIcon
+        if icon then
+            pcall(icon.ClearAllPoints, icon)
+            for _, point in ipairs(original.points) do pcall(icon.SetPoint, icon, unpack(point)) end
+            if original.u0 then pcall(icon.SetTexCoord, icon, original.u0, original.u1, original.v0, original.v1) end
+            if original.mask and icon.AddMaskTexture then pcall(icon.AddMaskTexture, icon, original.mask) end
+        end
+        local mask = original.mask
+        if mask then
+            if original.maskWidth and original.maskHeight then
+                pcall(mask.SetSize, mask, original.maskWidth, original.maskHeight)
+            end
+            pcall(mask.ClearAllPoints, mask)
+            for _, point in ipairs(original.maskPoints) do pcall(mask.SetPoint, mask, unpack(point)) end
+        end
+    end
+    if data.adoptedArtAlpha then
+        for region, alpha in pairs(data.adoptedArtAlpha) do pcall(region.SetAlpha, region, alpha) end
+    end
+    if data.adoptedTextOriginal then
+        for fs, original in pairs(data.adoptedTextOriginal) do
+            if original.font then pcall(fs.SetFont, fs, original.font, original.size, original.flags) end
+            if original.r then pcall(fs.SetTextColor, fs, original.r, original.g, original.b, original.a) end
+        end
+    end
+    if data.adoptedWell then pcall(data.adoptedWell.Hide, data.adoptedWell) end
+    if data.adoptedBorder then pcall(data.adoptedBorder.Hide, data.adoptedBorder) end
+    local active = Marked(btn, "activeOverlay")
+    if active then pcall(active.Hide, active) end
+    data.adoptedIconOriginal = nil
+    data.adoptedArtAlpha = nil
+    data.adoptedTextOriginal = nil
+    data.adoptedIcon = nil
+    data.adoptedReleased = true
+end
+
 local function SkinAdoptedButton(btn)
-    if not btn or GetFFD(btn).adoptedSkinned then return end
-    GetFFD(btn).adoptedSkinned = true
+    if not btn then return end
+    local data = GetFFD(btn)
+    if data.adoptedSkinned then
+        if data.adoptedReleased then
+            data.adoptedReleased = nil
+            EnsureAdoptedIcon(btn)
+            FadeAdoptedArt(btn)
+            if data.adoptedWell then pcall(data.adoptedWell.Show, data.adoptedWell) end
+            if data.adoptedBorder then pcall(data.adoptedBorder.Show, data.adoptedBorder) end
+            ApplyAdoptedTextStyle(btn, data)
+            if not data.adoptedWatch then
+                data.adoptedWatch = true
+                Widget:PollWatch(btn, MaintainAdoptedButton, 2)
+            end
+        end
+        return
+    end
+    data.adoptedSkinned = true
 
     -- 先认图标、再压美术层：FadeAdoptedArt 要靠 adoptedIcon 这个标记避开"我们认作图标"
     -- 的那张贴图（GetNormalTexture 兜底路径），顺序反过来就会先把图标压成 alpha 0。
@@ -1211,23 +1355,12 @@ local function SkinAdoptedButton(btn)
         -- 2 秒一次的低频维护：补图标（晚生）/ 补遮罩摘除、重压暴雪美术层
         -- （暴雪自己的刷新偶尔会把 alpha 写回 1，尤其是勾选态与悬停层）。
         -- 按钮隐藏时 PollWatch 不跑，所以收起宠物条时等于零开销，也就永不注销。
-        Widget:PollWatch(btn, function(self)
-            EnsureAdoptedIcon(self)
-            FadeAdoptedArt(self)
-        end, 2)
+        Widget:PollWatch(btn, MaintainAdoptedButton, 2)
     end
 
     -- 收养按钮（宠物/姿态）的热键与堆叠数：和自绘按钮同一套 —— Super Effective + 主题色
     -- （2026-10-30 玩家要求）。暴雪自己的 FontString，只调字体与颜色，不写字段。
-    local tcol = ButtonTextColor()
-    if btn.HotKey then
-        pcall(Widget.SetFont, Widget, btn.HotKey, HOTKEY_SIZE, "pixel")
-        if btn.HotKey.SetTextColor then pcall(btn.HotKey.SetTextColor, btn.HotKey, tcol.r, tcol.g, tcol.b, tcol.a) end
-    end
-    if btn.Count then
-        pcall(Widget.SetFont, Widget, btn.Count, COUNT_SIZE, "pixel")
-        if btn.Count.SetTextColor then pcall(btn.Count.SetTextColor, btn.Count, tcol.r, tcol.g, tcol.b, tcol.a) end
-    end
+    ApplyAdoptedTextStyle(btn, data)
 
     -- 冷却**交给暴雪自己**：我们那套渲染会给它的冷却框 SetHideCountdownNumbers(true) 再自己画字，
     -- 而暴雪冷却框在本客户端受限（SetCooldown 参数可能是机密值、调用被拒），
@@ -1333,11 +1466,16 @@ local function AdoptStanceButtons(bar)
     return total
 end
 
---- 姿态条本体（P5' 之后加的，形状照 BuildPetBar）。
+--- 姿态条本体：Build 只建容器，受保护收养 / 壳静音 / 排版由脱战路径 EnsureStanceAdoption 做。
 local function BuildStanceBar(bar, frame, def)
+    bar.page = 0
+    return bar
+end
+
+local function EnsureStanceAdoption(bar)
     if AdoptStanceButtons(bar) == 0 then
         -- 一个按钮都没拿到：**别动暴雪那条**，让它照原生方式显示（宁可丑，不能没有）。
-        pcall(frame.Hide, frame)
+        pcall(bar.frame.Hide, bar.frame)
         return nil
     end
 
@@ -1345,12 +1483,12 @@ local function BuildStanceBar(bar, frame, def)
     if shell then
         -- 同宠物条：只压根框 alpha + 关鼠标，**事件一条都不卸载**（图标 / 选中态 / 冷却
         -- 都是它自己的 UpdateState 在刷；UpdateGridLayout 动的是容器，不是我们搬走的按钮）。
-        Widget:Mute(shell, { depth = 0, combat = "write" })
+        Widget:Mute(shell, { depth = 0 })
     end
 
     bar.visibility = STANCE_VISIBILITY
     if RegisterStateDriver then
-        pcall(RegisterStateDriver, frame, "visibility", STANCE_VISIBILITY)
+        pcall(RegisterStateDriver, bar.frame, "visibility", STANCE_VISIBILITY)
     end
     PositionBar(bar)
     bar.page = 0
@@ -1382,78 +1520,78 @@ local function ReleaseStance(bar)
 end
 
 local function CreateBar(def)
-    if buildFailure then return nil end
+    local bar = bars[def.key]
+    if bar and bar.complete then return bar end
+    if bar and bar.unavailable then return nil end
 
-    local frame, template = NewFrame("Frame", "MonetUI" .. def.key, UIParent, CONTAINER_TEMPLATES,
-        function(f) return type(f.WrapScript) == "function" end)
+    local frame = bar and bar.frame
+    local template
     if not frame then
-        buildFailure = buildFailure or "header"
-        return nil
+        frame, template = NewFrame("Frame", "MonetUI" .. def.key, UIParent, CONTAINER_TEMPLATES,
+            function(f) return type(f.WrapScript) == "function" end)
+        if not frame then
+            buildFailure = buildFailure or "header"
+            return nil
+        end
+        -- 模板串里有 SecureHandlerStateTemplate 不等于安全处理器真的装上了：以 WrapScript 为准。
+        if not template:find("SecureHandlerStateTemplate") or type(frame.WrapScript) ~= "function" then
+            buildFailure = buildFailure or "header"
+            bar = { def = def, frame = frame, buttons = {}, unavailable = true }
+            bars[def.key] = bar
+            pcall(frame.Hide, frame)
+            return nil
+        end
+        bar = {
+            def        = def,
+            index      = def.index,
+            frame      = frame,
+            buttons    = {},
+            visibility = def.paged and M.secure.VISIBILITY_MAIN or M.secure.VISIBILITY_OTHER,
+        }
+        bars[def.key] = bar
     end
-    -- 模板串里有 SecureHandlerStateTemplate 不等于安全处理器真的装上了（见 CONTAINER_TEMPLATES
-    -- 的注释）：以 WrapScript 为准，否则要等状态驱动走到 WrapScript 才炸。
-    if not template:find("SecureHandlerStateTemplate") or type(frame.WrapScript) ~= "function" then
-        buildFailure = buildFailure or "header"
-        return nil
+
+    if not bar.headerReady then
+        local snippetOK = pcall(frame.SetAttributeNoHandler, frame, "_onstate-page", M.secure.ON_STATE_PAGE)
+        -- 初始页号也必须在安全环境里写，Lua 直接 SetAttribute 会留下脏值。
+        local pageOK = pcall(frame.Execute, frame, ("self:SetAttribute('actionpage', %d)"):format(def.page))
+        local levelOK = pcall(frame.SetFrameLevel, frame, def.level or 60)
+        bar.headerReady = snippetOK and pageOK and levelOK and true or nil
+        if not bar.headerReady then return nil end
     end
 
-    pcall(frame.SetAttributeNoHandler, frame, "_onstate-page", M.secure.ON_STATE_PAGE)
-    -- 初始页号也**必须在安全环境里**写：Lua 直接 SetAttribute 得到的是脏值，
-    -- 客户端点击时拿它调 UseAction 就会判插件越权（见 Secure.lua 的 PAGE_CHILD 段长注释）。
-    pcall(frame.Execute, frame, ("self:SetAttribute('actionpage', %d)"):format(def.page))
-
-    -- 抬到暴雪动作条之上（ActionButton 52 / MultiBar* 3），点击才落到我们自己的按钮上；
-    -- 暴雪那几条条被 Park 掉（MainActionBar alpha 0，其余换到常隐框体），点击不会落到它们身上。
-    -- def.level 可以按条单独抬（宠物条要压过 1–8 号条）。
-    pcall(frame.SetFrameLevel, frame, def.level or 60)
-
-    local bar = {
-        def        = def,
-        index      = def.index,
-        frame      = frame,
-        buttons    = {},
-        visibility = def.paged and M.secure.VISIBILITY_MAIN or M.secure.VISIBILITY_OTHER,
-    }
-
-    -- **宠物条只能收养暴雪的 PetActionButton1..10**：实测这个客户端没有通用安全按钮的
-    -- `type="pet"`（属性全对、层级也压过所有条，点了照样没反应，而且没有任何拦截 —— 是
-    -- 客户端根本不处理这个 type）。收养之后施法 / 右键切自动施法 / 冷却 / 自动施法提示全原生。
-    -- 代价：SetParent/SetSize 会把受保护按钮标脏，暴雪自己的 SetShown 会被拒（日志里 10 条
-    -- BLOCKED，只进日志、不弹窗）。功能优先，接受这个代价。
+    -- 宠物条只收养暴雪按钮；姿态条同理。容器建好后，收养事务由 Apply 在自由窗口执行。
     if def.pet then
-        return M.petbar.BuildPetBar(bar, frame, def)
+        M.petbar.BuildPetBar(bar, frame, def)
+        bar.complete = true
+        return bar
     end
-
-    -- 姿态条同理：收养暴雪 StanceButton1..10（见 BuildStanceBar 的注释）。
     if def.stance then
-        return BuildStanceBar(bar, frame, def)
+        BuildStanceBar(bar, frame, def)
+        bar.complete = true
+        return bar
     end
 
     for index = 1, (def.count or BUTTONS_PER_BAR) do
-        local button = BuildButton(bar, index)
-        if not button then break end
-        bar.buttons[#bar.buttons + 1] = button
+        if not BuildButton(bar, index) then
+            buildFailure = buildFailure or "button"
+            return nil
+        end
     end
 
-    if #bar.buttons == 0 then
-        pcall(frame.Hide, frame)
-        buildFailure = buildFailure or "button"
-        return nil
-    end
-
-    -- 翻页驱动：1 号条按客户端状态换页，其余条固定在自己那一页。
+    if Locked() then return nil end
     if RegisterStateDriver then
         pcall(RegisterStateDriver, frame, "page", def.paged and M.secure.FULL_PAGE or tostring(def.page))
     end
 
     LayoutBar(bar)
     PositionBar(bar)
-    -- 按钮建好、位置定好后，把当前页下发给它们一次（片段跑，安全环境里写 action）
     M.secure.PushPageToChildren(bar)
     M.secure.PushSecureInit(bar, "action")
     M.dragdrop.EnsureDropCatcher(bar)
     bar.page = tonumber(frame:GetAttribute("actionpage")) or def.page
     RefreshBar(bar)
+    bar.complete = true
     return bar
 end
 
@@ -1687,7 +1825,11 @@ local function ScheduleSlotFlush()
     end, "动作条:槽位合并")
 end
 
+local eventsRegistered = false
+
 function M:RegisterEvents()
+    if eventsRegistered then return end
+    eventsRegistered = true
     EventBus:Register("PLAYER_ENTERING_WORLD", function()
         M:Apply()
     end)
@@ -1750,7 +1892,14 @@ function M:RegisterEvents()
         M:UpdateAll()
         M:UpdateHotkeys()
     end)
-    EventBus:Register("MONETUI_RESTRICTION_CHANGED", function() M:UpdateAll() end)
+    EventBus:Register("MONETUI_RESTRICTION_CHANGED", function(_, _, active)
+        if active then
+            M:UpdateAll()
+            return
+        end
+        M:Apply()
+        if M.ready then M:RefreshLayout() end
+    end)
 end
 
 --- 只重画冷却（战斗中也要跑：冷却框是我们自己的贴图，不受保护）。
@@ -1836,7 +1985,7 @@ function M:RefreshLayout()
     if Locked() then
         -- 按钮本体是受保护的安全模板：战斗中挪不动（SecureActionButtonTemplate），
         -- 硬来会被客户端拒绝。排队到脱战补做（ns:AfterCombat）。
-        ns:AfterCombat("actionbars-layout", function() M:RefreshLayout() end)
+        ns:AfterCombat("actionbars-layout", function() M:RefreshLayout() end, "regen")
         return
     end
     -- 条数可能刚改过：姿态条的默认锚点跟着"最高那条"走，再统一排布。
@@ -1845,9 +1994,23 @@ function M:RefreshLayout()
         -- 姿态条收养的按钮是**从右端往左**排的（见 AdoptStanceButtons）：LayoutBar 那套左上是
         -- 给自绘按钮的，用在这条上会把可见的 1..N 格顶到整条最左边、离 3 号条一大段空隙。
         if bar.def and bar.def.stance then
-            AdoptStanceButtons(bar)
+            if M.own and StanceFormCount() > 0 then
+                EnsureStanceAdoption(bar)
+            else
+                ReleaseStance(bar)
+            end
+        elseif bar.def and bar.def.pet then
+            -- 宠物格高 = 宽 × 0.75，不能走普通 LayoutBar 的正方形排版。
+            M.petbar.EnsurePetAdoption(bar)
         else
+            for index, button in ipairs(bar.buttons) do
+                M.secure.InstallSecureInit(button)
+                M.secure.InstallPageChild(button, index)
+                InstallDrag(bar, button, index)
+            end
             LayoutBar(bar)
+            M.secure.PushPageToChildren(bar)
+            M.secure.PushSecureInit(bar, "action")
         end
         PositionBar(bar)
     end
@@ -1860,38 +2023,52 @@ local function ReportFailure()
     ns:Print(FAILURE_TEXT[buildFailure] or FAILURE_TEXT.template)
 end
 
---- 建一次自己的动作条。返回 true 表示自绘动作条可用。
+--- 建自己的动作条；半成品留在原条上，下一次只补缺失部分。
 function M:Build()
     if built then return M.ready end
-    built = true
+    if Locked() then return false end
 
     if not ActionBar then
         buildFailure = "lab"
+        built = true
         M.ready = false
         ReportFailure()
         return false
     end
 
     for _, def in ipairs(BAR_DEFS) do
-        local bar = CreateBar(def)
-        if bar then bars[def.key] = bar end
+        if not bars[def.key] or not bars[def.key].complete then
+            local ok, bar = pcall(CreateBar, def)
+            if not ok then
+                buildFailure = buildFailure or "template"
+            elseif bar then
+                bars[def.key] = bar
+            end
+        end
     end
 
-    M.ready = next(bars) ~= nil
+    local complete = 0
+    for _, def in ipairs(BAR_DEFS) do
+        if bars[def.key] and bars[def.key].complete then complete = complete + 1 end
+    end
+    M.ready = complete == #BAR_DEFS
     if not M.ready then
         buildFailure = buildFailure or "template"
         ReportFailure()
         return false
     end
 
+    buildFailure = nil
+    built = true
     leaveVehicle = CreateLeaveVehicle()
     return true
 end
 
 function M:Apply()
+    if not M.enabled then return end
     if Locked() then
         -- 战斗中建不了条：排队到脱战（ns:AfterCombat）。
-        ns:AfterCombat("actionbars-apply", function() M:Apply() end)
+        ns:AfterCombat("actionbars-apply", function() M:Apply() end, "regen")
         return
     end
 
@@ -1911,8 +2088,10 @@ function M:Apply()
                 -- 宠物条不走"第几条开着"那套：它的显隐只由 [pet] 状态驱动决定
                 -- （CreateBar 里已注册）。自绘动作条关掉时直接藏起来，暴雪那条保持原样。
                 if not own then
+                    M.petbar.ReleasePetBar(bar)
                     pcall(bar.frame.Hide, bar.frame)
                 else
+                    M.petbar.EnsurePetAdoption(bar)
                     SetupHoverOnly(bar, def.hover and Config().petHover ~= false)
                 end
             elseif def.stance then
@@ -1920,7 +2099,7 @@ function M:Apply()
                 -- 框体里，原生姿态条就成了一条空壳（玩家直接没法变形态）：
                 --   ① 玩家关掉自绘动作条；② 这个职业根本没有形态（NumShapeshiftForms = 0）。
                 if own and StanceFormCount() > 0 then
-                    AdoptStanceButtons(bar)
+                    EnsureStanceAdoption(bar)
                     -- 条数刚变过也可能走到这里（面板改「显示动作条数量」只调 Apply）：
                     -- 锚点由 SyncStanceAnchor 重算，必须再摆一次，否则姿态条还停在旧位置、
                     -- 和长出来的 Bar4 叠在一起。
@@ -1981,13 +2160,25 @@ function M:Apply()
     M.petbar.SyncPetGlowNow()
 end
 
+local function RetryDisable()
+    if M.enabled == false then M:SetEnabled(false) end
+end
+
 function M:SetEnabled(enabled)
+    M.enabled = enabled and true or false
     if enabled then
         self:Apply()
     else
+        if Locked() then
+            -- 停用也要还受保护按钮 / 壳 / 暴雪条；限制期只记状态，脱战整笔执行。
+            M.own = false
+            ns:AfterCombat("actionbars-disable", RetryDisable, "regen")
+            return
+        end
         M.own = false
         WatchPages(false)
         for _, bar in pairs(bars) do
+            if bar.def and bar.def.pet then M.petbar.ReleasePetBar(bar) end
             if bar.def and bar.def.stance then ReleaseStance(bar) end
             pcall(bar.frame.Hide, bar.frame)
         end
@@ -2006,6 +2197,13 @@ function M:SetEnabled(enabled)
 end
 
 function M:Initialize()
+    if Locked() then
+        ns:AfterCombat("actionbars-initialize", function()
+            if not ns:IsModuleEnabled("ActionBars") then return end
+            ns:InitializeModule("ActionBars")
+        end)
+        return false
+    end
     self:Build()
     self:Apply()
     self:RegisterEvents()
@@ -2021,6 +2219,8 @@ M.ButtonSize         = ButtonSize
 M.Spacing            = Spacing
 M.PositionBar        = PositionBar
 M.SkinAdoptedButton  = SkinAdoptedButton
+M.ReleaseAdoptedButton = ReleaseAdoptedButton
+M.ProtectedLocked    = Locked
 M.ResolveContainer   = ResolveContainer
 M.bars               = bars
 M.adopted            = adopted

@@ -28,6 +28,10 @@ local toc      = read("MonetUI.toc")
 local init     = stripComments(read("Init.lua"))
 local layout   = stripComments(read("Utils/Layout.lua"))
 local core     = stripComments(read("Core.lua"))
+local unitframes = stripComments(read("Modules/UnitFrames/UnitFrames.lua"))
+local actionbars = stripComments(read("Modules/ActionBars/ActionBars.lua"))
+local groups   = stripComments(read("Modules/UnitFrames/Groups.lua"))
+local bosses   = stripComments(read("Modules/UnitFrames/BossFrames.lua"))
 local deploy   = read("tools/deploy-retail.ps1")
 local synccheck = read("tools/sync-check.js")
 
@@ -110,6 +114,53 @@ check("ns.version 不硬编码，改从 TOC 读",
     core:find("ns%.version%s*=%s*\"") == nil
     and core:find("GetAddOnMetadata") ~= nil
     and core:find("@project%-version@") == nil)
+
+-- ⑧ Map 只加密数据，不拦受保护写入（1.60.1 / 71037 厄运之槌实测）；其余限制仍延迟。
+check("Core 分离数据限制与受保护写入门",
+    core:find("function ns:CanRunProtectedWork()", 1, true) ~= nil
+    and core:find('name ~= "Map" and restrictionActive[name]', 1, true) ~= nil
+    and core:find("if not ns:CanRunProtectedWork() then return end", 1, true) ~= nil
+    and core:find('mode ~= "regen" and ns:CanRunProtectedWork()', 1, true) ~= nil)
+check("安全单位框初始化复用 Core 写入门并补原始战斗标志",
+    unitframes:find("local function CanInitialize()", 1, true) ~= nil
+    and unitframes:find("ns:CanRunProtectedWork()", 1, true) ~= nil
+    and unitframes:find("InCombatLockdown()", 1, true) ~= nil
+    and unitframes:find('UnitAffectingCombat("player") == true', 1, true) ~= nil
+    and unitframes:find('ns:AfterCombat("unitframes-initialize", function()', 1, true) ~= nil
+    and unitframes:find('ns:InitializeModule("UnitFrames")', 1, true) ~= nil)
+check("Core 尊重模块返回 false 的延迟初始化语义",
+    core:find("local ok, result = pcall(module.Initialize, module)", 1, true) ~= nil
+    and core:find("if result == false then return false end", 1, true) ~= nil)
+check("PLAYER_LOGIN 在异步模块启动前建立限制账本",
+    core:find('EventBus:Register%("PLAYER_LOGIN", function%(%)%s*LoadDatabase%(%)%s*SeedRestrictions%(%)', 1, false) ~= nil)
+check("动作条构建与排版复用 Core 受保护写入门",
+    actionbars:find("ns:CanRunProtectedWork()", 1, true) ~= nil
+    and actionbars:find("function M:Initialize%(%)%s*if Locked%(%) then", 1, false) ~= nil
+    and actionbars:find('ns:AfterCombat("actionbars-initialize", function()', 1, true) ~= nil
+    and actionbars:find('ns:InitializeModule("ActionBars")', 1, true) ~= nil)
+check("团队与首领框的受保护写入门同样复用 Core",
+    groups:find("return not ns:CanRunProtectedWork()", 1, true) ~= nil
+    and bosses:find("return not ns:CanRunProtectedWork()", 1, true) ~= nil)
+
+-- ⑨ 启动优化：旧 CVar 账在数据库迁移后结算；模块初始化必须处在可 yield 的协程里，
+--    且每个模块之间主动让出 Async 帧预算。Lua 5.1 不能跨越 pcall 边界 yield。
+check("数据库迁移后调用 Init:Prepare",
+    core:find("Migrate%(db%)%s*if ns%.Init.-ns%.Init:Prepare%(%)") ~= nil)
+check("旧 CVar 清理使用白名单且写后复验",
+    init:find("LEGACY_COMBAT_CVARS") ~= nil
+    and init:find("local after, known = ReadCVar%(name%)") ~= nil
+    and init:find("SameCVar%(after, value%)") ~= nil
+    and init:find("MONETUI_RESTRICTION_CHANGED", 1, true) ~= nil)
+check("Init:Run 用 Async 协程放行模块",
+    init:find("function Init:Run%(onReady%)") ~= nil
+    and init:find("ns%.Async:Run%(function%(%)") ~= nil
+    and init:find('"启动:模块初始化"', 1, true) ~= nil)
+check("StartModules 每个模块后 Checkpoint",
+    core:find("self:InitializeModule%(name%)%s*if self%.Async.-self%.Async%.Checkpoint%(%)") ~= nil)
+check("加载横幅在模块启动之后",
+    core:find("ns:StartModules%(%)%s*ns:Print%(string%.format%(\"v%%s") ~= nil)
+check("init status 报告旧 CVar 清理结果",
+    init:find('ns:Print%("  旧 CVar 清理：" %.%. tostring%(self%.lastCleanup%)%)') ~= nil)
 
 print(failed == 0 and "ALL PASS" or (failed .. " FAILED"))
 os.exit(failed == 0 and 0 or 1)

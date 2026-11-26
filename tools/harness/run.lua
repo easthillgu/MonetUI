@@ -268,10 +268,23 @@ function Run.Main(opts)
     end
 
     local function bootSequence()
+        if opts.restrictedBoot then
+            local t = env.Enum and env.Enum.AddOnRestrictionType
+                and tonumber(env.Enum.AddOnRestrictionType[opts.restrictedBoot])
+            if not t then
+                rep:Add("B", "red", "B:unknown-class:" .. opts.restrictedBoot, {
+                    msg = "受限首启类别不存在：" .. tostring(opts.restrictedBoot),
+                })
+                return
+            end
+            api.restrictions[opts.restrictedBoot] = true
+            api.SetRestricted(true)
+            R.restrictedBootType = t
+        end
         dispatch("ADDON_LOADED", ADDON_NAME)
         dispatch("PLAYER_LOGIN")
         dispatch("PLAYER_ENTERING_WORLD", true, false)
-        api:Pump(2, 0.5)
+        api:Pump(opts.restrictedBoot == "Map" and 6 or 2, 0.5)
     end
 
     --- 受限写入被拒时，同一条写入已在断言二记过账；这里记的是"它把整条路径打断了"。
@@ -294,6 +307,83 @@ function Run.Main(opts)
         local f, l, m = splitError(bootErr, "run.lua")
         local level, cls, msg = blockAware(m)
         rep:Add(cls, level, cls .. ":boot:" .. tostring(l), { file = f, line = l, msg = "首启序列抛错：" .. msg })
+    end
+
+    if R.restrictedBootType then
+        rep:Phase("restricted-boot")
+        local ab = ns:GetModule("ActionBars")
+        local uf = ns:GetModule("UnitFrames")
+        local mapBoot = opts.restrictedBoot == "Map"
+        local deferred = ab and uf and not ab._initialized and not uf._initialized
+        if (mapBoot and (not ab or not uf or not ab._initialized or not uf._initialized or not ab.ready))
+            or (not mapBoot and not deferred) then
+            rep:Add("B", "red", "B:boot-lifecycle:" .. opts.restrictedBoot, {
+                msg = string.format("%s 受限首启后 ActionBars._initialized=%s ready=%s / UnitFrames._initialized=%s",
+                    opts.restrictedBoot, tostring(ab and ab._initialized), tostring(ab and ab.ready),
+                    tostring(uf and uf._initialized)),
+            })
+        end
+        local made = 0
+        for index = 1, 8 do
+            if api.byName["MonetUIBar" .. index] then made = made + 1 end
+        end
+        for _, name in ipairs({ "MonetUIBarPet", "MonetUIBarStance" }) do
+            if api.byName[name] then made = made + 1 end
+        end
+        for _, unit in ipairs({ "Player", "Target", "Targettarget", "Focus", "Pet" }) do
+            if api.byName["MonetUI" .. unit .. "Frame"] then made = made + 1 end
+        end
+        if (mapBoot and made ~= 15) or (not mapBoot and made ~= 0) then
+            rep:Add("B", "red", "B:boot-frames:" .. opts.restrictedBoot, {
+                msg = opts.restrictedBoot .. " 受限首启创建了 " .. made .. " 个动作条/单位框，预期 "
+                    .. (mapBoot and "15" or "0"),
+            })
+        end
+        if mapBoot then
+            local complete, secureButtons, secureBad = 0, 0, 0
+            for barIndex = 1, 8 do
+                local bar = ab and ab.bars and ab.bars["Bar" .. barIndex]
+                if bar and bar.complete then complete = complete + 1 end
+                if bar and bar.frame and bar.buttons then
+                    local page = tonumber(bar.frame:GetAttribute("actionpage"))
+                    for index, button in ipairs(bar.buttons) do
+                        secureButtons = secureButtons + 1
+                        local expected = page and ((page - 1) * 12 + index) or -1
+                        if button:GetID() ~= 0 or button:GetAttribute("type") ~= "action"
+                            or button:GetAttribute("typerelease") ~= "actionrelease"
+                            or button:GetAttribute("action") ~= expected
+                            or button:GetAttribute("_childupdate-mui-page") == nil
+                            or button:GetAttribute("_childupdate-mui-kind") == nil
+                            or button:GetAttribute("_childupdate-mui-keydown") == nil then
+                            secureBad = secureBad + 1
+                        end
+                    end
+                end
+            end
+            for _, key in ipairs({ "BarPet", "BarStance" }) do
+                local bar = ab and ab.bars and ab.bars[key]
+                if bar and bar.complete then complete = complete + 1 end
+            end
+            if complete ~= 10 or secureButtons ~= 96 or secureBad ~= 0 then
+                rep:Add("B", "red", "B:map-boot-incomplete", {
+                    msg = string.format("Map 首启动作条完成=%d，按钮=%d，异常=%d", complete, secureButtons, secureBad),
+                })
+            end
+            for _, name in ipairs({ "PlayerFrame", "MainActionBar" }) do
+                local frame = api.byName[name]
+                if not frame or api.EffectiveAlpha(frame) > 0.001 then
+                    rep:Add("B", "red", "B:map-blizzard-visible:" .. name, {
+                        msg = string.format("Map 首启后 %s 缺失或仍可见（alpha=%s）",
+                            name, frame and tostring(api.EffectiveAlpha(frame)) or "nil"),
+                    })
+                end
+            end
+            local bagBar = api.byName.BagsBar
+            if bagBar and bagBar:IsShown() then
+                rep:Add("B", "red", "B:map-bagbar-visible", { msg = "Map 首启后暴雪背包条仍显示" })
+            end
+        end
+        R.restrictedBootPending = true
     end
 
     ---------------------------------------------------------------- 刷新路径清单
@@ -720,6 +810,109 @@ function Run.Main(opts)
         end
     end
 
+    if R.restrictedBootPending then
+        local cls = opts.restrictedBoot
+        rep:Phase("restricted-boot:release:" .. cls)
+        leaveClass(cls, R.restrictedBootType)
+        api:Pump(3, 0.5)
+        local ab = ns:GetModule("ActionBars")
+        local uf = ns:GetModule("UnitFrames")
+        local complete = 0
+        for _, bar in pairs(ab and ab.bars or {}) do
+            if bar.complete then complete = complete + 1 end
+        end
+        local units = 0
+        for _, unit in ipairs({ "Player", "Target", "Targettarget", "Focus", "Pet" }) do
+            if api.byName["MonetUI" .. unit .. "Frame"] then units = units + 1 end
+        end
+        local restored = ab and uf and uf._initialized and ab._initialized and ab.ready
+            and complete == 10 and units == 5
+        local secureButtons, secureBad = 0, 0
+        local secureSample = ""
+        for barIndex = 1, 8 do
+            local key = "Bar" .. barIndex
+            local bar = ab and ab.bars and ab.bars[key]
+            if bar and bar.frame and bar.buttons then
+                local page = tonumber(bar.frame:GetAttribute("actionpage"))
+                for index, button in ipairs(bar.buttons) do
+                    secureButtons = secureButtons + 1
+                    local expected = page and ((page - 1) * 12 + index) or -1
+                    local ok = button:GetID() == 0
+                        and button:GetAttribute("type") == "action"
+                        and button:GetAttribute("typerelease") == "actionrelease"
+                        and button:GetAttribute("action") == expected
+                        and button:GetAttribute("_childupdate-mui-page") ~= nil
+                        and button:GetAttribute("_childupdate-mui-kind") ~= nil
+                        and button:GetAttribute("_childupdate-mui-keydown") ~= nil
+                        and bar.frame:GetAttribute("_onstate-page") ~= nil
+                    local writes = api.STATE[button].secureAttrs or {}
+                    for _, attr in ipairs({ "action", "type", "typerelease", "checkselfcast",
+                            "checkfocuscast", "checkmouseovercast", "useOnKeyDown" }) do
+                        if not writes[attr] then ok = false end
+                    end
+                    if button:GetAttribute("checkselfcast") ~= true
+                        or button:GetAttribute("checkfocuscast") ~= true
+                        or button:GetAttribute("checkmouseovercast") ~= true
+                        or type(button:GetAttribute("useOnKeyDown")) ~= "boolean" then
+                        ok = false
+                    end
+                    if not ok then
+                        secureBad = secureBad + 1
+                        if secureSample == "" then
+                            secureSample = string.format("；样本 %s#%d page=%s expected=%s id=%s type=%s release=%s action=%s pageChild=%s kindChild=%s keydownChild=%s onState=%s children=%s parent=%s execute=%s childUpdate=%s",
+                                key, index, tostring(page), tostring(expected), tostring(button:GetID()),
+                                tostring(button:GetAttribute("type")), tostring(button:GetAttribute("typerelease")),
+                                tostring(button:GetAttribute("action")),
+                                tostring(button:GetAttribute("_childupdate-mui-page") ~= nil),
+                                tostring(button:GetAttribute("_childupdate-mui-kind") ~= nil),
+                                tostring(button:GetAttribute("_childupdate-mui-keydown") ~= nil),
+                                tostring(bar.frame:GetAttribute("_onstate-page") ~= nil),
+                                tostring(bar.frame:GetNumChildren()), tostring(button:GetParent() == bar.frame),
+                                tostring(type(bar.frame.Execute)), tostring(type(bar.frame.ChildUpdate)))
+                        end
+                    end
+                end
+                local nextPage = (page or bar.def.page) + 1
+                local pageOK = pcall(bar.frame.Execute, bar.frame,
+                    ("self:SetAttribute('actionpage', %d); self:ChildUpdate('mui-page', %d)"):format(nextPage, nextPage))
+                for index, button in ipairs(bar.buttons) do
+                    if button:GetAttribute("action") ~= (nextPage - 1) * 12 + index then
+                        pageOK = false
+                    end
+                end
+                pcall(bar.frame.Execute, bar.frame,
+                    ("self:SetAttribute('actionpage', %d); self:ChildUpdate('mui-page', %d)"):format(page or bar.def.page, page or bar.def.page))
+                if not pageOK then secureBad = secureBad + 1 end
+            end
+        end
+        if secureButtons ~= 96 or secureBad ~= 0 then
+            restored = false
+            rep:Add("B", "red", "B:secure-attrs:" .. cls, {
+                msg = string.format("%s 普通动作条按钮=%d，安全属性/片段异常=%d%s", cls, secureButtons, secureBad, secureSample),
+            })
+        end
+        if not restored then
+            local prints = {}
+            for _, line in ipairs(api.prints) do
+                if line:find("动作条", 1, true) then prints[#prints + 1] = line end
+            end
+            local barState = {}
+            for key, bar in pairs(ab and ab.bars or {}) do
+                barState[#barState + 1] = string.format("%s[frame=%s,unavailable=%s,header=%s,complete=%s]",
+                    key, tostring(bar.frame ~= nil), tostring(bar.unavailable),
+                    tostring(bar.headerReady), tostring(bar.complete))
+            end
+            table.sort(barState)
+            rep:Add("B", "red", "B:not-restored:" .. cls, {
+                msg = string.format("%s 解禁后动作条完成=%d ready=%s initialized=%s，单位框=%d restricted=%s lockdown=%s；%s；%s",
+                    cls, complete, tostring(ab and ab.ready), tostring(ab and ab._initialized), units,
+                    tostring(ns:IsRestricted()), tostring(env.InCombatLockdown()),
+                    table.concat(prints, " / "), table.concat(barState, " ")),
+            })
+        end
+        R.restrictedBootResult = { complete = complete, units = units }
+    end
+
     rep:Phase("restricted-sweep")
     for _, cls in ipairs(CLASSES) do
         -- 阶段名细分到 enter / pump / leave：脱战排空（FlushAfterCombat）跑在
@@ -909,11 +1102,12 @@ end
 ---------------------------------------------------------------- CLI
 -- 直接 `lua tools/harness/run.lua --root=…` 也能跑；run.js 就是这么起的。
 local function cli(args)
-    local root, sampleDir, maxRows, selftest, secrets
+    local root, sampleDir, maxRows, selftest, secrets, restrictedBoot
     for _, a in ipairs(args) do
         root = a:match("^%-%-root=(.+)$") or root
         sampleDir = a:match("^%-%-samples=(.+)$") or sampleDir
         maxRows = tonumber(a:match("^%-%-max=(%d+)$")) or maxRows
+        restrictedBoot = a:match("^%-%-restricted%-boot=(%a+)$") or restrictedBoot
         if a == "--selftest" then selftest = true end
         if a == "--secrets" then secrets = true end
     end
@@ -945,6 +1139,7 @@ local function cli(args)
     local R = Run.Main({
         root = root, report = rep, engine = engine, world = world, samples = samples,
         secrets = secrets,
+        restrictedBoot = restrictedBoot,
     })
 
     local bp = R.bankPasses or {}
@@ -974,6 +1169,8 @@ local function cli(args)
             string.format("α 体检：%d 个挂过背板的容器 · Need 台账：命中 %d 条 / 缺席 %d 条",
                 R.alphaChecked or 0, R.ledgerHits or 0, R.ledgerMisses or 0),
             bankMeta(),
+            R.restrictedBootResult and string.format("受限首启 %s：解禁后动作条 %d/10 · 单位框 %d/5",
+                tostring(restrictedBoot), R.restrictedBootResult.complete, R.restrictedBootResult.units) or nil,
             samples[1] and ("样例：" .. #samples .. " 份（--selftest 用来证明断言确实会红）") or nil,
         },
     }))

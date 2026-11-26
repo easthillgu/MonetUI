@@ -35,8 +35,9 @@ local CLASS_POWER = {
 -- Defensive ceiling: a garbage maximum must not build a hundred bars.
 local MAX_PIPS = 10
 
---- The player's class file name ("ROGUE", ...), cached.  UnitClassBase preferred;
---- both calls pcall'd because identity can be hidden in restricted states.
+--- The player's class file name ("ROGUE", ...), cached only after a value-level
+--- readability guard. A secret class token must never reach a truth test or table key;
+--- an unreadable refresh leaves an earlier normal cache untouched.
 local playerClass
 local function PlayerClass()
     if playerClass then return playerClass end
@@ -44,22 +45,30 @@ local function PlayerClass()
     local class
     if _G.UnitClassBase then
         local ok, file = pcall(_G.UnitClassBase, "player")
-        if ok then class = file end
+        if ok and type(file) == "string" and Secrets.CanRead(file) and not Secrets.IsSecret(file) then
+            class = file
+        end
     end
     if not class and _G.UnitClass then
         local ok, _, file = pcall(_G.UnitClass, "player")
-        if ok then class = file end
+        if ok and type(file) == "string" and Secrets.CanRead(file) and not Secrets.IsSecret(file) then
+            class = file
+        end
     end
 
-    if type(class) == "string" then playerClass = class end
+    if type(class) == "string" and Secrets.CanRead(class) and not Secrets.IsSecret(class) then
+        playerClass = class
+    end
     return playerClass
 end
 
---- Does this power event concern the frame's class resource?  A missing or
---- non-string token (UNIT_MAXPOWER, a full refresh) always refreshes.
+--- Does this power event concern the frame's class resource?  A missing,
+--- non-string or unreadable token (UNIT_MAXPOWER, a full refresh) always refreshes.
 local function ClassPowerIn(frame, powerType)
     if not frame.classPower then return false end
-    if type(powerType) ~= "string" then return true end
+    if type(powerType) ~= "string" or not Secrets.CanRead(powerType) or Secrets.IsSecret(powerType) then
+        return true
+    end
 
     local class = PlayerClass()
     local def = class and CLASS_POWER[class]

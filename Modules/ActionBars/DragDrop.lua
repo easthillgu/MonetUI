@@ -12,6 +12,8 @@ local M = ns:GetModule("ActionBars")
 if not M then return end
 
 local SlotOf = M.SlotOf
+-- 共享守卫首先调用 ns:IsRestricted() 覆盖六类限制，再补登录 / reload 当拍的原生战斗标志。
+local Locked = M.ProtectedLocked
 
 local Secrets = ns.Secrets
 
@@ -28,6 +30,8 @@ local Secrets = ns.Secrets
 -- 放下时按光标坐标**算**出目标格（不再依赖命中判定），再 PlaceAction。
 -- 平时它关着鼠标，所以点击照旧落在我们自己的按钮上。
 local dropCatchers = setmetatable({}, { __mode = "k" })
+-- 接住器也是安全框；鼠标持有状态进弱旁表，不往对象上写 holding 字段。
+local catcherStates = setmetatable({}, { __mode = "k" })
 
 local function CursorUI()
     local x, y = GetCursorPosition()
@@ -69,16 +73,21 @@ end
 -- 空闲时一个回调都不跑），有新接住器再由 EnsurePoller 挂回来。
 local pollId = nil
 local PollCatchers, EnsurePoller
+local pendingCatchers = {}
+local EnsureDropCatcher
+local function RetryDropCatchers()
+    if Locked() then return false end
+    local pending = pendingCatchers
+    pendingCatchers = {}
+    for bar in pairs(pending) do
+        if M.enabled ~= false and M.own then EnsureDropCatcher(bar) end
+    end
+    return true
+end
 
 PollCatchers = function()
-    -- 战斗中**一个字节都不写**：接住器是 SecureActionButtonTemplate 建出来的受保护框，
-    -- 对它 EnableMouse 会被拦成 `ADDON_ACTION_BLOCKED MonetUI UNKNOWN()`（2026-11-22 实机，
-    -- taintLog=2 栈：DragDrop.lua:132 ← Scheduler:Invoke）。拖放本身也只能脱战做
-    -- （OnMouseUp/OnReceiveDrag 都有战斗门），战斗期保持现状即可。
-    if (type(InCombatLockdown) == "function" and InCombatLockdown())
-        or (type(UnitAffectingCombat) == "function" and UnitAffectingCombat("player")) then
-        return
-    end
+    -- 六类限制统一由 Core 记账；限制期一个字节都不写，接住器保持现状，下一拍再结算。
+    if Locked() then return end
 
     local any = false
     local cursorHolding = nil    -- 懒算：一颗接住器都不显示时，这一拍根本不用问光标
@@ -94,8 +103,10 @@ PollCatchers = function()
             if cursorHolding == nil then cursorHolding = (GetCursorInfo() ~= nil) end
             active = cursorHolding
         end
-        if active ~= catcher.holding then
-            catcher.holding = active
+        local state = catcherStates[catcher]
+        if not state then state = {}; catcherStates[catcher] = state end
+        if active ~= state.holding then
+            state.holding = active
             pcall(catcher.EnableMouse, catcher, active)
         end
     end
@@ -112,8 +123,15 @@ EnsurePoller = function()
     pollId = Scheduler:Every(100, PollCatchers, "动作条:拖放接收器")
 end
 
-local function EnsureDropCatcher(bar)
+EnsureDropCatcher = function(bar)
     if dropCatchers[bar] then return dropCatchers[bar] end
+    if Locked() then
+        -- CreateBar 可以在登录 / reload 的受限当拍先建普通容器；安全接住器必须整笔推迟。
+        pendingCatchers[bar] = true
+        ns:AfterCombat("actionbars-drop-catchers", RetryDropCatchers, "regen")
+        return nil
+    end
+    pendingCatchers[bar] = nil
     local frame = bar.frame
     -- **必须用暴雪模板建**：实机证明普通 Frame 收不到 OnReceiveDrag（一次都没有），
     -- 而之前那版 ActionBarButtonTemplate 做的透明代理是能收到拖放的。所以接住器也用它。
@@ -128,6 +146,7 @@ local function EnsureDropCatcher(bar)
         if ok and made then catcher = made break end
     end
     if not catcher then return nil end
+    catcherStates[catcher] = {}
     -- **它只是接住拖放，绝不能施法、也不该有提示框。**
     -- ActionBarButtonTemplate 会带来暴雪 ActionButton 的 OnClick / OnEnter：
     --   * OnClick 在它没有 action 属性时会按 CalculateAction(id=0) 算成"动作条第 1 格"，
@@ -151,19 +170,19 @@ local function EnsureDropCatcher(bar)
     catcher:Show()
     catcher:EnableMouse(false)
     catcher:SetScript("OnReceiveDrag", function(self)
-        if InCombatLockdown() then return end
+        if Locked() then return end
         local index = IndexAtCursor(bar)
         local button = index and bar.buttons[index]
         local slot = button and SlotOf(button, bar, index)
         if slot and PlaceAction then pcall(PlaceAction, slot) end
-        self.holding = false
+        catcherStates[self].holding = false
         pcall(self.EnableMouse, self, false)
     end)
     -- **OnReceiveDrag 在这个客户端不派发给普通框体**（实机：接住器 mouse=true、光标确实拿着法术，
     -- 但一次 RECV 都没有）。所以真正的落点走 OnMouseUp：松手时只要手里还有东西，就按坐标算格子
     -- 再 PlaceAction —— 这也是"点一下把技能放进格子"的标准行为。
     catcher:SetScript("OnMouseUp", function(self)
-        if InCombatLockdown() then return end
+        if Locked() then return end
         if GetCursorInfo() == nil then return end
         local index = IndexAtCursor(bar)
         local button = index and bar.buttons[index]

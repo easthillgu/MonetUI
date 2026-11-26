@@ -77,7 +77,7 @@ ok(/local CONTENT_ICON_ATLAS = \{/.test(SKIN) && /spellicon/.test(SKIN),
   'D1 内容图标 atlas 前缀表在位（含 spellicon 家族，否则铁槌还会被压掉）');
 ok(/if tex and not IsContentIcon\(tex\) then self:Fade\(tex\) end/.test(SKIN),
   'D2 FadeButtonArt 走豁免：normal / pushed / disabled / highlight 里的功能图标不剥');
-ok(/if not IsContentIcon\(region\) then/.test(SKIN),
+ok(/if not IsContentIcon\(region\) and not IsOwnIconField\(frame, region\) then/.test(SKIN),
   'D3 Strip 的 region 循环走同一条豁免（两条剥图路径不能只修一条）');
 
 // ---------------------------------------------------------------- C 守卫口径

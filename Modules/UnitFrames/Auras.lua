@@ -485,7 +485,9 @@ end
 local function RegisterAuraDuration(button, cd, duration)
     local prop = _G.Enum and Enum.DurationTextBindingProperty
     prop = prop and prop.RemainingDuration
-    local curve = GetDurationColorCurve()
+    -- 已有曲线可在机密期继续用；nil 时只能在非安全上下文创建，不能从引擎 initializeFrame 里建。
+    local curve = durationColorCurve
+    if curve == nil and not InCombat() then curve = GetDurationColorCurve() end
     if curve and prop ~= nil then
         if pcall(button.SetDurationText, button, duration,
             { textColor = { curve = curve, property = prop } }) then
@@ -658,6 +660,21 @@ local function SetAuraFitMounted(on, owner)
     for _, key in ipairs(TARGET_GROUPS) do SetFitGroupMounted(key, on) end
 end
 
+local function SetAuraContainerEnabled(container, enabled)
+    if type(container) ~= "table" or type(container.SetEnabled) ~= "function" then return true end
+    return pcall(container.SetEnabled, container, enabled and true or false)
+end
+
+--- 失败容器不发布引用，但必须真正停用并摘掉这一组可能已登记的按钮账。
+local function DiscardAuraContainer(container, key)
+    if type(container) ~= "table" then return end
+    SetAuraContainerEnabled(container, false)
+    pcall(container.Hide, container)
+    pcall(container.ClearAllPoints, container)
+    pcall(container.SetParent, container, nil)
+    ReleaseFitGroup(key)
+end
+
 -- initializeFrame：一个引擎按钮只进来一次。碰按钮的事必须在这里做完。
 -- spec（可选）：{ width, height, crop } —— BuffFrame 的战斗兜底复用这套样式，但玩家 buff 行是
 -- 方形图标、且不裁边（目标框的 18x14 槽才需要 3:4 裁切）。不传 spec 就等于原来的目标框样子。
@@ -814,10 +831,17 @@ local function CreateAuraContainer(parent, key, filterString, kind)
     end
 
     -- 约束 2：先给一个可渲染的矩形，否则引擎那轮 OnUpdate 永远不会跑第一次布局。
-    container:SetSize(1, 1)
+    if not pcall(container.SetSize, container, 1, 1) then
+        DiscardAuraContainer(container, key)
+        return nil, "SetSize 失败"
+    end
 
     -- Compute justified layout based on parent frame width
-    local iconsPerRow, actualSpacing, rowWidth = ApplyContainerLayout(container, parent)
+    local okLayout, iconsPerRow, actualSpacing, rowWidth = pcall(ApplyContainerLayout, container, parent)
+    if not okLayout then
+        DiscardAuraContainer(container, key)
+        return nil, "布局失败: " .. tostring(iconsPerRow)
+    end
 
     local opts = {
         maxFrameCount = iconsPerRow * TARGET_AURA_ROWS,
@@ -849,78 +873,122 @@ local function CreateAuraContainer(parent, key, filterString, kind)
 
     local okAdd, err = pcall(container.AddAuraGroup, container, key, filterString, opts)
     if not okAdd then
+        DiscardAuraContainer(container, key)
         return nil, "AddAuraGroup 失败: " .. tostring(err)
     end
 
     pcall(container.SetUnit, container, "target")
+    if not SetAuraContainerEnabled(container, true) then
+        DiscardAuraContainer(container, key)
+        return nil, "SetEnabled(true) 失败"
+    end
     pcall(container.UpdateAllAuras, container)
     return container
 end
 
 local targetAuraDebuffs, targetAuraBuffs
-local RebuildTargetAuras   -- 前置声明：EnsureTargetAuras 战斗中要把它排进 ns:AfterCombat（实现在下面）
+local EnsureTargetAuras
+local RebuildTargetAuras   -- 前置声明：换主题的排队重试在下面实现
+
+--- 只补建缺失的一组；绝不能借重试之名重建已经成功发布的另一组。
+local function RetryTargetAuras()
+    EnsureTargetAuras(frames.target)
+end
 
 --- 建/显示目标光环容器。取代 A 方案的 BorrowTargetAuras。
 --- buff 贴着血条、debuff 叠在 buff 之上，两组都是满一行往上换行。
-local function EnsureTargetAuras(frame)
+EnsureTargetAuras = function(frame)
     if not frame then return end
 
     if not Shared("showTargetAuras") then
-        if targetAuraDebuffs then targetAuraDebuffs:Hide() end
-        if targetAuraBuffs then targetAuraBuffs:Hide() end
+        if targetAuraDebuffs then
+            SetAuraContainerEnabled(targetAuraDebuffs, false)
+            pcall(targetAuraDebuffs.Hide, targetAuraDebuffs)
+        end
+        if targetAuraBuffs then
+            SetAuraContainerEnabled(targetAuraBuffs, false)
+            pcall(targetAuraBuffs.Hide, targetAuraBuffs)
+        end
         -- 容器藏了 = 这一组没有活可干（账留着，勾回来立刻还能扫）；两组都藏了就摘 ticker。
         SetAuraFitMounted(false)
         return
     end
 
-    -- 染色曲线必须在这里（不安全上下文）先建好：引擎按钮的 initializeFrame 是
-    -- securecall 进去跑的，在里面第一次调 C_CurveUtil.CreateColorCurve 会被拒，
-    -- 结果所有按钮都拿不到曲线、时长只剩白色。
-    GetDurationColorCurve()
+    local missing = not targetAuraDebuffs or not targetAuraBuffs
+    -- 战斗中建容器会被拦：拿到的一组容器**永远是空的**（实测 0 个按钮显示、换目标也不刷新），
+    -- 而且之后没人再重建。所以战斗里干脆不建，排队到脱战补做（ns:AfterCombat）。
+    if missing and InCombat() then
+        ns:AfterCombat("unitframes-auras", RetryTargetAuras)
+        return
+    end
 
+    -- 染色曲线必须在这里（不安全上下文）先建好；机密窗口不创建曲线。
+    if missing then GetDurationColorCurve() end
+
+    -- 两组分别记录、分别重试：任一组失败都不能阻断另一组，也不能摧毁已成功的一组。
     if not targetAuraDebuffs then
-        -- 战斗中建容器会被拦：拿到的一组容器**永远是空的**（实测 0 个按钮显示、换目标也不刷新），
-        -- 而且之后没人再重建。所以战斗里干脆不建，排队到脱战补做（ns:AfterCombat）。
-        if InCombat() then
-            ns:AfterCombat("unitframes-auras", RebuildTargetAuras)
-            return
-        end
         local debuffs, why = CreateAuraContainer(frame, "monetTargetDebuffs", "HARMFUL", "debuff")
         if not debuffs then
-            -- 一次性警告，不刷屏。
             if not M.__auraWarned then
                 M.__auraWarned = true -- TAINT-OK: M 是本模块自建 table
                 ns:Print("目标光环（原生 AuraContainer）不可用：" .. tostring(why))
             end
-            return
-        end
-        targetAuraDebuffs = debuffs
-
-        local buffs = CreateAuraContainer(frame, "monetTargetBuffs", "HELPFUL", "buff")
-        targetAuraBuffs = buffs
-
-        -- 排法（都是 BOTTOMLEFT 锚点 + 向上生长）：buff 贴着血条，第一行满了往上排第二行；
-        -- debuff 再叠在 buff 上面，同样是满行往上换行。buff 变高时 debuff 跟着往上抬。
-        local gap = Shared("targetAuraGap") or 22
-        if buffs then
-            buffs:SetPoint("BOTTOMLEFT", frame, "TOPLEFT", 0, gap)
-            debuffs:SetPoint("BOTTOMLEFT", buffs, "TOPLEFT", 0, TARGET_AURA_SPACING)
         else
-            debuffs:SetPoint("BOTTOMLEFT", frame, "TOPLEFT", 0, gap)
+            targetAuraDebuffs = debuffs
+        end
+    end
+    if not targetAuraBuffs then
+        local buffs, why = CreateAuraContainer(frame, "monetTargetBuffs", "HELPFUL", "buff")
+        if not buffs then
+            if not M.__auraWarned then
+                M.__auraWarned = true -- TAINT-OK: M 是本模块自建 table
+                ns:Print("目标光环（原生 AuraContainer）不可用：" .. tostring(why))
+            end
+        else
+            targetAuraBuffs = buffs
+        end
+
+    end
+
+    if not targetAuraDebuffs and not targetAuraBuffs then return end
+
+    -- 选项关掉时容器会真正停用；重新打开只恢复仍存活的引用，不重建。
+    local debuffsReady, buffsReady = false, false
+    if targetAuraDebuffs then
+        debuffsReady = SetAuraContainerEnabled(targetAuraDebuffs, true)
+        if not debuffsReady then pcall(targetAuraDebuffs.Hide, targetAuraDebuffs) end
+    end
+    if targetAuraBuffs then
+        buffsReady = SetAuraContainerEnabled(targetAuraBuffs, true)
+        if not buffsReady then pcall(targetAuraBuffs.Hide, targetAuraBuffs) end
+    end
+
+    -- 排法（都是 BOTTOMLEFT 锚点 + 向上生长）：buff 贴着血条，第一行满了往上排第二行；
+    -- debuff 再叠在 buff 上面，同样是满一行往上换行。buff 变高时 debuff 跟着往上抬。
+    -- 只有 debuff 成功时仍按原兜底位置贴着血条；buff 后续独立重试成功再自动抬到 buff 上。
+    local gap = Shared("targetAuraGap") or 22
+    if buffsReady then
+        targetAuraBuffs:SetPoint("BOTTOMLEFT", frame, "TOPLEFT", 0, gap)
+    end
+    if debuffsReady then
+        if buffsReady then
+            targetAuraDebuffs:SetPoint("BOTTOMLEFT", targetAuraBuffs, "TOPLEFT", 0, TARGET_AURA_SPACING)
+        else
+            targetAuraDebuffs:SetPoint("BOTTOMLEFT", frame, "TOPLEFT", 0, gap)
         end
     end
 
     -- 容器在场：这一组的账重新算活（ticker 关掉过的话在这里重新挂上）。
     SetAuraFitMounted(true)
-    if targetAuraDebuffs then targetAuraDebuffs:Show() end
-    if targetAuraBuffs then targetAuraBuffs:Show() end
+    if debuffsReady then targetAuraDebuffs:Show() end
+    if buffsReady then targetAuraBuffs:Show() end
 
     -- 换目标以后上一个目标的光环还留在屏幕上：引擎只在光环**变化**时刷新按钮，
     -- 换目标本身不算变化。客户端自己留了口子 —— AuraContainerSharedMixin:UpdateAllAuras
     -- 的注释就写着 "Exposed to allow external events to trigger refreshes where needed
     -- (e.g. target changes)" —— 这里就是那个 external event。
-    if targetAuraDebuffs then pcall(targetAuraDebuffs.UpdateAllAuras, targetAuraDebuffs) end
-    if targetAuraBuffs then pcall(targetAuraBuffs.UpdateAllAuras, targetAuraBuffs) end
+    if debuffsReady then pcall(targetAuraDebuffs.UpdateAllAuras, targetAuraDebuffs) end
+    if buffsReady then pcall(targetAuraBuffs.UpdateAllAuras, targetAuraBuffs) end
 end
 
 --- 主题变化时**重建**容器。引擎光环按钮在 initializeFrame 返回之后就不可再写 —— 实测连我们
@@ -938,6 +1006,7 @@ function RebuildTargetAuras()
     for _, key in ipairs(TARGET_GROUPS) do ReleaseFitGroup(key) end
     for _, container in ipairs({ targetAuraDebuffs, targetAuraBuffs }) do
         if container then
+            SetAuraContainerEnabled(container, false)
             pcall(container.ClearAllPoints, container)
             pcall(container.Hide, container)
             pcall(container.SetParent, container, nil)
