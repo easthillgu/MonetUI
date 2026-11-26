@@ -185,7 +185,7 @@ local WATCH = {
             { "C_Item.GetWeaponEnchantInfo", "BuffFrame 武器附魔行；缺它那行整行隐藏（文案写着本客户端没有）" },
             { "C_Bank.AutoDepositItemsIntoBank", "背包『一键存入』钮；缺它那颗钮点了只打印无效" },
             { "C_Container.SortBags", "背包『整理』钮；缺它只打印无效" },
-            { "GetPetActionInfo", "宠物条状态位 / 自动施法状态（ActionBars 的提示文案说没有；快照未收录，故标 absent）", "absent" },
+            { "GetPetActionInfo", "宠物条状态位 / 自动施法（快照未收录，1.60 · 71139 实测**有**；PetBar 已在用）" },
             { "GetNumShapeshiftForm", "姿态条单数名（我们说只有复数 GetNumShapeshiftForms）", "absent" },
             { "UnregisterForDrag", "QuestTracker 的拖拽锁（我们说客户端没有，只能用 SetMovable(false)）", "absent" },
             { "GetScaledCursorPosition", "Cursor 拖尾（我们说只有文档化的 GetCursorPosition）", "absent" },

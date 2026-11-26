@@ -2229,6 +2229,7 @@ M.PET_DEF            = PET_DEF
 -- ---------------------------------------------------------------------------
 -- /mui actionbars probe … —— 实机取证（AGENTS：帧名与返回顺序一律不凭记忆）
 --   pet    逐格打印 GetPetActionInfo 的 7 个返回值：这条旧全局**不在**本地 API 快照里，
+--          **但 1.60.1 · 71139 实测存在**（2026-11-26 `/mui compat`，PetBar 的自动施法状态就在用它），
 --          所以"第 4 位是 isActive、第 6 位是 autoCastEnabled"只能靠改状态看哪一位跟着变。
 --   art    点名收养按钮的子件：ADOPTED_ART 是按名字压 alpha 的，名字错就是静默不压，
 --          同时打印每个子对象的真实名字（字段名和纹理名不一定同名）。
@@ -2257,7 +2258,8 @@ end
 
 local function ProbePet()
     if type(_G.GetPetActionInfo) ~= "function" then
-        ns:Print("|cffff6b6b本客户端没有 GetPetActionInfo|r，宠物状态得换 API。")
+        -- api-audit:ok 运行时兜底文案（1.60 实测有这个全局；真缺才走这一行）
+        ns:Print("|cffff6b6b读不到 GetPetActionInfo|r（本机确实没有这个旧全局时才该出现这行）。")
         return
     end
     ns:Print("GetPetActionInfo 逐格（改一个状态跑一次，比对哪一位变了）：")

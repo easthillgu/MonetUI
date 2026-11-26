@@ -695,7 +695,8 @@ end
 -- 脱战把 BuffFrame 整体 alpha 0、自绘行只读 C_UnitAuras 的 HELPFUL/HARMFUL ⇒ 附魔
 -- 两头都看不见。这里补一条专用行：数据源 C_Item.GetWeaponEnchantInfo（1.60 文档，
 -- 返回 WeaponEnchantInfo 数组，timeLeft 单位**毫秒**），图标直接用 enchantIconID
--- （fileID）。本客户端没有 TempEnchantFrame、GetInventoryItem* 全族不存在，不许用。
+-- （fileID）。`TempEnchantFrame` 在 12.1.5 / 1.60 都没有（别去找）；而
+-- `GetInventoryItem*` 全族 **1.60.1 · 71139 实测存在**（耐久槽位路径就在用），那条旧结论作废。
 -- 战斗跟随 combatMode 隐藏（战斗中能否读该 API 未实测，A2 待实机另行拍板）。
 -- ============================================================================
 
