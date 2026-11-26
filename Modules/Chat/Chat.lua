@@ -306,24 +306,68 @@ end
 -- 注意 ①位置是我们直接写客户端框的锚点，重载后会回默认 ⇒ 存档 + 每秒复查，被拽回就补一次；
 --      ②细条锚在输入框顶边，所以输入框一走，细条自己就跟上了。
 local INPUT_STORE_KEY = "ChatInput"
+local INPUT_BAR_GAP = 6         -- 对齐模式：输入框底边离动作条最高沿的间距
 local drag = nil
+
+-- 对齐模式的参照：这几条「屏幕下方的条」里取最靠上的 top。
+-- 姿态条（StanceBar）在有形态时才显示，所以只认「此刻可见」的那些；
+-- 显隐读的是受保护框的 IsShown（战斗中可能是机密布尔）⇒ 走 Secrets.Bool 兜默认值，
+-- 整段 pcall 包住，任何一条读不出来就跳过（宁少算不高估，否则输入框会被顶到半屏）。
+local BAR_FRAMES = { "MainActionBar", "MultiBarBottomLeft", "MultiBarBottomRight", "StanceBar", "PetActionBar" }
+
+local function FrameTop(name)
+    local f = _G[name]
+    if type(f) ~= "table" or type(f.GetTop) ~= "function" then return nil end
+    local okS, shown = pcall(f.IsShown, f)
+    if okS and not Secrets.Bool(shown, true) then return nil end
+    local okT, top = pcall(f.GetTop, f)
+    if not okT or type(top) ~= "number" then return nil end
+    top = Secrets.Number(top)
+    if not top then return nil end
+    if top <= 0 or top > UIParent:GetHeight() * 0.5 then return nil end   -- 异常高度直接扔掉
+    return top
+end
+
+--- 动作条区块的最高沿（没有可读的条时退回 0）。
+local function BarsTop()
+    local top = 0
+    for _, name in ipairs(BAR_FRAMES) do
+        local value = FrameTop(name)
+        if value and value > top then top = value end
+    end
+    return top
+end
 
 local function StoredInputPos()
     local db = ns:DB()
     local chat = db and db.chat
     local store = chat and chat.positions
     local pos = store and store[INPUT_STORE_KEY]
-    if type(pos) == "table" and type(pos.x) == "number" and type(pos.y) == "number" then
-        return pos
-    end
+    if type(pos) ~= "table" then return nil end
+    if pos.mode == "bars" then return pos end
+    if type(pos.x) == "number" and type(pos.y) == "number" then return pos end
     return nil
+end
+
+--- 把存档解成实际的 (x, y)：对齐模式每次现算（换分辨率、动作条换位置都能跟上）。
+local function ResolveInputPos(pos)
+    if not pos then return nil end
+    if pos.mode == "bars" then
+        local w = frame and frame:GetWidth() or MIN_BAR_WIDTH
+        local x = math.floor((UIParent:GetWidth() - w) / 2)
+        local y = math.floor(BarsTop() + (tonumber(pos.gap) or INPUT_BAR_GAP))
+        return x, y
+    end
+    return pos.x, pos.y
 end
 
 local function ApplyInputPos(pos)
     local eb = NativeEditBox()
     if not eb or not pos then return end
+    local x, y = ResolveInputPos(pos)
+    if not x or not y then return end
     pcall(eb.ClearAllPoints, eb)
-    pcall(eb.SetPoint, eb, "BOTTOMLEFT", UIParent, "BOTTOMLEFT", pos.x, pos.y)
+    pcall(eb.SetPoint, eb, "BOTTOMLEFT", UIParent, "BOTTOMLEFT", x, y)
     pcall(eb.SetWidth, eb, frame and frame:GetWidth() or MIN_BAR_WIDTH)
 end
 
@@ -331,12 +375,14 @@ end
 local function InputPosDrifted(pos)
     local eb = NativeEditBox()
     if not eb or not pos then return false end
+    local x, y = ResolveInputPos(pos)
+    if not x or not y then return false end
     local okN, count = pcall(eb.GetNumPoints, eb)
     if not okN or count ~= 1 then return true end
-    local okP, point, relative, _, x, y = pcall(eb.GetPoint, eb, 1)
+    local okP, point, relative, _, px, py = pcall(eb.GetPoint, eb, 1)
     if not okP or point ~= "BOTTOMLEFT" or relative ~= UIParent then return true end
-    if math.abs((tonumber(x) or 0) - pos.x) >= 1 then return true end
-    if math.abs((tonumber(y) or 0) - pos.y) >= 1 then return true end
+    if math.abs((tonumber(px) or 0) - x) >= 1 then return true end
+    if math.abs((tonumber(py) or 0) - y) >= 1 then return true end
     return false
 end
 
@@ -439,8 +485,9 @@ FollowWidth = function()
     -- 输入框被搬到别处时（右键拖过），宽度也跟聊天窗走，并且每秒复查一次锚点：
     -- 客户端自己的布局（FCF 更新、改窗口尺寸）可能把它拽回 `ChatFrame1` 顶上，拽回就补一次。
     local pos = StoredInputPos()
-    if not pos then return end
-    if InputPosDrifted(pos) then ApplyInputPos(pos) return end
+    if pos and not drag then
+        if InputPosDrifted(pos) then ApplyInputPos(pos) return end
+    end
     local eb = NativeEditBox()
     if eb and math.abs(eb:GetWidth() - w) >= 1 then pcall(eb.SetWidth, eb, w) end
 end
@@ -543,6 +590,18 @@ function M:SetEnabled(value)
 end
 
 function M:HandleCommand(rest)
+    if rest == "bars" or rest == "center" then
+        local db = ns:DB()
+        local chat = db and db.chat
+        if not chat then return false end
+        chat.positions = chat.positions or {}
+        chat.positions[INPUT_STORE_KEY] = { mode = "bars", gap = INPUT_BAR_GAP }
+        local x, y = ResolveInputPos(StoredInputPos())
+        ApplyInputPos(StoredInputPos())
+        ns:Print(("聊天输入框已对齐到动作条上方（居中，间距 %d px，落点 %d,%d）。"):format(
+            INPUT_BAR_GAP, x or -1, y or -1))
+        return true
+    end
     if rest == "reset" then
         if ResetInputPos() then
             ns:Print("聊天输入框已还给客户端（存档位置已清）。")
