@@ -209,9 +209,16 @@ local function Field(host, key)
 end
 
 --- `GetChildren` / `GetRegions` 返回**多返回值**，必须用 `{ }` 包成表再遍历。
+--- 捕获函数提到外面：以前每次调用现造一个闭包，聊天窗的 1s 轮询里每秒都在白分配。
+local function captureKids(host)
+    local _, kids = ns.Widget:ChildrenOf(host)
+    return kids
+end
+local function captureRegions(host) return { host:GetRegions() } end
 local function ListOf(host, getter)
     if not host or type(host[getter]) ~= "function" then return {} end
-    local ok, list = pcall(function() return { host[getter](host) } end)
+    local capture = getter == "GetChildren" and captureKids or captureRegions
+    local ok, list = pcall(capture, host)
     if ok and type(list) == "table" then return list end
     return {}
 end
@@ -1241,21 +1248,10 @@ end
 --- §8.97 页签相对容器"冒头"量：页签顶 − 容器顶（实测 GDM 258..284 / Tab 258..290 ⇒ 6，
 --- 即页签比容器高 6、下沿还低 1）。页签落到底部时用它把页签**自己的顶边**贴到框底边，
 --- 否则会多出 6 个单位压进消息区。现量，不写死数字；取不到可见页签就按 6 兜底。
-local function TabOverhang(gdm)
-    if not gdm or type(gdm.GetChildren) ~= "function" then return 6 end
-    local okG, gt = pcall(gdm.GetTop, gdm)
-    if not okG or type(gt) ~= "number" then return 6 end
-    local ok, kids = pcall(function() return { gdm:GetChildren() } end)
-    if not ok then return 6 end
-    local pool = {}
-    for _, child in ipairs(kids) do
-        pool[#pool + 1] = child
-        local okC, gkids = pcall(function() return { child:GetChildren() } end)
-        if okC then
-            for _, g in ipairs(gkids) do pool[#pool + 1] = g end
-        end
-    end
-    for _, tab in ipairs(pool) do
+--- 在一层子框里找可见的页签。提到函数外面：PinDock 在 1s 轮询里每秒都量一次，
+--- 旧写法每次现造一个 pool 表 + 先收集两层再遍历；现在两层各扫一遍，零额外表分配。
+local function OverhangIn(list, gt)
+    for _, tab in ipairs(list) do
         local okN, nm = pcall(tab.GetName, tab)
         if okN and type(nm) == "string" and nm:match("Tab%d+$") then
             local okS, shown = pcall(tab.IsShown, tab)
@@ -1263,6 +1259,23 @@ local function TabOverhang(gdm)
             if okS and shown and okT and type(tb) == "number" then
                 return tb - gt
             end
+        end
+    end
+end
+
+local function TabOverhang(gdm)
+    if not gdm or type(gdm.GetChildren) ~= "function" then return 6 end
+    local okG, gt = pcall(gdm.GetTop, gdm)
+    if not okG or type(gt) ~= "number" then return 6 end
+    local ok, kids = ns.Widget:ChildrenOf(gdm)
+    if not ok then return 6 end
+    local found = OverhangIn(kids, gt)
+    if found then return found end
+    for _, child in ipairs(kids) do
+        local okC, gkids = ns.Widget:ChildrenOf(child)
+        if okC then
+            found = OverhangIn(gkids, gt)
+            if found then return found end
         end
     end
     return 6

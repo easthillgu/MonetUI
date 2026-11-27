@@ -75,7 +75,7 @@ local function BrightenTree(f)
         end
     end
     if type(f.GetChildren) == "function" then
-        local ok, kids = pcall(function() return { f:GetChildren() } end)
+        local ok, kids = ns.Widget:ChildrenOf(f)
         if ok and kids then
             for i = 1, #kids do BrightenTree(kids[i]) end
         end

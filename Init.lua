@@ -3,6 +3,10 @@
 -- 然后才放行 ns:StartModules()。这样各模块读到的第一份几何就是最终值，
 -- 不需要在运行期反复重贴 / 自愈（动态 Mover 以后再做）。
 --
+-- 启动被 Async 切成数帧（Init:Run → Core 的 Boot），而 PLAYER_LOGIN 只派发一次：
+-- 模块 Initialize 里不许直接订阅它（必然错过），统一用 ns:OnLogin(fn) —— 事件已过就当场跑。
+-- tools/init-login-gate.js 对这条做离线闸门。
+--
 -- 2026-11-10 判例：默认聊天框底边 145（暴雪编辑模式预设「现代」，来自
 --   Blizzard_EditMode/Camelot/EditModePresetLayoutConstants.lua 的
 --   CHAT_FRAME_ANCHOR_OFFSET_Y = 145），而我们动作条 / 小地图面板统一用

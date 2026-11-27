@@ -670,9 +670,10 @@ local fadedNodes = setmetatable({}, { __mode = "k" })       -- obj -> { base, al
 local pendingRestores = setmetatable({}, { __mode = "k" })  -- base -> true
 local restoreRetryAt = setmetatable({}, { __mode = "k" })   -- base -> guard clock
 
---- `GetChildren` 返回的是**多返回值**不是表，必须包表。
+--- `GetChildren` 返回的是**多返回值**不是表，必须包表；包表统一走 Widget:ChildrenOf。
 local function ChildrenOf(frame)
-    return { frame:GetChildren() }
+    local _, kids = ns.Widget:ChildrenOf(frame)
+    return kids
 end
 
 local function RegionsOf(frame)
@@ -2240,7 +2241,7 @@ end
 --- `/mui` 下 机密 0 / 读不到 10）。⇒ 真/问号/空三档对姓名板不可达；图标有没有画出来只认
 --- `显`（图标纹理 IsShown）、`子框`（引擎池大小）、`宽=机密`（引擎排版过）和截图。
 local function IconReport(container, limit)
-    local kids = Query(function() return { container:GetChildren() } end)
+    local kids = Query(ChildrenOf, container)
     if not kids then return "子框读不到" end
     local seen, shown, shownUnread = 0, 0, 0
     local real, question, blank, secret, forbidden = 0, 0, 0, 0, 0
@@ -2299,7 +2300,7 @@ function M:ProbeAuras()
             rows[#rows + 1] = { unit = Text(unit), container = false, kids = 0 }
         else
             bound = bound + 1
-            local kids = Query(function() return { container:GetChildren() } end)
+            local kids = Query(ChildrenOf, container)
             local kidCount = kids and #kids or -1
             local width = Query(container.GetWidth, container)
             local alpha = Query(container.GetAlpha, container)

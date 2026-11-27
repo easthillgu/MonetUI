@@ -453,7 +453,7 @@ function M:SweepDeep(frame, controlOpts, withInfo, rowDepth)
             if not M.active then return end
             local ok, err = pcall(function()
                 Skin:DropdownsIn(frame, { depth = 1 })
-                local okKids, kids = pcall(function() return { frame:GetChildren() } end)
+                local okKids, kids = ns.Widget:ChildrenOf(frame)
                 if okKids and type(kids) == "table" then
                     for i = 1, #kids do
                         local child = kids[i]
@@ -705,7 +705,7 @@ local LooksLikeItemButton = function(button) return Skin:LooksLikeItemButton(but
 function M:SkinButtonsIn(frame, opts, depth)
     if not frame or type(frame.GetChildren) ~= "function" then return end
     -- GetChildren 本身也可能撞 forbidden object（IconWidgetsIn 同款判例），裹住。
-    local okKids, children = pcall(function() return { frame:GetChildren() } end)
+    local okKids, children = ns.Widget:ChildrenOf(frame)
     if not okKids or type(children) ~= "table" then return end
     -- `depth` 只给"列表行藏在 ScrollBox 好几层下面"的窗口用（11-05 实测：社交窗的行是
     -- `Button:匿名 <- Frame <- Frame <- Frame <- SocialUIFrame`，四深，直接子件档永远扫不到）。
@@ -716,7 +716,7 @@ function M:SkinButtonsIn(frame, opts, depth)
         if node == frame then
             kids = children
         else
-            local ok, c = pcall(function() return { node:GetChildren() } end)
+            local ok, c = ns.Widget:ChildrenOf(node)
             kids = ok and c or nil
         end
         if type(kids) ~= "table" then return end
@@ -773,7 +773,7 @@ function M:IconWidgetsIn(frame, depth, withInfo)
     if depth > 4 then return end
     -- GetChildren 也会撞 forbidden object（2026-11-02 实机红字判例：无名框枚举子层直接抛
     -- "bad argument #1 ... self:GetChildren()"）——不裹起来整棵子树连同 body 一起炸。
-    local okKids, children = pcall(function() return { frame:GetChildren() } end)
+    local okKids, children = ns.Widget:ChildrenOf(frame)
     if not okKids or type(children) ~= "table" then return end
     for i = 1, #children do
         local child = children[i]
@@ -868,6 +868,23 @@ function M:IconWidgetsIn(frame, depth, withInfo)
                         -- 落标记免得每趟重复读一遍宽高与 atlas。
                         Mark(child, "iconFlat", true)
                     end -- sized and isSlot and not hasAtlas
+                else
+                    -- 11-27：格子可能已被别的 deep 扫描先标了 iconFlat（那一趟没带 slotInfo），
+                    -- 角色面板这种点名 slotInfo 的档就被标记挡在外面 —— 等级数字和耐久
+                    -- 从来没加上过（实机 20 个装备格全是 ilvl=false / dura=false）。
+                    -- ItemQualityBorder 幂等：已标过的格子只补信息件，不重铺美术 / 不抢 texcoord。
+                    if withInfo then
+                        local target = child
+                        for _, key in ipairs({ "itemButton", "ItemButton" }) do
+                            local okInner, inner = pcall(function() return child[key] end)
+                            if okInner and type(inner) == "table" and inner.GetObjectType
+                                and pcall(inner.GetObjectType, inner) == "Button" then
+                                target = inner
+                                break
+                            end
+                        end
+                        pcall(Skin.ItemQualityBorder, Skin, target, withInfo)
+                    end
                 end
             elseif kind == "Frame" then
                 M:IconWidgetsIn(child, depth + 1, withInfo)
@@ -882,7 +899,7 @@ function M:SkinScrollsIn(frame, depth)
     if not frame or type(frame.GetChildren) ~= "function" then return end
     depth = depth or 0
     -- GetChildren 本身也可能撞 forbidden object（本函数带递归，IconWidgetsIn 同款判例），裹住。
-    local okKids, children = pcall(function() return { frame:GetChildren() } end)
+    local okKids, children = ns.Widget:ChildrenOf(frame)
     if not okKids or type(children) ~= "table" then return end
     for i = 1, #children do
         local child = children[i]
@@ -908,7 +925,7 @@ end
 --- Restyle every direct child Slider of a frame.
 function M:SkinSlidersIn(frame)
     if not frame or type(frame.GetChildren) ~= "function" then return end
-    local okKids, children = pcall(function() return { frame:GetChildren() } end)
+    local okKids, children = ns.Widget:ChildrenOf(frame)
     if not okKids or type(children) ~= "table" then return end
     for i = 1, #children do
         local child = children[i]

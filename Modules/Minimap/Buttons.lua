@@ -386,7 +386,7 @@ local function QueueArtRegions(btn)
                 if okT and kind == "Texture" then out[#out + 1] = r end
             end
         end
-        local okC, kids = pcall(function() return { obj:GetChildren() } end)
+        local okC, kids = ns.Widget:ChildrenOf(obj)
         if okC and type(kids) == "table" then
             for i = 1, #kids do walk(kids[i], depth + 1) end
         end
@@ -1035,7 +1035,7 @@ function B:ScanMinimapButtons()
     -- 第一趟：小地图那棵子树（LibDBIcon 的按钮通常直接挂 Minimap）。
     local function walk(frame, depth)
         if not frame or depth > 4 then return end
-        local okC, children = pcall(frame.GetChildren, frame)
+        local okC, children = ns.Widget:ChildrenOf(frame)
         if not okC or type(children) ~= "table" then return end
         for _, child in ipairs(children) do
             consider(child)

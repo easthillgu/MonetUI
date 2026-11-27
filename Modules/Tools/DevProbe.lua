@@ -335,7 +335,7 @@ function Dig(root)
         })
         walkRegions(frame, depth + 1, copy)
         if type(frame.GetChildren) ~= "function" then return end
-        local ok, kids = pcall(function() return { frame:GetChildren() } end)
+        local ok, kids = ns.Widget:ChildrenOf(frame)
         if not ok or type(kids) ~= "table" then return end
         for i = 1, #kids do
             if #dataRows >= MAX_ROWS then

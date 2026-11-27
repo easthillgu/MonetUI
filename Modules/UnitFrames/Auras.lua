@@ -524,7 +524,8 @@ local function RegionsOf(frame)
 end
 
 local function ChildrenOf(frame)
-    return { frame:GetChildren() }
+    local _, kids = ns.Widget:ChildrenOf(frame)
+    return kids
 end
 
 local function StyleAuraCooldownTexts(button, fontKey, basePx, outline, depth)

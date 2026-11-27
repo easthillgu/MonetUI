@@ -150,7 +150,7 @@ end
 --- 子树遍历**只走根那一层**就 return，探针报出来的数全是"只数了顶层"的数。
 local function KidsOf(frame)
     if type(frame) ~= "table" or type(frame.GetChildren) ~= "function" then return nil end
-    local ok, list = pcall(function() return { frame:GetChildren() } end)
+    local ok, list = ns.Widget:ChildrenOf(frame)
     if ok and type(list) == "table" then return list end
     return nil
 end

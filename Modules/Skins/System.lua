@@ -78,7 +78,7 @@ end
 -- 实机对照：改之前 11 个按钮全是 `128-RedButton-*` 三件套 atlas、alpha 1；改之后是
 -- 我们的 1px 底板 + neutral 文字。
 local function DressMenuButtons(frame)
-    local ok, kids = pcall(function() return { frame:GetChildren() } end)
+    local ok, kids = ns.Widget:ChildrenOf(frame)
     if not ok then return end
     for i = 1, #kids do
         local child = kids[i]
@@ -175,12 +175,13 @@ local function TintNineSlice(frame)
             if cr then nine:SetCenterColor(cr, cg, cb, ca) end
             if nine.SetAlpha then nine:SetAlpha(oldAlpha or 1) end
             Mark(frame, "nineTint", nil)
+            Skin:ClearTintersFor(frame)
         end)
 
         -- 关掉美化后主题刷新还会跑，所以这里先问一句"这片框架现在还算被美化着吗"
         Skin:OnTheme(function()
             if Marked(frame, "nineTint") then PaintNine(frame, nine) end
-        end)
+        end, frame)
     end
 
     PaintNine(frame, nine)
@@ -207,6 +208,7 @@ local function TintBackdrop(frame)
             if frame.SetBackdropColor and br then frame:SetBackdropColor(br, bg, bb, ba) end
             if frame.SetBackdropBorderColor and dr then frame:SetBackdropBorderColor(dr, dg, db, da) end
             Mark(frame, "backdropTint", nil)
+            Skin:ClearTintersFor(frame)
         end)
 
         Skin:OnTheme(function()
@@ -218,7 +220,7 @@ local function TintBackdrop(frame)
                 local ar, ag, ab = ns.Color:GetAmbient()
                 frame:SetBackdropColor(ar * 0.35, ag * 0.35, ab * 0.35, 0.95)
             end
-        end)
+        end, frame)
     end
 
     if frame.SetBackdropColor then
@@ -276,7 +278,8 @@ local function RawRegions(obj)
 end
 
 local function RawKids(obj)
-    return { obj:GetChildren() }
+    local _, kids = ns.Widget:ChildrenOf(obj)
+    return kids
 end
 
 local function RegionsOf(obj)
@@ -421,7 +424,7 @@ local function TintMenuScroll(node, depth)
         end
     end
     if (depth or 0) >= 2 then return end
-    local ok, kids = pcall(function() return { node:GetChildren() } end)
+    local ok, kids = ns.Widget:ChildrenOf(node)
     for i = 1, #(ok and kids or {}) do
         TintMenuScroll(kids[i], (depth or 0) + 1)
     end
@@ -453,7 +456,7 @@ local function DressMenu(menu)
 
     -- 菜单是池化复用的：同一帧重新打开会换一批元素（数量/高度都变）。
     -- 拿"子控件数 + 高度"当签名，变了才整轮重刷 —— 平时每拍只多一次比较。
-    local ok, kids = pcall(function() return { menu:GetChildren() } end)
+    local ok, kids = ns.Widget:ChildrenOf(menu)
     if not ok then return end
     local height = 0
     local okH, h = pcall(menu.GetHeight, menu)
@@ -478,7 +481,7 @@ end
 --- `DressMenu` 的签名守卫只在元素数量/高度变化时重刷，池化复用时新冒出的勾会漏。
 --- 这里只扫菜单的直接 Button 子级（成本可忽略），按 atlas 认脸重染（TintMenuChecks 自带幂等）。
 local function RetintMenuChecks(menu)
-    local ok, kids = pcall(function() return { menu:GetChildren() } end)
+    local ok, kids = ns.Widget:ChildrenOf(menu)
     if not ok then return end
     for i = 1, #kids do
         if RegionKind(kids[i]) == "Button" then TintMenuChecks(kids[i]) end
@@ -547,12 +550,18 @@ local function DressDropdownArrows(list)
             our:SetTexture(Media:Texture("monet_chevron_up"))
             Widget:Arrow(our, "right")
             Mark(our, "art", true)   -- 自建贴图必须打标：认脸探针只信标记与字符串路径（#44/#45）
+            Skin:Record(function()
+                if our.Hide then our:Hide() end
+                Skin:ClearTintersFor(our)
+                Mark(our, "art", nil)
+                Mark(button, "muiExpandArrow", nil) -- 不清的话关掉再开会跳过这颗按钮，箭头永久缺席
+            end)
             local function tint()
                 local r, g, b = Color:GetBorder()
                 if r and our.SetVertexColor then our:SetVertexColor(r, g, b) end
             end
             tint()
-            Skin:OnTheme(tint)
+            Skin:OnTheme(tint, our)
         end)
     end
 end
@@ -675,12 +684,13 @@ local function PlateTooltip(tip)
         s.bg:Hide(); s.top:Hide(); s.bottom:Hide(); s.left:Hide(); s.right:Hide()
         Mark(tip, "tooltipEdges", nil)
         Mark(tip, "tooltipPlate", nil)
+        Skin:ClearTintersFor(tip)
     end)
 
     -- 主题换了跟着重染（关掉美化后 Mark 没了，这里自然什么都不做）
     Skin:OnTheme(function()
         if Marked(tip, "tooltipPlate") then PaintTooltipPlate(tip) end
-    end)
+    end, tip)
 
     PaintTooltipPlate(tip)
 end

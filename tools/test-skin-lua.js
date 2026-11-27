@@ -69,6 +69,27 @@ has(skins, /function M:Apply\b/, 'M:Apply 仍在（ControlState / RefreshThemes 
 check('Widget.lua 代码里没有 self:Track（只剩注释里解释这段历史）',
       !widgetLines.some(l => /self:Track\(/.test(l) && !/^\s*--/.test(l)));
 
+// 1b: 主题回调 / Track 名册只增不减会让反复开关皮肤越来越慢（tinters 每次 RefreshThemes 都跑）。
+console.log('\n[1b] 主题回调与 Track 名册的注销句柄');
+check('Track 按对象去重', /if frame and self\.recording and not trackedFrames\[frame\]/.test(skin));
+check('Skin:Untrack 已定义（Rollback 可销账）', /function Skin:Untrack\(frame\)/.test(skin));
+check('Skin:OnTheme 接受 owner 并返回 Cancel 句柄',
+      /function Skin:OnTheme\(fn, owner\)/.test(skin) && /Cancel = function\(\)/.test(skin));
+check('Skin:ClearTintersFor 已定义', /function Skin:ClearTintersFor\(owner\)/.test(skin));
+check('轮询键表按版本号缓存（登记 / 注销时重建）',
+      /if c and c\.version == keyVersion then return c\.list end/.test(widget)
+      && (widget.match(/BumpKeys\(\)/g) || []).length >= 3);
+check('hover / show 两路共用可见性缓存',
+      (widget.match(/now \+ WATCH_VIS_TTL/g) || []).length >= 2);
+const onThemeCalls = (skin.match(/self:OnTheme\(/g) || []).length;
+const ownedTints = (skin.match(/self:Record\(function\(\) self:ClearTintersFor\(/g) || []).length;
+check('Skin.lua 每一处 OnTheme 都有 owner 销账', onThemeCalls === ownedTints,
+      'OnTheme=' + onThemeCalls + ' 销账=' + ownedTints);
+const system = srcOf('Modules/Skins/System.lua');
+check('System.lua 四处 owner 主题回调都在 undo 里销账',
+      (system.match(/Skin:ClearTintersFor\(/g) || []).length >= 4,
+      '找到 ' + (system.match(/Skin:ClearTintersFor\(/g) || []).length + ' 处');
+
 // ---------------------------------------------------------------- 2
 console.log('\n[2] 阴影渐变方向：贴近边框的一端必须是实色');
 // SetGradient 的 minC 在 VERTICAL 底 / HORIZONTAL 左。四条 strip 里，贴近边框的端各在哪个位置，
@@ -361,8 +382,13 @@ const stripComments = (src) => src.split(/\r?\n/)
     .map((l) => l.replace(/\s--.*$/, ''))
     .join('\n');
 const npCode = stripComments(np);
-check('ChildrenOf 把 GetChildren 的多返回值包成表',
-      /return \{ *frame:GetChildren\(\) *\}/.test(bodyOf(np, 'local function ChildrenOf(frame)')));
+// 2026-11-27：包表动作下沉到 Widget:ChildrenOf（全仓唯一漏斗），本地 helper 改为委托；
+// 两种写法都承认，但必须能证明多返回值被整组收进表（不能是裸 GetChildren）。
+const npChildrenBody = bodyOf(np, 'local function ChildrenOf(frame)');
+check('ChildrenOf 把 GetChildren 的多返回值包成表（内联或委托 Widget:ChildrenOf）',
+      /return \{ *frame:GetChildren\(\) *\}/.test(npChildrenBody) ||
+      (/ns\.Widget:ChildrenOf\(frame\)/.test(npChildrenBody) &&
+       /return kids/.test(npChildrenBody)));
 check('代码里没有裸调 GetChildren 的多返回值（剥注释后判代码）',
       !/= *frame:GetChildren\(\)/.test(npCode) && !/ipairs\(frame:GetChildren\(\)\)/.test(npCode));
 has(np, /local function FadeNativeNode\(obj, base, plate, deep\)/, '节点级压制 FadeNativeNode 已定义');
@@ -565,6 +591,11 @@ if (masksOff) {
 }
 const cropDriver = /local function EnsureCropDriver\(\)([\s\S]*?)\nend/.exec(skin);
 check('EnsureCropDriver 已定义', !!cropDriver);
+check('裁切坐标比较用稳定函数（每次调用不现造闭包）',
+      /local function CropCoordSame\(/.test(skin) && /pcall\(CropCoordSame,/.test(skin));
+check('品质驱动的等级/冷却复用当拍已解析的 itemKey',
+      /UpdateSlotInfo\(btn, entry, key\)/.test(skin)
+      && !/function UpdateSlotInfo\(btn, entry\)\s*\r?\n\s*local key = ResolveItemKey/.test(skin));
 if (cropDriver) {
   const b = cropDriver[1];
   check('每拍读遮罩数，>0 就补摘（不再只摘第一次）',
@@ -574,6 +605,32 @@ if (cropDriver) {
 const cropIcon = /function Skin:CropIcon\(icon, x0, x1, y0, y1\)([\s\S]*?)\nend/.exec(skin);
 check('CropIcon 走同一个摘遮罩入口', !!cropIcon && /CropMasksOff\(icon\)/.test(cropIcon[1])
       && !/Skin:StripMasks\(icon\)/.test(cropIcon[1]));
+
+// 11-27：人物面板装备格的耐久百分比（品质边框已由 ItemQualityBorder 统一画）。
+console.log('\n[20] 角色装备格：品质边 + 耐久');
+const character = srcOf('Modules/Skins/Character.lua');
+check('耐久字体在左下角，不挡等级数字 / 叠堆数',
+      /function Skin:SlotDurabilityFont\(btn\)/.test(skin)
+      && /"BOTTOMLEFT", btn, "BOTTOMLEFT"/.test(skin));
+check('opts.dura 才建耐久字体（商人 / 邮件不受影响）',
+      /if opts and opts\.dura and not entry\.dura then/.test(skin)
+      && /entry\.dura = Skin:SlotDurabilityFont\(btn\)/.test(skin));
+check('耐久走 Durability 模块的守卫读数（不另抄槽位表）',
+      /ns\.Durability:ReadSlot\(slot\)/.test(skin)
+      && /pcall\(btn\.GetID, btn\)/.test(skin));
+check('人物面板点名 dura / inventory，品质驱动才会更新耐久与颜色',
+      /slotInfo = \{ ilvl = true, cd = true, dura = true, inventory = true \}/.test(character)
+      && /entry\.ilvl or entry\.cd or entry\.dura/.test(skin));
+check('装备槽从 GetID + GetInventoryItemLink 解析品质 / 物品键',
+      /local function InventorySlotOf/.test(skin)
+      && /GetInventoryItemLink, "player", slot/.test(skin)
+      && /ResolveQuality\(btn, entry\.inventory\)/.test(skin)
+      && /ResolveItemKey\(btn, entry\.inventory\)/.test(skin));
+check('已标 iconFlat 的格子也补 withInfo（不被早先的 deep 扫描挡住）',
+      (skins.match(/pcall\(Skin\.ItemQualityBorder, Skin, target, withInfo\)/g) || []).length >= 2);
+check('诊断代码已清理', !/DIAG-REMOVE|__qTick|__qShown|__qUpdate|__qDura|__qKeys|__qArgs/.test(skin));
+check('等级数字取 GetItemInfo 第 4 返回（itemLevel），不是第 3 的 quality',
+      /local ok, _, _, _, lv = pcall\(info, key\)/.test(skin));
 
 console.log('\n' + (bad === 0 ? '全部通过' : bad + ' 项未通过'));
 process.exit(bad === 0 ? 0 : 1);

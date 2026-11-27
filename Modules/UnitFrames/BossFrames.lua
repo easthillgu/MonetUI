@@ -407,7 +407,7 @@ local function ParkBoss(frame)
 
         if type(node.GetChildren) == "function" then
             -- GetChildren 是多返回值，必须包成表；单颗读取失败不阻断其余节点。
-            local ok, kids = pcall(function() return { node:GetChildren() } end)
+            local ok, kids = ns.Widget:ChildrenOf(node)
             if ok and type(kids) == "table" then
                 for i = 1, #kids do visit(kids[i]) end
             end

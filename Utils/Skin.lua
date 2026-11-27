@@ -49,13 +49,25 @@ end
 
 -- Frames/textures we created: hidden on rollback, shown again on re-apply -- the skin code caches them on the Blizzard frame, so they are built once and merely toggled.
 Skin.added = {}
+-- 同一个对象反复 Track 不能进两遍；撤销时按对象销账。弱键不拦住垃圾回收。
+local trackedFrames = setmetatable({}, { __mode = "k" })
 
 -- Only while recording: things built for a Blizzard window belong to the skin and hide with it, while helpers called for the addon's own frames (the config panel) must not join that rollback list.
 function Skin:Track(frame)
-    if frame and self.recording then
+    if frame and self.recording and not trackedFrames[frame] then
+        trackedFrames[frame] = true
         self.added[#self.added + 1] = frame
     end
     return frame
+end
+
+--- 从名册里摘掉一个对象（Rollback 的 undo 里用）。留 false 哨兵，保证 1..# 连续。
+function Skin:Untrack(frame)
+    if not frame then return end
+    trackedFrames[frame] = nil
+    for i = 1, #self.added do
+        if self.added[i] == frame then self.added[i] = false end
+    end
 end
 
 function Skin:ShowAdded()
@@ -74,12 +86,38 @@ end
 
 -- Colour changes the Widget theme registration cannot see (a Blizzard texture we recoloured, a thumb we drew ourselves): panels push a refresh closure and the Skins module runs them whenever the theme changes.
 Skin.tinters = {}
+-- 有 owner 的回调按对象去重：同一扇窗反复开关不会在 RefreshThemes 里堆旧闭包。
+local tinterOwners = setmetatable({}, { __mode = "k" })
+local TINTER_CLEARED = function() end
 
-function Skin:OnTheme(fn)
-    if type(fn) == "function" then
-        self.tinters[#self.tinters + 1] = fn
+--- @param owner 可选。传了就按对象登记（重复登记覆盖同一槽），返回带 Cancel 的句柄；
+---               不传则维持旧行为，直接返回 fn。
+--- 撤销只清 fn、保留 slot 号：关掉再开时复用原来的槽，数组长度才不会随开关次数增长。
+function Skin:OnTheme(fn, owner)
+    if type(fn) ~= "function" then return fn end
+    local index = #self.tinters + 1
+    if owner then
+        local previous = tinterOwners[owner]
+        if previous and previous.index and self.tinters[previous.index] then index = previous.index end
+        tinterOwners[owner] = { index = index, fn = fn }
     end
-    return fn
+    self.tinters[index] = fn
+    if not owner then return fn end
+    return {
+        Cancel = function()
+            if self.tinters[index] == fn then self.tinters[index] = TINTER_CLEARED end
+            local rec = tinterOwners[owner]
+            if rec and rec.fn == fn then tinterOwners[owner] = { index = index } end
+        end,
+    }
+end
+
+--- Rollback 的 undo 里调用：摘掉某个对象名下的主题回调（留空槽哨兵，数组仍连续）。
+function Skin:ClearTintersFor(owner)
+    local rec = owner and tinterOwners[owner]
+    if not rec then return end
+    if self.tinters[rec.index] == rec.fn then self.tinters[rec.index] = TINTER_CLEARED end
+    tinterOwners[owner] = { index = rec.index }   -- 保留槽位，等下次 Apply 复用
 end
 
 function Skin:RefreshThemes()
@@ -536,7 +574,7 @@ function Skin:BrightenDarkText(frame, depth)
             end
         end
     end
-    local okC, kids = pcall(function() return { frame:GetChildren() } end)
+    local okC, kids = ns.Widget:ChildrenOf(frame)
     if okC then
         for _, k in ipairs(kids) do self:BrightenDarkText(k, depth + 1) end
     end
@@ -622,7 +660,7 @@ function Skin:FadeAtlasBackdrop(frame, patterns, depth, alpha)
             end
         end
     end
-    local okC, kids = pcall(function() return { frame:GetChildren() } end)
+    local okC, kids = ns.Widget:ChildrenOf(frame)
     if okC then
         for _, k in ipairs(kids) do self:FadeAtlasBackdrop(k, patterns, depth + 1, alpha) end
     end
@@ -674,7 +712,7 @@ function Skin:FadePlainBackdrops(frame, opts)
             end
         end
         if depth < maxDepth then
-            local okC, kids = pcall(function() return { f:GetChildren() } end)
+            local okC, kids = ns.Widget:ChildrenOf(f)
             if okC then
                 for _, k in ipairs(kids) do sweep(k, depth + 1) end
             end
@@ -713,7 +751,7 @@ function Skin:ReassertHidden(frame, depth)
             end
         end
     end
-    local okC, kids = pcall(function() return { frame:GetChildren() } end)
+    local okC, kids = ns.Widget:ChildrenOf(frame)
     if okC then
         for _, k in ipairs(kids) do writes = writes + self:ReassertHidden(k, depth + 1) end
     end
@@ -768,7 +806,7 @@ function Skin:TalentNodeArt(frame, depth)
             end
         end
     end
-    local okC, kids = pcall(function() return { frame:GetChildren() } end)
+    local okC, kids = ns.Widget:ChildrenOf(frame)
     if okC and type(kids) == "table" then
         for i = 1, #kids do self:TalentNodeArt(kids[i], depth + 1) end
     end
@@ -809,7 +847,7 @@ function Skin:SpellbookPageArrows(root)
     local hits = {}
     local function walk(f, d)
         if d > 8 or not Widget:Readable(f) then return end
-        local okC, kids = pcall(function() return { f:GetChildren() } end)
+        local okC, kids = ns.Widget:ChildrenOf(f)
         if not (okC and type(kids) == "table") then return end
         for i = 1, #kids do
             local c = kids[i]
@@ -893,7 +931,7 @@ function Skin:SpellbookItemArt(frame, depth)
             self:Record(function() Mark(icon, "spellCrop", nil) end)
         end
     end
-    local okC, kids = pcall(function() return { frame:GetChildren() } end)
+    local okC, kids = ns.Widget:ChildrenOf(frame)
     if okC then
         for _, k in ipairs(kids) do self:SpellbookItemArt(k, depth + 1) end
     end
@@ -908,7 +946,7 @@ function Skin:TabSystemArt(tsys)
     if not tsys or type(tsys.GetChildren) ~= "function" then return end
     local okF, forbidden = pcall(function() return tsys:IsForbidden() end)
     if okF and forbidden then return end
-    local okC, kids = pcall(function() return { tsys:GetChildren() } end)
+    local okC, kids = ns.Widget:ChildrenOf(tsys)
     if not okC then return end
     for _, tab in ipairs(kids) do
         local okT, kind = pcall(function() return tab:GetObjectType() end)
@@ -1056,7 +1094,7 @@ function Skin:StyleAtlasBackdrop(frame, fadePatterns, swapPatterns, tintPatterns
             end
         end
     end
-    local okC, kids = pcall(function() return { frame:GetChildren() } end)
+    local okC, kids = ns.Widget:ChildrenOf(frame)
     if okC then
         for _, k in ipairs(kids) do self:StyleAtlasBackdrop(k, fadePatterns, swapPatterns, tintPatterns, depth + 1) end
     end
@@ -1892,10 +1930,11 @@ function Skin:Tab(tab, opts)
         Mark(tab, "tabBar", underline)
         self:Track(underline)
         WatchTab(self, tab)
+        self:Record(function() self:ClearTintersFor(underline) end)
         self:OnTheme(function()
             -- §8.90 下划线颜色由 UpdateTabState 按三态统一上色（不再硬编码主题边色）。
             Skin:UpdateTabState(tab)
-        end)
+        end, underline)
     end
     self:UpdateTabState(tab)
     return tab
@@ -1970,10 +2009,11 @@ function Skin:Stepper(button)
     if r then our:SetVertexColor(r, g, b) end
     if not Marked(button, "arrowTint") then
         Mark(button, "arrowTint", true)
+        self:Record(function() self:ClearTintersFor(our) end)
         self:OnTheme(function()
             local nr, ng, nb = Color:GetBorder()
             if nr then our:SetVertexColor(nr, ng, nb) end
-        end)
+        end, our)
     end
     return true
 end
@@ -2051,7 +2091,7 @@ local function HidePortraitTree(self, host, depth)
         end
     end
     -- 子件也收（`CircleMask` 圆形遮罩 / 肖像外那圈金属边都在这一层）。
-    local okC, kids = pcall(function() return { host:GetChildren() } end)
+    local okC, kids = ns.Widget:ChildrenOf(host)
     if okC then
         for _, kid in ipairs(kids) do n = n + HidePortraitTree(self, kid, depth + 1) end
     end
@@ -2182,7 +2222,7 @@ function Skin:BookTabArt(button)
     end
     -- ② 47×34 的 NineSlice 子框（9 张数字 fileID 边框贴图，没有 atlas、也不在
     --    GetRegions 里）：整框压 α0。我们的 controlBg 是另一个子框，豁免。
-    local okK, kids = pcall(function() return { button:GetChildren() } end)
+    local okK, kids = ns.Widget:ChildrenOf(button)
     if okK and type(kids) == "table" then
         local ownBg = Marked(button, "controlBg")
         for i = 1, #kids do
@@ -2548,7 +2588,7 @@ function Skin:RoundButtonsIn(root, opts)
     local count = 0
     local function walk(f, d)
         if d > maxDepth or not Widget:Readable(f) then return end
-        local okC, kids = pcall(function() return { f:GetChildren() } end)
+        local okC, kids = ns.Widget:ChildrenOf(f)
         if not okC or type(kids) ~= "table" then return end
         for i = 1, #kids do
             local c = kids[i]
@@ -2618,7 +2658,7 @@ function Skin:FadeChrome(frame, opts)
                 end
             end
         end
-        local okC, kids = pcall(function() return { h:GetChildren() } end)
+        local okC, kids = ns.Widget:ChildrenOf(h)
         if okC and type(kids) == "table" then
             for _, k in ipairs(kids) do walk(k, d + 1) end
         end
@@ -2688,7 +2728,7 @@ function Skin:WalkFrames(root, opts, fn)
         local nextCarry = fn and fn(h, atlases, name, carry)
         if nextCarry == "stop" then return end
         if nextCarry == nil then nextCarry = carry end
-        local okC, kids = pcall(function() return { h:GetChildren() } end)
+        local okC, kids = ns.Widget:ChildrenOf(h)
         if not okC or type(kids) ~= "table" then return end
         for _, k in ipairs(kids) do walk(k, d + 1, nextCarry) end
     end
@@ -2749,11 +2789,12 @@ function Skin:ScrollBar(scrollbar)
                 if pushed and pushed.SetVertexColor then pushed:SetVertexColor(r, g, b) end
                 if not Marked(button, "arrowTint") then
                     Mark(button, "arrowTint", true)
+                    self:Record(function() self:ClearTintersFor(normal) end)
                     self:OnTheme(function()
                         local nr, ng, nb = Color:GetBorder()
                         if normal.SetVertexColor then normal:SetVertexColor(nr, ng, nb) end
                         if pushed and pushed.SetVertexColor then pushed:SetVertexColor(nr, ng, nb) end
-                    end)
+                    end, normal)
                 end
             end
         end
@@ -2791,7 +2832,8 @@ function Skin:ScrollBar(scrollbar)
             if line.SetVertexColor then line:SetVertexColor(r * k, g * k, b * k, a) end
         end
         tintLine(1, 0.35)
-        self:OnTheme(function() tintLine(1, 0.35) end)
+        self:Record(function() self:ClearTintersFor(line) end)
+        self:OnTheme(function() tintLine(1, 0.35) end, line)
         -- 悬停在把手上时把轨提亮一点：滚动条是个整体，只亮把手会让轨像没换皮。
         if thumb then
             Widget:HoverWatch(thumb, function() tintLine(1.25, 0.6) end, function() tintLine(1, 0.35) end)
@@ -2826,7 +2868,8 @@ function Skin:ScrollThumb(thumb)
         fill:SetVertexColor(r * k, g * k, b * k, 0.95)
     end
     tint(1)
-    self:OnTheme(function() tint(1) end)
+    self:Record(function() self:ClearTintersFor(fill) end)
+    self:OnTheme(function() tint(1) end, fill)
     -- 轮询代替 HookScript（滑块手柄是暴雪的贴图，写脚本槽会污染）。
     Widget:HoverWatch(thumb, function() tint(1.35) end, function() tint(1) end)
 end
@@ -3089,7 +3132,7 @@ end
 --- @return 这次真正走过的 region 数（0 = 这颗钮身上没有那层装饰框）
 function Skin:FadeChildBoxArt(button)
     if not button then return 0 end
-    local okKids, kids = pcall(function() return { button:GetChildren() } end)
+    local okKids, kids = ns.Widget:ChildrenOf(button)
     if not okKids then return 0 end
     local n = 0
     for _, kid in ipairs(kids) do
@@ -3156,10 +3199,11 @@ function Skin:MaximizeMinimize(button, kind)
             -- 禁用档：同一张字形压暗一档（不跟主题走 —— 禁用就该比常态退后一步）。
             pcall(disabled.SetVertexColor, disabled, 0.60, 0.60, 0.60)
         end
+        self:Record(function() self:ClearTintersFor(button) end)
         self:OnTheme(function()
             local nr, ng, nb = Color:GetBorder()
             tint(nr, ng, nb)
-        end)
+        end, button)
         -- 悬停：箭头抬到 highlight 档（轮询，不写暴雪脚本槽）。
         Widget:HoverWatch(button, function()
             local hr, hg, hb = Color:GetHighlight()
@@ -3196,7 +3240,7 @@ end
 --- `RedButton-Expand` / `RedButton-Condense`、尺寸 0x0）。显示那一拍尺寸落地，重扫即命中。
 function Skin:MaximizeMinimizeFrame(host)
     if not host then return 0 end
-    local ok, kids = pcall(function() return { host:GetChildren() } end)
+    local ok, kids = ns.Widget:ChildrenOf(host)
     if not ok then return 0 end
     local n = 0
     for _, btn in ipairs(kids) do
@@ -3221,7 +3265,7 @@ function Skin:MaximizeMinimizeSweep(root, depth)
     local self_ref = self
     local n = 0
     local function walk(host, d)
-        local ok, kids = pcall(function() return { host:GetChildren() } end)
+        local ok, kids = ns.Widget:ChildrenOf(host)
         if not ok then return end
         for _, kid in ipairs(kids) do
             local isBtn = false
@@ -3267,10 +3311,11 @@ function Skin:PageArrow(button, dir)
         normal:SetVertexColor(r, g, b)
         if not Marked(button, "pageArrowTint") then
             Mark(button, "pageArrowTint", true)
+            self:Record(function() self:ClearTintersFor(normal) end)
             self:OnTheme(function()
                 local nr, ng, nb = Color:GetBorder()
                 if normal.SetVertexColor then normal:SetVertexColor(nr, ng, nb) end
-            end)
+            end, normal)
         end
     end
     return button
@@ -3316,10 +3361,11 @@ function Skin:ChatScrollAlert(button)
     if normal and normal.SetVertexColor then
         local r, g, b = Color:GetBorder()
         normal:SetVertexColor(r, g, b)
+        self:Record(function() self:ClearTintersFor(normal) end)
         self:OnTheme(function()
             local nr, ng, nb = Color:GetBorder()
             if normal.SetVertexColor then normal:SetVertexColor(nr, ng, nb) end
-        end)
+        end, normal)
     end
     return true
 end
@@ -3369,7 +3415,8 @@ function Skin:Slider(slider)
                     fill:SetVertexColor(r, g, b, 0.95)
                 end
                 tint()
-                self:OnTheme(tint)
+                self:Record(function() self:ClearTintersFor(thumb) end)
+                self:OnTheme(tint, thumb)
             end
         elseif thumb.SetTexture then
             -- Go through SwapArt, not a raw SetTexture: SwapArt records the old art and sets
@@ -3385,7 +3432,8 @@ function Skin:Slider(slider)
             tint()
             if not Marked(slider, "sliderTint") then
                 Mark(slider, "sliderTint", true)
-                self:OnTheme(tint)
+                self:Record(function() self:ClearTintersFor(slider) end)
+                self:OnTheme(tint, slider)
             end
         end
     end
@@ -3421,10 +3469,11 @@ function Skin:CheckButton(check, opts)
             pcall(checked.SetVertexColor, checked, r, g, b)
             if not Marked(check, "checkTint") then
                 Mark(check, "checkTint", true)
+                self:Record(function() self:ClearTintersFor(checked) end)
                 self:OnTheme(function()
                     local nr, ng, nb = Color:GetBorder()
                     if checked.SetVertexColor then checked:SetVertexColor(nr, ng, nb) end
-                end)
+                end, checked)
             end
         end
     end
@@ -3460,10 +3509,11 @@ function Skin:RadioButton(radio, opts)
             pcall(checked.SetVertexColor, checked, r, g, b)
             if not Marked(radio, "radioTint") then
                 Mark(radio, "radioTint", true)
+                self:Record(function() self:ClearTintersFor(checked) end)
                 self:OnTheme(function()
                     local nr, ng, nb = Color:GetBorder()
                     if checked.SetVertexColor then checked:SetVertexColor(nr, ng, nb) end
-                end)
+                end, checked)
             end
         end
     end
@@ -3584,7 +3634,8 @@ function Skin:DropdownButtonArt(button, opts)
                 if r then pcall(tex.SetVertexColor, tex, r, g, b) end
             end
             tint()
-            self:OnTheme(tint)
+            self:Record(function() self:ClearTintersFor(tex) end)
+            self:OnTheme(tint, tex)
         end
     end
     return button
@@ -3732,11 +3783,12 @@ function Skin:CloseButton(button)
         end
         if not Marked(button, "closeTint") then
             Mark(button, "closeTint", true)
+            self:Record(function() self:ClearTintersFor(normal) end)
             self:OnTheme(function()
                 local nr, ng, nb = Color:GetBorder()
                 if normal.SetVertexColor then normal:SetVertexColor(nr, ng, nb) end
                 if pushed and pushed.SetVertexColor then pushed:SetVertexColor(nr, ng, nb) end
-            end)
+            end, normal)
         end
     end
     -- 补扫认钮只靠这个标记：换过图之后 atlas 签名就没了（见 CloseButtonByArt）。
@@ -3820,20 +3872,22 @@ end
 --- 纵向允许两种上下口径（本仓 SetTexCoord 按 left,right,bottom,top 落，角点序按
 --- UL/LL/UR/LR 读）：只判"左列=左列、右列=右列、上行=上行、下行=下行 + 两轴取值集合
 --- 与目标一致"，不赌客户端的 y 方向。
+-- 比较函数提到外面：裁切驱动每 0.5s 对**每个**裁切图标要判一次，旧写法每次现造一个
+-- pcall 闭包 + 一个 near 闭包（实机这一路 375 次调用累计 0.86s，纯分配占了一截）。
+local function CoordNear(a, b) return math.abs(a - b) <= 1e-4 end
+local function CropCoordSame(ulx, uly, llx, lly, urx, ury, lrx, lry, c)
+    if not (CoordNear(ulx, llx) and CoordNear(urx, lrx)
+        and CoordNear(uly, ury) and CoordNear(lly, lry)) then return false end
+    if not (CoordNear(ulx, c[1]) and CoordNear(urx, c[2])) then return false end
+    return (CoordNear(uly, c[3]) and CoordNear(lly, c[4]))
+        or (CoordNear(uly, c[4]) and CoordNear(lly, c[3]))
+end
+
 local function CropDrifted(icon, c)
     if type(icon.GetTexCoord) ~= "function" then return true end
     local okT, ulx, uly, llx, lly, urx, ury, lrx, lry = pcall(icon.GetTexCoord, icon)
     if not okT or type(ulx) ~= "number" then return true end
-    local okC, same = pcall(function()
-        local eps = 1e-4
-        local function near(a, b) return math.abs(a - b) <= eps end
-        if not (near(ulx, llx) and near(urx, lrx) and near(uly, ury) and near(lly, lry)) then
-            return false
-        end
-        if not (near(ulx, c[1]) and near(urx, c[2])) then return false end
-        return (near(uly, c[3]) and near(lly, c[4]))
-            or (near(uly, c[4]) and near(lly, c[3]))
-    end)
+    local okC, same = pcall(CropCoordSame, ulx, uly, llx, lly, urx, ury, lrx, lry, c)
     if not okC then return true end
     return not same
 end
@@ -4014,7 +4068,36 @@ local function ReadLink(btn) return btn.link end
 local function ReadItemID(btn) return btn.itemID end
 local function LocIsValid(loc) return loc:IsValidItem() end
 
-local function ResolveQuality(btn)
+--- 角色 / 观察的装备槽模板不写 .link / .itemID，也没有 GetItemID()，真正的装备槽号在
+--- `btn:GetID()`（1..19）。只有 slotInfo.inventory 点名的档才走这条路 —— 背包 / 交易的
+--- GetID 是别的语义，误当装备槽会读到完全无关的物品品质。
+--- 链接可能带机密标记：先 CanRead 再交给 C_Item，别让 string.match 抛 invalid value。
+local function InventorySlotOf(btn, enabled)
+    if not enabled or type(btn.GetID) ~= "function" then return nil end
+    local ok, slot = pcall(btn.GetID, btn)
+    if not ok then return nil end
+    slot = (Secrets and Secrets.Number and Secrets.Number(slot)) or tonumber(slot)
+    if type(slot) == "number" and slot >= 1 and slot <= 19 then return slot end
+    return nil
+end
+
+local function InventoryKeyOf(slot)
+    if type(_G.GetInventoryItemLink) == "function" then
+        local ok, link = pcall(_G.GetInventoryItemLink, "player", slot)
+        if ok and type(link) == "string" and link ~= ""
+            and (not Secrets or not Secrets.CanRead or Secrets.CanRead(link)) then
+            return link
+        end
+    end
+    if type(_G.GetInventoryItemID) == "function" then
+        local ok, id = pcall(_G.GetInventoryItemID, "player", slot)
+        local n = ok and ((Secrets and Secrets.Number and Secrets.Number(id)) or tonumber(id)) or nil
+        if type(n) == "number" and n > 0 then return n end
+    end
+    return nil
+end
+
+local function ResolveQuality(btn, inventory)
     local okLink, link = pcall(ReadLink, btn)
     if okLink and type(link) == "string" and Secrets and Secrets.CanRead
         and Secrets.CanRead(link) and link ~= "" then
@@ -4043,13 +4126,21 @@ local function ResolveQuality(btn)
             end
         end
     end
+    local slot = InventorySlotOf(btn, inventory)
+    if slot then
+        local key = InventoryKeyOf(slot)
+        if key then
+            local q = QualityOf(key)
+            if q then return q end
+        end
+    end
     return nil
 end
 
 --- 物品键多路解析（与 ResolveQuality 同一套顺序，但返回**键本身**而不是品质）：
 --- 等级数字与冷却都要吃它。返回 link 字符串或 itemID 数字，读不出 = nil。
 --- 只读字段 / pcall 方法，绝不往暴雪按钮写任何东西。
-local function ResolveItemKey(btn)
+local function ResolveItemKey(btn, inventory)
     -- 清单#7：品质驱动每拍都要取一次键做缓存比较，改走上面已提好的 ReadLink/ReadItemID，
     -- 不再每次调用现造闭包（与 ResolveQuality 头注是同一条口径）。
     local okLink, link = pcall(ReadLink, btn)
@@ -4060,6 +4151,11 @@ local function ResolveItemKey(btn)
     if type(btn.GetItemID) == "function" then
         local ok, v = pcall(btn.GetItemID, btn)
         if ok and type(v) == "number" and v > 0 then return v end
+    end
+    local slot = InventorySlotOf(btn, inventory)
+    if slot then
+        local key = InventoryKeyOf(slot)
+        if key then return key end
     end
     return nil
 end
@@ -4082,6 +4178,16 @@ function Skin:SlotInfoFont(btn)
     local fs = Widget:Font(btn, 10, "pixel", "bright", "LEFT", "OVERLAY",
                             "THICKOUTLINE, MONOCHROME")
     fs:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -2)
+    fs:SetDrawLayer("OVERLAY", 9)
+    return fs
+end
+
+--- 耐久百分比：和等级数字同一档字体，但落在左下角（右下角是模板的叠堆数量），
+--- 不挡图标（OVERLAY 7）也不挡品质边（1px 外缘）。
+function Skin:SlotDurabilityFont(btn)
+    local fs = Widget:Font(btn, 10, "pixel", "bright", "LEFT", "OVERLAY",
+                            "THICKOUTLINE, MONOCHROME")
+    fs:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 2, 2)
     fs:SetDrawLayer("OVERLAY", 9)
     return fs
 end
@@ -4115,12 +4221,26 @@ function Skin:ApplySlotCooldown(cd, itemID)
     end
 end
 
---- 等级 + 冷却（人物面板装备格用；背包 / 我们自己的银行格也共用上面那三个 `Skin:Slot*` 原语，
---- 差别只在身份来源：这里从按钮字段反推，那边从 `bagRec` 权威 rec 直取）。
---- 等级只在 itemKey 变化时取一次（`C_Item.GetItemInfo` 的第 4 返回），冷却每拍重算
---- ——时长在走，但只在拿得到明文数字时才画（同 Bags 的守卫口径）。
-local function UpdateSlotInfo(btn, entry)
-    local key = ResolveItemKey(btn)
+--- 耐久分级色：与信息栏耐久格同一档（<30 危险红 / <60 主题主色 / 其余白），
+--- 走 ns.Color 的同一组功能色，不在皮肤层另配色值。
+local function DurabilityColor(pct)
+    local color = ns.Color
+    if pct and pct < 30 and color and type(color.GetDanger) == "function" then
+        return color:GetDanger()
+    end
+    if pct and pct < 60 and color and type(color.GetPrimary) == "function" then
+        return color:GetPrimary()
+    end
+    return 1, 1, 1
+end
+
+--- 等级 + 冷却 + 耐久（人物面板装备格用；背包 / 我们自己的银行格也共用上面那三个
+--- `Skin:Slot*` 原语，差别只在身份来源：这里从按钮字段反推，那边从 `bagRec` 权威 rec 直取）。
+--- 等级只在 itemKey 变化时取一次（`C_Item.GetItemInfo` 的第 4 返回），冷却与耐久每拍重算
+--- ——时长 / 损耗在走；两者只在拿得到明文数字时才画（同 Bags 的守卫口径）。
+--- key 由驱动那一拍已经解析好传进来：品质驱动每 0.5s 对每个可见格都会算一次 ResolveItemKey
+--- （link/id/GetItemID 三次 pcall），这里以前再算一遍，纯重复开销。
+local function UpdateSlotInfo(btn, entry, key)
     if key ~= entry.itemKey then
         entry.itemKey = key
         local fs = entry.ilvl
@@ -4129,7 +4249,9 @@ local function UpdateSlotInfo(btn, entry)
             if key then
                 local info = (C_Item and C_Item.GetItemInfo) or _G.GetItemInfo
                 if info then
-                    local ok, _, _, lv = pcall(info, key)
+                    -- GetItemInfo 返回序：name, link, quality, itemLevel —— 第 4 个才是等级。
+                    -- 以前少跳一个，把品质 1/3/4 当等级画在图标左上角（作者 11-27 报的"1 3 4"）。
+                    local ok, _, _, _, lv = pcall(info, key)
                     text = Skin:SlotInfoText(ok and lv or nil)
                 end
             end
@@ -4142,6 +4264,30 @@ local function UpdateSlotInfo(btn, entry)
     local cd = entry.cd
     if cd then
         Skin:ApplySlotCooldown(cd, ItemIDOf(entry.itemKey))
+    end
+    local fsD = entry.dura
+    if fsD then
+        -- 装备槽按钮的 GetID 就是背包槽位号；拿不到 / 读不出（空槽、机密期）就留白，
+        -- 不画 0% —— 和信息栏"名册未载入不显示假数"同一口径。
+        local okSlot, slot = pcall(btn.GetID, btn)
+        local current, maximum
+        if okSlot and type(slot) == "number" and slot > 0 and ns.Durability then
+            current, maximum = ns.Durability:ReadSlot(slot)
+        end
+        local text, band = "", nil
+        if current and maximum and maximum > 0 then
+            local pct = current / maximum * 100
+            text = string.format("%.0f%%", pct)
+            band = pct < 30 and "danger" or (pct < 60 and "warn" or "ok")
+        end
+        if text ~= entry.duraText then
+            entry.duraText = text
+            fsD:SetText(text)
+        end
+        if band ~= entry.duraBand then
+            entry.duraBand = band
+            fsD:SetTextColor(DurabilityColor(band == "danger" and 20 or (band == "warn" and 45 or 100)))
+        end
     end
 end
 
@@ -4264,7 +4410,7 @@ local function EnsureQualityDriver()
                     -- 键不变但品质会从 nil 变有值（GetItemInfo 缓存落地），不能冻成素边。
                     -- 缓存键用 qKey，不占 UpdateSlotInfo 的 itemKey（那本账归等级数字）。
                     local gl, gb, gw, gh, gs = QualityGeo(btn, origins)
-                    local key = ResolveItemKey(btn)
+                    local key = ResolveItemKey(btn, entry.inventory)
                     -- 机密键不做 == 比较（AGENTS：机密值比较会抛）：读不出按 nil 记，
                     -- 受限期保留上次状态，解除后键变可读 ⇒ 指纹不等 ⇒ 照旧重算。
                     if Secrets and Secrets.CanRead and not Secrets.CanRead(key) then
@@ -4277,7 +4423,7 @@ local function EnsureQualityDriver()
                         entry.gl, entry.gb, entry.gw, entry.gh, entry.gs = gl, gb, gw, gh, gs
                         entry.qKey = key
                         SnapQualityBorder(btn, border, entry)
-                        local q = ResolveQuality(btn)
+                        local q = ResolveQuality(btn, entry.inventory)
                         -- 机密品质不算"解析成功"：否则受限那拍会把素边冻进缓存。
                         entry.qResolved = type(q) == "number"
                             and (not (Secrets and Secrets.CanRead) or Secrets.CanRead(q))
@@ -4294,7 +4440,9 @@ local function EnsureQualityDriver()
                     -- 等级 + 冷却只在显式开过格（CharacterFrame 的装备格）上跑：
                     -- 商人 / 邮件那些同走这条扫描的窗口一个字节都不多写。
                     -- 冷却每拍都要重算（时长在走），不受上面的缓存短路影响。
-                    if entry.ilvl or entry.cd then UpdateSlotInfo(btn, entry) end
+                    if entry.ilvl or entry.cd or entry.dura then
+                        UpdateSlotInfo(btn, entry, key)
+                    end
                 end
             end
         end
@@ -4304,9 +4452,10 @@ end
 --- Draw a quality-coloured 1px border around a flattened item button.  The border starts
 --- as the plain neutral edge and recolours itself (poll driver) once the item's quality is
 --- resolvable; unknown / poor / common keep the plain edge, exactly like Bags.
---- @param withInfo 给这个格子加"等级数字 + 冷却遮罩"（人物面板装备格点名开；默认不开 ——
----   商人 / 邮件这些同一条扫描吃到的窗口维持原样）。已登记过的格子也能事后升级，
----   谁先扫到都不影响结果。两个新对象不入 Track 名单（`ShowAdded` 会把冷却遮罩强 Show 出来）。
+--- @param withInfo true = 等级数字 + 冷却遮罩；表 `{ ilvl, cd, dura }` 可逐项开（人物面板
+---   装备格用 `dura = true` 额外画耐久百分比）。默认不开 —— 商人 / 邮件这些同一条扫描吃到的
+---   窗口维持原样。已登记过的格子也能事后升级，谁先扫到都不影响结果。
+---   两个新对象不入 Track 名单（`ShowAdded` 会把冷却遮罩强 Show 出来）。
 function Skin:ItemQualityBorder(btn, withInfo)
     if not btn then return btn end
     local entry = qualityBorders[btn]
@@ -4334,12 +4483,18 @@ function Skin:ItemQualityBorder(btn, withInfo)
         EnsureQualityDriver()
         SnapQualityBorder(btn, border, entry)
     end
-    if withInfo and not entry.ilvl then
+    local opts = type(withInfo) == "table" and withInfo or nil
+    if opts and opts.inventory and not entry.inventory then entry.inventory = true end
+    if (withInfo == true or opts) and not entry.ilvl then
         entry.ilvl = Skin:SlotInfoFont(btn)
         local cd = Widget:Cooldown(btn)
         cd:SetHideCountdownNumbers(true)   -- 装备格不到 40px：遮罩够了，倒计时数字会挤
         cd:Hide()
         entry.cd = cd
+    end
+    if opts and opts.dura and not entry.dura then
+        entry.dura = Skin:SlotDurabilityFont(btn)
+        self:Track(entry.dura)
     end
     return btn
 end
@@ -4440,10 +4595,11 @@ function Skin:Divider(parent)
     local r, g, b = Color:GetNeutral()
     line:SetVertexColor(r, g, b, 0.3)
     self:Track(line)
+    self:Record(function() self:ClearTintersFor(line) end)
     self:OnTheme(function()
         local nr, ng, nb = Color:GetNeutral()
         line:SetVertexColor(nr, ng, nb, 0.3)
-    end)
+    end, line)
     return line
 end
 
@@ -4671,7 +4827,7 @@ function Skin:ProbeLayers(path, filter)
         local invisible = push(depth, depth == 0 and "根框" or probeTag(probeLabel(frame), parentName),
             frame, placeOfFrame(frame), nil, fadedParent, hiddenHere, nil)
         walkRegions(frame, depth, invisible or fadedParent, hiddenHere)
-        local ok, kids = pcall(function() return { frame:GetChildren() } end)
+        local ok, kids = ns.Widget:ChildrenOf(frame)
         if ok and type(kids) == "table" then
             local myName = probeLabel(frame)
             for i = 1, #kids do

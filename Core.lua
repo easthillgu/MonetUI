@@ -8,6 +8,9 @@ local LibStub = _G.LibStub
 local LMC = LibStub and LibStub("LibMonetColor-1.0", true)
 
 ns.name = ADDON_NAME
+-- PLAYER_LOGIN 只派发一次，而 StartModules 被 Init:Run 切片到后续帧。模块不要直接
+-- Register("PLAYER_LOGIN")（一定错过），统一走 ns:OnLogin（见 Core.lua 定义）。
+ns.loginDispatched = false
 -- 版本一律从 TOC 读，别再硬编码：0.13.0 / 0.13.1 发版时只改了 TOC / CHANGELOG / tag，
 -- 这里却留在 0.12.0，启动横幅和 /mui status 都在报旧版本（11-10 实机读数发现）。
 -- 与 WhatsNew 同一个来源，发版时不再需要第四处手工对齐。
@@ -920,6 +923,29 @@ function ns:InitializeModule(name)
     return true
 end
 
+--- 登录只发生一次，而模块在 Async 协程里跨数帧初始化：任何在 Initialize 里直接
+--- Register("PLAYER_LOGIN") 的模块都会永久错过那一次（没有第二次）。统一走这里：
+--- 事件已经派发过就当场跑，否则一次性订阅并自行注销。回调抛错只提示、不影响启动。
+function ns:OnLogin(fn)
+    if type(fn) ~= "function" then return end
+    if self.loginDispatched then
+        local ok, err = pcall(fn)
+        if not ok then self:Print("登录回调失败: " .. tostring(err)) end
+        return
+    end
+    local once
+    once = function()
+        if ns.EventBus and type(ns.EventBus.Unregister) == "function" then
+            pcall(ns.EventBus.Unregister, ns.EventBus, "PLAYER_LOGIN", once)
+        end
+        local ok, err = pcall(fn)
+        if not ok then ns:Print("登录回调失败: " .. tostring(err)) end
+    end
+    if ns.EventBus and type(ns.EventBus.Register) == "function" then
+        pcall(ns.EventBus.Register, ns.EventBus, "PLAYER_LOGIN", once)
+    end
+end
+
 --- Enable/disable a module at runtime (used by the config panel).
 function ns:SetModuleEnabled(name, value)
     local module = modules[name]
@@ -1376,6 +1402,7 @@ ns.EventBus:Register("PLAYER_LOGOUT", function()
 end)
 
 ns.EventBus:Register("PLAYER_LOGIN", function()
+    ns.loginDispatched = true   -- 后续帧才初始化的模块靠 ns:OnLogin 补跑，不能自己订阅
     LoadDatabase()
     SeedRestrictions()
     -- 主题刷新失败不能让模块永远不启动：以前这里裸调 RefreshTheme，

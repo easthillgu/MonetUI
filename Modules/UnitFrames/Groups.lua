@@ -1100,7 +1100,7 @@ end
 --- 归零 alpha 与关鼠标都只作用在根框上（BossFrames 同款 bug，`c2b6b2b` 已修）。
 local function ChildrenOf(frame)
     if type(frame.GetChildren) ~= "function" then return nil end
-    local ok, kids = pcall(function() return { frame:GetChildren() } end)
+    local ok, kids = ns.Widget:ChildrenOf(frame)
     if not ok or type(kids) ~= "table" then return nil end
     return kids
 end

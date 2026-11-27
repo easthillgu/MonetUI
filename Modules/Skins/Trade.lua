@@ -193,7 +193,7 @@ local function SyncMerchantSlots()
             if bg then pcall(bg.SetShown, bg, present) end
             local slot = merchantSlots[i]
             if slot and type(slot.GetChildren) == "function" then
-                local okKids, kids = pcall(function() return { slot:GetChildren() } end)
+                local okKids, kids = ns.Widget:ChildrenOf(slot)
                 if okKids then
                     for _, child in ipairs(kids) do
                         if ns:Marked(child, "qualityBorder") then pcall(child.SetShown, child, present) end
@@ -231,7 +231,7 @@ local function DressMerchantSlots()
     if not bbSlot then return end
     Skin:ItemQualityBorder(bbSlot)
     local icon = bbSlot.icon or bbSlot.Icon
-    local okKids, kids = pcall(function() return { bbSlot:GetChildren() } end)
+    local okKids, kids = ns.Widget:ChildrenOf(bbSlot)
     if not okKids then return end
     for _, child in ipairs(kids) do
         local okR, regions = pcall(function() return { child:GetRegions() } end)

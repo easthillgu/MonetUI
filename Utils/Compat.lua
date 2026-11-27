@@ -467,7 +467,7 @@ local function Walk(node, depth, bag)
     if depth > MAX_DEPTH or bag.n >= MAX_NODES then return end
     -- `GetChildren` 返回的是**多返回值**，不是表：直接 `pcall(node.GetChildren, node)` 只会拿到
     -- 第一个子框，`ipairs` 于是永远空转（本仓其余十处都写成 `{ ... }`）。这里必须包成表。
-    local ok, kids = pcall(function() return { node:GetChildren() } end)
+    local ok, kids = ns.Widget:ChildrenOf(node)
     if not ok or type(kids) ~= "table" then return end
     for _, child in ipairs(kids) do
         if bag.n >= MAX_NODES then return end

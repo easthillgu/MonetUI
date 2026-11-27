@@ -18,9 +18,15 @@ local CHARACTER_PANELS = {
     "ReputationFrame", "TokenFrame",
 }
 
--- 装备格单独一档：`slotInfo = true` 让扫描在每格上多挂"物品等级数字 + 冷却遮罩"（作者
--- 11-04 点名只要人物面板这一处）。声望 / 货币 / 检视 / 商人一律不开。
-local PAPERDOLL_PANEL = { panel = { bgAlpha = 0.96 }, deep = true, slotInfo = true }
+-- 装备格单独一档：品质色 1px 方边由 ItemQualityBorder 统一画，`slotInfo` 再让每格多挂
+-- "等级数字 + 冷却遮罩 + 耐久百分比"（11-27 作者点名：人物面板装备格要能直接看到耐久）。
+-- 声望 / 货币 / 检视 / 商人一律不开；写表而不是 true，是为了把三件信息各自开关。
+local PAPERDOLL_PANEL = {
+    panel = { bgAlpha = 0.96 }, deep = true,
+    -- inventory = true：角色装备槽不写 .link/.itemID，品质与物品键要从
+    -- GetID() + GetInventoryItemLink("player", slot) 取（只有这一档开，别误伤背包/交易）。
+    slotInfo = { ilvl = true, cd = true, dura = true, inventory = true },
+}
 
 local INSPECT_TABS = { "InspectFrameTab1", "InspectFrameTab2" }
 
@@ -120,7 +126,7 @@ local function PressCharacterTitleBand(host, d)
             end)
         end
     end
-    local okC, kids = pcall(function() return { host:GetChildren() } end)
+    local okC, kids = ns.Widget:ChildrenOf(host)
     if okC and kids then
         for i = 1, #kids do PressCharacterTitleBand(kids[i], d + 1) end
     end

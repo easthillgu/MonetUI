@@ -150,7 +150,7 @@ local function WalkSwapRole(frame, depth)
         end
     end
     if type(frame.GetChildren) == "function" then
-        local okC, kids = pcall(function() return { frame:GetChildren() } end)
+        local okC, kids = ns.Widget:ChildrenOf(frame)
         if okC and type(kids) == "table" then
             for i = 1, #kids do WalkSwapRole(kids[i], depth + 1) end
         end
@@ -204,7 +204,7 @@ local function RegionsOf(obj)
 end
 local function ChildrenOf(obj)
     if not obj or type(obj.GetChildren) ~= "function" then return nil end
-    local ok, r = pcall(function() return { obj:GetChildren() } end)
+    local ok, r = ns.Widget:ChildrenOf(obj)
     return (ok and type(r) == "table") and r or nil
 end
 

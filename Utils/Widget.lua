@@ -40,7 +40,7 @@ Widget.TEXT_GAP = 3
 -- 弱键：自建框体被丢弃后条目跟着回收（以前是强引用，永不释放）。
 local hoverWatch, hoverId = setmetatable({}, { __mode = "k" }), nil
 --- 悬停轮询里"这个框现在显示着吗"的缓存寿命（秒）。见 EnsureHoverDriver。
-local HOVER_VIS_TTL = 0.3
+local WATCH_VIS_TTL = 0.3
 
 --- 驱动循环遇到暂停中的框时用它替下监听表：状态照常推进，但一个回调都不跑。
 local idleList = {}
@@ -77,9 +77,22 @@ end
 
 --- 驱动循环用的键快照：回调里 `Widget:Unwatch` 可能把**当前这个键**从表里删掉，
 --- 而 `pairs` 在删除后继续 `next()` 会抛 "invalid key to 'next'"（Lua 5.1）。
+--- 2026-11-27：以前 hover 10Hz + poll 10Hz 每拍都重建这张表（每拍 × 全部在册框），
+--- 实机这两路累计 2.57s / 1.72s。改成按"订阅表版本号"缓存：只有登记 / 注销时才重建，
+--- 回调里再改表也只影响下一拍（驱动已经自己重读 `st` / `cbs` 并跳过 nil）。
+local keyCache = setmetatable({}, { __mode = "k" })
+local keyVersion = 0
+local function BumpKeys() keyVersion = keyVersion + 1 end
 local function Keys(map)
+    local c = keyCache[map]
+    if c and c.version == keyVersion then return c.list end
     local out = {}
     for k in pairs(map) do out[#out + 1] = k end
+    if not c then
+        c = {}
+        keyCache[map] = c
+    end
+    c.version, c.list = keyVersion, out
     return out
 end
 
@@ -171,6 +184,20 @@ end
 --- `EnumerateFrames` 会把这个客户端里**所有**帧都给我们，包括被接管的 forbidden 对象。
 function Widget:Readable(frame)
     return not Forbidden(frame)
+end
+
+--- `GetChildren` / `GetRegions` 返回的是**多返回值**：`pcall(frame.GetChildren, frame)` 只能接到第一个子框，
+--- 随后 `#userdata` 会抛；forbidden 对象读子级也会抛。全仓只有这一个漏斗。
+--- 返回 `ok, kids`，与旧的 `ns.Widget:ChildrenOf(f)` 逐位一致。
+local function captureChildren(frame)
+    return { frame:GetChildren() }
+end
+
+function Widget:ChildrenOf(frame)
+    if not frame or type(frame.GetChildren) ~= "function" then return false, nil end
+    local ok, kids = pcall(captureChildren, frame)
+    if not ok then return false, nil end
+    return true, kids
 end
 
 --- "谁把这个框交给了我们轮询" —— 只能在**登记那一刻**记下来。
@@ -312,7 +339,7 @@ local function EnsureHoverDriver()
                 shown, readable = st.visShown, st.visReadable
             else
                 shown, readable = VisibilityOf(frame, "hover")
-                st.visShown, st.visReadable, st.visUntil = shown, readable, now + HOVER_VIS_TTL
+                st.visShown, st.visReadable, st.visUntil = shown, readable, now + WATCH_VIS_TTL
             end
             -- 暂停中的框：shown=false → inside=false，状态照常推进但 list 是空的，
             -- 一个回调都不跑（那些回调全是往这个框写东西，跑了也只是多一条拦截）。
@@ -384,6 +411,7 @@ function Widget:HoverWatch(frame, onEnter, onLeave, onDown, onUp)
     if not st then
         st = { list = {}, inside = false, pressed = false }
         hoverWatch[frame] = st
+        BumpKeys()
         labelOf(frame)                -- 名字趁还能读记下来
         Origin("hover", frame)
         EnsureHoverDriver()
@@ -406,10 +434,20 @@ local showWatch, showId = setmetatable({}, { __mode = "k" }), nil
 local function EnsureShowDriver()
     if showId then return end
     showId = Scheduler:Every(200, function()
+        local now = GetTime()
         for _, frame in ipairs(Keys(showWatch)) do
             local st = showWatch[frame]
             if st then
-            local shown, readable = VisibilityOf(frame, "show")
+            -- 与 HoverWatch 同一口径：可见性读有 0.3s 缓存（实机这一路 0.2s 一拍、
+            -- 每次都要为全部在册框付两次 pcall）。藏→显最多晚 0.3s 被发现，
+            -- 换肤的显示期补扫本来就是这个量级；读不出来时仍按"这一拍什么都不做"处理。
+            local shown, readable
+            if st.visUntil and now < st.visUntil then
+                shown, readable = st.visShown, st.visReadable
+            else
+                shown, readable = VisibilityOf(frame, "show")
+                st.visShown, st.visReadable, st.visUntil = shown, readable, now + WATCH_VIS_TTL
+            end
             if readable then
                 if shown and not st.shown then
                     -- 快照：回调里可能自己 Unwatch（见 `Snapshot` 的注释）
@@ -469,6 +507,7 @@ function Widget:PollWatch(frame, fn, interval)
     if not list then
         list = {}
         pollWatch[frame] = list
+        BumpKeys()
         labelOf(frame)                -- 名字趁还能读记下来
         Origin("poll", frame)
     end
@@ -537,6 +576,7 @@ end
 --- 遍历安全见文件头部 `Snapshot` / `Live` 的注释。
 function Widget:Unwatch(frame, fn)
     if not frame then return end
+    BumpKeys()   -- 可能删掉某个键；键快照下一拍重建（这一拍照旧走手里的快照）
 
     local list = pollWatch[frame]
     if list then
@@ -633,7 +673,7 @@ local function MuteMouseTree(node, depth, on)
     -- `GetChildren` 返回的是**多返回值**不是表：直接 `pcall(node.GetChildren, node)` 只拿到
     -- 第一个子框，随后 `type(kids) ~= "table"` 判掉 → 递归空转，整棵子树一个都关不掉
     -- （`c2b6b2b` 修过同款，Groups.lua / Compat.lua 各留了一条注释）。必须包成表。
-    local ok, kids = pcall(function() return { node:GetChildren() } end)
+    local ok, kids = ns.Widget:ChildrenOf(node)
     if not ok or not kids then return false end
     for i = 1, #kids do
         if not MuteMouseTree(kids[i], depth - 1, on) then return false end
