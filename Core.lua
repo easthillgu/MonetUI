@@ -58,6 +58,7 @@ local DEFAULTS = {
         InfoBar      = true,
         Tooltip      = true,
         Chat         = true,
+        KeyFeeder    = true,
     },
     chat = { positions = {} },
     -- 小地图插件收纳（Modules/Minimap/Buttons.lua）：我们往 `AddonCompartmentFrame` 里

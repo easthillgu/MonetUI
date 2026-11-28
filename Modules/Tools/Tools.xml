@@ -13,6 +13,7 @@
     文件本身列在 .pkgmeta 的 ignore 里。仓库与本地部署始终保留它们。
     8. WhatsNew.lua - 版本更新后一次性的"本版要点"提示（/mui whatsnew 可重看）
     9. Tweaks.lua - 控制台优化（逐条 CVar 开关）
+    10. KeyFeeder.lua - 施法成功后的技能图标反馈（屏幕中央 0.3s 渐隐）
 -->
 <Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/
 ..\FrameXML\UI.xsd">
@@ -25,4 +26,5 @@
     <Script file="DevCommands.lua"/><!-- DEV-ONLY -->
     <Script file="WhatsNew.lua"/>
     <Script file="Tweaks.lua"/>
+    <Script file="KeyFeeder.lua"/>
 </Ui>

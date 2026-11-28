@@ -118,7 +118,7 @@ local MODULE_GROUPS = {
     { caption = "外观与交互", names = { "Chat", "Skins", "Tooltip", "Cursor" } },
     { caption = "战斗与动作", names = { "UnitFrames", "ActionBars", "Nameplates", "Cooldown", "BuffFrame" } },
     { caption = "地图与信息", names = { "Minimap", "InfoBar", "Bags", "QuestTracker" } },
-    { caption = "提醒与系统", names = { "Toast", "Durability", "Tweaks", "WhatsNew" } },
+    { caption = "提醒与系统", names = { "Toast", "Durability", "Tweaks", "WhatsNew", "KeyFeeder" } },
 }
 
 local MODULE_LABEL = {
@@ -139,6 +139,7 @@ local MODULE_LABEL = {
     Durability   = "耐久警告",
     Tweaks       = "控制台优化",
     WhatsNew     = "更新提示",
+    KeyFeeder    = "按键反馈",
 }
 
 --- 获取区域显示名；名称用于文本拼接，读取前先检查机密值。

@@ -50,7 +50,7 @@
 
 ## 📦 安装
 
-**CurseForge（推荐）**：<https://www.curseforge.com/wow/addons/monetui> —— 当前 `0.13.16`，
+**CurseForge（推荐）**：<https://www.curseforge.com/wow/addons/monetui> —— 当前 `0.13.17`，
 Forever `1.60.1` / Release；首版 `0.12.0` 的文件 ID 是 `9506208`。用 CurseForge 客户端可直接订阅更新。
 自动发版走 GitHub tag：纯数字 tag 触发 Actions 打包上传，见 `docs/HANDOFF.md` §8.69.4；
 新版本上传后通常要过 CF 审核才会在公开文件页出现，期间可从

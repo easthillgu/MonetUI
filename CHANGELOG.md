@@ -3,6 +3,19 @@
 This file is used verbatim as the CurseForge release changelog (see `.pkgmeta`).
 Update the top section before tagging a new release.
 
+## 0.13.17 (2026-11-28)
+
+- Character sheet: equipment slots now show the item quality border, item level and durability;
+  the quality/level keys come from `GetInventoryItemLink("player", slot)` because these slots have no
+  `.itemID`/`GetItemID()`, and item level reads the 4th `GetItemInfo` return (the 3rd is quality).
+- Skins: theme callbacks are deduplicated by owner and their slots reused, so toggling the skin module
+  no longer grows the refresh list; `GetChildren` goes through one guarded funnel.
+- Performance: hover/show/poll drivers cache their frame key lists by subscription version, and the
+  crop/quality drivers no longer allocate closures per tick. Measured per-call time dropped from
+  1.36 to 0.73 ms (custom poll), 0.91 to 0.56 ms (hover) and 2.29 to 0.95 ms (crop).
+- KeyFeeder: a new optional module shows the just-cast spell icon in the screen centre and fades it
+  out over 0.3 s; can be disabled in Settings → 提醒与系统 → 按键反馈.
+
 ## 0.13.16 (2026-11-27)
 
 - Chat: the button row is replaced by a channel strip - one bar as wide as the chat frame, 3px
